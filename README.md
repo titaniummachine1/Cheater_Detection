@@ -5,5 +5,5 @@
 Automatic bot and cheater detection and adds priority on cheaters.
 
 
-[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Priority/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Priority/releases/latest/download/Cheater_Priority)
+[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Priority/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Priority/releases/latest/download/Cheater_Priority.lua)
 
