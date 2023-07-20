@@ -27,54 +27,53 @@ local options = {
 local prevData = nil ---@type PlayerData
 local playerStrikes = {} ---@type table<number, number>
 
-local function StrikePlayer(idx, reason, entity, player)
+local detectedPlayers = {} -- Table to store detected players
 
+local function StrikePlayer(idx, reason, player)
     -- Initialize strikes if needed
     if not playerStrikes[idx] then
-      playerStrikes[idx] = 0 
+        playerStrikes[idx] = 0
     end
-  
+
     -- Increment strikes
     playerStrikes[idx] = playerStrikes[idx] + 1
-  
+
     -- Get the target player
     local targetPlayer
     if player and player:GetIndex() == idx then
-      targetPlayer = player
+        targetPlayer = player
     end
-  
+
     -- Handle strike limit
     if playerStrikes[idx] < options.StrikeLimit then
-  
-      -- Print message
-      if targetPlayer then  
-        print(targetPlayer:GetName() .. " stroked AC")
-        client.ChatPrintf(tostring("\x04[AC] \x01Player \x03".. player:GetName()..  " \x01has been striked for \x04".. reason))
-      end
-  
-    else
-  
-      -- Print cheating message
-      if targetPlayer and playerlist.GetPriority(entity) < 10 then
-        print(targetPlayer:GetName() .. " is cheating")
-        client.ChatPrintf(tostring("\x04[AC] \x01Player \x03".. player:GetName()..  " \x01is cheating!"))
-  
-        -- Auto mark
-        if options.AutoMark then
-          playerlist.SetPriority(entity, 10) 
+        -- Print message
+        if targetPlayer and playerlist.GetPriority(player) > -1 then
+            print(targetPlayer:GetName() .. " stroked AC")
+            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01has been striked for \x04" .. reason))
         end
-  
-      end
-  
+    else
+        -- Print cheating message if player is not detected
+        if targetPlayer and playerlist.GetPriority(player) > -1 and not detectedPlayers[player:GetIndex()] then
+            print(targetPlayer:GetName() .. " is cheating")
+            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01is cheating!"))
+
+            -- Add player to detectedPlayers table
+            detectedPlayers[player:GetIndex()] = true
+
+            -- Auto mark
+            if options.AutoMark then
+                playerlist.SetPriority(player, 10)
+            end
+        end
     end
-  
-  end
+end
+
 
 -- Detects rage pitch (looking up/down too much)
 local function CheckPitch(player, entity)
     local angles = player:GetEyeAngles()
     if angles.pitch >= 89 or angles.pitch <= -89 then
-        StrikePlayer(player:GetIndex(), "Invalid pitch", entity, player)
+        StrikePlayer(player:GetIndex(), "Invalid pitch", entity)
     end
 end
 
@@ -88,7 +87,7 @@ local function CheckChoke(player, entity)
     local delta = simTime - oldSimTime
     local deltaTicks = Conversion.Time_to_Ticks(delta)
     if deltaTicks > options.MaxTickDelta then
-        StrikePlayer(player:GetIndex(), "Choking packets", entity, player)
+        StrikePlayer(player:GetIndex(), "Choking packets", entity)
     end
 end
 
