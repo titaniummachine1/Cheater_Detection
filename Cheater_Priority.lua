@@ -1,6 +1,9 @@
 --[[
     Cheater Detection for Lmaobox
-    Author: LNX (github.com/lnx00)
+    Author: titaniummachine1 (https://github.com/titaniummachine1)
+    Credit for examples:
+    LNX (github.com/lnx00)
+    Muqa for chat pritn help
 ]]
 
 ---@alias PlayerData { Angle: EulerAngles[], Position: Vector3[], SimTime: number[] }
@@ -25,45 +28,47 @@ local prevData = nil ---@type PlayerData
 local playerStrikes = {} ---@type table<number, number>
 
 local function StrikePlayer(idx, reason, entity, player)
+
+    -- Initialize strikes if needed
     if not playerStrikes[idx] then
-        playerStrikes[idx] = 0
+      playerStrikes[idx] = 0 
     end
-
+  
+    -- Increment strikes
     playerStrikes[idx] = playerStrikes[idx] + 1
-    if playerStrikes[idx] < options.StrikeLimit then
-        -- Find player with index idx
-        local targetPlayer = nil
-        if player ~= nil then
-            if player:GetIndex() == idx then
-                targetPlayer = player
-                if targetPlayer ~= nil then
-                    print(player:GetName() .. " stroked AC")
-                    client.ChatPrintf(tostring("\x04[AC] \x01Player ".. player:GetName()..  " \x01has been striked for \x04".. reason)) --client.ChatPrintf(string.format("\x04[AC] \x01Player \x05%d \x01has been striked for \x05%s", idx, reason))
-                end
-            end
-        end
-    elseif playerStrikes[idx] >= options.StrikeLimit then
-        local targetPlayer = nil
-            if player ~= nil then
-            if player:GetIndex() == idx then
-                targetPlayer = player
-                if targetPlayer ~= nil then
-                    if playerlist.GetPriority(entity) ~= 10 and playerlist.GetPriority(entity) ~= -1 then
-                        print(player:GetName() .. " is cheating")
-
-                        client.ChatPrintf(tostring("\x04[AC] \x01Player ".. player:GetName()..  " \x01is cheating!"))  --client.ChatPrintf(string.format("\x04[CD] \x01Player \x05%d \x01is cheating!", idx))
-                        --[[client.ChatPrintf("\x04[CD] \x01Player \x05%s \x01has been striked for \x05%s", player:GetName(), reason)
-                            client.ChatPrintf("\x04[CD] \x01Player \x05%s \x01is cheating!", player:GetName())
-                            ]]
-                        if options.AutoMark == true then
-                            playerlist.SetPriority(entity, 10)
-                        end
-                    end
-                end
-            end
-        end
+  
+    -- Get the target player
+    local targetPlayer
+    if player and player:GetIndex() == idx then
+      targetPlayer = player
     end
-end
+  
+    -- Handle strike limit
+    if playerStrikes[idx] < options.StrikeLimit then
+  
+      -- Print message
+      if targetPlayer then  
+        print(targetPlayer:GetName() .. " stroked AC")
+        client.ChatPrintf(tostring("\x04[AC] \x01Player \x03".. player:GetName()..  " \x01has been striked for \x04".. reason))
+      end
+  
+    else
+  
+      -- Print cheating message
+      if targetPlayer and playerlist.GetPriority(entity) < 10 then
+        print(targetPlayer:GetName() .. " is cheating")
+        client.ChatPrintf(tostring("\x04[AC] \x01Player \x03".. player:GetName()..  " \x01is cheating!"))
+  
+        -- Auto mark
+        if options.AutoMark then
+          playerlist.SetPriority(entity, 10) 
+        end
+  
+      end
+  
+    end
+  
+  end
 
 -- Detects rage pitch (looking up/down too much)
 local function CheckPitch(player, entity)
