@@ -24,7 +24,7 @@ local players = entities.FindByClass("CTFPlayer")
 local options = {
     StrikeLimit = 10,
     MaxTickDelta = 8,
-    AimbotSensetivity = 0.26,
+    AimbotSensetivity = 2,
     AutoMark = true,
 }
 
@@ -196,7 +196,6 @@ local function GetLeastFovTarget(shooter)
 
         if not Helpers.VisPos(player, playerOrigin, shooterOrigin) then --exclude invisible players as aimbot wil not target them
             -- Skip players not visible
-            print("XD")
             goto continue
         end
 
