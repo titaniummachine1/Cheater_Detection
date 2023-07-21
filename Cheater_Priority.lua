@@ -194,6 +194,11 @@ local function GetLeastFovTarget(shooter)
         player = WPlayer.FromEntity(player)
         local playerOrigin = player:GetHitboxPos(1)
 
+        if not Helpers.VisPos(player, shooterOrigin, playerOrigin) then --exclude invisible players as aimbot wil not target them
+            -- Skip players not visible
+            goto continue
+        end
+
         local angles = Math.PositionAngles(shooterOrigin, playerOrigin)
         local fov = Math.AngleFov(angles, viewAngles)
 
