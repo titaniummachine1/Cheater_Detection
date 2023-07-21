@@ -194,8 +194,9 @@ local function GetLeastFovTarget(shooter)
         player = WPlayer.FromEntity(player)
         local playerOrigin = player:GetHitboxPos(1)
 
-        if not Helpers.VisPos(player, shooterOrigin, playerOrigin) then --exclude invisible players as aimbot wil not target them
+        if not Helpers.VisPos(player, playerOrigin, shooterOrigin) then --exclude invisible players as aimbot wil not target them
             -- Skip players not visible
+            print("XD")
             goto continue
         end
 
