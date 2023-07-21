@@ -14,13 +14,17 @@ local libLoaded, lnxLib = pcall(require, "lnxLib")
 assert(libLoaded, "lnxLib not found, please install it!")
 assert(lnxLib.GetVersion() >= 0.981, "lnxLib version is too old, please update it!")
 
-local Conversion = lnxLib.Utils.Conversion
+
+local Math, Conversion = lnxLib.Utils.Math, lnxLib.Utils.Conversion
 local WPlayer = lnxLib.TF2.WPlayer
+local Helpers = lnxLib.TF2.Helpers
+
+local players = entities.FindByClass("CTFPlayer")
 
 local options = {
     StrikeLimit = 10,
     MaxTickDelta = 8,
-    MaxAngleDelta = 17,
+    AimbotSensetivity = 0.4,
     AutoMark = true,
 }
 
@@ -49,13 +53,13 @@ local function StrikePlayer(idx, reason, player)
         -- Print message
         if targetPlayer and playerlist.GetPriority(player) > -1 then
             print(targetPlayer:GetName() .. " stroked AC")
-            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01has been striked for \x04" .. reason))
+            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01has triggered AC With \x04" .. reason))
         end
     else
         -- Print cheating message if player is not detected
         if targetPlayer and playerlist.GetPriority(player) > -1 and not detectedPlayers[player:GetIndex()] then
             print(targetPlayer:GetName() .. " is cheating")
-            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01is cheating!"))
+            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01is cheating! Reason: \x04".. reason))
 
             -- Add player to detectedPlayers table
             detectedPlayers[player:GetIndex()] = true
@@ -158,14 +162,74 @@ local function isValidName(player, name, entity)
     end
 end
 
-local function CheckFlick(player, entity)
-    return
+local function GetLeastFovTarget(shooter)
+    -- Find closest target
+    local closestFov = 360
+    local closestTarget
+    local closestAngle
+  
+    for i, player in ipairs(players) do
+        if player:IsDormant() or shooter == nil then goto continue end
+        if shooter == player then goto continue end
+        if not player:IsAlive() then goto continue end
+        if player:GetTeamNumber() == shooter:GetTeamNumber() then -- Skip local player and teammates
+            goto continue
+        end
+  
+    -- Get pLocal eye level and set vector at our eye level to ensure we check distance from eyes
+        player = WPlayer.FromEntity(player)
+        shooter = WPlayer.FromEntity(shooter)
+        
+        --local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]") -- Vector3(0, 0, 70)
+        local shooterOrigin = shooter:GetEyePos() --(shooter:GetAbsOrigin() + viewOffset)
+
+        --viewOffset = player:GetPropVector("localdata", "m_vecViewOffset[0]") -- Vector3(0, 0, 70)
+        local playerOrigin = player:GetHitboxPos(1) --(player:GetAbsOrigin() + viewOffset)
+        
+        local viewAngles = shooter:GetEyeAngles()--:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]"):Forward()
+        --if not Helpers.VisPos(shooterOrigin, playerOrigin) then goto continue end
+  
+        local angles = Math.PositionAngles(shooterOrigin, playerOrigin)
+        local fov = Math.AngleFov(angles, viewAngles)
+        if fov < closestFov then
+            closestAngle = angles
+            closestFov = fov
+            closestTarget = player
+        end
+  
+        ::continue::
+    end
+  
+    -- Check if aiming at head
+    local aimingAtHead = false
+    if closestFov < options.AimbotSensetivity then
+        aimingAtHead = true
+    end
+    return closestTarget, aimingAtHead
 end
+
+local flickCounter = 0
+local function CheckAimbot(shooter)
+    local Target, HeadAim = GetLeastFovTarget(shooter)
+    if HeadAim == true then
+        flickCounter = flickCounter + 1
+            StrikePlayer(shooter:GetIndex(), "Silent Aimbot", shooter)
+        if flickCounter > 2 then
+            flickCounter = 0
+            StrikePlayer(shooter:GetIndex(), "AimLock", shooter) 
+        end
+    else
+        flickCounter = 0
+    end
+end
+
 -- Add your custom detection functions here
 
 local function OnCreateMove(userCmd)
     local me = WPlayer.GetLocal()
     if not me then return end
+
+    players = entities.FindByClass("CTFPlayer")
 
     -- Get current data
     local currentData = {
@@ -191,8 +255,9 @@ local function OnCreateMove(userCmd)
         if prevData then
             CheckChoke(player, entity) --detects majority of rage cheaters
         end
-        isValidName(player, entity:GetName(), entity)
-        CheckFlick(player, entity)
+        isValidName(player, entity:GetName(), entity) --detect bot names
+
+        CheckAimbot(entity) --detect aimbot users
 
 
         ::continue::
