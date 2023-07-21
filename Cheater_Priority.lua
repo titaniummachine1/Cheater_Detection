@@ -24,7 +24,7 @@ local players = entities.FindByClass("CTFPlayer")
 local options = {
     StrikeLimit = 10,
     MaxTickDelta = 8,
-    AimbotSensetivity = 0.1,
+    AimbotSensetivity = 0.26,
     AutoMark = true,
 }
 
@@ -164,43 +164,52 @@ local function isValidName(player, name, entity)
 end
 
 local function GetLeastFovTarget(shooter)
+
+    if shooter == nil 
+    or shooter:IsDormant()
+    or not shooter:IsAlive() then return nil end
+
+    local shooter_class = shooter:GetPropInt("m_iClass") -- check if shooter is TF2_Sniper
+    if shooter_class ~= 2 and shooter_class ~= 8 then return nil end
+
+ 
     -- Find closest target
-    local closestFov = 360
+    local closestFov = options.AimbotSensetivity * 4
     local closestTarget
     local closestAngle
-  
-    for i, player in ipairs(players) do
-        if player:IsDormant() or shooter == nil then goto continue end
-        if shooter == player then goto continue end
-        if not player:IsAlive() then goto continue end
-        if player:GetTeamNumber() == shooter:GetTeamNumber() then -- Skip local player and teammates
+    local shooterTeam = shooter:GetTeamNumber()
+
+    shooter = WPlayer.FromEntity(shooter)
+    local shooterOrigin = shooter:GetEyePos()
+    local viewAngles = shooter:GetEyeAngles()
+
+    for _, player in ipairs(players) do
+        if player == shooter
+        or player:IsDormant() 
+        or not player:IsAlive() 
+        or player:GetTeamNumber() == shooterTeam then -- Skip shooters teammates cuz they will not shoot at them anyways
             goto continue
         end
-  
-    -- Get pLocal eye level and set vector at our eye level to ensure we check distance from eyes
-        player = WPlayer.FromEntity(player)
-        shooter = WPlayer.FromEntity(shooter)
-        
-        --local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]") -- Vector3(0, 0, 70)
-        local shooterOrigin = shooter:GetEyePos() --(shooter:GetAbsOrigin() + viewOffset)
 
-        --viewOffset = player:GetPropVector("localdata", "m_vecViewOffset[0]") -- Vector3(0, 0, 70)
-        local playerOrigin = player:GetHitboxPos(1) --(player:GetAbsOrigin() + viewOffset)
-        
-        local viewAngles = shooter:GetEyeAngles()--:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]"):Forward()
-        --if not Helpers.VisPos(shooterOrigin, playerOrigin) then goto continue end
-  
+        player = WPlayer.FromEntity(player)
+        local playerOrigin = player:GetHitboxPos(1)
+
         local angles = Math.PositionAngles(shooterOrigin, playerOrigin)
         local fov = Math.AngleFov(angles, viewAngles)
+
+        if fov > options.AimbotSensetivity then -- skip players that are beyond threshold
+            goto continue 
+        end
+
         if fov < closestFov then
             closestAngle = angles
             closestFov = fov
             closestTarget = player
         end
-  
+
         ::continue::
     end
-  
+    
     -- Check if aiming at head
     local aimingAtHead = false
     if closestFov < options.AimbotSensetivity then
@@ -209,18 +218,13 @@ local function GetLeastFovTarget(shooter)
     return closestTarget, aimingAtHead
 end
 
-local flickCounter = 0
+
 local function CheckAimbot(shooter)
     local Target, HeadAim = GetLeastFovTarget(shooter)
+    if Target == nil then return end
+
     if HeadAim == true then
-        flickCounter = flickCounter + 1
-            StrikePlayer(shooter:GetIndex(), "Silent Aimbot", shooter)
-        if flickCounter > 2 then
-            flickCounter = 0
-            StrikePlayer(shooter:GetIndex(), "AimLock", shooter) 
-        end
-    else
-        flickCounter = 0
+        StrikePlayer(shooter:GetIndex(), "Aimbot", shooter)
     end
 end
 
