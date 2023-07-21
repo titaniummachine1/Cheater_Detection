@@ -24,7 +24,7 @@ local players = entities.FindByClass("CTFPlayer")
 local options = {
     StrikeLimit = 10,
     MaxTickDelta = 16,
-    AimbotSensetivity = 2,
+    AimbotSensetivity = 0.2,
     AutoMark = true,
 }
 
@@ -152,6 +152,7 @@ local BOTPATTERNS = {
     -- Other valid patterns
     "omegatronic",
     "OMEGATRONIC",
+    "Hexatronic"
   }
   
 local function isValidName(player, name, entity)
@@ -219,6 +220,7 @@ local function GetLeastFovTarget(shooter)
     local aimingAtHead = false
     if closestFov < options.AimbotSensetivity then
         aimingAtHead = true
+        print(closestFov)
     end
     return closestTarget, aimingAtHead
 end
