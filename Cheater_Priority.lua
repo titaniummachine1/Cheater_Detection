@@ -23,7 +23,7 @@ local players = entities.FindByClass("CTFPlayer")
 
 local options = {
     StrikeLimit = 10,
-    MaxTickDelta = 8,
+    MaxTickDelta = 16,
     AimbotSensetivity = 2,
     AutoMark = true,
 }
@@ -263,7 +263,10 @@ local function OnCreateMove(userCmd)
 
         CheckPitch(player, entity) --detects all bots as they all use anty aim
         if prevData then
-            CheckChoke(player, entity) --detects majority of rage cheaters
+            latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
+            if latin + latout < 200 then
+                CheckChoke(player, entity) --detects majority of rage cheaters
+            end
         end
         isValidName(player, entity:GetName(), entity) --detect bot names
 
