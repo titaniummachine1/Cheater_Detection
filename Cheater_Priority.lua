@@ -76,7 +76,6 @@ end
 -- Detects rage pitch (looking up/down too much)
 local function CheckPitch(player, entity)
     local angles = player:GetEyeAngles()
-    print(angles.pitch)
     if angles.pitch == 89.00 or angles.pitch == -89.00 -- aa pitch when normaly only 89.29 max = hard to reproduce when legit
     or angles.pitch >= 89.30 or angles.pitch <= -89.30 then -- aa pitch but broken with exploits
         StrikePlayer(player:GetIndex(), "Invalid pitch", entity)
