@@ -15,17 +15,22 @@ assert(libLoaded, "lnxLib not found, please install it!")
 assert(lnxLib.GetVersion() >= 0.981, "lnxLib version is too old, please update it!")
 
 
+local TF2 = lnxLib.TF2
 local Math, Conversion = lnxLib.Utils.Math, lnxLib.Utils.Conversion
-local WPlayer = lnxLib.TF2.WPlayer
+local WPlayer = TF2.WPlayer
 local Helpers = lnxLib.TF2.Helpers
 
 local players = entities.FindByClass("CTFPlayer")
+
 local pLocal = entities.GetLocalPlayer()
+playerlist.SetPriority(pLocal, 0) -- debug
+
 local options = {
-    StrikeLimit = 7,
+    StrikeLimit = 4,
     MaxTickDelta = 20,
     Aimbotfov = 7,
     AutoMark = true,
+    debug = false,
 }
 
 local BOTPATTERNS = {
@@ -111,13 +116,13 @@ local function StrikePlayer(idx, reason, player)
         -- Print message
         if targetPlayer and playerlist.GetPriority(player) > -1 then
             print(targetPlayer:GetName() .. " stroked AC")
-            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01has triggered AC With \x04" .. reason))
+            client.ChatPrintf(tostring("\x04[CD] \x01Player \x03" .. player:GetName() .. " \x01has stroke CD With \x04" .. reason))
         end
     else
         -- Print cheating message if player is not detected
         if targetPlayer and playerlist.GetPriority(player) > -1 and not detectedPlayers[player:GetIndex()] then
             print(targetPlayer:GetName() .. " is cheating")
-            client.ChatPrintf(tostring("\x04[AC] \x01Player \x03" .. player:GetName() .. " \x01is cheating! Reason: \x04".. reason))
+            client.ChatPrintf(tostring("\x04[CD] \x01Player \x03" .. player:GetName() .. " \x01is cheating! Reason: \x04".. reason))
 
             -- Add player to detectedPlayers table
             detectedPlayers[player:GetIndex()] = true
@@ -131,10 +136,10 @@ local function StrikePlayer(idx, reason, player)
 end
 
 -- Detects rage pitch (looking up/down too much)
-local function CheckPitch(player, entity)
+local function CheckAngles(player, entity)
     local angles = player:GetEyeAngles()
-    if angles.pitch == 89.00 or angles.pitch == -89.00 -- aa pitch when normaly only 89.29 max = hard to reproduce when legit
-    or angles.pitch >= 89.30 or angles.pitch <= -89.30 then -- aa pitch but broken with exploits
+    if angles.pitch == 89.00 or angles.pitch == -89.00 -- detects fake up/down/up/fakedown pitch settigns {lbox]
+    or angles.pitch >= 90 or angles.pitch <= -90 then -- detects custom pitch and other cheats
         StrikePlayer(player:GetIndex(), "Invalid pitch", entity)
     end
 end
@@ -161,47 +166,76 @@ local function isValidName(player, name, entity)
     end
 end
 
+--[[local viewAngleMap = {} -- Table to store the view angles for each player by index
+local lastAngle = {} -- Table to store the last view angles for each player by index
+local allAngles = {} -- Table to store all previous view angles for each player by index
+local maxAngles = 24 -- Maximum number of previous angles to store
 
-local lastFov = {} -- Table to store the previous tick's FOV for each player by index
-local aimPosMap = {} -- Table to store the AimPos value for each player by index
+local function CheckAimbot(player, idx)
+    local viewAngles = player:GetEyeAngles()
+    if lastAngle[idx] then
+        viewAngleMap[idx] = lastAngle[idx]
+    end
+    if not allAngles[idx] then
+        allAngles[idx] = {}
+    end
+    table.insert(allAngles[idx], viewAngles)
+    while #allAngles[idx] > maxAngles do
+        table.remove(allAngles[idx], 1)
+    end
+    lastAngle[idx] = viewAngles
+end]]
 
+
+-- Table to store the previous tick's FOV for each player by index
+local lastFov = {}
+
+-- Table to store suspicious players
+local suspicious = {}
+
+-- Function to check for aimbot
 local function CheckAimbot(shooter)
+    -- Return nil if the shooter is invalid or dead
     if not shooter or shooter:IsDormant() or not shooter:IsAlive() then
         return nil
     end
 
-    local shooter_class = shooter:GetPropInt("m_iClass") -- check if shooter is TF2_Sniper
-    if shooter_class ~= 2 and shooter_class ~= 8 and shooter_class ~= 1 and shooter_class ~= 9 then
+    -- Return nil if the shooter is not in the suspicious table
+    if not suspicious[shooter:GetIndex()] then
         return nil
     end
 
+    -- Initialize variables
     local shooterIndex = shooter:GetIndex()
     local shooterTeam = shooter:GetTeamNumber()
-    local closestFov = options.Aimbotfov + 5
+    local closestFov = 360
     local closestTarget
 
+    -- Get the shooter's position and view angles
     shooter = WPlayer.FromEntity(shooter)
     local shooterOrigin = shooter:GetEyePos()
     local viewAngles = shooter:GetEyeAngles()
 
-    local aimPos = aimPosMap[shooterIndex] or 1 -- Use the stored AimPos for this shooter, default to 1 if not set
-
+    -- Loop through all players
     for _, player in ipairs(players) do
+        -- Skip shooters, dormant players, dead players, and players from the same team.
         if player == shooter or player:IsDormant() or not player:IsAlive() or player:GetTeamNumber() == shooterTeam then
-            -- Skip shooters, dormant players, dead players, and players from the same team.
             goto continue
         end
 
+        -- Get the player's position
         player = WPlayer.FromEntity(player)
-        local playerOrigin = player:GetHitboxPos(aimPos)
+        local playerOrigin = player:GetHitboxPos(1)
 
+        -- Exclude invisible players as aimbot will not target them.
         if not Helpers.VisPos(player, playerOrigin, shooterOrigin) then
-            -- Exclude invisible players as aimbot will not target them.
             goto continue
         end
 
+        -- Calculate the FOV between the shooter's view angles and the player's position
         local fov = Math.AngleFov(Math.PositionAngles(shooterOrigin, playerOrigin), viewAngles)
 
+        -- Update the closest target if the current player has a smaller FOV
         if fov < closestFov then
             closestFov = fov
             closestTarget = player
@@ -210,58 +244,75 @@ local function CheckAimbot(shooter)
         ::continue::
     end
 
+    -- Update the last FOV value for the shooter
     lastFov[shooterIndex] = closestFov
+
+    -- Return the closest target
     return closestTarget
 end
 
+-- Event hook function
 local function event_hook(ev)
+    -- Return if the event is not a player hurt event
     if ev:GetName() ~= "player_hurt" then
         return
     end
 
     -- Get the entities involved in the event
-    local victim = entities.GetByUserID(ev:GetInt("userid"))
     local attacker = entities.GetByUserID(ev:GetInt("attacker"))
+    if options.debug == false and attacker == pLocal then return end
+    local victim = entities.GetByUserID(ev:GetInt("userid"))
+    local damage = ev:GetInt("damageamount")
 
-    if attacker == pLocal then
-        return
+    -- Return if the attacker or victim is dormant
+    if attacker:IsDormant() or victim:IsDormant() then return end
+
+    -- Get the attacker's class and aim position
+    local attackerclass = attacker:GetPropInt("m_iClass")
+    local AimPos = 2
+    if attackerclass == 2 or attackerclass == 8 then
+        AimPos = 1
     end
 
+    -- Get the shooter's position and the victim's position
     local shooter = WPlayer.FromEntity(attacker)
-    local shooterClass = attacker:GetPropInt("m_iClass")
+    local shooterOrigin = shooter:GetEyePos()
+    victim = WPlayer.FromEntity(victim)
+    local aimHitbox = 1
 
-    -- Check if the attacker is a sniper class (TF2_Sniper, TF2_Spy, TF2_Scout, or TF2_Engineer)
-    if shooterClass ~= 2 and shooterClass ~= 8 and shooterClass ~= 1 and shooterClass ~= 9 then
-        return
+    -- Set the aim position to the head for sniper classes
+    if attackerclass == 2 then
+        aimHitbox = 2
+    end
+    local victimOrigin = victim:GetHitboxPos(aimHitbox)
+
+    -- Calculate the FOV between the shooter's view angles and the victim's position
+    local targetAngle = Math.PositionAngles(shooterOrigin, victimOrigin)
+    local Fov = Math.AngleFov(shooter:GetEyeAngles(), targetAngle )
+
+    -- Add the attacker to the suspicious table if the FOV is greater than the aimbot FOV
+    if Fov > options.Aimbotfov then
+        table.insert(suspicious, attacker:GetIndex(), attacker)
+        print("suspicious")
     end
 
-    local shooterOrigin = shooter:GetEyePos()
-    local viewAngles = shooter:GetEyeAngles()
-    local player = WPlayer.FromEntity(victim)
-
-    local aimPos = aimPosMap[shooter:GetIndex()] or 1 -- Use the stored AimPos for this shooter, default to 1 if not set
-    local playerOrigin = player:GetHitboxPos(aimPos)
-
-    local fov = Math.AngleFov(Math.PositionAngles(shooterOrigin, playerOrigin), viewAngles)
-    local fovDiff = fov - (lastFov[shooter:GetIndex()] or 0)
-
+    -- Perform advanced detection if the FOV difference is greater than the aimbot FOV
+    local fovDiff = Fov - (lastFov[shooter:GetIndex()] or 0)
     if fovDiff > options.Aimbotfov then
-        -- Perform detection action here, such as striking the player for aimbot.
         StrikePlayer(shooter:GetIndex(), "Silent Aimbot", attacker)
     end
 
-    lastFov[shooter:GetIndex()] = fov -- Update lastFov with the new FOV value
+    -- Update the last FOV value for the shooter
+    lastFov[shooter:GetIndex()] = Fov
 end
-
-
-
 
 local function OnCreateMove(userCmd)
     pLocal = entities.GetLocalPlayer()
     players = entities.FindByClass("CTFPlayer")
     if pLocal == nil then goto continue end -- Skip if local player is nil
+
     local latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
-    
+   --:GetPropDataTableInt("m_iConnectionState")[pLocal:GetIndex()]
     -- Get current data
     local currentData = {
         Angle = {},
@@ -270,7 +321,8 @@ local function OnCreateMove(userCmd)
     }
 
     for idx, entity in pairs(players) do
-        if idx == pLocal:GetIndex()
+        if options.debug == false and entity == pLocal  -- Skip local player 
+        or options.debug == false and TF2.IsFriend(idx, true)
         or playerlist.GetPriority(entity) == 10
         or playerlist.GetPriority(entity) == -1
         or entity:IsDormant()
@@ -279,21 +331,21 @@ local function OnCreateMove(userCmd)
         end
 
         local player = WPlayer.FromEntity(entity)
-        --currentData.Angle[idx] = player:GetEyeAngles()
-        --currentData.Position[idx] = player:GetAbsOrigin()
+
         currentData.SimTime[idx] = player:GetSimulationTime()
 
         isValidName(player, entity:GetName(), entity) --detect bot names
 
-        CheckPitch(player, entity) --detects all bots as they all use anty aim
+        CheckAngles(player, entity) --detects rage cheaters and bots
+
+        CheckAimbot(entity) --detect aimbot users
 
         if prevData then
             if (latin + latout) < 200 then
                 CheckChoke(player, entity) --detects majority of rage cheaters
             end
-        end
 
-        CheckAimbot(entity) --detect aimbot users
+        end
 
         ::continue::
     end
