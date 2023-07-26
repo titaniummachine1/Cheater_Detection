@@ -35,7 +35,8 @@ local options = {
     MaxTickDelta = 20,
     Aimbotfov = 12,
     AutoMark = true,
-    debug = false
+    BhopTimes = 3,
+    debug = false,
 }
 
 local BOTPATTERNS = {
@@ -193,7 +194,7 @@ local function CheckBhop(pEntity, mData, entity)
         mData[pEntity].pBhop[1] = mData[pEntity].pBhop[1] + 1 -- Increment the bhop count if the player is in the air
     end
 
-    if mData[pEntity].pBhop[1] >= 3 then
+    if mData[pEntity].pBhop[1] >= options.BhopTimes then
         mData[pEntity].iPlayerSuspicion = mData[pEntity].iPlayerSuspicion + 1 -- Increment the suspicion if the player consistently bhops
         mData[pEntity].pBhop[1] = 0 -- Reset the bhop count
         StrikePlayer(pEntity:GetIndex(), "Bunny Hop", entity) --return true, mData[pEntity].pBhop[1] -- Return true if the suspicion threshold is reached
@@ -304,7 +305,7 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     -- Get current data
     local currentData = {
         SimTime = {},
-        pBhop = {}, 
+        pBhop = {}
     }
 
     for idx, entity in pairs(players) do
@@ -378,10 +379,16 @@ local function doDraw()
         options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 1, 20)
         ImMenu.EndFrame()
 
+
         -- Max Tick Delta Slider
         ImMenu.BeginFrame(1)
         options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 1, 100)
         ImMenu.EndFrame()
+        
+          -- Max Tick Delta Slider
+          ImMenu.BeginFrame(1)
+          options.BhopTimes = ImMenu.Slider("Max Bhops", options.BhopTimes, 1, 10)
+          ImMenu.EndFrame()
 
         -- Aimbot FOV Slider
         ImMenu.BeginFrame(1)
@@ -401,6 +408,7 @@ local function doDraw()
             playerStrikes = {} ---@type table<number, number>
             detectedPlayers = {} -- Table to store detected players
             lastAngles = {}
+            client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
         end
         ImMenu.EndFrame()
 
@@ -416,13 +424,13 @@ local function OnUnload()
     client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
 end
 
-callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
-callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)
-callbacks.Register("Unload", "MCT_Unload", OnUnload)
-callbacks.Register("Draw", "MCT_Draw", doDraw)
+callbacks.Unregister("CreateMove", "Cheater_detection")                     -- unregister the "CreateMove" callback
+callbacks.Unregister("FireGameEvent", "unique_event_hook")                 -- unregister the "FireGameEvent" callback
+callbacks.Unregister("Unload", "MCT_Unload")                                -- unregister the "Unload" callback
+callbacks.Unregister("Draw", "MCT_Draw")                                   -- unregister the "Draw" callback
 
-client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
-callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)
+callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)        -- register the "CreateMove" callback
+callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)         -- register the "FireGameEvent" callback
 callbacks.Register("Unload", "MCT_Unload", OnUnload)                         -- Register the "Unload" callback
 callbacks.Register("Draw", "MCT_Draw", doDraw)                              -- Register the "Draw" callback
 --[[ Play sound when loaded ]]--
