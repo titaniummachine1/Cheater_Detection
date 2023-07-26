@@ -19,5 +19,5 @@ Click on the buttons below to download the requirements. V
 
 ![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/db517625-ba06-4f2b-889e-db0024e44442)
 
-[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Priority/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Priority/releases/latest/download/Cheater_Priority.lua)
+![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/71b7c3bb-14f1-4d5a-8e60-bba5ef936624)
 
