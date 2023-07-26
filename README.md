@@ -1,4 +1,7 @@
 # Cheater_Priority
+![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/b7f09770-ebeb-43cc-a5ed-17e2ba115442)
+
+
 ![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Ftitaniummachine1%2FCheater_Priority&label=Visitors&countColor=%23263759&style=plastic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -19,5 +22,4 @@ Click on the buttons below to download the requirements. V
 
 ![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/db517625-ba06-4f2b-889e-db0024e44442)
 
-![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/71b7c3bb-14f1-4d5a-8e60-bba5ef936624)
 
