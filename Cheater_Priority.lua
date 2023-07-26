@@ -387,7 +387,7 @@ local function doDraw()
         
           -- Max Tick Delta Slider
           ImMenu.BeginFrame(1)
-          options.BhopTimes = ImMenu.Slider("Max Bhops", options.BhopTimes, 1, 10)
+          options.BhopTimes = ImMenu.Slider("Max Bhops", options.BhopTimes, 2, 10)
           ImMenu.EndFrame()
 
         -- Aimbot FOV Slider
