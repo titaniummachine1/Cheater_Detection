@@ -418,20 +418,22 @@ end
 
 
 
-local function OnUnload()
-    -- Called when the script is unloaded
+local function OnUnload()-- Called when the script is unloaded
     UnloadLib() --unloading lualib
     client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
 end
 
+--[[ Unregister previous callbacks ]]--
 callbacks.Unregister("CreateMove", "Cheater_detection")                     -- unregister the "CreateMove" callback
 callbacks.Unregister("FireGameEvent", "unique_event_hook")                 -- unregister the "FireGameEvent" callback
 callbacks.Unregister("Unload", "MCT_Unload")                                -- unregister the "Unload" callback
 callbacks.Unregister("Draw", "MCT_Draw")                                   -- unregister the "Draw" callback
 
+--[[ Register callbacks ]]--
 callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)        -- register the "CreateMove" callback
 callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)         -- register the "FireGameEvent" callback
 callbacks.Register("Unload", "MCT_Unload", OnUnload)                         -- Register the "Unload" callback
 callbacks.Register("Draw", "MCT_Draw", doDraw)                              -- Register the "Draw" callback
+
 --[[ Play sound when loaded ]]--
 client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
