@@ -7,7 +7,7 @@ Click on the buttons below to download the requirements. V
 
 [![LuaLib](https://img.shields.io/badge/Download-Latest-blue?style=for-the-badge&logo=download)](https://github.com/lnx00/Lmaobox-Library/releases/latest/) and copy the `lnxLib.lua` file to your `%localappdata%` folder.
 
-[![ImMenu](https://img.shields.io/badge/Download-Latest-blue?style=for-the-badge&logo=download)](https://github.com/lnx00/Lmaobox-ImMenu/blob/main/src/ImMenu.lua) and copy the `imMenu.lua` file to your `%localappdata%` folder.
+[![ImMenu](https://img.shields.io/badge/Download-blue?style=for-the-badge&logo=download)](https://github.com/lnx00/Lmaobox-ImMenu/blob/main/src/ImMenu.lua) and copy the `imMenu.lua` file to your `%localappdata%` folder.
 
 
 ## Download
