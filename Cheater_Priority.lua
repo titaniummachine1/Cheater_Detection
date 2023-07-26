@@ -14,11 +14,16 @@ local libLoaded, lnxLib = pcall(require, "lnxLib")
 assert(libLoaded, "lnxLib not found, please install it!")
 assert(lnxLib.GetVersion() >= 0.981, "lnxLib version is too old, please update it!")
 
-
 local TF2 = lnxLib.TF2
 local Math, Conversion = lnxLib.Utils.Math, lnxLib.Utils.Conversion
 local WPlayer, WPR = TF2.WPlayer, TF2.WPlayerResource
 local Helpers = lnxLib.TF2.Helpers
+local Fonts = lnxLib.UI.Fonts
+
+---@type boolean, ImMenu
+local menuLoaded, ImMenu = pcall(require, "ImMenu")
+assert(menuLoaded, "ImMenu not found, please install it!")
+assert(ImMenu.GetVersion() >= 0.66, "ImMenu version is too old, please update it!")
 
 local players = entities.FindByClass("CTFPlayer")
 
@@ -346,23 +351,79 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     prevData = currentData
     ::continue::
 end
+local strikes_default = options.StrikeLimit
+local exampleSliderValue = 5 -- Default value for the example slider
 
---[[ Remove the menu when unloaded --
-local function OnUnload()                                -- Called when the script is unloaded
-    MenuLib.RemoveMenu(menu)                             -- Remove the menu
+local function doDraw()
+    draw.SetFont(Fonts.Verdana)
+    draw.Color(255, 255, 255, 255)
+
+    if not engine.IsGameUIVisible() then return end
+
+    if ImMenu.Begin("Cheater Detection", true) then
+
+        local menuWidth, menuHeight = 250, 300
+        local x, y = ImMenu.GetCurrentWindow().X, ImMenu.GetCurrentWindow().Y
+
+        --[[ Draw black background
+        draw.Color(0, 0, 0, 200)
+        draw.FilledRect(x, y, x + menuWidth, y + menuHeight)]]
+    
+        --[[ Draw border
+        draw.Color(255, 255, 255, 255)
+        draw.OutlinedRect(x, y, x + menuWidth, y + menuHeight)]]
+
+        -- Strike Limit Slider
+        ImMenu.BeginFrame(1)
+        options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 1, 20)
+        ImMenu.EndFrame()
+
+        -- Max Tick Delta Slider
+        ImMenu.BeginFrame(1)
+        options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 1, 100)
+        ImMenu.EndFrame()
+
+        -- Aimbot FOV Slider
+        ImMenu.BeginFrame(1)
+        options.Aimbotfov = ImMenu.Slider("Aimbot Fov", options.Aimbotfov, 1, 180)
+        ImMenu.EndFrame()
+
+        -- Options
+        ImMenu.BeginFrame(1)
+        options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
+        options.debug = ImMenu.Checkbox("Debug", options.debug)
+        ImMenu.EndFrame()
+
+        -- Reset Button
+        ImMenu.BeginFrame(1)
+        if ImMenu.Button("Reset") then
+            prevData = nil ---@type PlayerData
+            playerStrikes = {} ---@type table<number, number>
+            detectedPlayers = {} -- Table to store detected players
+            lastAngles = {}
+        end
+        ImMenu.EndFrame()
+
+        ImMenu.End()
+    end
+end
+
+
+
+local function OnUnload()
+    -- Called when the script is unloaded
     UnloadLib() --unloading lualib
     client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
-end]]
+end
 
---[[ Unregister previous callbacks ]]--
-callbacks.Unregister("CreateMove", "Cheater_detection")            -- Unregister the "CreateMove" callback
-callbacks.Unregister("FireGameEvent", "unique_event_hook")
---callbacks.Unregister("Unload", "MCT_Unload")                    -- Unregister the "Unload" callback
---callbacks.Unregister("Draw", "MCT_Draw")                        -- Unregister the "Draw" callback
---[[ Register callbacks ]]--
 callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
 callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)
---callbacks.Register("Unload", "MCT_Unload", OnUnload)                         -- Register the "Unload" callback
---callbacks.Register("Draw", "MCT_Draw", doDraw)                               -- Register the "Draw" callback
+callbacks.Register("Unload", "MCT_Unload", OnUnload)
+callbacks.Register("Draw", "MCT_Draw", doDraw)
+
+client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
+callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)
+callbacks.Register("Unload", "MCT_Unload", OnUnload)                         -- Register the "Unload" callback
+callbacks.Register("Draw", "MCT_Draw", doDraw)                              -- Register the "Draw" callback
 --[[ Play sound when loaded ]]--
 client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
