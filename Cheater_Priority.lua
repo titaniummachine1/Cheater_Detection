@@ -17,7 +17,7 @@ assert(lnxLib.GetVersion() >= 0.981, "lnxLib version is too old, please update i
 
 local TF2 = lnxLib.TF2
 local Math, Conversion = lnxLib.Utils.Math, lnxLib.Utils.Conversion
-local WPlayer = TF2.WPlayer
+local WPlayer, WPR = TF2.WPlayer, TF2.WPlayerResource
 local Helpers = lnxLib.TF2.Helpers
 
 local players = entities.FindByClass("CTFPlayer")
@@ -30,7 +30,7 @@ local options = {
     MaxTickDelta = 20,
     Aimbotfov = 12,
     AutoMark = true,
-    debug = false,
+    debug = false
 }
 
 local BOTPATTERNS = {
@@ -174,7 +174,28 @@ local function CheckDuckSpeed(player, entity)
     end
 end
 
---[[ Check if a player is choking packets (Fakelag, Doubletap)
+local function CheckBhop(pEntity, mData, entity)
+    if not mData[pEntity] then
+        mData[pEntity] = { pBhop = { 0, 0 }, iPlayerSuspicion = 0 }
+    end
+
+    local flags = pEntity:GetPropInt("m_fFlags")
+    local bOnGround = flags & FL_ONGROUND == 1
+
+    if bOnGround then
+        mData[pEntity].pBhop[1] = 0 -- Reset the bhop count if the player is on the ground
+    else
+        mData[pEntity].pBhop[1] = mData[pEntity].pBhop[1] + 1 -- Increment the bhop count if the player is in the air
+    end
+
+    if mData[pEntity].pBhop[1] >= 3 then
+        mData[pEntity].iPlayerSuspicion = mData[pEntity].iPlayerSuspicion + 1 -- Increment the suspicion if the player consistently bhops
+        mData[pEntity].pBhop[1] = 0 -- Reset the bhop count
+        StrikePlayer(pEntity:GetIndex(), "Bunny Hop", entity) --return true, mData[pEntity].pBhop[1] -- Return true if the suspicion threshold is reached
+    end
+end
+
+-- Check if a player is choking packets (Fakelag, Doubletap)
 local function CheckChoke(player, entity)
     local simTime = player:GetSimulationTime()
     local oldSimTime = prevData.SimTime[player:GetIndex()]
@@ -185,7 +206,7 @@ local function CheckChoke(player, entity)
     if deltaTicks > options.MaxTickDelta then
         StrikePlayer(player:GetIndex(), "Choking packets", entity)
     end
-end]]
+end
 
 local function isValidName(player, name, entity)
 
@@ -195,9 +216,6 @@ local function isValidName(player, name, entity)
       end
     end
 end
-
-
-
 
 local HurtVictim = nil
 local shooter = nil
@@ -219,7 +237,8 @@ local function event_hook(ev)
         if attacker:IsDormant() then return end
         if Victim:IsDormant() then return end
         if not attacker:IsAlive() then return end
-
+        local pWeapon = attacker:GetPropEntity("m_hActiveWeapon")
+        if pWeapon:GetWeaponProjectileType() ~= 1 then return end --skip projectile weapons
     --print("pass")
     --update lastattacker and lastHurtVictim
     shooter = attacker
@@ -227,7 +246,6 @@ local function event_hook(ev)
 end
 
 local lastAngles = {}
-
 -- Function to check for aimbot
 local function CheckAimbot()
 	if HurtVictim == nil then return end -- when noone gets killed or damaged amingot check is not needed
@@ -260,7 +278,8 @@ local function CheckAimbot()
         local fov = Math.AngleFov(AimbotAngle, shootAngles)
         local PrewFov = Math.AngleFov(AimbotAngle, lastAngles[idx])
         local FovDelta = PrewFov - fov
-        print(shooter:GetName(), fov, PrewFov, FovDelta)
+
+        if options.debug == true then print(shooter:GetName(), fov, PrewFov, FovDelta) end
 
         if FovDelta > options.Aimbotfov then
             StrikePlayer(idx, "Aimbot", shooter)
@@ -269,16 +288,18 @@ end
 
 local function OnCreateMove(userCmd)--runs 66 times/second
     pLocal = entities.GetLocalPlayer()
+    local WLocal = WPlayer.FromEntity(pLocal)
     players = entities.FindByClass("CTFPlayer")
     if pLocal == nil then goto continue end -- Skip if local player is nil
 
     latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
-   --:GetPropDataTableInt("m_iConnectionState")[pLocal:GetIndex()]
+
+    local connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
+
     -- Get current data
     local currentData = {
-        Angle = {},
-        Position = {},
         SimTime = {},
+        pBhop = {}, 
     }
 
     for idx, entity in pairs(players) do
@@ -301,16 +322,20 @@ local function OnCreateMove(userCmd)--runs 66 times/second
 
         CheckDuckSpeed(player, entity) --detects DuckSpeed
 
+        CheckBhop(player, currentData, entity)
+
         if HurtVictim == nil then
             lastAngles[idx] = player:GetEyeAngles() --store viewangles of target player
         end
 
+        --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
-            if (latin + latout) < 200 then
-                --CheckChoke(player, entity) --detects rage Fakelag
+            if connectionState == 1 or connectionState == 0 then
+                if (latin + latout) < 200 then
+                    CheckChoke(player, entity) --detects rage Fakelag
+                end
             end
         end
-
         ::continue::
     end
     CheckAimbot() --detect silent aimbot users
@@ -322,5 +347,22 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     ::continue::
 end
 
-callbacks.Register("CreateMove", OnCreateMove)
+--[[ Remove the menu when unloaded --
+local function OnUnload()                                -- Called when the script is unloaded
+    MenuLib.RemoveMenu(menu)                             -- Remove the menu
+    UnloadLib() --unloading lualib
+    client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
+end]]
+
+--[[ Unregister previous callbacks ]]--
+callbacks.Unregister("CreateMove", "Cheater_detection")            -- Unregister the "CreateMove" callback
+callbacks.Unregister("FireGameEvent", "unique_event_hook")
+--callbacks.Unregister("Unload", "MCT_Unload")                    -- Unregister the "Unload" callback
+--callbacks.Unregister("Draw", "MCT_Draw")                        -- Unregister the "Draw" callback
+--[[ Register callbacks ]]--
+callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
 callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)
+--callbacks.Register("Unload", "MCT_Unload", OnUnload)                         -- Register the "Unload" callback
+--callbacks.Register("Draw", "MCT_Draw", doDraw)                               -- Register the "Draw" callback
+--[[ Play sound when loaded ]]--
+client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
