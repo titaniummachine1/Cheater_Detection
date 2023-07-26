@@ -23,12 +23,12 @@ local Helpers = lnxLib.TF2.Helpers
 local players = entities.FindByClass("CTFPlayer")
 
 local pLocal = entities.GetLocalPlayer()
-playerlist.SetPriority(pLocal, 0) -- debug
+local latin, latout = 0, 0
 
 local options = {
     StrikeLimit = 4,
     MaxTickDelta = 20,
-    Aimbotfov = 7,
+    Aimbotfov = 12,
     AutoMark = true,
     debug = false,
 }
@@ -128,7 +128,7 @@ local function StrikePlayer(idx, reason, player)
             detectedPlayers[player:GetIndex()] = true
 
             -- Auto mark
-            if options.AutoMark then
+            if options.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 10)
             end
         end
@@ -144,7 +144,37 @@ local function CheckAngles(player, entity)
     end
 end
 
--- Check if a player is choking packets (Fakelag, Doubletap)
+local tick_count = 0
+-- Detects rage pitch (looking up/down too much)
+local function CheckDuckSpeed(player, entity)
+    local angles = player:GetEyeAngles()
+    local flags = player:GetPropInt("m_fFlags")
+    local OnGround = flags & FL_ONGROUND == 1
+    local DUCKING = flags & FL_DUCKING == 2
+    if OnGround
+    and DUCKING then -- detects fake up/down/up/fakedown pitch settigns {lbox]
+        local MaxDuckSpeed = {
+            [1] = 400,
+            [2] = 300,
+            [3] = 240,
+            [4] = 262,
+            [5] = 320,
+            [6] = 77,
+            [7] = 300,
+            [8] = 320,
+            [9] = 300
+        }
+        if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed[entity:GetPropInt("m_iClass")] then
+            tick_count = tick_count + 1
+            if tick_count >= 17 then
+                StrikePlayer(player:GetIndex(), "Duck Speed", entity)
+                tick_count = 0
+            end
+        end
+    end
+end
+
+--[[ Check if a player is choking packets (Fakelag, Doubletap)
 local function CheckChoke(player, entity)
     local simTime = player:GetSimulationTime()
     local oldSimTime = prevData.SimTime[player:GetIndex()]
@@ -155,10 +185,10 @@ local function CheckChoke(player, entity)
     if deltaTicks > options.MaxTickDelta then
         StrikePlayer(player:GetIndex(), "Choking packets", entity)
     end
-end
+end]]
 
 local function isValidName(player, name, entity)
-    
+
     for i, pattern in ipairs(BOTPATTERNS) do
       if string.find(name, pattern) then
         StrikePlayer(player:GetIndex(), "Bot Name", entity, player)
@@ -166,90 +196,11 @@ local function isValidName(player, name, entity)
     end
 end
 
---[[local viewAngleMap = {} -- Table to store the view angles for each player by index
-local lastAngle = {} -- Table to store the last view angles for each player by index
-local allAngles = {} -- Table to store all previous view angles for each player by index
-local maxAngles = 24 -- Maximum number of previous angles to store
-
-local function CheckAimbot(player, idx)
-    local viewAngles = player:GetEyeAngles()
-    if lastAngle[idx] then
-        viewAngleMap[idx] = lastAngle[idx]
-    end
-    if not allAngles[idx] then
-        allAngles[idx] = {}
-    end
-    table.insert(allAngles[idx], viewAngles)
-    while #allAngles[idx] > maxAngles do
-        table.remove(allAngles[idx], 1)
-    end
-    lastAngle[idx] = viewAngles
-end]]
 
 
--- Table to store the previous tick's FOV for each player by index
-local lastFov = {}
 
--- Table to store suspicious players
-local suspicious = {}
-
--- Function to check for aimbot
-local function CheckAimbot(shooter)
-    -- Return nil if the shooter is invalid or dead
-    if not shooter or shooter:IsDormant() or not shooter:IsAlive() then
-        return nil
-    end
-
-    -- Return nil if the shooter is not in the suspicious table
-    if not suspicious[shooter:GetIndex()] then
-        return nil
-    end
-
-    -- Initialize variables
-    local shooterIndex = shooter:GetIndex()
-    local shooterTeam = shooter:GetTeamNumber()
-    local closestFov = 360
-    local closestTarget
-
-    -- Get the shooter's position and view angles
-    shooter = WPlayer.FromEntity(shooter)
-    local shooterOrigin = shooter:GetEyePos()
-    local viewAngles = shooter:GetEyeAngles()
-
-    -- Loop through all players
-    for _, player in ipairs(players) do
-        -- Skip shooters, dormant players, dead players, and players from the same team.
-        if player == shooter or player:IsDormant() or not player:IsAlive() or player:GetTeamNumber() == shooterTeam then
-            goto continue
-        end
-
-        -- Get the player's position
-        player = WPlayer.FromEntity(player)
-        local playerOrigin = player:GetHitboxPos(1)
-
-        -- Exclude invisible players as aimbot will not target them.
-        if not Helpers.VisPos(player, playerOrigin, shooterOrigin) then
-            goto continue
-        end
-
-        -- Calculate the FOV between the shooter's view angles and the player's position
-        local fov = Math.AngleFov(Math.PositionAngles(shooterOrigin, playerOrigin), viewAngles)
-
-        -- Update the closest target if the current player has a smaller FOV
-        if fov < closestFov then
-            closestFov = fov
-            closestTarget = player
-        end
-
-        ::continue::
-    end
-
-    -- Update the last FOV value for the shooter
-    lastFov[shooterIndex] = closestFov
-
-    -- Return the closest target
-    return closestTarget
-end
+local HurtVictim = nil
+local shooter = nil
 
 -- Event hook function
 local function event_hook(ev)
@@ -260,58 +211,68 @@ local function event_hook(ev)
 
     -- Get the entities involved in the event
     local attacker = entities.GetByUserID(ev:GetInt("attacker"))
-    if options.debug == false and attacker == pLocal then return end
-    local victim = entities.GetByUserID(ev:GetInt("userid"))
-    local damage = ev:GetInt("damageamount")
+    local Victim = entities.GetByUserID(ev:GetInt("userid"))
+        if attacker == nil or Victim == nil then return end
+        if options.debug == false and attacker == pLocal then return end
+        if options.debug == false and TF2.IsFriend(attacker:GetIndex(), true) then return end
+        if playerlist.GetPriority(attacker) == 10 then return end
+        if attacker:IsDormant() then return end
+        if Victim:IsDormant() then return end
+        if not attacker:IsAlive() then return end
 
-    -- Return if the attacker or victim is dormant
-    if attacker:IsDormant() or victim:IsDormant() then return end
-
-    -- Get the attacker's class and aim position
-    local attackerclass = attacker:GetPropInt("m_iClass")
-    local AimPos = 2
-    if attackerclass == 2 or attackerclass == 8 then
-        AimPos = 1
-    end
-
-    -- Get the shooter's position and the victim's position
-    local shooter = WPlayer.FromEntity(attacker)
-    local shooterOrigin = shooter:GetEyePos()
-    victim = WPlayer.FromEntity(victim)
-    local aimHitbox = 1
-
-    -- Set the aim position to the head for sniper classes
-    if attackerclass == 2 then
-        aimHitbox = 2
-    end
-    local victimOrigin = victim:GetHitboxPos(aimHitbox)
-
-    -- Calculate the FOV between the shooter's view angles and the victim's position
-    local targetAngle = Math.PositionAngles(shooterOrigin, victimOrigin)
-    local Fov = Math.AngleFov(shooter:GetEyeAngles(), targetAngle )
-
-    -- Add the attacker to the suspicious table if the FOV is greater than the aimbot FOV
-    if Fov > options.Aimbotfov then
-        table.insert(suspicious, attacker:GetIndex(), attacker)
-        print("suspicious")
-    end
-
-    -- Perform advanced detection if the FOV difference is greater than the aimbot FOV
-    local fovDiff = Fov - (lastFov[shooter:GetIndex()] or 0)
-    if fovDiff > options.Aimbotfov then
-        StrikePlayer(shooter:GetIndex(), "Silent Aimbot", attacker)
-    end
-
-    -- Update the last FOV value for the shooter
-    lastFov[shooter:GetIndex()] = Fov
+    --print("pass")
+    --update lastattacker and lastHurtVictim
+    shooter = attacker
+    HurtVictim = Victim
 end
 
-local function OnCreateMove(userCmd)
+local lastAngles = {}
+
+-- Function to check for aimbot
+local function CheckAimbot()
+	if HurtVictim == nil then return end -- when noone gets killed or damaged amingot check is not needed
+        local idx = shooter:GetIndex()
+    if lastAngles[idx] == nil then
+        lastAngles[idx] = shooter:GetEyeAngles()
+    end -- when noone gets killed or damaged amingot check is not needed
+
+    local Wshooter = WPlayer.FromEntity(shooter)
+    local shootAngles = Wshooter:GetEyeAngles() --get angles of player called
+
+    -- Initialize variables
+    local shooterTeam = shooter:GetTeamNumber()
+
+    -- Get the shooter's position and view angles
+    local shooterOrigin = Wshooter:GetEyePos()
+
+        -- Get the attacker's class and aim position
+        local attackerclass = shooter:GetPropInt("m_iClass")
+        local AimPos = 4
+        if attackerclass == 2 or attackerclass == 8 then
+            AimPos = 1
+        end
+
+        -- Get the most propable hibox aimbot will target
+        local WHurtVictim = WPlayer.FromEntity(HurtVictim)
+        local playerOrigin = WHurtVictim:GetHitboxPos(AimPos) -- most propable aimbot target
+        local AimbotAngle = Math.PositionAngles(shooterOrigin, playerOrigin)-- most propable aimbot angle
+        -- Calculate the FOV between the shooter's view angles and the player's position
+        local fov = Math.AngleFov(AimbotAngle, shootAngles)
+        local PrewFov = Math.AngleFov(AimbotAngle, lastAngles[idx])
+        local FovDelta = PrewFov - fov
+        print(shooter:GetName(), fov, PrewFov, FovDelta)
+
+        if FovDelta > options.Aimbotfov then
+            StrikePlayer(idx, "Aimbot", shooter)
+        end
+end
+
+local function OnCreateMove(userCmd)--runs 66 times/second
     pLocal = entities.GetLocalPlayer()
     players = entities.FindByClass("CTFPlayer")
     if pLocal == nil then goto continue end -- Skip if local player is nil
 
-    local latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
+    latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
    --:GetPropDataTableInt("m_iConnectionState")[pLocal:GetIndex()]
     -- Get current data
     local currentData = {
@@ -338,18 +299,25 @@ local function OnCreateMove(userCmd)
 
         CheckAngles(player, entity) --detects rage cheaters and bots
 
-        CheckAimbot(entity) --detect aimbot users
+        CheckDuckSpeed(player, entity) --detects DuckSpeed
+
+        if HurtVictim == nil then
+            lastAngles[idx] = player:GetEyeAngles() --store viewangles of target player
+        end
 
         if prevData then
             if (latin + latout) < 200 then
-                CheckChoke(player, entity) --detects majority of rage cheaters
+                --CheckChoke(player, entity) --detects rage Fakelag
             end
-
         end
 
         ::continue::
     end
+    CheckAimbot() --detect silent aimbot users
 
+    --update globals
+    HurtVictim = nil
+    shooter = nil
     prevData = currentData
     ::continue::
 end
