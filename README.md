@@ -2,7 +2,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
-# Cheater_Priority
+# Cheater_Detection
 ![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/b7f09770-ebeb-43cc-a5ed-17e2ba115442)
 
 ## Description
