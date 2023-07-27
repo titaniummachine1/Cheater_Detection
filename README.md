@@ -3,7 +3,7 @@
 
 
 # Cheater_Detection
-![image](https://github.com/titaniummachine1/Cheater_Detection/assets/78664175/07790a1d-fef5-471e-828f-19223ab015bd)
+![image](https://github.com/titaniummachine1/Cheater_Detection/assets/78664175/0b551b8b-1585-42b8-bbed-17104350e8d9)
 
 ## Description
 Automatic bot and cheater detection and adds priority on cheaters.
