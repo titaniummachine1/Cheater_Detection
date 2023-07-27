@@ -361,105 +361,102 @@ local strikes_default = options.StrikeLimit
 local exampleSliderValue = 5 -- Default value for the example slider
 
 local function doDraw()
+
     draw.SetFont(Fonts.Verdana)
     draw.Color(255, 255, 255, 255)
 
-    if options.tags then 
-        draw.SetFont(tahoma_bold)
-        local players = entities.FindByClass( "CTFPlayer" )
-        for i,p in pairs(players) do 
-            if playerlist.GetPriority(p) >= 5 and not p:IsDormant() then 
-                local tagText, tagColor
-                local padding = Vector3(0, 0, 7)
-                local headPos = (p:GetAbsOrigin() + p:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding 
-                if gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0 then
-                        headPos = headPos + Vector3(0, 0, 17)
-                end
-                local feetPos = p:GetAbsOrigin() - padding
-                local headScreenPos = client.WorldToScreen(headPos)
-                local feetScreenPos = client.WorldToScreen(feetPos)
-                if headScreenPos ~= nil and feetScreenPos ~= nil then
-                    local height = math.abs(headScreenPos[2] - feetScreenPos[2])
-                    local width = height * 0.6
-                    local x = math.floor(headScreenPos[1] - width * 0.5)
-                    local y = math.floor(headScreenPos[2])
-                    local w = math.floor(width)
-                    local h = math.floor(height)
-                    tagText = "SUSPICIOUS"
-                    tagColor = {255,255,0,255}
-                    if playerlist.GetPriority(p) == 10 then 
-                        tagText = "CHEATER"
-                        tagColor = {255,0,0,255}
-                    end
-                    draw.Color(table.unpack(tagColor))
-                    local tagWidth, tagHeight = draw.GetTextSize(tagText)
-                    if gui.GetValue("AIM RESOLVER") == 1 then --fix bug when arrow of resolver clips with tag
-                        y = y - 20
-                    end
-                    draw.Text(math.floor(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
-                end
+    
+    if engine.IsGameUIVisible() then
+        if ImMenu.Begin("Cheater Detection", true) then
+
+            local menuWidth, menuHeight = 250, 300
+            local x, y = ImMenu.GetCurrentWindow().X, ImMenu.GetCurrentWindow().Y
+
+            -- Strike Limit Slider
+            ImMenu.BeginFrame(1)
+            options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 3, 20)
+            ImMenu.EndFrame()
+
+            -- Max Tick Delta Slider
+            ImMenu.BeginFrame(1)
+            options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 1, 22)
+            ImMenu.EndFrame()
+            
+            -- Max Tick Delta Slider
+            ImMenu.BeginFrame(1)
+            options.BhopTimes = ImMenu.Slider("Max Bhops", options.BhopTimes, 4, 15)
+            ImMenu.EndFrame()
+
+            -- Aimbot FOV Slider
+            ImMenu.BeginFrame(1)
+            options.Aimbotfov = ImMenu.Slider("Aimbot Fov", options.Aimbotfov, 2, 180)
+            ImMenu.EndFrame()
+
+            -- Options
+            ImMenu.BeginFrame(1)
+            options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
+            if options.AutoMark == true then 
+                options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
             end
+            ImMenu.EndFrame()
+
+            -- Options
+            ImMenu.BeginFrame(1)
+            options.debug = ImMenu.Checkbox("Debug", options.debug)
+            ImMenu.EndFrame()
+            --[[ Reset Button
+            ImMenu.BeginFrame(1)
+            if ImMenu.Button("Reset") then
+                prevData = nil ---@type PlayerData
+                playerStrikes = {} ---@type table<number, number>
+                detectedPlayers = {} -- Table to store detected players
+                lastAngles = {}
+                client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
+            end
+            ImMenu.EndFrame()]]
+
+            ImMenu.End()
         end
     end
 
-    if not engine.IsGameUIVisible() then return end
-    if ImMenu.Begin("Cheater Detection", true) then
-
-        local menuWidth, menuHeight = 250, 300
-        local x, y = ImMenu.GetCurrentWindow().X, ImMenu.GetCurrentWindow().Y
-
-        --[[ Draw black background
-        draw.Color(0, 0, 0, 200)
-        draw.FilledRect(x, y, x + menuWidth, y + menuHeight)]]
-    
-        --[[ Draw border
-        draw.Color(255, 255, 255, 255)
-        draw.OutlinedRect(x, y, x + menuWidth, y + menuHeight)]]
-
-        -- Strike Limit Slider
-        ImMenu.BeginFrame(1)
-        options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 3, 20)
-        ImMenu.EndFrame()
-
-        -- Max Tick Delta Slider
-        ImMenu.BeginFrame(1)
-        options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 1, 22)
-        ImMenu.EndFrame()
-        
-          -- Max Tick Delta Slider
-          ImMenu.BeginFrame(1)
-          options.BhopTimes = ImMenu.Slider("Max Bhops", options.BhopTimes, 4, 15)
-          ImMenu.EndFrame()
-
-        -- Aimbot FOV Slider
-        ImMenu.BeginFrame(1)
-        options.Aimbotfov = ImMenu.Slider("Aimbot Fov", options.Aimbotfov, 2, 180)
-        ImMenu.EndFrame()
-
-        -- Options
-        ImMenu.BeginFrame(1)
-        options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
-        if options.AutoMark == true then 
-            options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
+    if engine.Con_IsVisible() then
+        if options.tags then 
+            draw.SetFont(tahoma_bold)
+            local players = entities.FindByClass( "CTFPlayer" )
+            for i,p in pairs(players) do 
+                if playerlist.GetPriority(p) >= 5 and not p:IsDormant() then 
+                    local tagText, tagColor
+                    local padding = Vector3(0, 0, 7)
+                    local headPos = (p:GetAbsOrigin() + p:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding 
+                    if gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0 then
+                            headPos = headPos + Vector3(0, 0, 17)
+                    end
+                    local feetPos = p:GetAbsOrigin() - padding
+                    local headScreenPos = client.WorldToScreen(headPos)
+                    local feetScreenPos = client.WorldToScreen(feetPos)
+                    if headScreenPos ~= nil and feetScreenPos ~= nil then
+                        local height = math.abs(headScreenPos[2] - feetScreenPos[2])
+                        local width = height * 0.6
+                        local x = math.floor(headScreenPos[1] - width * 0.5)
+                        local y = math.floor(headScreenPos[2])
+                        local w = math.floor(width)
+                        local h = math.floor(height)
+                        tagText = "SUSPICIOUS"
+                        tagColor = {255,255,0,255}
+                        if playerlist.GetPriority(p) == 10 then 
+                            tagText = "CHEATER"
+                            tagColor = {255,0,0,255}
+                        end
+                        draw.Color(table.unpack(tagColor))
+                        local tagWidth, tagHeight = draw.GetTextSize(tagText)
+                        if gui.GetValue("AIM RESOLVER") == 1 then --fix bug when arrow of resolver clips with tag
+                            y = y - 20
+                        end
+                        draw.Text(math.floor(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
+                    end
+                end
+            end
         end
-        ImMenu.EndFrame()
-
-        -- Options
-        ImMenu.BeginFrame(1)
-        options.debug = ImMenu.Checkbox("Debug", options.debug)
-        ImMenu.EndFrame()
-        --[[ Reset Button
-        ImMenu.BeginFrame(1)
-        if ImMenu.Button("Reset") then
-            prevData = nil ---@type PlayerData
-            playerStrikes = {} ---@type table<number, number>
-            detectedPlayers = {} -- Table to store detected players
-            lastAngles = {}
-            client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
-        end
-        ImMenu.EndFrame()]]
-
-        ImMenu.End()
     end
 end
 
