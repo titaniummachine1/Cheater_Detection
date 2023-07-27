@@ -124,7 +124,7 @@ local function StrikePlayer(idx, reason, player)
     if playerStrikes[idx] < options.StrikeLimit then
         -- Print message
         if targetPlayer and playerlist.GetPriority(player) > -1 and playerStrikes[idx] == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
-            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500suspicious\x01."))
+            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
             if options.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 5)
             end
@@ -133,7 +133,7 @@ local function StrikePlayer(idx, reason, player)
         -- Print cheating message if player is not detected
         if targetPlayer and playerlist.GetPriority(player) > -1 and not detectedPlayers[player:GetIndex()] then
             printc(255, 216, 107, 255, tostring("[CD] ".. targetPlayer:GetName() .. " is cheating"))
-            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 cheating\x01! \x01(\x04" .. reason.. "\x01)."))
+            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
 
             -- Add player to detectedPlayers table
             detectedPlayers[player:GetIndex()] = true
@@ -357,6 +357,7 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     prevData = currentData
     ::continue::
 end
+
 local strikes_default = options.StrikeLimit
 local exampleSliderValue = 5 -- Default value for the example slider
 
@@ -366,8 +367,7 @@ local function doDraw()
     draw.Color(255, 255, 255, 255)
 
     
-    if engine.IsGameUIVisible() then
-        if ImMenu.Begin("Cheater Detection", true) then
+        if engine.IsGameUIVisible() and ImMenu.Begin("Cheater Detection", true) then
 
             local menuWidth, menuHeight = 250, 300
             local x, y = ImMenu.GetCurrentWindow().X, ImMenu.GetCurrentWindow().Y
@@ -417,14 +417,11 @@ local function doDraw()
 
             ImMenu.End()
         end
-    end
 
-    if engine.Con_IsVisible() then
-        if options.tags then 
+        if options.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
             draw.SetFont(tahoma_bold)
-            local players = entities.FindByClass( "CTFPlayer" )
-            for i,p in pairs(players) do 
-                if playerlist.GetPriority(p) >= 5 and not p:IsDormant() then 
+            for i,p in pairs(players) do
+                if playerlist.GetPriority(p) >= 5 and not p:IsDormant() and p:IsAlive() then
                     local tagText, tagColor
                     local padding = Vector3(0, 0, 7)
                     local headPos = (p:GetAbsOrigin() + p:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding 
@@ -458,7 +455,6 @@ local function doDraw()
             end
         end
     end
-end
 
 local function OnUnload()-- Called when the script is unloaded
     UnloadLib() --unloading lualib
