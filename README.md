@@ -7,6 +7,7 @@
 
 ## Description
 Automatic bot and cheater detection and adds priority on cheaters.
+with visuals based on Rijin
 
 ## Requirements
 Click on the buttons below to download the requirements. V
