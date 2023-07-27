@@ -17,7 +17,7 @@ Click on the buttons below to download the requirements. V
 
 
 ## Download
-[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Detection/releases/latest/download/Cheater_Detection.lua)
+[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection.avg/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Detection/releases/latest/download/Cheater_Detection.lua)
 
 
 ![image](https://github.com/titaniummachine1/Cheater_Priority/assets/78664175/db517625-ba06-4f2b-889e-db0024e44442)
