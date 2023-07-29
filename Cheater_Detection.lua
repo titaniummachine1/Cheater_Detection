@@ -231,10 +231,9 @@ local function CheckChoke(player, entity)
     if delta == 0 then return end --its local player revinding time
     local deltaTicks = Conversion.Time_to_Ticks(delta)
     if deltaTicks > options.MaxTickDelta then
-        local localPlayer = WLocal
-        if localPlayer then
-            local localSimTime = localPlayer:GetSimulationTime()
-            local localOldSimTime = prevData.SimTime[localPlayer:GetIndex()]
+        if (latin + latout) < 200 then
+            local localSimTime = WLocal:GetSimulationTime()
+            local localOldSimTime = prevData.SimTime[WLocal:GetIndex()]
             if localOldSimTime then
                 local localDelta = localSimTime - localOldSimTime
                 local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
@@ -242,8 +241,9 @@ local function CheckChoke(player, entity)
                     return false
                 end
             end
+            StrikePlayer("Choking packets", entity)
+            return true
         end
-        StrikePlayer("Choking packets", entity)
         return true
     end
     return false
@@ -369,7 +369,7 @@ local function OnCreateMove(userCmd)--runs 66 times/second
 
         --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
-            if connectionState == 1 or connectionState == 0 then
+            if connectionState == 1 then
                 if CheckChoke(player, entity) == true then break end --detects rage Fakelag
             end
         end
