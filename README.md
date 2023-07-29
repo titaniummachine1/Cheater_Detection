@@ -9,6 +9,9 @@
 Automatic bot and cheater detection and adds priority on cheaters.
 with visuals based on Rijin
 
+in case of problems
+[Contact me on Telegram](https://t.me/TerminatorMachine)
+
 ## Requirements
 Click on the buttons below to download the requirements. V
 
