@@ -28,6 +28,7 @@ assert(ImMenu.GetVersion() >= 0.66, "ImMenu version is too old, please update it
 local players = entities.FindByClass("CTFPlayer")
 
 local pLocal = entities.GetLocalPlayer()
+local WLocal = pLocal
 local latin, latout = 0, 0
 
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
@@ -230,7 +231,7 @@ local function CheckChoke(player, entity)
     if delta == 0 then return end --its local player revinding time
     local deltaTicks = Conversion.Time_to_Ticks(delta)
     if deltaTicks > options.MaxTickDelta then
-        local localPlayer = entities.GetLocalPlayer()
+        local localPlayer = WLocal
         if localPlayer then
             local localSimTime = localPlayer:GetSimulationTime()
             local localOldSimTime = prevData.SimTime[localPlayer:GetIndex()]
@@ -331,7 +332,7 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     pLocal = entities.GetLocalPlayer()
     if pLocal == nil then goto continue end -- Skip if local player is nil
 
-    local WLocal = WPlayer.FromEntity(pLocal)
+    WLocal = WPlayer.FromEntity(pLocal)
     players = entities.FindByClass("CTFPlayer")
 
     latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
