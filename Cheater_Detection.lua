@@ -104,8 +104,10 @@ local BOTPATTERNS = {
 local prevData = nil ---@type PlayerData
 local playerStrikes = {} ---@type table<number, number>
 local detectedPlayers = {} -- Table to store detected players
+local LastStrike = 0
 
-local function StrikePlayer(idx, reason, player)
+local function StrikePlayer(reason, player)
+    local idx = player:GetIndex()
     -- Initialize strikes if needed
     if not playerStrikes[idx] then
         playerStrikes[idx] = 0
@@ -122,11 +124,16 @@ local function StrikePlayer(idx, reason, player)
 
     -- Handle strike limit
     if playerStrikes[idx] < options.StrikeLimit then
-        -- Print message
-        if targetPlayer and playerlist.GetPriority(player) > -1 and playerStrikes[idx] == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
-            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
-            if options.AutoMark and player ~= pLocal then
-                playerlist.SetPriority(player, 5)
+
+        local strikeDelta = globals.TickInterval() - LastStrike
+        if strikeDelta > 7 then -- prevent suspicion spam
+            -- Print message
+            if targetPlayer and playerlist.GetPriority(player) > -1 and playerStrikes[idx] == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
+                client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
+                if options.AutoMark and player ~= pLocal then
+                    playerlist.SetPriority(player, 5)
+                    LastStrike = globals.TickInterval()
+                end
             end
         end
     else
@@ -149,10 +156,12 @@ end
 -- Detects rage pitch (looking up/down too much)
 local function CheckAngles(player, entity)
     local angles = player:GetEyeAngles()
-    if angles.pitch == 89.00 or angles.pitch == -89.00
-    or angles.pitch >= 90 or angles.pitch <= -90 then 
-        StrikePlayer(player:GetIndex(), "Invalid pitch", entity)
+    if angles.pitch == 89.000 or angles.pitch == -89.000
+    or angles.pitch >= 90 or angles.pitch <= -90 then
+        StrikePlayer("Invalid pitch", entity)
+        return true
     end
+    return false
 end
 
 local tick_count = 0
@@ -178,11 +187,15 @@ local function CheckDuckSpeed(player, entity)
         if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed[entity:GetPropInt("m_iClass")] then
             tick_count = tick_count + 1
             if tick_count >= 66 then
-                StrikePlayer(player:GetIndex(), "Duck Speed", entity)
+                StrikePlayer("Duck Speed", entity)
                 tick_count = 0
+                return true
             end
+            return true
         end
+        return false
     end
+    return false
 end
 
 local function CheckBhop(pEntity, mData, entity)
@@ -202,8 +215,10 @@ local function CheckBhop(pEntity, mData, entity)
     if mData[pEntity].pBhop[1] >= options.BhopTimes then
         mData[pEntity].iPlayerSuspicion = mData[pEntity].iPlayerSuspicion + 1 -- Increment the suspicion if the player consistently bhops
         mData[pEntity].pBhop[1] = 0 -- Reset the bhop count
-        StrikePlayer(pEntity:GetIndex(), "Bunny Hop", entity) --return true, mData[pEntity].pBhop[1] -- Return true if the suspicion threshold is reached
+        StrikePlayer("Bunny Hop", entity) --return true, mData[pEntity].pBhop[1] -- Return true if the suspicion threshold is reached
+        return true
     end
+    return false
 end
 
 -- Check if a player is choking packets (Fakelag, Doubletap)
@@ -215,15 +230,29 @@ local function CheckChoke(player, entity)
     if delta == 0 then return end --its local player revinding time
     local deltaTicks = Conversion.Time_to_Ticks(delta)
     if deltaTicks > options.MaxTickDelta then
-        StrikePlayer(player:GetIndex(), "Choking packets", entity)
+        local localPlayer = entities.GetLocalPlayer()
+        if localPlayer then
+            local localSimTime = localPlayer:GetSimulationTime()
+            local localOldSimTime = prevData.SimTime[localPlayer:GetIndex()]
+            if localOldSimTime then
+                local localDelta = localSimTime - localOldSimTime
+                local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
+                if localDeltaTicks <= options.MaxTickDelta then
+                    return false
+                end
+            end
+        end
+        StrikePlayer("Choking packets", entity)
+        return true
     end
+    return false
 end
 
 local function isValidName(player, name, entity)
 
     for i, pattern in ipairs(BOTPATTERNS) do
       if string.find(name, pattern) then
-        StrikePlayer(player:GetIndex(), "Bot Name", entity, player)
+        StrikePlayer("Bot Name", entity, player)
       end
     end
 end
@@ -288,20 +317,22 @@ local function CheckAimbot()
         -- Calculate the FOV between the shooter's view angles and the player's position
         local fov = Math.AngleFov(AimbotAngle, shootAngles)
         local PrewFov = Math.AngleFov(AimbotAngle, lastAngles[idx])
-        local FovDelta = PrewFov - fov
+        local FovDelta = math.abs(PrewFov - fov) % 360
 
         if options.debug == true then print(shooter:GetName(), fov, PrewFov, FovDelta) end
 
-        if FovDelta > options.Aimbotfov then
-            StrikePlayer(idx, "Aimbot", shooter)
+        if FovDelta > options.Aimbotfov
+        and fov <= 0.77 then
+            StrikePlayer("Aimbot", shooter)
         end
 end
 
 local function OnCreateMove(userCmd)--runs 66 times/second
     pLocal = entities.GetLocalPlayer()
+    if pLocal == nil then goto continue end -- Skip if local player is nil
+
     local WLocal = WPlayer.FromEntity(pLocal)
     players = entities.FindByClass("CTFPlayer")
-    if pLocal == nil then goto continue end -- Skip if local player is nil
 
     latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
 
@@ -314,41 +345,36 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     }
 
     for idx, entity in pairs(players) do
-        if options.debug == false and entity == pLocal  -- Skip local player 
-        or options.debug == false and TF2.IsFriend(idx, true)
-        or playerlist.GetPriority(entity) == 10
-        or playerlist.GetPriority(entity) == -1
+        if playerlist.GetPriority(entity) == 10
         or entity:IsDormant()
-        or not entity:IsAlive() then
-            goto continue
-        end
+        or not entity:IsAlive() then goto continue end
 
         local player = WPlayer.FromEntity(entity)
-
         currentData.SimTime[idx] = player:GetSimulationTime()
 
-        isValidName(player, entity:GetName(), entity) --detect bot names
-
-        CheckAngles(player, entity) --detects rage cheaters and bots
-
-        CheckDuckSpeed(player, entity) --detects DuckSpeed
-
-        CheckBhop(player, currentData, entity)
+        if options.debug == false and TF2.IsFriend(idx, true) then goto continue end -- Skip local player 
 
         if HurtVictim == nil then
             lastAngles[idx] = player:GetEyeAngles() --store viewangles of target player
         end
 
+        if isValidName(player, entity:GetName(), entity) == true then break end --detect bot names
+
+        if CheckAngles(player, entity) == true then break end --detects rage cheaters and bots
+
+        if CheckDuckSpeed(player, entity) == true then break end --detects DuckSpeed
+
+        if CheckBhop(player, currentData, entity) == true then break end --detects rage Bhop
+
         --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
             if connectionState == 1 or connectionState == 0 then
-                if (latin + latout) < 200 then
-                    CheckChoke(player, entity) --detects rage Fakelag
-                end
+                if CheckChoke(player, entity) == true then break end --detects rage Fakelag
             end
         end
         ::continue::
     end
+
     CheckAimbot() --detect silent aimbot users
 
     --update globals
@@ -359,7 +385,6 @@ local function OnCreateMove(userCmd)--runs 66 times/second
 end
 
 local strikes_default = options.StrikeLimit
-local exampleSliderValue = 5 -- Default value for the example slider
 
 local function doDraw()
 
@@ -379,7 +404,7 @@ local function doDraw()
 
             -- Max Tick Delta Slider
             ImMenu.BeginFrame(1)
-            options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 1, 22)
+            options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 8, 22)
             ImMenu.EndFrame()
             
             -- Max Tick Delta Slider
@@ -404,16 +429,6 @@ local function doDraw()
             ImMenu.BeginFrame(1)
             options.debug = ImMenu.Checkbox("Debug", options.debug)
             ImMenu.EndFrame()
-            --[[ Reset Button
-            ImMenu.BeginFrame(1)
-            if ImMenu.Button("Reset") then
-                prevData = nil ---@type PlayerData
-                playerStrikes = {} ---@type table<number, number>
-                detectedPlayers = {} -- Table to store detected players
-                lastAngles = {}
-                client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded
-            end
-            ImMenu.EndFrame()]]
 
             ImMenu.End()
         end
@@ -421,7 +436,7 @@ local function doDraw()
         if options.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
             draw.SetFont(tahoma_bold)
             for i,p in pairs(players) do
-                if playerlist.GetPriority(p) >= 5 and not p:IsDormant() and p:IsAlive() then
+                if p:IsValid() and playerlist.GetPriority(p) >= 5 and not p:IsDormant() and p:IsAlive() then
                     local tagText, tagColor
                     local padding = Vector3(0, 0, 7)
                     local headPos = (p:GetAbsOrigin() + p:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding 
@@ -455,6 +470,7 @@ local function doDraw()
             end
         end
     end
+    ----424 lineeror
 
 local function OnUnload()-- Called when the script is unloaded
     UnloadLib() --unloading lualib
