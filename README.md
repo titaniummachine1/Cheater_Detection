@@ -11,6 +11,7 @@ with visuals based on Rijin
 
 in case of problems
 [Contact me on Telegram](https://t.me/TerminatorMachine)
+https://t.me/TerminatorMachine
 
 ## Requirements
 Click on the buttons below to download the requirements. V
