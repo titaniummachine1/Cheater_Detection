@@ -33,11 +33,11 @@ local latin, latout = 0, 0
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
 
 local options = {
-    StrikeLimit = 8,
-    MaxTickDelta = 20,
-    Aimbotfov = 12,
+    StrikeLimit = 5,
+    MaxTickDelta = 8,
+    Aimbotfov = 5,
     AutoMark = true,
-    BhopTimes = 6,
+    BhopTimes = 5,
     debug = false,
     tags = true
 }
@@ -399,7 +399,7 @@ local function doDraw()
 
             -- Strike Limit Slider
             ImMenu.BeginFrame(1)
-            options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 3, 20)
+            options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 4, 17)
             ImMenu.EndFrame()
 
             -- Max Tick Delta Slider
