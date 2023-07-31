@@ -47,7 +47,12 @@ local prevData = {
     SimTime = {},
     pBhop = {}
 } ---@type PlayerData
-local playerData = {}
+
+local playerData = {
+        entity = nil,
+        strikes = nil,
+        detected = nil
+}
 
 local function StrikePlayer(reason, player)
     local idx = player:GetIndex()
@@ -310,9 +315,18 @@ local function OnCreateMove(userCmd)
         or entity:IsDormant()
         or not entity:IsAlive() then goto continue end -- Skip if player is nil, dormant or dead
 
-        if options.debug == false and playerlist.GetPriority(entity) == 10 then
+        if entity ~= pLocal and playerlist.GetPriority(entity) == 10 then
             -- Set player as detected
-            playerData[idx].detected = true
+            if playerData[idx] then
+                playerData[idx].detected = true
+            else
+                -- Initialize strikes if needed
+                playerData[idx] = {
+                    entity = entity,
+                    strikes = options.StrikeLimit,
+                    detected = true
+                }
+            end
             goto continue
         end -- Skip local player
 
@@ -423,13 +437,12 @@ local function doDraw()
                                 local y = math.floor(headScreenPos[2])
                                 local w = math.floor(width)
                                 local h = math.floor(height)
-
-                                tagText = "SUSPICIOUS"
-
-                                tagColor = {255,255,0,255}
                                 if detected then
                                     tagText = "CHEATER"
                                     tagColor = {255,0,0,255}
+                                else
+                                    tagText = "SUSPICIOUS"
+                                    tagColor = {255,255,0,255}
                                 end
                                 draw.Color(table.unpack(tagColor))
                                 local tagWidth, tagHeight = draw.GetTextSize(tagText)
