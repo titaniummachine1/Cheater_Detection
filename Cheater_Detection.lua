@@ -43,108 +43,63 @@ local options = {
     tags = true
 }
 
-local BOTPATTERNS = {
-    "braaaap %d+", -- Escape special characters with %
-    "swonk bot %d+",
-    "S.* bit%.ly/2UnS5z8",
-    "(%d+)Morpheus Bot Removal Service", -- Group captures with ()
-    "(%d+)/id/heinrichderpro",
-    "(%d+)\\[VALVE\\]Twilight Sparkle(%n)?", -- Use %n for newline
-    "S.* bit\\.ly\\/2UnS5z8",
-    "(\\(\\d\\))?Morpheus Bot Removal Service",
-    "\\[VALVE\\]N[i00ed]\\w[g]+\\w+[i00ed]\\w[l]+[e\\d]r",
-    "(\\(\\d+\\))?\\/id\\/heinrichderpro",
-    "(\\(\\d+\\))?\\[VALVE\\]Twilight Sparkle(\n)?",
-    "(\\(\\d+\\))?shoppy\\.gg\\/@d3fc0n6",
-    "(\\(\\d+\\))?youtube\\.com/d3fc0n6",
-    "(\\(\\d+\\))?Festive Hitman",
-    "(\\(\\d+\\))?blu ((red)|(me))",
-    "(\\(\\d+\\))?YOU'VE BEEN LOVE ROLLED!!!",
-    "(\\(\\d+\\))?Bottle Goon",
-    "(\\(\\d+\\))?Osama bin laden",
-    "(\\(\\d+\\))?YOU'VE BEEN MARIO KARTED",
-    "(\\(\\d+\\))\\[VALVE\\]N.ggerk.ller",
-    "(\\(\\d+\\))?Twilight Sparkle is cute",
-    "(\\(\\d+\\))?CUMBOT.TF",
-    "(\\(\\d+\\))?vcaps bots",
-    "(\\(\\d+\\))?Youtube\\/HamGames",
-    "(\\(\\d+\\))?DoesHotter",
-    "(\\(\\d+\\))?www\\.titsassesandicks\\.com",
-    "(\\(\\d+\\))?Neil banging the tunes",
-    "(\\(\\d+\\))?your medical license v2",
-    "(\\(\\d+\\))?kurumimink",
-    "(\\(\\d+\\))?[VALVE]WhiteKiller",
-    "(\\(\\d+\\))?discord\\.gg\\/9Ukuw9V",
-    "(\\(\\d+\\))?haunted\\.church",
-    "(\\(\\d+\\))?\\[VAC\\] OneTrick",
-    "(\\(\\d+\\))?Richard\\sStallman(\\s)?",
-    "(\\(\\d+\\))?\\w+ gaming \\(not a bot\\)",
-    "(\\(\\d+\\))?vk\\.com/warcrimer",
-    "(\\(\\d+\\))?(http\\:\\/\\/)?meowhook\\.club()?",
-    "(\\(\\d+\\))?vk.com/thenosok",
-    "(\\(\\d+\\))?O.?M.?E.?G.?A.?T.?R.?O.?N.?I.?C.?",
-    "omegatronic",
-    "OMEGATRONIC",
-    "braaaap god",
-    "Níggerkiller as",
-    -- And so on for other patterns
-    -- Use \\ to escape literals
-    "\\n", "\\r\\n", "\\r",
-    -- Hex encode unicode
-    "\226\128\159", -- \u0e49
-    "\226\128\144", -- \u0e4a
-    -- Unicode patterns need to be in a string
-    [[\u0274\u026a\u0262\u0262\u1d07\u0280]], 
-
-    -- Other valid patterns
-    "omegatronic",
-    "OMEGATRONIC",
-    "Hexatronic"
-}
-
-local prevData = nil ---@type PlayerData
-local playerStrikes = {} ---@type table<number, number>
-local detectedPlayers = {} -- Table to store detected players
-local LastStrike = 0
+local prevData = {
+    SimTime = {},
+    pBhop = {}
+} ---@type PlayerData
+local playerData = {}
 
 local function StrikePlayer(reason, player)
     local idx = player:GetIndex()
+
     -- Initialize strikes if needed
-    if not playerStrikes[idx] then
-        playerStrikes[idx] = 0
+    if not playerData[idx] then
+        playerData[idx] = {
+            entity = player,
+            strikes = 0,
+            detected = false
+        }
     end
 
     -- Increment strikes
-    playerStrikes[idx] = playerStrikes[idx] + 1
-
-    -- Get the target player
-    local targetPlayer
-    if player and player:GetIndex() == idx then
-        targetPlayer = player
-    end
+    playerData[idx].strikes = playerData[idx].strikes + 1
 
     -- Handle strike limit
-    if playerStrikes[idx] < options.StrikeLimit then
+    if playerData[idx].strikes < options.StrikeLimit then
+        -- Print message
+        if player and playerlist.GetPriority(player) > -1 and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
+            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
+            if options.AutoMark and player ~= pLocal then
+                playerlist.SetPriority(player, 5)
+                LastStrike = globals.TickInterval()
+            end
+        end
 
-        local strikeDelta = globals.TickInterval() - LastStrike
-        if strikeDelta > 7 then -- prevent suspicion spam
-            -- Print message
-            if targetPlayer and playerlist.GetPriority(player) > -1 and playerStrikes[idx] == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
-                client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
+        if reason == "Invalid pitch" then
+            -- Print cheating message if player is not detected
+            if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
+                print(tostring("[CD] ".. player:GetName() .. " is cheating"))
+                client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
+
+                -- Increment strikes
+                playerData[idx].strikes = options.StrikeLimit
+                -- Set player as detected
+                playerData[idx].detected = true
+
+                -- Auto mark
                 if options.AutoMark and player ~= pLocal then
-                    playerlist.SetPriority(player, 5)
-                    LastStrike = globals.TickInterval()
+                    playerlist.SetPriority(player, 10)
                 end
             end
         end
     else
         -- Print cheating message if player is not detected
-        if targetPlayer and playerlist.GetPriority(player) > -1 and not detectedPlayers[player:GetIndex()] then
-            printc(255, 216, 107, 255, tostring("[CD] ".. targetPlayer:GetName() .. " is cheating"))
+        if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
+            print(tostring("[CD] ".. player:GetName() .. " is cheating"))
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
 
-            -- Add player to detectedPlayers table
-            detectedPlayers[player:GetIndex()] = true
+            -- Set player as detected
+            playerData[idx].detected = true
 
             -- Auto mark
             if options.AutoMark and player ~= pLocal then
@@ -231,32 +186,19 @@ local function CheckChoke(player, entity)
     if delta == 0 then return end --its local player revinding time
     local deltaTicks = Conversion.Time_to_Ticks(delta)
     if deltaTicks > options.MaxTickDelta then
-        if (latin + latout) < 200 then
-            local localSimTime = WLocal:GetSimulationTime()
-            local localOldSimTime = prevData.SimTime[WLocal:GetIndex()]
-            if localOldSimTime then
-                local localDelta = localSimTime - localOldSimTime
-                local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
-                if localDeltaTicks <= options.MaxTickDelta then
-                    return false
-                end
-            end
-            StrikePlayer("Choking packets", entity)
-            return true
-        end
         return true
     end
     return false
 end
 
-local function isValidName(player, name, entity)
+--[[local function isValidName(player, name, entity)
 
     for i, pattern in ipairs(BOTPATTERNS) do
       if string.find(name, pattern) then
         StrikePlayer("Bot Name", entity, player)
       end
     end
-end
+end]]
 
 local HurtVictim = nil
 local shooter = nil
@@ -270,6 +212,8 @@ local function event_hook(ev)
 
     -- Get the entities involved in the event
     local attacker = entities.GetByUserID(ev:GetInt("attacker"))
+    if playerData[attacker:GetIndex()] ~= nil
+    and playerData[attacker:GetIndex()].detected == true then return end --skip detected players
     local Victim = entities.GetByUserID(ev:GetInt("userid"))
         if attacker == nil or Victim == nil then return end
         if options.debug == false and attacker == pLocal then return end
@@ -328,9 +272,9 @@ local function CheckAimbot()
         end
 end
 
-local function OnCreateMove(userCmd)--runs 66 times/second
+local function OnCreateMove(userCmd)
     pLocal = entities.GetLocalPlayer()
-    if pLocal == nil then goto continue end -- Skip if local player is nil
+    if pLocal == nil then return end -- Skip if local player is nil
 
     WLocal = WPlayer.FromEntity(pLocal)
     players = entities.FindByClass("CTFPlayer")
@@ -345,21 +289,43 @@ local function OnCreateMove(userCmd)--runs 66 times/second
         pBhop = {}
     }
 
-    for idx, entity in pairs(players) do
-        if playerlist.GetPriority(entity) == 10
+    local packetloss = true
+    if (latin + latout) < 200 and prevData then
+        local localSimTime = WLocal:GetSimulationTime()
+        local localOldSimTime = prevData.SimTime[WLocal:GetIndex()]
+        if localOldSimTime then
+            local localDelta = localSimTime - localOldSimTime
+            local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
+            if localDeltaTicks <= options.MaxTickDelta then
+                packetloss = false
+            end
+        end
+    end
+
+    for i = 1, #players do
+        local entity = players[i]
+        local idx = entity:GetIndex()
+
+        if playerData[idx] and playerData[idx].detected == true --dont check detected players
         or entity:IsDormant()
-        or not entity:IsAlive() then goto continue end
+        or not entity:IsAlive() then goto continue end -- Skip if player is nil, dormant or dead
+
+        if options.debug == false and playerlist.GetPriority(entity) == 10 then
+            -- Set player as detected
+            playerData[idx].detected = true
+            goto continue
+        end -- Skip local player
 
         local player = WPlayer.FromEntity(entity)
-        currentData.SimTime[idx] = player:GetSimulationTime()
+        currentData.SimTime[idx] = player:GetSimulationTime() --store simulation time of target players
 
         if options.debug == false and TF2.IsFriend(idx, true) then goto continue end -- Skip local player 
 
-        if HurtVictim == nil then
-            lastAngles[idx] = player:GetEyeAngles() --store viewangles of target player
-        end
+        if HurtVictim ~= nil then goto continue end --skip aimbot check if someone gets killed or damaged
 
-        if isValidName(player, entity:GetName(), entity) == true then break end --detect bot names
+        lastAngles[idx] = player:GetEyeAngles() --store viewangles of target players
+
+        --if isValidName(player, entity:GetName(), entity) == true then break end --detect bot names
 
         if CheckAngles(player, entity) == true then break end --detects rage cheaters and bots
 
@@ -369,7 +335,7 @@ local function OnCreateMove(userCmd)--runs 66 times/second
 
         --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
-            if connectionState == 1 then
+            if not packetloss and connectionState == 1 then
                 if CheckChoke(player, entity) == true then break end --detects rage Fakelag
             end
         end
@@ -382,7 +348,6 @@ local function OnCreateMove(userCmd)--runs 66 times/second
     HurtVictim = nil
     shooter = nil
     prevData = currentData
-    ::continue::
 end
 
 local strikes_default = options.StrikeLimit
@@ -400,12 +365,12 @@ local function doDraw()
 
             -- Strike Limit Slider
             ImMenu.BeginFrame(1)
-            options.StrikeLimit = ImMenu.Slider("Strike Limit", options.StrikeLimit, 4, 17)
+            options.StrikeLimit = ImMenu.Slider("Strikes Limit", options.StrikeLimit, 4, 17)
             ImMenu.EndFrame()
 
             -- Max Tick Delta Slider
             ImMenu.BeginFrame(1)
-            options.MaxTickDelta = ImMenu.Slider("Max Tick Delta", options.MaxTickDelta, 8, 22)
+            options.MaxTickDelta = ImMenu.Slider("Max Packet Choke", options.MaxTickDelta, 8, 22)
             ImMenu.EndFrame()
             
             -- Max Tick Delta Slider
@@ -421,9 +386,7 @@ local function doDraw()
             -- Options
             ImMenu.BeginFrame(1)
             options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
-            if options.AutoMark == true then 
-                options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
-            end
+            options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
             ImMenu.EndFrame()
 
             -- Options
@@ -436,37 +399,47 @@ local function doDraw()
 
         if options.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
             draw.SetFont(tahoma_bold)
-            for i,p in pairs(players) do
-                if p:IsValid() and playerlist.GetPriority(p) >= 5 and not p:IsDormant() and p:IsAlive() then
-                    local tagText, tagColor
-                    local padding = Vector3(0, 0, 7)
-                    local headPos = (p:GetAbsOrigin() + p:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding 
-                    if gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0 then
-                            headPos = headPos + Vector3(0, 0, 17)
-                    end
-                    local feetPos = p:GetAbsOrigin() - padding
-                    local headScreenPos = client.WorldToScreen(headPos)
-                    local feetScreenPos = client.WorldToScreen(feetPos)
-                    if headScreenPos ~= nil and feetScreenPos ~= nil then
-                        local height = math.abs(headScreenPos[2] - feetScreenPos[2])
-                        local width = height * 0.6
-                        local x = math.floor(headScreenPos[1] - width * 0.5)
-                        local y = math.floor(headScreenPos[2])
-                        local w = math.floor(width)
-                        local h = math.floor(height)
-                        tagText = "SUSPICIOUS"
-                        tagColor = {255,255,0,255}
-                        if playerlist.GetPriority(p) == 10 then 
-                            tagText = "CHEATER"
-                            tagColor = {255,0,0,255}
+            if playerData then
+                for idx, data in pairs(playerData) do
+                    local entity = data.entity
+                    local strikes = data.strikes
+                    local detected = data.detected
+
+                    if not entity or not entity:IsValid() or entity:IsDormant() or not entity:IsAlive() then goto continue end
+                        if playerData[idx].strikes >= math.floor(options.StrikeLimit / 2) then
+                            local tagText, tagColor
+                            local padding = Vector3(0, 0, 7)
+                            local headPos = (entity:GetAbsOrigin() + entity:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding
+                            if gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0 then
+                                    headPos = headPos + Vector3(0, 0, 17)
+                            end
+                            local feetPos = entity:GetAbsOrigin() - padding
+                            local headScreenPos = client.WorldToScreen(headPos)
+                            local feetScreenPos = client.WorldToScreen(feetPos)
+                            if headScreenPos ~= nil and feetScreenPos ~= nil then
+                                local height = math.abs(headScreenPos[2] - feetScreenPos[2])
+                                local width = height * 0.6
+                                local x = math.floor(headScreenPos[1] - width * 0.5)
+                                local y = math.floor(headScreenPos[2])
+                                local w = math.floor(width)
+                                local h = math.floor(height)
+
+                                tagText = "SUSPICIOUS"
+
+                                tagColor = {255,255,0,255}
+                                if detected then
+                                    tagText = "CHEATER"
+                                    tagColor = {255,0,0,255}
+                                end
+                                draw.Color(table.unpack(tagColor))
+                                local tagWidth, tagHeight = draw.GetTextSize(tagText)
+                                if gui.GetValue("AIM RESOLVER") == 1 then --fix bug when arrow of resolver clips with tag
+                                    y = y - 20
+                                end
+                                draw.Text(math.floor(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
+                            end
                         end
-                        draw.Color(table.unpack(tagColor))
-                        local tagWidth, tagHeight = draw.GetTextSize(tagText)
-                        if gui.GetValue("AIM RESOLVER") == 1 then --fix bug when arrow of resolver clips with tag
-                            y = y - 20
-                        end
-                        draw.Text(math.floor(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
-                    end
+                    ::continue::
                 end
             end
         end
