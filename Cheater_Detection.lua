@@ -36,11 +36,12 @@ local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
 local options = {
     StrikeLimit = 5,
     MaxTickDelta = 8,
-    Aimbotfov = 5,
+    Aimbotfov = 2,
     AutoMark = true,
     BhopTimes = 5,
     debug = false,
-    tags = true
+    tags = true,
+    partyCallaut = true
 }
 
 local prevData = {
@@ -74,6 +75,11 @@ local function StrikePlayer(reason, player)
         -- Print message
         if player and playerlist.GetPriority(player) > -1 and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
+
+            if options.partyCallaut then
+                client.Command("say_party " .."[CD] " .. player:GetName() .. "is SUSPICIOUS",true);
+            end
+            
             if options.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 5)
                 LastStrike = globals.TickInterval()
@@ -85,7 +91,9 @@ local function StrikePlayer(reason, player)
             if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
                 print(tostring("[CD] ".. player:GetName() .. " is cheating"))
                 client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-
+                if options.partyCallaut then
+                    client.Command( "say_party ".. "[CD] ".. player:GetName() .."is Cheating".. "(".. reason.. ")",true);
+                end
                 -- Increment strikes
                 playerData[idx].strikes = options.StrikeLimit
                 -- Set player as detected
@@ -102,7 +110,9 @@ local function StrikePlayer(reason, player)
         if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-
+            if options.partyCallaut then
+                client.Command( "say_party ".. "[CD] ".. player:GetName() .."is Cheating".. "(".. reason.. ")",true);
+            end
             -- Set player as detected
             playerData[idx].detected = true
 
@@ -234,47 +244,55 @@ local function event_hook(ev)
     shooter = attacker
     HurtVictim = Victim
 end
-
 local lastAngles = {}
+local AimbotStage = 0
+
 -- Function to check for aimbot
 local function CheckAimbot()
-	if HurtVictim == nil then return end -- when noone gets killed or damaged amingot check is not needed
-        local idx = shooter:GetIndex()
+    if HurtVictim == nil then return end
+
+    local idx = shooter:GetIndex()
     if lastAngles[idx] == nil then
         lastAngles[idx] = shooter:GetEyeAngles()
-    end -- when noone gets killed or damaged amingot check is not needed
+    end
 
     local Wshooter = WPlayer.FromEntity(shooter)
-    local shootAngles = Wshooter:GetEyeAngles() --get angles of player called
+    local shootAngles = Wshooter:GetEyeAngles()
 
-    -- Initialize variables
     local shooterTeam = shooter:GetTeamNumber()
-
-    -- Get the shooter's position and view angles
     local shooterOrigin = Wshooter:GetEyePos()
 
-        -- Get the attacker's class and aim position
-        local attackerclass = shooter:GetPropInt("m_iClass")
-        local AimPos = 4
-        if attackerclass == 2 or attackerclass == 8 then
-            AimPos = 1
-        end
+    local attackerclass = shooter:GetPropInt("m_iClass")
+    local AimPos = 4
+    if attackerclass == 2 or attackerclass == 8 then
+        AimPos = 1
+    end
 
-        -- Get the most propable hibox aimbot will target
-        local WHurtVictim = WPlayer.FromEntity(HurtVictim)
-        local playerOrigin = WHurtVictim:GetHitboxPos(AimPos) -- most propable aimbot target
-        local AimbotAngle = Math.PositionAngles(shooterOrigin, playerOrigin)-- most propable aimbot angle
-        -- Calculate the FOV between the shooter's view angles and the player's position
-        local fov = Math.AngleFov(AimbotAngle, shootAngles)
+    local WHurtVictim = WPlayer.FromEntity(HurtVictim)
+    local playerOrigin = WHurtVictim:GetHitboxPos(AimPos)
+    local AimbotAngle = Math.PositionAngles(shooterOrigin, playerOrigin)
+    local fov = Math.AngleFov(AimbotAngle, shootAngles)
+
+    if AimbotStage == 0 then
         local PrewFov = Math.AngleFov(AimbotAngle, lastAngles[idx])
-        local FovDelta = math.abs(PrewFov - fov) % 360
+        local FovDelta = math.abs(PrewFov - fov)
 
         if options.debug == true then print(shooter:GetName(), fov, PrewFov, FovDelta) end
 
-        if FovDelta > options.Aimbotfov
-        and fov <= 0.77 then
+        if FovDelta > options.Aimbotfov then
+            AimbotStage = AimbotStage + 1
+        end
+
+    elseif AimbotStage >= 1 then
+        local FovDelta = Math.AngleFov(shootAngles, lastAngles[idx])
+        if options.debug == true then print("unflick fov", FovDelta) end
+
+        if FovDelta < 0.5 then
             StrikePlayer("Aimbot", shooter)
         end
+
+        AimbotStage = 0
+    end
 end
 
 local function OnCreateMove(userCmd)
@@ -310,7 +328,7 @@ local function OnCreateMove(userCmd)
     for i = 1, #players do
         local entity = players[i]
         local idx = entity:GetIndex()
-
+        --print(predictViewAngle(idx, 2))
         if playerData[idx] and playerData[idx].detected == true --dont check detected players
         or entity:IsDormant()
         or not entity:IsAlive() then goto continue end -- Skip if player is nil, dormant or dead
@@ -359,8 +377,10 @@ local function OnCreateMove(userCmd)
     CheckAimbot() --detect silent aimbot users
 
     --update globals
-    HurtVictim = nil
-    shooter = nil
+    if AimbotStage == 0 then
+        HurtVictim = nil
+        shooter = nil
+    end
     prevData = currentData
 end
 
@@ -374,8 +394,8 @@ local function doDraw()
     
         if engine.IsGameUIVisible() and ImMenu.Begin("Cheater Detection", true) then
 
-            local menuWidth, menuHeight = 250, 300
-            local x, y = ImMenu.GetCurrentWindow().X, ImMenu.GetCurrentWindow().Y
+            --local menuWidth, menuHeight = 250, 300
+            --local x, y = 100, 100
 
             -- Strike Limit Slider
             ImMenu.BeginFrame(1)
@@ -394,12 +414,13 @@ local function doDraw()
 
             -- Aimbot FOV Slider
             ImMenu.BeginFrame(1)
-            options.Aimbotfov = ImMenu.Slider("Aimbot Fov", options.Aimbotfov, 2, 180)
+            options.Aimbotfov = ImMenu.Slider("Aimbot Fov", options.Aimbotfov, 1, 180)
             ImMenu.EndFrame()
 
             -- Options
             ImMenu.BeginFrame(1)
             options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
+            options.partyCallaut = ImMenu.Checkbox("Party Callout", options.partyCallaut)
             options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
             ImMenu.EndFrame()
 
