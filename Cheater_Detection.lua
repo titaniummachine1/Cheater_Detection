@@ -65,12 +65,16 @@ local function StrikePlayer(reason, player)
     local idx = player:GetIndex()
 
     -- Initialize strikes if needed
-    if not playerData[idx] then
+    if not playerData[idx] or playerData[idx].entity == nil then
         playerData[idx] = {
             entity = player,
             strikes = 0,
             detected = false
         }
+    end
+
+    if reason == "Invalid pitch" then -- isnta detect when anty aiming(Invalid Pitch)
+        playerData[idx].strikes = options.StrikeLimit
     end
 
     -- Increment strikes
@@ -79,7 +83,7 @@ local function StrikePlayer(reason, player)
     -- Handle strike limit
     if playerData[idx].strikes < options.StrikeLimit then
         -- Print message
-        if player and playerlist.GetPriority(player) > -1 and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
+        if player and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
 
             if options.partyCallaut == true then
@@ -91,41 +95,21 @@ local function StrikePlayer(reason, player)
                 LastStrike = globals.TickInterval()
             end
         end
+    end
 
-        if reason == "Invalid pitch" then
-            -- Print cheating message if player is not detected
-            if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
-                print(tostring("[CD] ".. player:GetName() .. " is cheating"))
-                client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-                if options.partyCallaut == true then
-                    client.Command( "say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
-                end
-                -- Increment strikes
-                playerData[idx].strikes = options.StrikeLimit
-                -- Set player as detected
-                playerData[idx].detected = true
-
-                -- Auto mark
-                if options.AutoMark and player ~= pLocal then
-                    playerlist.SetPriority(player, 10)
-                end
-            end
-        end
-    else
-        -- Print cheating message if player is not detected
-        if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
-            print(tostring("[CD] ".. player:GetName() .. " is cheating"))
+    -- Print cheating message if player is not detected
+    if player and not playerData[idx].detected then
+        print(tostring("[CD] ".. player:GetName() .. " is cheating"))
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-            if options.partyCallaut == true then
-                client.Command("say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
-            end
-            -- Set player as detected
-            playerData[idx].detected = true
+        if options.partyCallaut == true then
+            client.Command("say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
+        end
+        -- Set player as detected
+        playerData[idx].detected = true
 
-            -- Auto mark
-            if options.AutoMark and player ~= pLocal then
-                playerlist.SetPriority(player, 10)
-            end
+        -- Auto mark
+        if options.AutoMark and player ~= pLocal then
+            playerlist.SetPriority(player, 10)
         end
     end
 end
@@ -208,15 +192,26 @@ end
 local function CheckChoke(player, entity)
     local simTime = player:GetSimulationTime()
     local oldSimTime = prevData.SimTime[player:GetIndex()]
-    if not oldSimTime then return end -- no simTime
-    local delta = simTime - oldSimTime --get difference between current and previous simtime
-    if delta == 0 then return end --its local player revinding time
-    local deltaTicks = Conversion.Time_to_Ticks(delta)
-    if deltaTicks > options.MaxTickDelta then
-        return true
+
+    if not oldSimTime then
+        return false -- no previous
     end
-    return false
+
+    local delta = simTime - oldSimTime -- get difference between current and previous simtime
+
+    if options.debug and delta == 0 then
+        return false -- it's the local player rewinding time
+    end
+
+    local deltaTicks = Conversion.Time_to_Ticks(delta)
+    if deltaTicks >= options.MaxTickDelta then
+        StrikePlayer("Choking Packets", player)
+        return true -- player is choking packets
+    else
+        return false --is not choking packets
+    end
 end
+
 
 --[[local function isValidName(player, name, entity)
 
@@ -239,7 +234,7 @@ local function event_hook(ev)
 
     -- Get the entities involved in the event
     local attacker = entities.GetByUserID(ev:GetInt("attacker"))
-    if playerData[attacker:GetIndex()] ~= nil
+    if attacker ~= nil and playerData[attacker:GetIndex()] ~= nil
     and playerData[attacker:GetIndex()].detected == true then return end --skip detected players
     local Victim = entities.GetByUserID(ev:GetInt("userid"))
         if attacker == nil or Victim == nil then return end
@@ -261,7 +256,7 @@ local AimbotStage = 0
 
 -- Function to check for aimbot
 local function CheckAimbot()
-    if HurtVictim == nil then return end
+    if HurtVictim == nil or shooter == nil then return end
 
     local idx = shooter:GetIndex()
     if lastAngles[idx] == nil then
@@ -331,7 +326,7 @@ local function OnCreateMove(userCmd)
         if localOldSimTime then
             local localDelta = localSimTime - localOldSimTime
             local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
-            if localDeltaTicks <= options.MaxTickDelta then
+            if localDeltaTicks <= options.MaxTickDelta and clientstate:GetChokedCommands() <= options.MaxTickDelta then
                 packetloss = false
             end
         end
@@ -345,7 +340,7 @@ local function OnCreateMove(userCmd)
         or entity:IsDormant()
         or not entity:IsAlive() then goto continue end -- Skip if player is nil, dormant or dead
 
-        if entity ~= pLocal and playerlist.GetPriority(entity) == 10 then
+        if playerlist.GetPriority(entity) == 10 then
             -- Set player as detected
             if playerData[idx] then
                 playerData[idx].detected = true
@@ -365,8 +360,6 @@ local function OnCreateMove(userCmd)
         local player = WPlayer.FromEntity(entity)
         currentData.SimTime[idx] = player:GetSimulationTime() --store simulation time of target players
 
-        if options.debug == false and TF2.IsFriend(idx, true) then goto continue end -- Skip local player 
-
         if HurtVictim ~= nil then goto continue end --skip aimbot check if someone gets killed or damaged
 
         lastAngles[idx] = player:GetEyeAngles() --store viewangles of target players
@@ -381,7 +374,7 @@ local function OnCreateMove(userCmd)
 
         --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
-            if not packetloss and connectionState == 1 then
+            if not packetloss and connectionState == 1 or options.debug == true then
                 if CheckChoke(player, entity) == true then break end --detects rage Fakelag
             end
         end
@@ -447,6 +440,11 @@ local function doDraw()
         end
 
         if options.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
+            if options.debug then
+                draw.Color(255, 0, 0, 255)
+                draw.Text(20, 120, "Debug Mode!!! Some Featheres Might malfunction")
+            end
+            draw.Color(255, 255, 255, 255)
             draw.SetFont(tahoma_bold)
             if playerData then
                 for idx, data in pairs(playerData) do
