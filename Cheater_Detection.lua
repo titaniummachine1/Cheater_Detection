@@ -326,7 +326,7 @@ local function OnCreateMove(userCmd)
         if localOldSimTime then
             local localDelta = localSimTime - localOldSimTime
             local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
-            if localDeltaTicks <= options.MaxTickDelta and clientstate:GetChokedCommands() <= options.MaxTickDelta then
+            if localDeltaTicks <= options.MaxTickDelta or clientstate:GetChokedCommands() <= options.MaxTickDelta then
                 packetloss = false
             end
         end
@@ -427,12 +427,12 @@ local function doDraw()
             -- Options
             ImMenu.BeginFrame(1)
             options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
-            options.partyCallaut = ImMenu.Checkbox("Party Callout", options.partyCallaut)
             options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
             ImMenu.EndFrame()
 
             -- Options
             ImMenu.BeginFrame(1)
+            options.partyCallaut = ImMenu.Checkbox("Party Callout", options.partyCallaut)
             options.debug = ImMenu.Checkbox("Debug", options.debug)
             ImMenu.EndFrame()
 
