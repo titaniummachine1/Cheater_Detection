@@ -76,8 +76,8 @@ local function StrikePlayer(reason, player)
         if player and playerlist.GetPriority(player) > -1 and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
 
-            if options.partyCallaut then
-                client.Command("say_party " .."[CD] " .. player:GetName() .. "is SUSPICIOUS",true);
+            if options.partyCallaut == true then
+                client.Command("say_party " .."[CD] " .. player:GetName() .. " is SUSPICIOUS",true);
             end
             
             if options.AutoMark and player ~= pLocal then
@@ -91,8 +91,8 @@ local function StrikePlayer(reason, player)
             if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
                 print(tostring("[CD] ".. player:GetName() .. " is cheating"))
                 client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-                if options.partyCallaut then
-                    client.Command( "say_party ".. "[CD] ".. player:GetName() .."is Cheating".. "(".. reason.. ")",true);
+                if options.partyCallaut == true then
+                    client.Command( "say_party ".. "[CD] ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
                 end
                 -- Increment strikes
                 playerData[idx].strikes = options.StrikeLimit
@@ -110,8 +110,8 @@ local function StrikePlayer(reason, player)
         if player and playerlist.GetPriority(player) > -1 and not playerData[idx].detected then
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-            if options.partyCallaut then
-                client.Command( "say_party ".. "[CD] ".. player:GetName() .."is Cheating".. "(".. reason.. ")",true);
+            if options.partyCallaut == true then
+                client.Command("say_party ".. "[CD] ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
             end
             -- Set player as detected
             playerData[idx].detected = true
