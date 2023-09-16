@@ -40,7 +40,7 @@ end
 local options = {
     StrikeLimit = 5,
     MaxTickDelta = 8,
-    Aimbotfov = 2,
+    Aimbotfov = 3,
     AutoMark = true,
     BhopTimes = 5,
     debug = false,
@@ -95,21 +95,22 @@ local function StrikePlayer(reason, player)
                 LastStrike = globals.TickInterval()
             end
         end
-    end
+    else
+            -- Print cheating message if player is not detected
+        if player and not playerData[idx].detected then
+            print(tostring("[CD] ".. player:GetName() .. " is cheating"))
+                client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
+            if options.partyCallaut == true then
+                client.Command("say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
+            end
 
-    -- Print cheating message if player is not detected
-    if player and not playerData[idx].detected then
-        print(tostring("[CD] ".. player:GetName() .. " is cheating"))
-            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-        if options.partyCallaut == true then
-            client.Command("say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
-        end
-        -- Set player as detected
-        playerData[idx].detected = true
+            -- Set player as detected
+            playerData[idx].detected = true
 
-        -- Auto mark
-        if options.AutoMark and player ~= pLocal then
-            playerlist.SetPriority(player, 10)
+            -- Auto mark
+            if options.AutoMark and player ~= pLocal then
+                playerlist.SetPriority(player, 10)
+            end
         end
     end
 end
@@ -252,23 +253,47 @@ local function event_hook(ev)
     HurtVictim = Victim
 end
 
+local lastTwoAngles = {}
+local predictedAngles = {}
+
+-- Function to predict the eye angle two ticks ahead
+local function PredictEyeAngleTwoTicksAhead(idx, currentAngle)
+    if lastTwoAngles[idx] == nil then
+        lastTwoAngles[idx] = {}
+    end
+
+    -- If we don't have enough data, return nil
+    if #lastTwoAngles[idx] < 2 then
+        return nil
+    end
+
+    -- Calculate the average change in eye angles
+    local averageChange = (lastTwoAngles[idx][2] - lastTwoAngles[idx][1]) / 2
+
+    -- Predict the future eye angle
+    predictedAngles[idx] = currentAngle + averageChange * 2
+    if predictedAngles[idx] == nil then print("nil prediction") end
+    return predictedAngles[idx]
+end
+
 local lastAngles = {}
+local currentAngles = {}
 local AimbotStage = 0
 
 -- Function to check for aimbot
 local function CheckAimbot()
-    if HurtVictim == nil or shooter == nil then return end
+    if HurtVictim == nil or shooter == nil then return false end
 
     local idx = shooter:GetIndex()
-    if lastAngles[idx] == nil then
-        lastAngles[idx] = shooter:GetEyeAngles()
-    end
-
     local Wshooter = WPlayer.FromEntity(shooter)
     local shootAngles = Wshooter:GetEyeAngles()
 
-    local shooterTeam = shooter:GetTeamNumber()
-    local shooterOrigin = Wshooter:GetEyePos()
+    if lastAngles[idx] == nil then
+        lastAngles[idx] = shootAngles
+        return false
+    end
+
+    local shooterEyePos = Wshooter:GetEyePos()
 
     local attackerclass = shooter:GetPropInt("m_iClass")
     local AimPos = 4
@@ -277,31 +302,44 @@ local function CheckAimbot()
     end
 
     local WHurtVictim = WPlayer.FromEntity(HurtVictim)
-    local playerOrigin = WHurtVictim:GetHitboxPos(AimPos)
-    local AimbotAngle = Math.PositionAngles(shooterOrigin, playerOrigin)
+    local WictimEyePos = WHurtVictim:GetHitboxPos(AimPos)
+
+    local AimbotAngle = Math.PositionAngles(shooterEyePos, WictimEyePos)
     local fov = Math.AngleFov(AimbotAngle, shootAngles)
-
+    print("realFov: "..fov)
     if AimbotStage == 0 then
-        local PrewFov = Math.AngleFov(AimbotAngle, lastAngles[idx])
-        local FovDelta = math.abs(PrewFov - fov)
-
-        if options.debug == true then print(shooter:GetName(), fov, PrewFov, FovDelta) end
+        local FovDelta = Math.AngleFov(AimbotAngle, lastAngles[idx])
+        if options.debug == true then print(shooter:GetName(), "Stage 0: Fov Delta ", FovDelta) end
 
         if FovDelta > options.Aimbotfov then
-            AimbotStage = AimbotStage + 1
+            AimbotStage = 1
+        else
+            AimbotStage = 0
+            return false
         end
+    elseif AimbotStage == 1 then
+        -- Predict future eye angle two ticks ahead
+        local futureAngle = PredictEyeAngleTwoTicksAhead(idx, shootAngles)
 
-    elseif AimbotStage >= 1 then
         local FovDelta = Math.AngleFov(shootAngles, lastAngles[idx])
-        if options.debug == true then print("unflick fov", FovDelta) end
+        if options.debug == true then print(shooter:GetName(), "Stage 1: Fov Delta ", FovDelta) end
 
-        if FovDelta < 0.5 then
-            StrikePlayer("Aimbot", shooter)
+        if FovDelta >= 0.2 then
+            if options.debug == true then print(futureAngle) end
+            --if futureAngle and Math.AngleFov(shootAngles, futureAngle) < 0.4 then
+                StrikePlayer("Aimbot", shooter)
+            --end
         end
 
         AimbotStage = 0
+        lastAngles[idx] = shootAngles -- Update the last angle for this player
+        return true
     end
+
+    lastAngles[idx] = shootAngles -- Update the last angle for this player
+    return true
 end
+
 
 local function OnCreateMove(userCmd)
     pLocal = entities.GetLocalPlayer()
@@ -332,6 +370,8 @@ local function OnCreateMove(userCmd)
             end
         end
     end
+
+    if CheckAimbot() == true then goto Aimbot end  --detect silent aimbot users
 
     for i = 1, #players do
         local entity = players[i]
@@ -379,17 +419,30 @@ local function OnCreateMove(userCmd)
                 if CheckChoke(player, entity) == true then break end --detects rage Fakelag
             end
         end
+
+        if not lastTwoAngles or lastTwoAngles[idx] == nil then
+            lastTwoAngles[idx] = {}
+        end
+
+        lastAngles[idx] = player:GetEyeAngles() --aimbot angle save for later
+
+        table.insert(lastTwoAngles[idx], currentAngle)
+
+        -- Keep only the last two angles
+        if #lastTwoAngles[idx] > 2 then
+            table.remove(lastTwoAngles[idx], 1)
+        end
+
         ::continue::
     end
+    prevData = currentData
 
-    CheckAimbot() --detect silent aimbot users
-
+    ::Aimbot::
     --update globals
     if AimbotStage == 0 then
         HurtVictim = nil
         shooter = nil
     end
-    prevData = currentData
 end
 
 local strikes_default = options.StrikeLimit
