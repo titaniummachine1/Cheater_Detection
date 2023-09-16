@@ -33,6 +33,10 @@ local latin, latout = 0, 0
 
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
 
+if pLocal then
+    playerlist.SetPriority(pLocal, 0)
+end
+
 local options = {
     StrikeLimit = 5,
     MaxTickDelta = 8,
@@ -50,9 +54,11 @@ local prevData = {
 } ---@type PlayerData
 
 local playerData = {
+    {
         entity = nil,
-        strikes = nil,
-        detected = nil
+        strikes = 0,
+        detected = false
+    }
 }
 
 local function StrikePlayer(reason, player)
@@ -77,7 +83,7 @@ local function StrikePlayer(reason, player)
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
 
             if options.partyCallaut == true then
-                client.Command("say_party " .."[CD] " .. player:GetName() .. " is SUSPICIOUS",true);
+                client.Command("say_party " .. player:GetName() .. " is Suspicious",true);
             end
             
             if options.AutoMark and player ~= pLocal then
@@ -92,7 +98,7 @@ local function StrikePlayer(reason, player)
                 print(tostring("[CD] ".. player:GetName() .. " is cheating"))
                 client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
                 if options.partyCallaut == true then
-                    client.Command( "say_party ".. "[CD] ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
+                    client.Command( "say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
                 end
                 -- Increment strikes
                 playerData[idx].strikes = options.StrikeLimit
@@ -111,7 +117,7 @@ local function StrikePlayer(reason, player)
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
             if options.partyCallaut == true then
-                client.Command("say_party ".. "[CD] ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
+                client.Command("say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
             end
             -- Set player as detected
             playerData[idx].detected = true
@@ -155,14 +161,20 @@ local function CheckDuckSpeed(player, entity)
             [8] = 320,
             [9] = 300
         }
+
         if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed[entity:GetPropInt("m_iClass")] then
-            tick_count = tick_count + 1
-            if tick_count >= 66 then
-                StrikePlayer("Duck Speed", entity)
-                tick_count = 0
+        --and clientstate:GetChokedCommands() > 12 then
+            local m_vecViewOffset = math.floor(pLocal:GetPropVector("m_vecViewOffset[0]").z) ; --check if fully crounched
+           
+            if m_vecViewOffset == 45 then
+                tick_count = tick_count + 1
+                if tick_count >= 8 then
+                    StrikePlayer("Duck Speed", entity)
+                    tick_count = 0
+                    return true
+                end
                 return true
             end
-            return true
         end
         return false
     end
@@ -347,6 +359,8 @@ local function OnCreateMove(userCmd)
             end
             goto continue
         end -- Skip local player
+
+        if options.debug == false and TF2.IsFriend(idx, true) then goto continue end -- dont detect friends
 
         local player = WPlayer.FromEntity(entity)
         currentData.SimTime[idx] = player:GetSimulationTime() --store simulation time of target players
