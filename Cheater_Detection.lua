@@ -251,6 +251,7 @@ local function event_hook(ev)
     shooter = attacker
     HurtVictim = Victim
 end
+
 local lastAngles = {}
 local AimbotStage = 0
 
@@ -319,15 +320,15 @@ local function OnCreateMove(userCmd)
         pBhop = {}
     }
 
-    local packetloss = true
+    local packetloss = false
     if (latin + latout) < 200 and prevData then
         local localSimTime = WLocal:GetSimulationTime()
         local localOldSimTime = prevData.SimTime[WLocal:GetIndex()]
         if localOldSimTime then
             local localDelta = localSimTime - localOldSimTime
             local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
-            if localDeltaTicks <= options.MaxTickDelta or clientstate:GetChokedCommands() <= options.MaxTickDelta then
-                packetloss = false
+            if localDeltaTicks >= options.MaxTickDelta or clientstate:GetChokedCommands() >= options.MaxTickDelta then
+                packetloss = true
             end
         end
     end
