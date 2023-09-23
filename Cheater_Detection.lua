@@ -4,6 +4,7 @@
     Credit for examples:
     LNX (github.com/lnx00) for base script
     Muqa for visuals and design help
+    Alchemist for testing and party callout
 ]]
 
 ---@alias PlayerData { Angle: EulerAngles[], Position: Vector3[], SimTime: number[] }
@@ -84,24 +85,19 @@ local function StrikePlayer(reason, player)
     if playerData[idx].strikes < options.StrikeLimit then
         -- Print message
         if player and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
-            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious"))
-
-            if options.partyCallaut == true then
-                client.Command("say_party " .. player:GetName() .. " is Suspicious",true);
-            end
+            client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious \x01(\x04" .. reason.. "\x01)"))
             
             if options.AutoMark and player ~= pLocal then
-                playerlist.SetPriority(player, 5)
                 LastStrike = globals.TickInterval()
             end
         end
     else
-            -- Print cheating message if player is not detected
+            -- Print cheating message if player is detected and wanst noted before
         if player and not playerData[idx].detected then
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
                 client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
             if options.partyCallaut == true then
-                client.Command("say_party ".. player:GetName() .." is Cheating".. "(".. reason.. ")",true);
+                client.Command("say_party ".. player:GetName() .." is Cheating " .. "(".. reason.. ")",true);
             end
 
             -- Set player as detected
