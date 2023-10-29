@@ -1,9 +1,9 @@
 --[[
     Cheater Detection for Lmaobox
     Author: titaniummachine1 (https://github.com/titaniummachine1)
-    Credit for examples:
+    Credits:
     LNX (github.com/lnx00) for base script
-    Muqa for visuals and design help
+    Muqa for visuals and design assistance
     Alchemist for testing and party callout
 ]]
 
@@ -375,7 +375,10 @@ local function OnCreateMove(userCmd)
         --print(predictViewAngle(idx, 2))
         if playerData[idx] and playerData[idx].detected == true --dont check detected players
         or entity:IsDormant()
-        or not entity:IsAlive() then goto continue end -- Skip if player is nil, dormant or dead
+        or options.debug == false and attacker == pLocal
+        or not entity:IsAlive()
+        or options.debug == false and TF2.IsFriend(entity:GetIndex(), true)
+        then goto continue end -- Skip if player is nil, dormant or dead
 
         if playerlist.GetPriority(entity) == 10 then
             -- Set player as detected
