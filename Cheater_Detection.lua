@@ -2,7 +2,7 @@
     Cheater Detection for Lmaobox
     Author: titaniummachine1 (https://github.com/titaniummachine1)
     Credits:
-    LNX (github.com/lnx00) for base script
+    LNX (github.com/lnx00) for base scriptd
     Muqa for visuals and design assistance
     Alchemist for testing and party callout
 ]]
@@ -38,7 +38,7 @@ if pLocal then
     playerlist.SetPriority(pLocal, 0)
 end
 
-local options = {
+local Menu = {
     StrikeLimit = 5,
     MaxTickDelta = 8,
     Aimbotfov = 3,
@@ -48,6 +48,93 @@ local options = {
     tags = true,
     partyCallaut = true
 }
+
+
+local Lua__fullPath = GetScriptName()
+local Lua__fileName = Lua__fullPath:match("\\([^\\]-)$"):gsub("%.lua$", "")
+
+local function CreateCFG(folder_name, table)
+    local success, fullPath = filesystem.CreateDirectory(folder_name)
+    local filepath = tostring(fullPath .. "/config.cfg")
+    local file = io.open(filepath, "w")
+    
+    if file then
+        local function serializeTable(tbl, level)
+            level = level or 0
+            local result = string.rep("    ", level) .. "{\n"
+            for key, value in pairs(tbl) do
+                result = result .. string.rep("    ", level + 1)
+                if type(key) == "string" then
+                    result = result .. '["' .. key .. '"] = '
+                else
+                    result = result .. "[" .. key .. "] = "
+                end
+                if type(value) == "table" then
+                    result = result .. serializeTable(value, level + 1) .. ",\n"
+                elseif type(value) == "string" then
+                    result = result .. '"' .. value .. '",\n'
+                else
+                    result = result .. tostring(value) .. ",\n"
+                end
+            end
+            result = result .. string.rep("    ", level) .. "}"
+            return result
+        end
+        
+        local serializedConfig = serializeTable(table)
+        file:write(serializedConfig)
+        file:close()
+        printc( 255, 183, 0, 255, "["..os.date("%H:%M:%S").."] Saved Config to ".. tostring(fullPath))
+    end
+end
+
+local function LoadCFG(folder_name)
+    local success, fullPath = filesystem.CreateDirectory(folder_name)
+    local filepath = tostring(fullPath .. "/config.cfg")
+    local file = io.open(filepath, "r")
+
+    if file then
+        local content = file:read("*a")
+        file:close()
+        local chunk, err = load("return " .. content)
+        if chunk then
+            printc( 0, 255, 140, 255, "["..os.date("%H:%M:%S").."] Loaded Config from ".. tostring(fullPath))
+            return chunk()
+        else
+            CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) --saving the config
+            print("Error loading configuration:", err)
+        end
+    end
+end
+
+local status, loadedMenu = pcall(function() 
+    return assert(LoadCFG(string.format([[Lua %s]], Lua__fileName))) 
+end) -- Auto-load config
+
+-- Function to check if all expected functions exist in the loaded config
+local function checkAllFunctionsExist(expectedMenu)
+    for key, value in pairs(loadedMenu) do
+        -- If the key from the loaded menu does not exist in the expected menu, return false
+        if expectedMenu[key] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+-- Execute this block only if loading the config was successful
+if status then
+    if checkAllFunctionsExist(Menu) and not input.IsButtonDown(KEY_LSHIFT) then
+        Menu = loadedMenu
+    else
+        print("Config is outdated or invalid. Creating a new config.")
+        CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) -- Save the config
+    end
+else
+    print("Failed to load config. Creating a new config.")
+    CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) -- Save the config
+end
+
 
 local prevData = {
     SimTime = {},
@@ -75,19 +162,19 @@ local function StrikePlayer(reason, player)
     end
 
     if reason == "Invalid pitch" then -- isnta detect when anty aiming(Invalid Pitch)
-        playerData[idx].strikes = options.StrikeLimit
+        playerData[idx].strikes = Menu.StrikeLimit
     end
 
     -- Increment strikes
     playerData[idx].strikes = playerData[idx].strikes + 1
 
     -- Handle strike limit
-    if playerData[idx].strikes < options.StrikeLimit then
+    if playerData[idx].strikes < Menu.StrikeLimit then
         -- Print message
-        if player and playerData[idx].strikes == math.floor(options.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
+        if player and playerData[idx].strikes == math.floor(Menu.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious \x01(\x04" .. reason.. "\x01)"))
             
-            if options.AutoMark and player ~= pLocal then
+            if Menu.AutoMark and player ~= pLocal then
                 LastStrike = globals.TickInterval()
             end
         end
@@ -96,7 +183,7 @@ local function StrikePlayer(reason, player)
         if player and not playerData[idx].detected then
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
                 client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-            if options.partyCallaut == true then
+            if Menu.partyCallaut == true then
                 client.Command("say_party ".. player:GetName() .." is Cheating " .. "(".. reason.. ")",true);
             end
 
@@ -104,7 +191,7 @@ local function StrikePlayer(reason, player)
             playerData[idx].detected = true
 
             -- Auto mark
-            if options.AutoMark and player ~= pLocal then
+            if Menu.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 10)
             end
         end
@@ -176,7 +263,7 @@ local function CheckBhop(pEntity, mData, entity)
         mData[pEntity].pBhop[1] = mData[pEntity].pBhop[1] + 1 -- Increment the bhop count if the player is in the air
     end
 
-    if mData[pEntity].pBhop[1] >= options.BhopTimes then
+    if mData[pEntity].pBhop[1] >= Menu.BhopTimes then
         mData[pEntity].iPlayerSuspicion = mData[pEntity].iPlayerSuspicion + 1 -- Increment the suspicion if the player consistently bhops
         mData[pEntity].pBhop[1] = 0 -- Reset the bhop count
         StrikePlayer("Bunny Hop", entity) --return true, mData[pEntity].pBhop[1] -- Return true if the suspicion threshold is reached
@@ -196,12 +283,12 @@ local function CheckChoke(player, entity)
 
     local delta = simTime - oldSimTime -- get difference between current and previous simtime
 
-    if options.debug and delta == 0 then
+    if Menu.debug and delta == 0 then
         return false -- it's the local player rewinding time
     end
 
     local deltaTicks = Conversion.Time_to_Ticks(delta)
-    if deltaTicks >= options.MaxTickDelta then
+    if deltaTicks >= Menu.MaxTickDelta then
         StrikePlayer("Choking Packets", player)
         return true -- player is choking packets
     else
@@ -235,8 +322,8 @@ local function event_hook(ev)
     and playerData[attacker:GetIndex()].detected == true then return end --skip detected players
     local Victim = entities.GetByUserID(ev:GetInt("userid"))
         if attacker == nil or Victim == nil then return end
-        if options.debug == false and attacker == pLocal then return end
-        if options.debug == false and TF2.IsFriend(attacker:GetIndex(), true) then return end
+        if Menu.debug == false and attacker == pLocal then return end
+        if Menu.debug == false and TF2.IsFriend(attacker:GetIndex(), true) then return end
         if playerlist.GetPriority(attacker) == 10 then return end
         if attacker:IsDormant() then return end
         if Victim:IsDormant() then return end
@@ -305,9 +392,9 @@ local function CheckAimbot()
     print("realFov: "..fov)
     if AimbotStage == 0 then
         local FovDelta = Math.AngleFov(AimbotAngle, lastAngles[idx])
-        if options.debug == true then print(shooter:GetName(), "Stage 0: Fov Delta ", FovDelta) end
+        if Menu.debug == true then print(shooter:GetName(), "Stage 0: Fov Delta ", FovDelta) end
 
-        if FovDelta > options.Aimbotfov then
+        if FovDelta > Menu.Aimbotfov then
             AimbotStage = 1
         else
             AimbotStage = 0
@@ -318,10 +405,10 @@ local function CheckAimbot()
         local futureAngle = PredictEyeAngleTwoTicksAhead(idx, shootAngles)
 
         local FovDelta = Math.AngleFov(shootAngles, lastAngles[idx])
-        if options.debug == true then print(shooter:GetName(), "Stage 1: Fov Delta ", FovDelta) end
+        if Menu.debug == true then print(shooter:GetName(), "Stage 1: Fov Delta ", FovDelta) end
 
         if FovDelta >= 0.2 then
-            if options.debug == true then print(futureAngle) end
+            if Menu.debug == true then print(futureAngle) end
             --if futureAngle and Math.AngleFov(shootAngles, futureAngle) < 0.4 then
                 StrikePlayer("Aimbot", shooter)
             --end
@@ -361,7 +448,7 @@ local function OnCreateMove(userCmd)
         if localOldSimTime then
             local localDelta = localSimTime - localOldSimTime
             local localDeltaTicks = Conversion.Time_to_Ticks(localDelta)
-            if localDeltaTicks >= options.MaxTickDelta or clientstate:GetChokedCommands() >= options.MaxTickDelta then
+            if localDeltaTicks >= Menu.MaxTickDelta or clientstate:GetChokedCommands() >= Menu.MaxTickDelta then
                 packetloss = true
             end
         end
@@ -371,13 +458,14 @@ local function OnCreateMove(userCmd)
 
     for i = 1, #players do
         local entity = players[i]
+        if entity == nil then goto continue end -- Skip if player is nil
         local idx = entity:GetIndex()
         --print(predictViewAngle(idx, 2))
         if playerData[idx] and playerData[idx].detected == true --dont check detected players
         or entity:IsDormant()
-        or options.debug == false and attacker == pLocal
+        or Menu.debug == false and attacker == pLocal
         or not entity:IsAlive()
-        or options.debug == false and TF2.IsFriend(entity:GetIndex(), true)
+        or Menu.debug == false and TF2.IsFriend(entity:GetIndex(), true)
         then goto continue end -- Skip if player is nil, dormant or dead
 
         if playerlist.GetPriority(entity) == 10 then
@@ -388,14 +476,14 @@ local function OnCreateMove(userCmd)
                 -- Initialize strikes if needed
                 playerData[idx] = {
                     entity = entity,
-                    strikes = options.StrikeLimit,
+                    strikes = Menu.StrikeLimit,
                     detected = true
                 }
             end
             goto continue
         end -- Skip local player
 
-        if options.debug == false and TF2.IsFriend(idx, true) then goto continue end -- dont detect friends
+        if Menu.debug == false and TF2.IsFriend(idx, true) then goto continue end -- dont detect friends
 
         local player = WPlayer.FromEntity(entity)
         currentData.SimTime[idx] = player:GetSimulationTime() --store simulation time of target players
@@ -414,7 +502,7 @@ local function OnCreateMove(userCmd)
 
         --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
-            if not packetloss and connectionState == 1 or options.debug == true then
+            if not packetloss and connectionState == 1 or Menu.debug == true then
                 if CheckChoke(player, entity) == true then break end --detects rage Fakelag
             end
         end
@@ -444,56 +532,29 @@ local function OnCreateMove(userCmd)
     end
 end
 
-local strikes_default = options.StrikeLimit
+
+local lastToggleTime = 0
+local Lbox_Menu_Open = true
+local toggleCooldown = 0.2  -- 200 milliseconds
+
+local function toggleMenu()
+    local currentTime = globals.RealTime()
+    if currentTime - lastToggleTime >= toggleCooldown then
+        Lbox_Menu_Open = not Lbox_Menu_Open  -- Toggle the state
+        lastToggleTime = currentTime  -- Reset the last toggle time
+    end
+end
 
 local function doDraw()
-
     draw.SetFont(Fonts.Verdana)
     draw.Color(255, 255, 255, 255)
 
-    
-        if engine.IsGameUIVisible() and ImMenu.Begin("Cheater Detection", true) then
-
-            --local menuWidth, menuHeight = 250, 300
-            --local x, y = 100, 100
-
-            -- Strike Limit Slider
-            ImMenu.BeginFrame(1)
-            options.StrikeLimit = ImMenu.Slider("Strikes Limit", options.StrikeLimit, 4, 17)
-            ImMenu.EndFrame()
-
-            -- Max Tick Delta Slider
-            ImMenu.BeginFrame(1)
-            options.MaxTickDelta = ImMenu.Slider("Max Packet Choke", options.MaxTickDelta, 8, 22)
-            ImMenu.EndFrame()
-            
-            -- Max Tick Delta Slider
-            ImMenu.BeginFrame(1)
-            options.BhopTimes = ImMenu.Slider("Max Bhops", options.BhopTimes, 4, 15)
-            ImMenu.EndFrame()
-
-            -- Aimbot FOV Slider
-            ImMenu.BeginFrame(1)
-            options.Aimbotfov = ImMenu.Slider("Aimbot Fov", options.Aimbotfov, 1, 180)
-            ImMenu.EndFrame()
-
-            -- Options
-            ImMenu.BeginFrame(1)
-            options.AutoMark = ImMenu.Checkbox("Auto Mark", options.AutoMark)
-            options.tags = ImMenu.Checkbox("Draw Tags", options.tags)
-            ImMenu.EndFrame()
-
-            -- Options
-            ImMenu.BeginFrame(1)
-            options.partyCallaut = ImMenu.Checkbox("Party Callout", options.partyCallaut)
-            options.debug = ImMenu.Checkbox("Debug", options.debug)
-            ImMenu.EndFrame()
-
-            ImMenu.End()
-        end
-
-        if options.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
-            if options.debug then
+    -- Inside your OnCreateMove or similar function where you check for input
+    if input.IsButtonDown(KEY_INSERT) then  -- Replace 72 with the actual key code for the button you want to use
+        toggleMenu()
+    end
+        if Menu.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
+            if Menu.debug then
                 draw.Color(255, 0, 0, 255)
                 draw.Text(20, 120, "Debug Mode!!! Some Featheres Might malfunction")
             end
@@ -506,7 +567,7 @@ local function doDraw()
                     local detected = data.detected
 
                     if not entity or not entity:IsValid() or entity:IsDormant() or not entity:IsAlive() then goto continue end
-                        if playerData[idx].strikes >= math.floor(options.StrikeLimit / 2) then
+                        if playerData[idx].strikes >= math.floor(Menu.StrikeLimit / 2) then
                             local tagText, tagColor
                             local padding = Vector3(0, 0, 7)
                             local headPos = (entity:GetAbsOrigin() + entity:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding
@@ -542,11 +603,49 @@ local function doDraw()
                 end
             end
         end
-    end
-    ----424 lineeror
 
-local function OnUnload()-- Called when the script is unloaded
+        if Lbox_Menu_Open == true and ImMenu.Begin("Cheater Detection", true) then
+
+            -- Strike Limit Slider
+            ImMenu.BeginFrame(1)
+            Menu.StrikeLimit = ImMenu.Slider("Strikes Limit", Menu.StrikeLimit, 4, 17)
+            ImMenu.EndFrame()
+
+            -- Max Tick Delta Slider
+            ImMenu.BeginFrame(1)
+            Menu.MaxTickDelta = ImMenu.Slider("Max Packet Choke", Menu.MaxTickDelta, 8, 22)
+            ImMenu.EndFrame()
+            
+            -- Max Tick Delta Slider
+            ImMenu.BeginFrame(1)
+            Menu.BhopTimes = ImMenu.Slider("Max Bhops", Menu.BhopTimes, 4, 15)
+            ImMenu.EndFrame()
+
+            -- Aimbot FOV Slider
+            ImMenu.BeginFrame(1)
+            Menu.Aimbotfov = ImMenu.Slider("Aimbot Fov", Menu.Aimbotfov, 1, 180)
+            ImMenu.EndFrame()
+
+            -- Menu
+            ImMenu.BeginFrame(1)
+            Menu.AutoMark = ImMenu.Checkbox("Auto Mark", Menu.AutoMark)
+            Menu.tags = ImMenu.Checkbox("Draw Tags", Menu.tags)
+            ImMenu.EndFrame()
+
+            -- Menu
+            ImMenu.BeginFrame(1)
+            Menu.partyCallaut = ImMenu.Checkbox("Party Callout", Menu.partyCallaut)
+            Menu.debug = ImMenu.Checkbox("Debug", Menu.debug)
+            ImMenu.EndFrame()
+
+            ImMenu.End()
+        end
+    end
+
+--[[ Remove the menu when unloaded ]]--
+local function OnUnload()                                -- Called when the script is unloaded
     UnloadLib() --unloading lualib
+    CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) --saving the config
     client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
 end
 
