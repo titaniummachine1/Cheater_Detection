@@ -57,7 +57,6 @@ local function OnCreateMove(cmd)
     end
 
     Menu, DataBase, players, pLocal, WLocal, latin, latout, connectionState, packetloss = Detections.UpdateData()
-    Detections.CheckForCheaters(cmd)
 end
 
 --[[ Callbacks ]]

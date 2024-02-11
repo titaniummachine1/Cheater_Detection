@@ -153,7 +153,18 @@ function Config.SaveDatabase(DataBaseTable)
     local file = io.open(filepath, "w")
 
     if file then
-        local serializedDatabase = Json.encode(DataBaseTable)
+        -- Create a new table to store unique records
+        local uniqueDataBase = {}
+
+        -- Iterate over the database table
+        for steamId, data in pairs(DataBaseTable) do
+            -- If the record doesn't exist in the unique database, add it
+            if not uniqueDataBase[steamId] then
+                uniqueDataBase[steamId] = data
+            end
+        end
+
+        local serializedDatabase = Json.encode(uniqueDataBase)
         file:write(serializedDatabase)
         file:close()
         printc(255, 183, 0, 255, "["..os.date("%H:%M:%S").."] Saved Database to ".. tostring(filepath))

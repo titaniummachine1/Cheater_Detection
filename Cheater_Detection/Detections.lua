@@ -39,11 +39,13 @@ local packetloss = nil
 function Detections.GetSteamID(Player)
     if Player then
         local playerInfo = client.GetPlayerInfo(Player:GetIndex())
-        if playerInfo then
-            return playerInfo.SteamID
+        local steamID = playerInfo.SteamID
+        if steamID then
+            local steamID64 = steam.ToSteamID64(steamID)
+            return steamID64
         end
     end
-
+    Log.Warn("Failed to get SteamID for player %s", Player:GetName() or "nil")
     return nil
 end
 
@@ -66,16 +68,6 @@ local defaultRecord = {
 }
 
 function Detections.UpdateData()
-    -- update every tick
-    Menu = Visuals.GetMenu()
-    Visuals.SetRuntimeData(DataBaseInput)
-    DataBase = Config.GetDatabase()
-    players = entities.FindByClass("CTFPlayer")
-    pLocal = entities.GetLocalPlayer()
-    WLocal = WPlayer.FromEntity(pLocal)
-    latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
-    connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
-
     -- Return all the necessary values
     return Menu, DataBase, players, pLocal, WLocal, latin, latout, connectionState
 end
@@ -103,7 +95,7 @@ function Detections.StrikePlayer(reason, player)
 
     -- Check if the player is already detected as a cheater
     if record.isCheater == true then
-        Log:info("Player %s is already detected as a cheater", player:GetName())
+        print("Player %s is already detected as a cheater", player:GetName())
         return -- Don't strike a player that's already detected
     end
 
@@ -429,8 +421,18 @@ local function event_hook(ev)
     end
 end
 
-function Detections.CheckForCheaters()
+local function OnTick()
+    -- update every tick
+    Menu = Visuals.GetMenu()
     local DebugMode = Menu.Main.debug
+    Visuals.SetRuntimeData(DataBaseInput)
+    DataBase = Config.GetDatabase()
+    players = entities.FindByClass("CTFPlayer")
+    pLocal = entities.GetLocalPlayer()
+    WLocal = WPlayer.FromEntity(pLocal)
+    latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
+    connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
+
     -- Check if the DataBase is not nil
     if not DataBase then
         Log:Warn("Database is nil")
@@ -438,25 +440,33 @@ function Detections.CheckForCheaters()
     end
 
     for _, entity in ipairs(players) do
-        local steamid = Detections.GetSteamID(entity)
-
         -- Skip if entity is nil, dormant, dead, or a friend (in non-debug mode)
         if not entity or entity:IsDormant() or not entity:IsAlive() or (not DebugMode and TF2.IsFriend(entity:GetIndex(), true)) then
             goto continue
         end
 
-        -- Get the record for the player
-        local Record = Config.GetRecord(steamid)
+        -- Get the steamid for the player after the entity check
+        local steamid = Detections.GetSteamID(entity)
+
         -- If the record doesn't exist or doesn't have EntityData, initialize it with defaultRecord
-        if not Record then
-            DataBase[steamid] = defaultRecord -- Assuming defaultRecord structure
-            Record = DataBase[steamid]
-        elseif not Record.EntityData then
+        if not DataBase[steamid] then
+            if steamid then
+                DataBase[steamid] = defaultRecord -- Assuming defaultRecord structure
+            else
+                Log:Warn("Failed to get SteamID for player %s", entity:GetName() or "nil")
+                goto continue
+            end
+        end
+
+        -- Create a local reference to the record
+        local Record = DataBase[steamid]
+
+        if not Record.EntityData then
             Record.EntityData = {}
         end
 
         --Skip if player is detected as a cheater
-        if Config.IsKnownCheater(steamid) then
+        if steamid ~= "[U:1:0]" and Config.IsKnownCheater(steamid) then
             --print(Record.Name .. " or ".. entity:GetName() .. " is detected as a cheater")
             goto continue
         end
@@ -474,12 +484,10 @@ function Detections.CheckForCheaters()
         end
 
         -- Perform checks on the player
-        if CheckAngles(player, entity) or
-            CheckDuckSpeed(player, entity) or
-            CheckBunnyHop(player, entity) or
-            CheckChoke(player, entity) then
-            break -- Assuming you want to stop checking after finding a cheater, otherwise remove this
-        end
+        CheckAngles(player, entity)
+        CheckDuckSpeed(player, entity)
+        CheckBunnyHop(player, entity)
+        CheckChoke(player, entity)
 
         ::continue::
     end
@@ -487,6 +495,11 @@ function Detections.CheckForCheaters()
     -- Update globals
     Config.UpdateDataBase(DataBase)
 end
+
+--[[ Unregister previous callbacks ]]--
+callbacks.Unregister("CreateMove", "CD_DetectionModule")                     -- unregister the "CreateMove" callback
+--[[ Register callbacks ]]--
+callbacks.Register("CreateMove", "CD_DetectionModule", OnTick)        -- register the "CreateMove" callback
 
 callbacks.Unregister("FireGameEvent", "unique_event_hook")                 -- unregister the "FireGameEvent" callback
 callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)         -- register the "FireGameEvent" callback
