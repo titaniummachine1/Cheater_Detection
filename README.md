@@ -3,7 +3,8 @@
 
 
 # Cheater_Detection
-![image](https://github.com/titaniummachine1/Cheater_Detection/assets/78664175/1afdf47d-42e4-47e8-b7a2-eb44af705b7f)
+![image](https://github.com/titaniummachine1/Cheater_Detection/assets/78664175/e8743c83-95fa-4a07-8c7e-050bbc4d0592)
+
 
 
 ## Description
