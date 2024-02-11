@@ -56,7 +56,7 @@ local function OnCreateMove(cmd)
         Visuals.toggleMenu() --toggle the menu
     end
 
-    Menu, DataBase, players, pLocal, WLocal, latin, latout, connectionState, packetloss = Detections.UpdateData(DataBase)
+    Menu, DataBase, players, pLocal, WLocal, latin, latout, connectionState, packetloss = Detections.UpdateData()
     Detections.CheckForCheaters(cmd)
 end
 
@@ -65,16 +65,18 @@ local function OnUnload() -- Called when the script is unloaded
     if DataBase then
         -- Check all suspects and erase those without strikes
         for steamId, record in pairs(Config.GetDatabase()) do
-            if record and record.strikes or 0 < 1 then
+            print(record.isCheater)
+            if record and record.strikes < 1 then
                 Config.ClearSuspect(steamId)
             else
                 DataBase[steamId].EntityData = nil -- Sclear entitydata
             end
         end
+
         if Menu.Main.debug and pLocal then
             Config.ClearSuspect(Detections.GetSteamID(pLocal)) -- Clear the local if debug is enabled
         end
-        Config.SaveDatabase(DataBase) -- Save the database
+            Config.SaveDatabase(DataBase) -- Save the database
     else
         Config.SaveDatabase()
     end

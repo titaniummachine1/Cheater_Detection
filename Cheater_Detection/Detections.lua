@@ -23,7 +23,6 @@ Log.Level = 0
 
 --[[ Variables ]]
 local Detections = {}
-local RuntimeData = {}
 -- Declare global variables
 local Menu = nil
 local DataBase = {}
@@ -48,7 +47,7 @@ function Detections.GetSteamID(Player)
     return nil
 end
 
-local defaultRecoard = {
+local defaultRecord = {
     Name = "NN",
     isCheater = false,
     cause = "None",
@@ -56,6 +55,7 @@ local defaultRecoard = {
     strikes = 0,
     EntityData = {
         SimTimes = {},
+        StdDevList = {},
         AngleHistory = {},
         Bhops = 0, -- Counter for consecutive jumps
         LastOnGround = true, -- Last known ground status
@@ -65,33 +65,19 @@ local defaultRecoard = {
     }
 }
 
-function Detections.UpdateData(DataBaseInput)
-    -- Initialize DataBaseInput if it's nil
-    DataBaseInput = DataBaseInput or {}
-
+function Detections.UpdateData()
     -- update every tick
     Menu = Visuals.GetMenu()
     Visuals.SetRuntimeData(DataBaseInput)
-    RuntimeData = DataBaseInput
-    DataBase = DataBaseInput
+    DataBase = Config.GetDatabase()
     players = entities.FindByClass("CTFPlayer")
     pLocal = entities.GetLocalPlayer()
     WLocal = WPlayer.FromEntity(pLocal)
     latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
     connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
 
-    packetloss = false
-    local localSimTime = WLocal:GetSimulationTime()
-
-    -- Get the player's record from the database
-    if WLocal and DataBaseInput then
-        DataBase = DataBaseInput
-    else
-        print("WLocal or DataBaseInput is nil")
-    end
-
     -- Return all the necessary values
-    return Menu, DataBaseInput, players, pLocal, WLocal, latin, latout, connectionState, packetloss
+    return Menu, DataBase, players, pLocal, WLocal, latin, latout, connectionState
 end
 
 local LastStrike = 0
@@ -182,7 +168,7 @@ local function CheckAngles(player, entity)
 
     local angles = player:GetEyeAngles()
     if angles.pitch > 89.4 or angles.pitch < -89.4 then --imposible angles
-        print(angles.pitch)
+        --print(angles.pitch)
         -- Detects specific cheats based on unique pitch patterns (rage pitch, lbox, etc.)
         if angles.pitch % 3256 == 0 then
             return Detections.StrikePlayer("LBOX AA(Center)", entity)
@@ -286,27 +272,28 @@ local function CheckChoke(pEntity, entity)
     end
 
     local record = DataBase[steamId]
-    if not record or not record.SimTimes then
-        record = defaultRecoard
-        record.SimTimes = {} -- Initialize SimTimes as an empty queue
-
-        DataBase[steamId] = record -- Add the new record to the database
+    if not record then
+        record = defaultRecord
+        DataBase[steamId] = defaultRecord -- Add the new record to the database
     end
+
+    local EntityData = record.EntityData or {}
+    EntityData.SimTimes = EntityData.SimTimes or {} -- Initialize SimTimes as an empty queue
 
     local simTime = pEntity:GetSimulationTime()
 
     -- Add the current simulation time to the queue
-    table.insert(record.SimTimes, simTime)
+    table.insert(EntityData.SimTimes, simTime)
 
     -- If the queue has more than 33 elements, remove the oldest one
-    if record and record.SimTimes and #record.SimTimes > 33 then
-        table.remove(record.SimTimes, 1)
+    if #EntityData.SimTimes > 33 then
+        table.remove(EntityData.SimTimes, 1)
     end
 
     -- Calculate the delta ticks for each pair of consecutive simulation times
     local deltaTicks = {}
-    for i = 2, #record.SimTimes do
-        local delta = record.SimTimes[i] - record.SimTimes[i - 1]
+    for i = 2, #EntityData.SimTimes do
+        local delta = EntityData.SimTimes[i] - EntityData.SimTimes[i - 1]
         table.insert(deltaTicks, Conversion.Time_to_Ticks(delta))
     end
 
@@ -327,18 +314,18 @@ local function CheckChoke(pEntity, entity)
     local standardDeviation = math.sqrt(variance)
 
     -- Update the list of the last 33 standard deviations for this player
-    record.StdDevList = record.StdDevList or {}
-    table.insert(record.StdDevList, 1, standardDeviation)
-    if #record.StdDevList > 33 then
-        table.remove(record.StdDevList)
+    EntityData.StdDevList = EntityData.StdDevList or {}
+    table.insert(EntityData.StdDevList, 1, standardDeviation)
+    if #EntityData.StdDevList > 33 then
+        table.remove(EntityData.StdDevList)
     end
 
     -- Calculate the average of the last 33 standard deviations
     local sum = 0
-    for i = 1, #record.StdDevList do
-        sum = sum + record.StdDevList[i]
+    for i = 1, #EntityData.StdDevList do
+        sum = sum + EntityData.StdDevList[i]
     end
-    local avgStdDev = sum / #record.StdDevList
+    local avgStdDev = sum / #EntityData.StdDevList
 
     -- Ensure standard deviation is within the range [-132, 132]
     standardDeviation = math.max(-132, standardDeviation)
@@ -350,10 +337,11 @@ local function CheckChoke(pEntity, entity)
         return true -- player is bursting packets
     end
 
+    record.EntityData = EntityData
+    DataBase[steamId] = record
     -- Check if the standard deviation of the delta ticks exceeds the maximum choke limit
     local minChoke = avgStdDev
     local maxChoke = minChoke + Menu.Main.ChokeDetection.MaxChoke
-    print(standardDeviation .. " " .. maxChoke)
     if standardDeviation > maxChoke then
         Detections.StrikePlayer("Choking Packets", entity)
         return true -- player is choking packets
@@ -441,7 +429,7 @@ local function event_hook(ev)
     end
 end
 
-function Detections.CheckForCheaters(cmd)
+function Detections.CheckForCheaters()
     local DebugMode = Menu.Main.debug
     -- Check if the DataBase is not nil
     if not DataBase then
@@ -459,10 +447,12 @@ function Detections.CheckForCheaters(cmd)
 
         -- Get the record for the player
         local Record = Config.GetRecord(steamid)
-        -- If the record doesn't exist, initialize it with defaultRecord
+        -- If the record doesn't exist or doesn't have EntityData, initialize it with defaultRecord
         if not Record then
-            DataBase[steamid] = defaultRecoard -- Assuming defaultRecord structure
+            DataBase[steamid] = defaultRecord -- Assuming defaultRecord structure
             Record = DataBase[steamid]
+        elseif not Record.EntityData then
+            Record.EntityData = {}
         end
 
         --Skip if player is detected as a cheater
@@ -475,9 +465,7 @@ function Detections.CheckForCheaters(cmd)
         local ViewAngles = player:GetEyeAngles()
 
         -- Initialize the AngleHistory table if it doesn't exist
-        if not Record.EntityData.AngleHistory then
-            Record.EntityData.AngleHistory = {}
-        end
+        Record.EntityData.AngleHistory = Record.EntityData.AngleHistory or {}
 
         -- Store the player's view angle history
         table.insert(Record.EntityData.AngleHistory, ViewAngles)
@@ -486,7 +474,10 @@ function Detections.CheckForCheaters(cmd)
         end
 
         -- Perform checks on the player
-        if CheckAngles(player, entity) or CheckDuckSpeed(player, entity) or CheckBunnyHop(player, entity) or CheckChoke(player, entity) then
+        if CheckAngles(player, entity) or
+            CheckDuckSpeed(player, entity) or
+            CheckBunnyHop(player, entity) or
+            CheckChoke(player, entity) then
             break -- Assuming you want to stop checking after finding a cheater, otherwise remove this
         end
 
