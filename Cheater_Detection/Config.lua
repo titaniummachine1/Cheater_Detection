@@ -170,8 +170,7 @@ function Config.SaveDatabase(DataBaseTable)
         printc(255, 183, 0, 255, "["..os.date("%H:%M:%S").."] Saved Database to ".. tostring(filepath))
     else
         print("Failed to save database. Creating a new database.")
-        DataBaseTable = {}
-        Config.SaveDatabase(DataBaseTable)
+        Config.SaveDatabase()
     end
 end
 
@@ -246,12 +245,6 @@ end
 
 function Config.PushSuspect(steamId, data)
     DataBase[steamId] = data
-    DataBase[steamId].EntityData = {}
-
-    --[[
-    DataBase[steamId].EntityData = nil
-    Config.SaveDatabase(DataBase)
-    DataBase[steamId].EntityData = {} --]]
 end
 
 function Config.ClearSuspect(steamId)

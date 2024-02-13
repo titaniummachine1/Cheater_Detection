@@ -49,13 +49,9 @@ function Detections.GetSteamID(Player)
     return nil
 end
 
-local defaultRecord = {
-    Name = "NN",
-    isCheater = false,
-    cause = "None",
-    date = os.date("%Y-%m-%d %H:%M:%S"),
-    strikes = 0,
-    EntityData = {
+local PlayerData = {}
+
+local DefaultPlayerData = {
         SimTimes = {},
         StdDevList = {},
         AngleHistory = {},
@@ -65,6 +61,13 @@ local defaultRecord = {
         CanJump = false, -- Whether the player was able to jump in the previous iteration
         -- Add other fields here
     }
+
+local defaultRecord = {
+    Name = "NN",
+    isCheater = false,
+    cause = "None",
+    date = os.date("%Y-%m-%d %H:%M:%S"),
+    strikes = 0,
 }
 
 function Detections.UpdateData()
@@ -218,36 +221,46 @@ local function CheckDuckSpeed(player, entity)
 end
 
 local function CheckBunnyHop(pEntity, entity)
-    local steamId = Detections.GetSteamID(pEntity)
-    if not Menu.Main.BhopDetection.Enable or not steamId or not DataBase[steamId] then
-        return -- Early return if bhop detection is disabled, the player isn't found in the database, or SteamID retrieval failed
+    if not Menu.Main.BhopDetection.Enable then
+        return -- Early return if bhop detection is disabled or SteamID retrieval failed
     end
 
-    local playerRecord = DataBase[steamId]
+    local steamId = Detections.GetSteamID(pEntity)
+    if not steamId then
+        Log:Warn("Failed to get SteamID for player %s", pEntity:GetName() or "nil")
+        return
+    end
+
+    -- Create a record for the player if it doesn't exist
+    if not PlayerData[steamId] then
+        PlayerData[steamId] = DefaultPlayerData
+    end
+
+    local record = PlayerData[steamId]
     local flags = pEntity:GetPropInt("m_fFlags")
     local onGround = flags & FL_ONGROUND == 1
     local vel = pEntity:EstimateAbsVelocity() -- Assuming this function returns a Vector3 of the player's velocity
 
     -- Check if the player was able to jump in the previous iteration
-    if playerRecord.EntityData.CanJump then
+    if record.CanJump then
         if onGround then
-            playerRecord.EntityData.Bhops = 0 -- Reset counter when player lands
-            playerRecord.EntityData.CanJump = false
-        elseif playerRecord.EntityData.LastZVelocity < vel.z and (vel.z == 271 or vel.z == 277) then
+            record.Bhops = 0 -- Reset counter when player lands
+            record.CanJump = false
+        elseif record.LastZVelocity < vel.z and (vel.z == 271 or vel.z == 277) then
             -- Player has performed a jump without the server registering as touching the ground
-            playerRecord.EntityData.Bhops = playerRecord.EntityData.Bhops + 1
-            if playerRecord.EntityData.Bhops >= Menu.Main.BhopDetection.MaxBhop then
+            record.Bhops = record.Bhops + 1
+            if record.Bhops >= Menu.Main.BhopDetection.MaxBhop then
                 -- Detected bunny hopping
                 Detections.StrikePlayer("Bunny Hop", entity)
-                playerRecord.EntityData.Bhops = 0 -- Reset counter after detection
+                record.Bhops = 0 -- Reset counter after detection
             end
         end
     else
-        playerRecord.EntityData.CanJump = onGround
+        record.CanJump = onGround
     end
 
     -- Store the last on-ground state and vertical velocity for the next check
-    playerRecord.EntityData.LastZVelocity = vel.z
+    record.LastZVelocity = vel.z
 end
 
 local function CheckChoke(pEntity, entity)
@@ -258,87 +271,73 @@ local function CheckChoke(pEntity, entity)
         return false
     end
 
-    if not DataBase then
-        Log:Warn("Database is nil")
-        DataBase = {} -- Initialize DataBase if it's nil
+    if not PlayerData then
+        Log:Warn("PlayerData is nil")
+        PlayerData = {} -- Initialize PlayerData if it's nil
     end
 
-    local record = DataBase[steamId]
-    if not record then
-        record = defaultRecord
-        DataBase[steamId] = defaultRecord -- Add the new record to the database
+    local record = PlayerData[steamId]
+    if not record or not record.SimTimes or not record.StdDevList then -- Fixed logic check here
+        record = DefaultPlayerData -- Proper deep copy to avoid shared reference
+        PlayerData[steamId] = record
     end
-
-    local EntityData = record.EntityData or {}
-    EntityData.SimTimes = EntityData.SimTimes or {} -- Initialize SimTimes as an empty queue
 
     local simTime = pEntity:GetSimulationTime()
+    table.insert(record.SimTimes, simTime) -- Add the current simulation time to the queue
 
-    -- Add the current simulation time to the queue
-    table.insert(EntityData.SimTimes, simTime)
-
-    -- If the queue has more than 33 elements, remove the oldest one
-    if #EntityData.SimTimes > 33 then
-        table.remove(EntityData.SimTimes, 1)
+    if #record.SimTimes > 33 then
+        table.remove(record.SimTimes, 1) -- Remove the oldest simulation time if the queue is too long
     end
 
-    -- Calculate the delta ticks for each pair of consecutive simulation times
     local deltaTicks = {}
-    for i = 2, #EntityData.SimTimes do
-        local delta = EntityData.SimTimes[i] - EntityData.SimTimes[i - 1]
+    for i = 2, #record.SimTimes do
+        local delta = record.SimTimes[i] - record.SimTimes[i - 1]
         table.insert(deltaTicks, Conversion.Time_to_Ticks(delta))
     end
 
-    -- Calculate the mean delta tick
-    local totalDeltaTime = 0
-    for i = 1, #deltaTicks do
-        totalDeltaTime = totalDeltaTime + deltaTicks[i]
-    end
-    local meanDeltaTick = totalDeltaTime / #deltaTicks
+    if #deltaTicks < 30 then return false end -- Ensure there are enough delta ticks for analysis
 
-    -- Calculate the standard deviation of the delta ticks
+    local meanDeltaTick = 0
+    for _, deltaTick in ipairs(deltaTicks) do
+        meanDeltaTick = meanDeltaTick + deltaTick
+    end
+    meanDeltaTick = meanDeltaTick / #deltaTicks
+
     local sumOfSquaredDifferences = 0
-    for i = 1, #deltaTicks do
-        local difference = deltaTicks[i] - meanDeltaTick
+    for _, deltaTick in ipairs(deltaTicks) do
+        local difference = deltaTick - meanDeltaTick
         sumOfSquaredDifferences = sumOfSquaredDifferences + difference * difference
     end
+
     local variance = sumOfSquaredDifferences / (#deltaTicks - 1)
     local standardDeviation = math.sqrt(variance)
 
-    -- Update the list of the last 33 standard deviations for this player
-    EntityData.StdDevList = EntityData.StdDevList or {}
-    table.insert(EntityData.StdDevList, 1, standardDeviation)
-    if #EntityData.StdDevList > 33 then
-        table.remove(EntityData.StdDevList)
-    end
-
-    -- Calculate the average of the last 33 standard deviations
-    local sum = 0
-    for i = 1, #EntityData.StdDevList do
-        sum = sum + EntityData.StdDevList[i]
-    end
-    local avgStdDev = sum / #EntityData.StdDevList
-
-    -- Ensure standard deviation is within the range [-132, 132]
+    -- Clamp standard deviation to a minimum of -132 to handle specific check
     standardDeviation = math.max(-132, standardDeviation)
-    standardDeviation = math.min(132, standardDeviation)
 
-    -- Check if the standard deviation of the delta ticks is less than or equal to 0
-    if standardDeviation < 0 then
+    -- Sequence burst detection logic using the clamped standard deviation
+    if standardDeviation == -132 then
         Detections.StrikePlayer("Sequence Burst", entity)
-        return true -- player is bursting packets
+        return true -- Player is using a sequence burst exploit
     end
 
-    record.EntityData = EntityData
-    DataBase[steamId] = record
-    -- Check if the standard deviation of the delta ticks exceeds the maximum choke limit
-    local minChoke = avgStdDev
-    local maxChoke = minChoke + Menu.Main.ChokeDetection.MaxChoke
+    table.insert(record.StdDevList, standardDeviation) -- Update the list of standard deviations
+    if #record.StdDevList > 33 then
+        table.remove(record.StdDevList, 1)
+    end
+
+    local avgStdDev = 0
+    for _, stdDev in ipairs(record.StdDevList) do
+        avgStdDev = avgStdDev + stdDev
+    end
+    avgStdDev = avgStdDev / #record.StdDevList
+
+    local maxChoke = avgStdDev + Menu.Main.ChokeDetection.MaxChoke
     if standardDeviation > maxChoke then
         Detections.StrikePlayer("Choking Packets", entity)
-        return true -- player is choking packets
+        return true -- Player is choking packets
     else
-        return false -- player is not choking packets
+        return false -- Player is not choking packets
     end
 end
 
@@ -417,7 +416,7 @@ local function event_hook(ev)
         --update lastattacker and lastHurtVictim
         shooter = attacker
         HurtVictim = Victim
-        CheckAimbotFlick(HurtVictim , shooter)
+        --CheckAimbotFlick(HurtVictim , shooter)
     end
 end
 
@@ -425,19 +424,13 @@ local function OnTick()
     -- update every tick
     Menu = Visuals.GetMenu()
     local DebugMode = Menu.Main.debug
-    Visuals.SetRuntimeData(DataBaseInput)
+    Visuals.SetRuntimeData(PlayerData)
     DataBase = Config.GetDatabase()
     players = entities.FindByClass("CTFPlayer")
     pLocal = entities.GetLocalPlayer()
     WLocal = WPlayer.FromEntity(pLocal)
     latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
     connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
-
-    -- Check if the DataBase is not nil
-    if not DataBase then
-        Log:Warn("Database is nil")
-        return
-    end
 
     for _, entity in ipairs(players) do
         -- Skip if entity is nil, dormant, dead, or a friend (in non-debug mode)
@@ -448,10 +441,10 @@ local function OnTick()
         -- Get the steamid for the player after the entity check
         local steamid = Detections.GetSteamID(entity)
 
-        -- If the record doesn't exist or doesn't have EntityData, initialize it with defaultRecord
-        if not DataBase[steamid] then
+        -- If the record doesn't exist or doesn't have playerData, initialize it with defaultRecord
+        if not PlayerData[steamid] then
             if steamid then
-                DataBase[steamid] = defaultRecord -- Assuming defaultRecord structure
+                PlayerData[steamid] = defaultRecord -- Assuming defaultRecord structure
             else
                 Log:Warn("Failed to get SteamID for player %s", entity:GetName() or "nil")
                 goto continue
@@ -459,14 +452,14 @@ local function OnTick()
         end
 
         -- Create a local reference to the record
-        local Record = DataBase[steamid]
+        local Record = PlayerData[steamid]
 
-        if not Record.EntityData then
-            Record.EntityData = {}
+        if not Record then
+            Record = defaultRecord
         end
 
         --Skip if player is detected as a cheater
-        if steamid ~= "[U:1:0]" and Config.IsKnownCheater(steamid) then
+        if Config.IsKnownCheater(steamid) then
             --print(Record.Name .. " or ".. entity:GetName() .. " is detected as a cheater")
             goto continue
         end
@@ -475,12 +468,12 @@ local function OnTick()
         local ViewAngles = player:GetEyeAngles()
 
         -- Initialize the AngleHistory table if it doesn't exist
-        Record.EntityData.AngleHistory = Record.EntityData.AngleHistory or {}
+        Record.AngleHistory = Record.AngleHistory or {}
 
         -- Store the player's view angle history
-        table.insert(Record.EntityData.AngleHistory, ViewAngles)
-        if #Record.EntityData.AngleHistory > 6 then
-            table.remove(Record.EntityData.AngleHistory, 1)
+        table.insert(Record.AngleHistory, ViewAngles)
+        if #Record.AngleHistory > 6 then
+            table.remove(Record.AngleHistory, 1)
         end
 
         -- Perform checks on the player
@@ -493,7 +486,7 @@ local function OnTick()
     end
 
     -- Update globals
-    Config.UpdateDataBase(DataBase)
+    Config.UpdateDataBase(DataBase) -- Assuming you have a function to update DataBase
 end
 
 --[[ Unregister previous callbacks ]]--

@@ -62,16 +62,6 @@ end
 --[[ Callbacks ]]
 local function OnUnload() -- Called when the script is unloaded
     if DataBase then
-        -- Check all suspects and erase those without strikes
-        for steamId, record in pairs(Config.GetDatabase()) do
-            print(record.isCheater)
-            if record and record.strikes < 1 then
-                Config.ClearSuspect(steamId)
-            else
-                DataBase[steamId].EntityData = nil -- Sclear entitydata
-            end
-        end
-
         if Menu.Main.debug and pLocal then
             Config.ClearSuspect(Detections.GetSteamID(pLocal)) -- Clear the local if debug is enabled
         end
