@@ -1,16 +1,27 @@
 ---@class Common
 local Common = {}
 
+pcall(UnloadLib) -- if it fails then forget about it it means it wasnt loaded in first place and were clean
+
 ---@type boolean, LNXlib
 local libLoaded, Lib = pcall(require, "LNXlib")
 assert(libLoaded, "LNXlib not found, please install it!")
-assert(Lib.GetVersion() >= 0.94, "LNXlib version is too old, please update it!")
+assert(Lib.GetVersion() >= 1.0, "LNXlib version is too old, please update it!")
 Common.Lib = Lib
-
-Common.Log = Lib.Utils.Logger.new("Lmaobot")
-Common.FS = Lib.Utils.FileSystem
-
+Common.Log = Lib.Utils.Logger.new("Cheater Detection")
+Common.Notify = Lib.UI.Notify
 -- Require Json.lua directly
-Common.Json = require("Cheater_Detection.Json")
+Common.Json = require("Cheater_Detection.Modules.Json")
+
+--[[ Callbacks ]]
+local function OnUnload() -- Called when the script is unloaded
+    UnloadLib() --unloading lualib
+    client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
+end
+
+--[[ Unregister previous callbacks ]]--
+callbacks.Unregister("Unload", "CD_Unload")                                -- unregister the "Unload" callback
+--[[ Register callbacks ]]--
+callbacks.Register("Unload", "CD_Unload", OnUnload)                         -- Register the "Unload" callback
 
 return Common
