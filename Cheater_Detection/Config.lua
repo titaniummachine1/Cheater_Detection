@@ -1,51 +1,14 @@
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Common")
+local G = require("Cheater_Detection.Globals")
 local Config = {}
-
 
 local Log = Common.Log
 local Lib = Common.Lib
-local Notify = Lib.UI.Notify
-local FS = Common.FS  -- Getting FileSystem directly from lnxLib
+local Notify = Common.Notify
 local Json = Common.Json
+local Menu = G.Menu
 Log.Level = 0
-
-local DataBase = {}
-
-local Menu = {
-    Tabs = {
-        Main = true,
-        Visuals = false,
-        playerlist = false,
-    },
-
-    Main = {
-        StrikeLimit = 5,
-        ChokeDetection = {
-            Enable = true,
-            MaxChoke = 7,
-        },
-        BhopDetection = {
-            Enable = true,
-            MaxBhop = 2,
-        },
-        AimbotDetection = {
-            Enable = true,
-            MAXfov = 20,
-        },
-        AntyAimDetection = true,
-        DuckSpeedDetection = true,
-        debug = false,
-    },
-
-    Visuals = {
-        AutoMark = true,
-        partyCallaut = true,
-        Chat_Prefix = true,
-        Cheater_Tags = true,
-        Debug = false,
-    },
-}
 
 local Lua__fullPath = GetScriptName()
 local Lua__fileName = Lua__fullPath:match("\\([^\\]-)$"):gsub("%.lua$", "")
@@ -58,10 +21,13 @@ end
 
 function Config.CreateCFG(table)
     if not table then
-        table = Menu
+        table = G.Default_Menu
     end
+
     local filepath = Config.GetFilePath()
     local file = io.open(filepath, "w")  -- Define the file variable here
+    local filePathstring = tostring(Config.GetFilePath())
+    local shortFilePath = filePathstring:match(".*\\(.*\\.*)$")
 
     if file then
         local function serializeTable(tbl, level)
@@ -89,7 +55,14 @@ function Config.CreateCFG(table)
         local serializedConfig = serializeTable(table)
         file:write(serializedConfig)
         file:close()
-        printc( 255, 183, 0, 255, "["..os.date("%H:%M:%S").."] Saved Config to ".. tostring(Config.GetFilePath()))
+
+        local successMessage = shortFilePath
+        printc(100, 183, 0, 255, "Succes Loading Config: Path:" .. successMessage)
+        Notify.Simple("Success! Saved Config to:", successMessage, 5)
+    else
+        local errorMessage = "Failed to open: " .. tostring(shortFilePath)
+        printc( 255, 0, 0, 255, errorMessage)
+        Notify.Simple("Error", errorMessage, 5)
     end
 end
 
@@ -113,9 +86,10 @@ local function checkAllKeysExist(expectedMenu, loadedMenu)
 end
 
 function Config.LoadCFG()
-    local success, fullPath = filesystem.CreateDirectory(folder_name)
-    local filepath = tostring(fullPath .. "/config.cfg")
+    local filepath = Config.GetFilePath()
     local file = io.open(filepath, "r")
+    local filePathstring = tostring(Config.GetFilePath())
+    local shortFilePath = filePathstring:match(".*\\(.*\\.*)$")
 
     if file then
         local content = file:read("*a")
@@ -123,32 +97,51 @@ function Config.LoadCFG()
         local chunk, err = load("return " .. content)
         if chunk then
             local loadedMenu = chunk()
-            if checkAllKeysExist(Menu, loadedMenu) then
-                printc(0, 255, 140, 255, "["..os.date("%H:%M:%S").."] Loaded Config from ".. tostring(filepath))
-                return loadedMenu
+            if checkAllKeysExist(G.Default_Menu, loadedMenu) and not input.IsButtonDown(KEY_LSHIFT) then
+                local successMessage = shortFilePath
+                printc(100, 183, 0, 255, "Succes Loading Config: Path:" .. successMessage)
+                Notify.Simple("Success! Loaded Config from", successMessage, 5)
+
+                G.Menu = loadedMenu
+            elseif input.IsButtonDown(KEY_LSHIFT) then
+                local warningMessage = "Creating a new config."
+                printc( 255, 0, 0, 255, warningMessage)
+                Notify.Simple("Warning", warningMessage, 5)
+                Config.CreateCFG(G.Default_Menu) -- Save the config
+
+                G.Menu = G.Default_Menu
             else
-                print("Config is outdated or invalid. Creating a new config.")
-                Config.CreateCFG(Menu) -- Save the config
-                return Menu
+                local warningMessage = "Config is outdated or invalid. Creating a new config."
+                printc( 255, 0, 0, 255, warningMessage)
+                Notify.Simple("Warning", warningMessage, 5)
+                Config.CreateCFG(G.Default_Menu) -- Save the config
+
+                G.Menu = G.Default_Menu
             end
         else
-            print("Error executing configuration file:", err)
-            Config.CreateCFG(Menu) -- Save the config
-            return Menu
+            local errorMessage = "Error executing configuration file: " .. tostring(err)
+            printc( 255, 0, 0, 255, errorMessage)
+            Notify.Simple("Error", errorMessage, 5)
+            Config.CreateCFG(G.Default_Menu) -- Save the config
+
+            G.Menu = G.Default_Menu
         end
     else
-        print("Config file not found. Creating a new config.")
-        Config.CreateCFG(Menu) -- Save the config
-        return Menu
+        local warningMessage = "Config file not found. Creating a new config."
+        printc( 255, 0, 0, 255, warningMessage)
+        Notify.Simple("Warning", warningMessage, 5)
+        Config.CreateCFG(G.Default_Menu) -- Save the config
+
+        G.Menu = G.Default_Menu
     end
 end
 
 function Config.UpdateDataBase(DataBaseTable)
-    DataBase = DataBaseTable or {}
+    G.DataBase = DataBaseTable or {}
 end
 
 function Config.SaveDatabase(DataBaseTable)
-    DataBaseTable = DataBaseTable or DataBase or {}
+    DataBaseTable = DataBaseTable or G.DataBase or {}
     local filepath = Config.GetFilePath():gsub("config.cfg", "database.json")
     local file = io.open(filepath, "w")
 
@@ -186,19 +179,17 @@ function Config.LoadDatabase()
             print("Error loading database:", err)
         else
             printc(0, 255, 140, 255, "["..os.date("%H:%M:%S").."] Loaded Database from ".. tostring(filepath))
-            DataBase = loadedDatabase
+            G.DataBase = loadedDatabase
         end
     else
         print("Failed to load database. Creating a new database.")
-        DataBase = {}
+        G.DataBase = {}
         Config.SaveDatabase()
     end
-
-    return DataBase
 end
 
 function Config.IsKnownCheater(steamId)
-    local record = DataBase[steamId]
+    local record = G.DataBase[steamId]
     if record then
         if record.isCheater == true then
             return true
@@ -208,7 +199,7 @@ function Config.IsKnownCheater(steamId)
 end
 
 function Config.GetRecord(steamId)
-    local record = DataBase[steamId]
+    local record = G.DataBase[steamId]
     if record then
         return record
     else
@@ -217,7 +208,7 @@ function Config.GetRecord(steamId)
 end
 
 function Config.GetStrikes(steamId)
-    local record = DataBase[steamId]
+    local record = G.DataBase[steamId]
     if record then
         return record.strikes
     else
@@ -226,7 +217,7 @@ function Config.GetStrikes(steamId)
 end
 
 function Config.GetCause(steamId)
-    local record = DataBase[steamId]
+    local record = G.DataBase[steamId]
     if record then
         return record.cause
     else
@@ -235,7 +226,7 @@ function Config.GetCause(steamId)
 end
 
 function Config.GetDate(steamId)
-    local record = DataBase[steamId]
+    local record = G.DataBase[steamId]
     if record then
         return record.date
     else
@@ -244,21 +235,36 @@ function Config.GetDate(steamId)
 end
 
 function Config.PushSuspect(steamId, data)
-    DataBase[steamId] = data
+    G.DataBase[steamId] = data
 end
 
 function Config.ClearSuspect(steamId)
-    if DataBase[steamId] then
-        DataBase[steamId] = nil
+    if G.DataBase[steamId] then
+        G.DataBase[steamId] = nil
     end
 end
 
-function Config.GetDatabase()
-    return DataBase
+--[[ Callbacks ]]
+local function OnUnload() -- Called when the script is unloaded
+    if G.DataBase then
+        if G.Menu.Main.debug and G.pLocal then
+            Config.ClearSuspect(Detections.GetSteamID(G.pLocal)) -- Clear the local if debug is enabled
+        end
+            Config.SaveDatabase(G.DataBase) -- Save the database
+    else
+        Config.SaveDatabase()
+    end
+
+    Config.CreateCFG(G.Menu) -- Save the configurations
+
+    UnloadLib() --unloading lualib
+    client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
 end
 
-function Config.GetMenu()
-    return Menu
-end
+--[[ Unregister previous callbacks ]]--
+callbacks.Unregister("Unload", "CD_Unload")                                -- unregister the "Unload" callback
+--[[ Register callbacks ]]--
+callbacks.Register("Unload", "CD_Unload", OnUnload)                         -- Register the "Unload" callback
+
 
 return Config
