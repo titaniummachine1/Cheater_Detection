@@ -1,5 +1,6 @@
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Common")
+local G = require("Cheater_Detection.Globals")
 local Config = require("Cheater_Detection.Config")
 local Visuals = {}
 
@@ -42,10 +43,14 @@ end
 local function doDraw()
     draw.SetFont(Fonts.Verdana)
     draw.Color(255, 255, 255, 255)
-    local Main = Menu.Main
+    local Main = G.Menu.Main
 
-        if Menu.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
-            if Menu.debug then
+    if input.IsButtonPressed(KEY_INSERT) then
+        Visuals.toggleMenu() --toggle the menu
+    end
+
+        if G.Menu.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
+            if G.Menu.debug then
                 draw.Color(255, 0, 0, 255)
                 draw.Text(20, 120, "Debug Mode!!! Some Features Might malfunction")
             end
@@ -59,7 +64,7 @@ local function doDraw()
                     local detected = data.isCheater
 
                     if not entity or not entity:IsValid() or entity:IsDormant() or not entity:IsAlive() then goto continue end
-                    if strikes >= math.floor(Menu.StrikeLimit / 2) then
+                    if strikes >= math.floor(G.Menu.StrikeLimit / 2) then
                         local tagText, tagColor
                         local padding = Vector3(0, 0, 7)
                         local headPos = (entity:GetAbsOrigin() + entity:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding
@@ -100,24 +105,24 @@ local function doDraw()
              -- Tabs for different sections
             ImMenu.BeginFrame(1)
                 if ImMenu.Button("Main") then
-                    Menu.Tabs.Main = true
-                    Menu.Tabs.Visuals = false
-                    Menu.Tabs.PlayerList = false
+                    G.Menu.Tabs.Main = true
+                    G.Menu.Tabs.Visuals = false
+                    G.Menu.Tabs.PlayerList = false
                 end
                 if ImMenu.Button("Visuals") then
-                    Menu.Tabs.Main = false
-                    Menu.Tabs.Visuals = true
-                    Menu.Tabs.PlayerList = false
+                    G.Menu.Tabs.Main = false
+                    G.Menu.Tabs.Visuals = true
+                    G.Menu.Tabs.PlayerList = false
                 end
                 if ImMenu.Button("PlayerList") then
-                    Menu.Tabs.Main = false
-                    Menu.Tabs.Visuals = false
-                    Menu.Tabs.PlayerList = true
+                    G.Menu.Tabs.Main = false
+                    G.Menu.Tabs.Visuals = false
+                    G.Menu.Tabs.PlayerList = true
                 end
             ImMenu.EndFrame()
 
             -- Main Section
-            if Menu.Tabs.Main then
+            if G.Menu.Tabs.Main then
                 -- Strike Limit Slider
                 ImMenu.BeginFrame(1)
                     Main.StrikeLimit = ImMenu.Slider("Strikes Limit", Main.StrikeLimit, 4, 17)
@@ -160,15 +165,15 @@ local function doDraw()
             end
 
             -- Visuals Section
-            if Menu.Tabs.Visuals then
+            if G.Menu.Tabs.Visuals then
                 ImMenu.BeginFrame(1)
-                    Menu.Visuals.Cheater_Tags = ImMenu.Checkbox("Draw Tags", Menu.Visuals.Cheater_Tags)
-                    Menu.Visuals.Chat_Prefix = ImMenu.Checkbox("Chat_Prefix", Menu.Visuals.Chat_Prefix)
+                    G.Menu.Visuals.Cheater_Tags = ImMenu.Checkbox("Draw Tags", G.Menu.Visuals.Cheater_Tags)
+                    G.Menu.Visuals.Chat_Prefix = ImMenu.Checkbox("Chat_Prefix", G.Menu.Visuals.Chat_Prefix)
                 ImMenu.EndFrame()
 
                 ImMenu.BeginFrame(1)
-                    Menu.Visuals.partyCallaut = ImMenu.Checkbox("Party Callout", Menu.Visuals.partyCallaut)
-                    Menu.Visuals.AutoMark = ImMenu.Checkbox("Auto Mark", Menu.Visuals.AutoMark)
+                    G.Menu.Visuals.partyCallaut = ImMenu.Checkbox("Party Callout", G.Menu.Visuals.partyCallaut)
+                    G.Menu.Visuals.AutoMark = ImMenu.Checkbox("Auto Mark", G.Menu.Visuals.AutoMark)
                 ImMenu.EndFrame()
             end
 
