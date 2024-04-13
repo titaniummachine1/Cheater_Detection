@@ -38,23 +38,16 @@ function Detections.StrikePlayer(reason, player)
     end
 
     -- Initialize the database if it's nil
-    G.DataBase = G.DataBase or {}
     if not G.PlayerData[steamId]
     or G.PlayerData[steamId] == nil then
         G.PlayerData[steamId] = G.DefaultPlayerData
-    end
-
-    -- If the player is already detected as a cheater, don't strike again
-    if G.DataBase[steamId] or playerlist.GetPriority(player) == 10 then
-        print(string.format("Player %s is already detected as a cheater", player:GetName()))
-        return
     end
 
     -- Increment the player's strikes
     G.PlayerData[steamId].info.Strikes = G.PlayerData[steamId].info.Strikes + 1
 
     -- If less than 66 ticks have passed since the last strike, return immediately
-    if G.PlayerData[steamId].info.LastStrike and globals.TickCount() - G.PlayerData[steamId].info.LastStrike < 66 then
+    if G.PlayerData[steamId].info.LastStrike and globals.TickCount() - G.PlayerData[steamId].info.LastStrike > 66 then
         Log:Warn(string.format("player %s triggerred AC too fast", player:GetName()))
         return
     end
@@ -156,6 +149,12 @@ function Detections.CheckDuckSpeed(player, entity)
         return false
     end
     return false
+end
+
+function Detections.KnownCheater(entity)
+    if playerlist.GetPriority(entity) == 10 then
+        Detections.StrikePlayer("Known Cheater", entity)
+    end
 end
 
 function Detections.CheckBunnyHop(pEntity, entity)

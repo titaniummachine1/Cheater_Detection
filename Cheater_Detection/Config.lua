@@ -314,9 +314,7 @@ function Config.PushSuspect(steamId, data)
 end
 
 function Config.ClearSuspect(steamId)
-    if G.DataBase[steamId] then
-        G.DataBase[steamId] = nil
-    end
+    table.remove(G.DataBase, steamId)
 end
 
 --[[ Callbacks ]]

@@ -22,9 +22,8 @@ local WPlayer, PR = TF2.WPlayer, TF2.PlayerResource
 local Helpers = Common.Helpers
 local Disable = false
 
-if pLocal then --debugging
-    playerlist.SetPriority(pLocal, 0)
-end
+playerlist.SetPriority(G.pLocal, 0)
+
 
 Config.LoadCFG() --load config on load of script
 Config.LoadDatabase() --load database inicialy
@@ -91,6 +90,7 @@ local function OnCreateMove(cmd)
                 Detections.CheckAngles(wrappedPlayer, entity)
                 Detections.CheckDuckSpeed(wrappedPlayer, entity)
                 Detections.CheckBunnyHop(wrappedPlayer, entity)
+                Detections.KnownCheater(entity)
                 --Detections.CheckChoke(wrappedPlayer, entity)
 
                 --[[after detections has run and code ended for this tick update history]]
