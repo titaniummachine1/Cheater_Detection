@@ -80,14 +80,6 @@ local function DrawMenu()
                     end
                 ImMenu.EndFrame()
 
-                -- Max Tick Delta Slider
-                ImMenu.BeginFrame(1)
-                    Main.ChokeDetection.Enable = ImMenu.Checkbox("Choke  ", Main.ChokeDetection.Enable)
-                    if Main.ChokeDetection.Enable == true then
-                        Main.ChokeDetection.MaxChoke = ImMenu.Slider("Max Packet Choke", Main.ChokeDetection.MaxChoke, 0.4, 10, 0.1)
-                    end
-                ImMenu.EndFrame()
-
                 ImMenu.BeginFrame(1)
                     Main.WarpDetection.Enable = ImMenu.Checkbox("Warp Detection  ", Main.WarpDetection.Enable)
                 ImMenu.EndFrame()

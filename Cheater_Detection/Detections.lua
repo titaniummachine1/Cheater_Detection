@@ -94,7 +94,7 @@ function Detections.StrikePlayer(reason, player)
         end
     end
 
-     -- Update LastStrike
+    -- Update LastStrike
     G.PlayerData[steamId].info.LastStrike = globals.TickCount()
 end
 
@@ -201,82 +201,20 @@ function Detections.CheckBunnyHop(pEntity, entity)
     G.PlayerData[steamId].info.LastVelocity.z = vel.z
 end
 
-function Detections.CheckChoke(pEntity, entity)
-    if G.Menu.Main.ChokeDetection.Enable == false then return false end
+function Detections.CheckWarp(pEntity, entity)
+    if G.Menu.Main.WarpDetection.Enable == false then return false end
     local steamId = Common.GetSteamID64(pEntity)
-    if not steamId then
-        Log:Warn("Failed to get SteamID for player %s", pEntity:GetName() or "nil")
-        return false
+
+    if not G.PlayerData[steamId].History then return end
+    if #G.PlayerData[steamId].History < 1 then return end
+
+    local previousSimTime = G.PlayerData[steamId].History[2].SimTime
+    local currentSimTime = pEntity:GetSimulationTime()
+    print(currentSimTime, previousSimTime, #G.PlayerData[steamId].History)
+
+    if currentSimTime < previousSimTime then
+        Detections.StrikePlayer("Dt/Warp", entity)
     end
-
-    if not PlayerData then
-        Log:Warn("PlayerData is nil")
-        PlayerData = {} -- Initialize PlayerData if it's nil
-    end
-
-    local record = PlayerData[steamId]
-    if not record or not record.SimTimes or not record.StdDevList then -- Fixed logic check here
-        record = DefaultPlayerData -- Proper deep copy to avoid shared reference
-        PlayerData[steamId] = record
-    end
-
-    local simTime = pEntity:GetSimulationTime()
-    table.insert(record.SimTimes, simTime) -- Add the current simulation time to the queue
-
-    if #record.SimTimes > 33 then
-        table.remove(record.SimTimes, 1) -- Remove the oldest simulation time if the queue is too long
-    end
-
-    local deltaTicks = {}
-    for i = 2, #record.SimTimes do
-        local delta = record.SimTimes[i] - record.SimTimes[i - 1]
-        table.insert(deltaTicks, Conversion.Time_to_Ticks(delta))
-    end
-
-    if #deltaTicks < 30 then return false end -- Ensure there are enough delta ticks for analysis
-
-    local meanDeltaTick = 0
-    for _, deltaTick in ipairs(deltaTicks) do
-        meanDeltaTick = meanDeltaTick + deltaTick
-    end
-    meanDeltaTick = meanDeltaTick / #deltaTicks
-
-    local sumOfSquaredDifferences = 0
-    for _, deltaTick in ipairs(deltaTicks) do
-        local difference = deltaTick - meanDeltaTick
-        sumOfSquaredDifferences = sumOfSquaredDifferences + difference * difference
-    end
-
-    local variance = sumOfSquaredDifferences / (#deltaTicks - 1)
-    local standardDeviation = math.sqrt(variance)
-
-    -- Clamp standard deviation to a minimum of -132 to handle specific check
-    standardDeviation = math.max(-132, standardDeviation)
-
-    -- Sequence burst detection logic using the clamped standard deviation
-    if standardDeviation == -132 then
-        Detections.StrikePlayer("Sequence Burst", entity)
-        return true -- Player is using a sequence burst exploit
-    end
-
-    table.insert(record.StdDevList, standardDeviation) -- Update the list of standard deviations
-    if #record.StdDevList > 33 then
-        table.remove(record.StdDevList, 1)
-    end
-
-    --[[local avgStdDev = 0
-    for _, stdDev in ipairs(record.StdDevList) do
-        avgStdDev = avgStdDev + stdDev
-    end
-    avgStdDev = avgStdDev / #record.StdDevList
-
-    local maxChoke = avgStdDev + G.Menu.Main.ChokeDetection.MaxChoke
-    if standardDeviation > maxChoke then
-        Detections.StrikePlayer("Choking Packets", entity)
-        return true -- Player is choking packets
-    else
-        return false -- Player is not choking packets
-    end]]
 end
 
 

@@ -91,7 +91,7 @@ local function OnCreateMove(cmd)
                 Detections.CheckDuckSpeed(wrappedPlayer, entity)
                 Detections.CheckBunnyHop(wrappedPlayer, entity)
                 Detections.KnownCheater(entity)
-                --Detections.CheckChoke(wrappedPlayer, entity)
+                --Detections.CheckWarp(wrappedPlayer, entity)
 
                 --[[after detections has run and code ended for this tick update history]]
                 --Initialize the history table if it doesn't exist
