@@ -270,11 +270,9 @@ function Config.importDatabase()
         return
     end
 
-    -- List of expected files to process.
-    local files = {"DataBase.json", "dataBase.json", "playerlist.cheaterfriend.json", "playerlist.group.json", "playerlist.vac.json"}
-
-    for _, file in ipairs(files) do
-        local fullPath = importPath .. file
+    -- Enumerate all files in the import directory
+    filesystem.EnumerateDirectory(importPath, function(filename, attributes)
+        local fullPath = importPath .. filename
         local content = Config.readFromFile(fullPath)
         if content then
             if Common.isJson(content) then
@@ -288,7 +286,7 @@ function Config.importDatabase()
                 Config.processRawIDs(content)
             end
         end
-    end
+    end)
 end
 
 function Config.IsKnownCheater(steamId)
