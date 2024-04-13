@@ -209,6 +209,7 @@ local function CheckAngles(player, entity)
     return false
 end
 
+
 local tick_count = 0
 -- Detects rage pitch (looking up/down too much)
 local function CheckDuckSpeed(player, entity)
@@ -218,25 +219,15 @@ local function CheckDuckSpeed(player, entity)
     local DUCKING = flags & FL_DUCKING == 2
     if OnGround
     and DUCKING then -- detects fake up/down/up/fakedown pitch settigns {lbox]
-        local MaxDuckSpeed = {
-            [1] = 400,
-            [2] = 300,
-            [3] = 240,
-            [4] = 262,
-            [5] = 320,
-            [6] = 77,
-            [7] = 300,
-            [8] = 320,
-            [9] = 300
-        }
+        local MaxDuckSpeed = entity:GetPropFloat("m_flMaxspeed") * 0.66 -- Update MaxSpeed based on the player's current state
 
-        if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed[entity:GetPropInt("m_iClass")] then
+        if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed then
         --and clientstate:GetChokedCommands() > 12 then
             local m_vecViewOffset = math.floor(pLocal:GetPropVector("m_vecViewOffset[0]").z) ; --check if fully crounched
            
             if m_vecViewOffset == 45 then
                 tick_count = tick_count + 1
-                if tick_count >= 8 then
+                if tick_count >= 66 then
                     StrikePlayer("Duck Speed", entity)
                     tick_count = 0
                     return true
@@ -248,6 +239,7 @@ local function CheckDuckSpeed(player, entity)
     end
     return false
 end
+
 
 local function CheckBhop(pEntity, mData, entity)
     if not mData[pEntity] then
