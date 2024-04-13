@@ -26,6 +26,16 @@ function Common.GetSteamID(Player)
     return nil
 end
 
+function Common.FromSteamid32To64(steamid32)
+    return "[U:1:" .. steamid32 .. "]"
+end
+
+-- Helper function to determine if the content is JSON
+function Common.isJson(content)
+    local firstChar = content:sub(1, 1)
+    return firstChar == "{" or firstChar == "["
+end
+
 --[[ Callbacks ]]
 local function OnUnload() -- Called when the script is unloaded
     UnloadLib() --unloading lualib

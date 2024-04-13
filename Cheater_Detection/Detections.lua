@@ -77,7 +77,6 @@ function Detections.StrikePlayer(reason, player)
 
             -- Set player as detected
             record.Name = player:GetName()
-            record.isCheater = true
             record.cause = reason
             record.date = os.date("%Y-%m-%d %H:%M:%S")
 

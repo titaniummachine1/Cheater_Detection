@@ -28,6 +28,7 @@ end
 
 Config.LoadCFG() --load config on load of script
 Config.LoadDatabase() --load database inicialy
+Config.importDatabase() --import the database if needed
 
 --[[ Functions ]]
 local function OnCreateMove(cmd)
