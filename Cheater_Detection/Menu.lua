@@ -20,18 +20,18 @@ local lastToggleTime = 0
 local Lbox_Menu_Open = true
 local toggleCooldown = 0.1  -- 200 milliseconds
 
-function Menu.toggleMenu()
-    local currentTime = globals.RealTime()
-    if currentTime - lastToggleTime >= toggleCooldown then
-        Lbox_Menu_Open = not Lbox_Menu_Open  -- Toggle the state
-        lastToggleTime = currentTime  -- Reset the last toggle time
+function Menu.HandleMenuShow()
+    if input.IsButtonPressed(KEY_INSERT) then
+        local currentTime = globals.RealTime()
+        if currentTime - lastToggleTime >= toggleCooldown then
+            Lbox_Menu_Open = not Lbox_Menu_Open  -- Toggle the state
+            lastToggleTime = currentTime  -- Reset the last toggle time
+        end
     end
 end
 
 local function DrawMenu()
-    if input.IsButtonPressed(KEY_INSERT) then
-        Menu.toggleMenu() --toggle the menu
-    end
+    Menu.HandleMenuShow()
 
     if G.Menu.Main.debug then
         draw.Color(255, 0, 0, 255)
@@ -96,7 +96,7 @@ local function DrawMenu()
                 ImMenu.BeginFrame(1)
                     Main.BhopDetection.Enable = ImMenu.Checkbox("bhop    ", Main.BhopDetection.Enable)
                     if Main.BhopDetection.Enable == true then
-                        Main.BhopDetection.MaxBhop = ImMenu.Slider("Max Bhops", Main.BhopDetection.MaxBhop, 4, 15)
+                        Main.BhopDetection.MaxBhop = ImMenu.Slider("Max Bhops", Main.BhopDetection.MaxBhop, 2, 15)
                     end
                 ImMenu.EndFrame()
 

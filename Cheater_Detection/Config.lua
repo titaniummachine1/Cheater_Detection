@@ -325,7 +325,7 @@ local function OnUnload() -- Called when the script is unloaded
 
     if G.DataBase then
         if G.Menu.Main.debug then
-            Config.ClearSuspect(Common.GetSteamID(G.pLocal)) -- Clear the local if debug is enabled
+            Config.ClearSuspect(Common.GetSteamID64(G.pLocal)) -- Clear the local if debug is enabled
         end
 
         Config.SaveDatabase(G.DataBase) -- Save the database
