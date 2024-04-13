@@ -4,8 +4,7 @@
 
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Common")
-local Config = require("Cheater_Detection.Config")
-local Visuals = require("Cheater_Detection.Visuals")
+local G = require("Cheater_Detection.Globals")
 
 local Lib = Common.Lib
 
@@ -14,66 +13,10 @@ local Math, Conversion = Lib.Utils.Math, Lib.Utils.Conversion
 local WPlayer, WPR = TF2.WPlayer, TF2.WPlayerResource
 local Helpers = Lib.TF2.Helpers
 
--- Unload package for debugging
-Lib.Utils.UnloadPackages("Cheater_Detection")
-
-local Notify, FS, Fonts, Commands, Timer = Lib.UI.Notify, Lib.Utils.FileSystem, Lib.UI.Fonts, Lib.Utils.Commands, Lib.Utils.Timer
-local Log = Lib.Utils.Logger.new("Detections")
-Log.Level = 0
-
 --[[ Variables ]]
 local Detections = {}
--- Declare global variables
-local Menu = nil
-local DataBase = {}
-local players = {}
-local pLocal = nil
-local WLocal = nil
-local latin = nil
-local latout = nil
-local connectionState = nil
-local packetloss = nil
 
 --[[functions ]]
-
-function Detections.GetSteamID(Player)
-    if Player then
-        local playerInfo = client.GetPlayerInfo(Player:GetIndex())
-        local steamID = playerInfo.SteamID
-        if steamID then
-            local steamID64 = steam.ToSteamID64(steamID)
-            return steamID64
-        end
-    end
-    Log.Warn("Failed to get SteamID for player %s", Player:GetName() or "nil")
-    return nil
-end
-
-local PlayerData = {}
-
-local DefaultPlayerData = {
-        SimTimes = {},
-        StdDevList = {},
-        AngleHistory = {},
-        Bhops = 0, -- Counter for consecutive jumps
-        LastOnGround = true, -- Last known ground status
-        LastZVelocity = 0, -- Last known vertical velocity
-        CanJump = false, -- Whether the player was able to jump in the previous iteration
-        -- Add other fields here
-    }
-
-local defaultRecord = {
-    Name = "NN",
-    isCheater = false,
-    cause = "None",
-    date = os.date("%Y-%m-%d %H:%M:%S"),
-    strikes = 0,
-}
-
-function Detections.UpdateData()
-    -- Return all the necessary values
-    return Menu, DataBase, players, pLocal, WLocal, latin, latout, connectionState
-end
 
 local LastStrike = 0
 function Detections.StrikePlayer(reason, player)
@@ -82,7 +25,7 @@ function Detections.StrikePlayer(reason, player)
         return
     end
 
-    local steamId = Detections.GetSteamID(player)
+    local steamId = Common.GetSteamID(player)
     if not steamId then
         Log:Warn("Failed to get SteamID for player %s", player:GetName() or "nil")
         return
@@ -94,7 +37,7 @@ function Detections.StrikePlayer(reason, player)
     end
 
     -- Initialize the player's record if it doesn't exist
-    local record = DataBase[steamId] or { strikes = 0, isCheater = false }
+    local record = G.PlayerData[steamId] or { strikes = 0, isCheater = false }
 
     -- Check if the player is already detected as a cheater
     if record.isCheater == true then
@@ -105,7 +48,7 @@ function Detections.StrikePlayer(reason, player)
     record.strikes = record.strikes + 1 -- Increment strikes 
 
     -- Handle strikes threshold
-    if record.strikes < Menu.Main.StrikeLimit then
+    if record.strikes < G.Menu.Main.StrikeLimit then
         -- If less than 132 ticks have passed since the last strike, return immediately
         if LastStrike and globals.TickCount() - (LastStrike or 0) < 132 then
             Log:Warn("Less than 66 ticks have passed since the last strike for player %s", player:GetName())
@@ -113,10 +56,10 @@ function Detections.StrikePlayer(reason, player)
         end
 
         -- Print message
-        if player and record.strikes == math.floor(Menu.Main.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
+        if player and record.strikes == math.floor(G.Menu.Main.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious \x01(\x04" .. reason.. "\x01)"))
 
-            if Menu.Visuals.AutoMark and player ~= pLocal then
+            if G.Menu.Visuals.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 5)
             end
         end
@@ -128,7 +71,7 @@ function Detections.StrikePlayer(reason, player)
         if player and not record.isCheater then
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-            if Menu.Visuals.partyCallaut == true then
+            if G.Menu.Visuals.partyCallaut == true then
                 client.Command("say_party ".. player:GetName() .." is Cheating " .. "(".. reason.. ")",true);
             end
 
@@ -139,7 +82,7 @@ function Detections.StrikePlayer(reason, player)
             record.date = os.date("%Y-%m-%d %H:%M:%S")
 
             -- Auto mark
-            if Menu.Visuals.AutoMark and player ~= pLocal then
+            if G.Menu.Visuals.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 10)
             end
         else
@@ -158,8 +101,8 @@ function Detections.StrikePlayer(reason, player)
 end
 
 -- Detects rage pitch (looking up/down too much)
-local function CheckAngles(player, entity)
-    if Menu.Main.AntyAimDetection == false then return end
+function Detections.CheckAngles(player, entity)
+    if G.Menu.Main.AntyAimDetection == false then return end
 
     local angles = player:GetEyeAngles()
     if angles.pitch > 89.4 or angles.pitch < -89.4 then --imposible angles
@@ -180,8 +123,8 @@ end
 
 local tick_count = 0
 -- Detects rage pitch (looking up/down too much)
-local function CheckDuckSpeed(player, entity)
-    if Menu.Main.DuckSpeedDetection == false then return end
+function Detections.CheckDuckSpeed(player, entity)
+    if G.Menu.Main.DuckSpeedDetection == false then return end
 
     local angles = player:GetEyeAngles()
     local flags = player:GetPropInt("m_fFlags")
@@ -189,17 +132,6 @@ local function CheckDuckSpeed(player, entity)
     local DUCKING = flags & FL_DUCKING == 2
     if OnGround
     and DUCKING then -- detects fake up/down/up/fakedown pitch settigns {lbox]
-        local MaxDuckSpeed = {
-            [1] = 400,
-            [2] = 300,
-            [3] = 240,
-            [4] = 262,
-            [5] = 320,
-            [6] = 77,
-            [7] = 300,
-            [8] = 320,
-            [9] = 300
-        }
 
         if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed[entity:GetPropInt("m_iClass")] then
         --and clientstate:GetChokedCommands() > 12 then
@@ -220,12 +152,12 @@ local function CheckDuckSpeed(player, entity)
     return false
 end
 
-local function CheckBunnyHop(pEntity, entity)
+function Detections.CheckBunnyHop(pEntity, entity)
     if not Menu.Main.BhopDetection.Enable then
         return -- Early return if bhop detection is disabled or SteamID retrieval failed
     end
 
-    local steamId = Detections.GetSteamID(pEntity)
+    local steamId = Common.GetSteamID(pEntity)
     if not steamId then
         Log:Warn("Failed to get SteamID for player %s", pEntity:GetName() or "nil")
         return
@@ -263,9 +195,9 @@ local function CheckBunnyHop(pEntity, entity)
     record.LastZVelocity = vel.z
 end
 
-local function CheckChoke(pEntity, entity)
+function Detections.CheckChoke(pEntity, entity)
     if Menu.Main.ChokeDetection.Enable == false then return false end
-    local steamId = Detections.GetSteamID(pEntity)
+    local steamId = Common.GetSteamID(pEntity)
     if not steamId then
         Log:Warn("Failed to get SteamID for player %s", pEntity:GetName() or "nil")
         return false
@@ -343,7 +275,7 @@ end
 
 
 -- Function to predict the eye angle two ticks ahead
-local function PredictEyeAngleTwoTicksAhead(idx, currentAngle)
+function Detections.PredictEyeAngleTwoTicksAhead(idx, currentAngle)
     if DataBase[idx].AngleHistory == nil or #DataBase[idx].AngleHistory < 2 then
         return nil
     end
@@ -357,7 +289,7 @@ local function PredictEyeAngleTwoTicksAhead(idx, currentAngle)
 end
 
 -- Function to check for aimbot
-local function CheckAimbotFlick(HurtVictim, shooter)
+function CheckAimbotFlick(HurtVictim, shooter)
     if HurtVictim == nil or shooter == nil then return false end
 
     local idx = shooter:GetIndex()
@@ -400,8 +332,8 @@ local function event_hook(ev)
     if ev:GetName() ~= "player_hurt" then
         -- Get the entities involved in the event
         local attacker = entities.GetByUserID(ev:GetInt("attacker"))
-        if attacker ~= nil and DataBase[Detections.GetSteamID(attacker)] ~= nil
-        and DataBase[Detections.GetSteamID(attacker)].detected == true then return end --skip detected players
+        if attacker ~= nil and DataBase[Common.GetSteamID(attacker)] ~= nil
+        and DataBase[Common.GetSteamID(attacker)].detected == true then return end --skip detected players
         local Victim = entities.GetByUserID(ev:GetInt("userid"))
             if attacker == nil or Victim == nil then return end
             if Menu.Main.debug == false and attacker == pLocal then return end
@@ -419,80 +351,6 @@ local function event_hook(ev)
         --CheckAimbotFlick(HurtVictim , shooter)
     end
 end
-
-local function OnTick()
-    -- update every tick
-    Menu = Visuals.GetMenu()
-    local DebugMode = Menu.Main.debug
-    Visuals.SetRuntimeData(PlayerData)
-    DataBase = Config.GetDatabase()
-    players = entities.FindByClass("CTFPlayer")
-    pLocal = entities.GetLocalPlayer()
-    WLocal = WPlayer.FromEntity(pLocal)
-    latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
-    connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
-
-    for _, entity in ipairs(players) do
-        -- Skip if entity is nil, dormant, dead, or a friend (in non-debug mode)
-        if not entity or entity:IsDormant() or not entity:IsAlive() or (not DebugMode and TF2.IsFriend(entity:GetIndex(), true)) then
-            goto continue
-        end
-
-        -- Get the steamid for the player after the entity check
-        local steamid = Detections.GetSteamID(entity)
-
-        -- If the record doesn't exist or doesn't have playerData, initialize it with defaultRecord
-        if not PlayerData[steamid] then
-            if steamid then
-                PlayerData[steamid] = defaultRecord -- Assuming defaultRecord structure
-            else
-                Log:Warn("Failed to get SteamID for player %s", entity:GetName() or "nil")
-                goto continue
-            end
-        end
-
-        -- Create a local reference to the record
-        local Record = PlayerData[steamid]
-
-        if not Record then
-            Record = defaultRecord
-        end
-
-        --Skip if player is detected as a cheater
-        if Config.IsKnownCheater(steamid) then
-            --print(Record.Name .. " or ".. entity:GetName() .. " is detected as a cheater")
-            goto continue
-        end
-
-        local player = WPlayer.FromEntity(entity)
-        local ViewAngles = player:GetEyeAngles()
-
-        -- Initialize the AngleHistory table if it doesn't exist
-        Record.AngleHistory = Record.AngleHistory or {}
-
-        -- Store the player's view angle history
-        table.insert(Record.AngleHistory, ViewAngles)
-        if #Record.AngleHistory > 6 then
-            table.remove(Record.AngleHistory, 1)
-        end
-
-        -- Perform checks on the player
-        CheckAngles(player, entity)
-        CheckDuckSpeed(player, entity)
-        CheckBunnyHop(player, entity)
-        CheckChoke(player, entity)
-
-        ::continue::
-    end
-
-    -- Update globals
-    Config.UpdateDataBase(DataBase) -- Assuming you have a function to update DataBase
-end
-
---[[ Unregister previous callbacks ]]--
-callbacks.Unregister("CreateMove", "CD_DetectionModule")                     -- unregister the "CreateMove" callback
---[[ Register callbacks ]]--
-callbacks.Register("CreateMove", "CD_DetectionModule", OnTick)        -- register the "CreateMove" callback
 
 callbacks.Unregister("FireGameEvent", "unique_event_hook")                 -- unregister the "FireGameEvent" callback
 callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)         -- register the "FireGameEvent" callback

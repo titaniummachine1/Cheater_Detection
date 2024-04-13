@@ -13,6 +13,19 @@ Common.Notify = Lib.UI.Notify
 -- Require Json.lua directly
 Common.Json = require("Cheater_Detection.Modules.Json")
 
+function Common.GetSteamID(Player)
+    if Player then
+        local playerInfo = client.GetPlayerInfo(Player:GetIndex())
+        local steamID = playerInfo.SteamID
+        if steamID then
+            local steamID64 = steam.ToSteamID64(steamID)
+            return steamID64
+        end
+    end
+    Log.Warn("Failed to get SteamID for player %s", Player:GetName() or "nil")
+    return nil
+end
+
 --[[ Callbacks ]]
 local function OnUnload() -- Called when the script is unloaded
     UnloadLib() --unloading lualib

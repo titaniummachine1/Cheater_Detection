@@ -57,7 +57,7 @@ function Config.CreateCFG(table)
         file:close()
 
         local successMessage = shortFilePath
-        printc(100, 183, 0, 255, "Succes Loading Config: Path:" .. successMessage)
+        printc(100, 183, 0, 255, "Succes Saving Config: Path:" .. successMessage)
         Notify.Simple("Success! Saved Config to:", successMessage, 5)
     else
         local errorMessage = "Failed to open: " .. tostring(shortFilePath)
@@ -136,10 +136,6 @@ function Config.LoadCFG()
     end
 end
 
-function Config.UpdateDataBase(DataBaseTable)
-    G.DataBase = DataBaseTable or {}
-end
-
 function Config.SaveDatabase(DataBaseTable)
     DataBaseTable = DataBaseTable or G.DataBase or {}
     local filepath = Config.GetFilePath():gsub("config.cfg", "database.json")
@@ -189,49 +185,23 @@ function Config.LoadDatabase()
 end
 
 function Config.IsKnownCheater(steamId)
-    local record = G.DataBase[steamId]
-    if record then
-        if record.isCheater == true then
-            return true
-        end
-    end
-    return false
+    return G.DataBase[steamId] ~= nil
 end
 
 function Config.GetRecord(steamId)
-    local record = G.DataBase[steamId]
-    if record then
-        return record
-    else
-        return nil
-    end
+    return G.DataBase[steamId]
 end
 
 function Config.GetStrikes(steamId)
-    local record = G.DataBase[steamId]
-    if record then
-        return record.strikes
-    else
-        return 0
-    end
+    return G.DataBase[steamId].strikes
 end
 
 function Config.GetCause(steamId)
-    local record = G.DataBase[steamId]
-    if record then
-        return record.cause
-    else
-        return nil
-    end
+    return G.DataBase[steamId].cause
 end
 
 function Config.GetDate(steamId)
-    local record = G.DataBase[steamId]
-    if record then
-        return record.date
-    else
-        return nil
-    end
+    return G.DataBase[steamId].date
 end
 
 function Config.PushSuspect(steamId, data)
@@ -246,19 +216,17 @@ end
 
 --[[ Callbacks ]]
 local function OnUnload() -- Called when the script is unloaded
+    Config.CreateCFG(G.Menu) -- Save the configurations
+
     if G.DataBase then
-        if G.Menu.Main.debug and G.pLocal then
-            Config.ClearSuspect(Detections.GetSteamID(G.pLocal)) -- Clear the local if debug is enabled
+        if G.Menu.Main.debug then
+            Config.ClearSuspect(Common.GetSteamID(G.pLocal)) -- Clear the local if debug is enabled
         end
-            Config.SaveDatabase(G.DataBase) -- Save the database
+
+        Config.SaveDatabase(G.DataBase) -- Save the database
     else
         Config.SaveDatabase()
     end
-
-    Config.CreateCFG(G.Menu) -- Save the configurations
-
-    UnloadLib() --unloading lualib
-    client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
 end
 
 --[[ Unregister previous callbacks ]]--
