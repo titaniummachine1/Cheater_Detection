@@ -16,6 +16,7 @@ Common.Math, Common.Conversion = Common.Lib.Utils.Math, Common.Lib.Utils.Convers
 Common.WPlayer, Common.PR = Common.TF2.WPlayer, Common.TF2.PlayerResource
 Common.Helpers = Common.TF2.Helpers
 
+local G = require("Cheater_Detection.Globals")
 -- Require Json.lua directly
 Common.Json = require("Cheater_Detection.Modules.Json")
 
@@ -38,17 +39,46 @@ function Common.GetSteamID64(Player)
     return nil
 end
 
+function Common.IsCheater(steamId)
+    if playerlist.GetPriority(steamId) == 10 then
+        return true
+    end
+
+    -- Check if player is in database or marked as cheater
+    local inDatabase = G.DataBase[steamId] ~= nil
+    local isMarkedCheater = G.PlayerData[steamId] ~= nil and G.PlayerData[steamId].info ~= nil and G.PlayerData[steamId].info.IsCheater == true
+
+    return inDatabase or isMarkedCheater
+end
+
+function Common.IsFriend(entity)
+    return (not G.Menu.Main.debug and TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a valid player
+end
+
+function Common.IsValidPlayer(entity, checkFriend)
+    -- Check if the entity is a valid player
+    if not entity or entity:IsDormant() or not entity:IsAlive() then
+        return false -- Entity is not a valid player
+    end
+
+    if checkFriend and Common.IsFriend(entity) then
+        return false -- Entity is a friend, skip
+    end
+
+    return true -- Entity is a valid player
+end
+
 -- Create a common record structure
 function Common.createRecord(angle, position, headHitbox, bodyHitbox, simTime, onGround)
     return {
         Angle = angle,
-        Position = position,
+        ViewPos = position,
         Hitboxes = {
         Head = headHitbox,
             Body = bodyHitbox,
         },
         SimTime = simTime,
-        onGround = onGround
+        onGround = onGround,
     }
 end
 

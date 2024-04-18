@@ -289,10 +289,6 @@ function Config.importDatabase()
     end)
 end
 
-function Config.IsKnownCheater(steamId)
-    return G.DataBase[steamId] ~= nil
-end
-
 function Config.GetRecord(steamId)
     return G.DataBase[steamId]
 end
@@ -314,7 +310,15 @@ function Config.PushSuspect(steamId, data)
 end
 
 function Config.ClearSuspect(steamId)
-    if G.DataBase[steamId] then table.remove(G.DataBase, steamId) end
+    local status, err = pcall(function()
+        if G.DataBase[steamId] then 
+            G.DataBase[steamId] = nil
+        end
+    end)
+
+    if not status then
+        print("Failed to clear suspect: " .. err)
+    end
 end
 
 --[[ Callbacks ]]

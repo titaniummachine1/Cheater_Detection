@@ -13,6 +13,7 @@ local G = require("Cheater_Detection.Globals")
 local Config = require("Cheater_Detection.Config")
 local Detections = require("Cheater_Detection.Detections")
 require("Cheater_Detection.Visuals") --wake up the visuals
+require("Cheater_Detection.Modules.EventHandler") --wake up the visuals
 local Menu = require("Cheater_Detection.Menu")--wake up the menu
 
 --[[ Variables ]]
@@ -46,33 +47,19 @@ local function OnCreateMove(cmd)
     --if Disable then return end --temporary disable
 
     for _, entity in ipairs(G.players) do
-        local skip = false
-
-        -- Skip if entity is nil, dormant, dead, or a friend (in non-debug mode)
-        if not entity or entity:IsDormant() or not entity:IsAlive() or (not DebugMode and TF2.IsFriend(entity:GetIndex(), true)) then
-            skip = true
-        end
-
         -- Get the steamid for the player
         local steamid = Common.GetSteamID64(entity)
         if not steamid then
             Log:Warn("Failed to get SteamID for player %s", entity:GetName() or "nil")
-            skip = true
         end
 
-        if not skip and steamid then
+        if steamid and Common.IsValidPlayer(entity, false) then
             -- If the record doesn't exist or doesn't have playerData, initialize it with defaultRecord
-            if not G.PlayerData[steamid] then
+            if steamid and not G.PlayerData[steamid] then
                 G.PlayerData[steamid] = G.DefaultPlayerData -- Assuming defaultRecord structure
             end
 
-            --Skip if player is detected as a cheater
-            if Config.IsKnownCheater(steamid) then
-                --print(G.PlayerData[steamid].Name .. " or ".. entity:GetName() .. " is detected as a cheater")
-                skip = true
-            end
-
-            if not skip then
+            if not skip or not steamid then
                 -- Get the player and entity properties
                 local wrappedPlayer = WPlayer.FromEntity(entity)
                 local viewAngles = wrappedPlayer:GetEyeAngles()
@@ -80,18 +67,23 @@ local function OnCreateMove(cmd)
                 local isOnGround = entityFlags & FL_ONGROUND == 1
                 local headHitboxPosition = wrappedPlayer:GetHitboxPos(1)
                 local bodyHitboxPosition = wrappedPlayer:GetHitboxPos(4)
-                local entityPosition = entity:GetAbsOrigin()
+                local ViewPos = wrappedPlayer:GetEyePos()
                 local simulationTime = wrappedPlayer:GetSimulationTime()
 
-                -- Initialize the current record if it doesn't exist
-                G.PlayerData[steamid].Current = G.PlayerData[steamid].Current or Common.createRecord(viewAngles, entityPosition, headHitboxPosition, bodyHitboxPosition, simulationTime, isOnGround)
+                --dont try to detect already detected player
+                if not Common.IsCheater(steamid) and not Common.IsFriend(entity) then
+                    -- Initialize the current record
+                    G.PlayerData[steamid].Current = Common.createRecord(viewAngles, ViewPos, headHitboxPosition, bodyHitboxPosition, simulationTime, isOnGround)
 
-                -- Perform checks on the player
-                Detections.CheckAngles(wrappedPlayer, entity)
-                Detections.CheckDuckSpeed(wrappedPlayer, entity)
-                Detections.CheckBunnyHop(wrappedPlayer, entity)
-                Detections.KnownCheater(entity)
-                --Detections.CheckWarp(wrappedPlayer, entity)
+                    -- Perform checks on the player
+                    Detections.CheckAngles(wrappedPlayer, entity)
+                    Detections.CheckDuckSpeed(wrappedPlayer, entity)
+                    Detections.CheckBunnyHop(wrappedPlayer, entity)
+                    Detections.CheckPacketManipulation(wrappedPlayer, entity)
+                else
+                    -- Initialize the current record with just backtrack data
+                    G.PlayerData[steamid].Current = Common.createRecord(nil, nil, headHitboxPosition, bodyHitboxPosition, simulationTime, nil)
+                end
 
                 --[[after detections has run and code ended for this tick update history]]
                 --Initialize the history table if it doesn't exist
@@ -100,8 +92,8 @@ local function OnCreateMove(cmd)
                 -- Insert the new current record into the history table
                 table.insert(G.PlayerData[steamid].History, G.PlayerData[steamid].Current)
 
-                -- Keep the history table size to a maximum of 6
-                if #G.PlayerData[steamid].History > 6 then
+                -- Keep the history table size to a maximum of 66
+                if #G.PlayerData[steamid].History > 66 then
                     table.remove(G.PlayerData[steamid].History, 1)
                 end
             end

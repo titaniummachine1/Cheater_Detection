@@ -6,7 +6,6 @@ local Globals = {}
 --- @alias PlayerCurrent { Angle: EulerAngles, Position: Vector3, SimTime: number }
 --- @alias PlayerState { Strikes: number, IsCheater: boolean }
 --- @alias Globals.PlayerData table<number, { Entity: any, History: PlayerHistory, Current: PlayerCurrent, Info: PlayerState }>
-Globals.PlayerData = {}
 Globals.DefaultPlayerData = {
     Entity = nil,
         info = {
@@ -18,7 +17,8 @@ Globals.DefaultPlayerData = {
             LastStrike = globals.TickCount(),
             bhop = 0,
             LastOnGround = true,
-            LastVelocity = Vector3(0,0,0)
+            LastVelocity = Vector3(0,0,0),
+            Class = 2,
         },
 
         Current = {
@@ -29,6 +29,7 @@ Globals.DefaultPlayerData = {
             },
             SimTime = 0,
             onGround = true,
+            FiredGun = 0,
         },
 
         History = {
@@ -39,12 +40,13 @@ Globals.DefaultPlayerData = {
                     Body = Vector3(0,0,0),
                 },
                 SimTime = 0,
-                onGround = true
+                onGround = true,
+                StdDev = 1,
+                FiredGun = 0,
             },
         },
 }
 
---layout of the playerdata
 Globals.PlayerData = {}
 
 --[[Shared Varaibles]]
@@ -73,7 +75,7 @@ Globals.Default_Menu = {
         StrikeLimit = 5,
         ChokeDetection = {
             Enable = true,
-            MaxChoke = 7,
+            MaxChoke = 22,
         },
         WarpDetection = {
             Enable = true,

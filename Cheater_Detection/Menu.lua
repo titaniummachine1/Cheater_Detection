@@ -1,5 +1,6 @@
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Common")
+--local FileBrowser = require("Cheater_Detection.Modules.FileBrowser")
 local G = require("Cheater_Detection.Globals")
 local Config = require("Cheater_Detection.Config")
 
@@ -81,7 +82,10 @@ local function DrawMenu()
                 ImMenu.EndFrame()
 
                 ImMenu.BeginFrame(1)
-                    Main.WarpDetection.Enable = ImMenu.Checkbox("Warp Detection  ", Main.WarpDetection.Enable)
+                    Main.ChokeDetection.Enable = ImMenu.Checkbox("Choke Detection ", Main.ChokeDetection.Enable)
+                    if Main.ChokeDetection.Enable == true then
+                        Main.ChokeDetection.MaxChoke = ImMenu.Slider("Max Packet Choke ", Main.ChokeDetection.MaxChoke, 7, 22)
+                    end
                 ImMenu.EndFrame()
 
                 -- Enable_bhopcheck
@@ -154,6 +158,9 @@ local function DrawMenu()
                     end
                 end
             end]]
+
+            -- File Browser Section
+            --local selectedFile = ImMenu.FileBrowser()
             ImMenu.End()
         end
     end

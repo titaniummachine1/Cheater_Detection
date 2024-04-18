@@ -10,7 +10,7 @@ local Lib = Common.Lib
 local Notify = Lib.UI.Notify
 local Fonts = Lib.UI.Fonts
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
-local Disable = true
+local Disable = false
 
 --[[ Functions ]]
 
@@ -22,7 +22,6 @@ local function DrawVisuals()
 
             if Disable then return end --temporary disable for visuals
 
-            if RuntimeData then
                 for steamId, data in pairs(RuntimeData) do
                     local entity = data.EntityData.entity
                     local strikes = data.strikes
@@ -63,7 +62,6 @@ local function DrawVisuals()
                     end
                     ::continue::
                 end
-            end
         end
     end
 

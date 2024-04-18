@@ -17,9 +17,6 @@ local Helpers = Common.Helpers
 local Log = Common.Log
 Log.Level = 0
 
---[[ Variables ]]
-local LastStrike = 0
-
 --[[functions ]]
 
 function Detections.StrikePlayer(reason, player)
@@ -46,16 +43,12 @@ function Detections.StrikePlayer(reason, player)
     -- Increment the player's strikes
     G.PlayerData[steamId].info.Strikes = G.PlayerData[steamId].info.Strikes + 1
 
-    -- If less than 66 ticks have passed since the last strike, return immediately
-    if G.PlayerData[steamId].info.LastStrike and globals.TickCount() - G.PlayerData[steamId].info.LastStrike > 66 then
-        Log:Warn(string.format("player %s triggerred AC too fast", player:GetName()))
-        return
-    end
-
     -- If the player has reached the strike limit, mark them as a cheater
     if G.PlayerData[steamId].info.Strikes >= G.Menu.Main.StrikeLimit then
         -- If the player is not already marked as a cheater, print a cheating message
-        if not G.PlayerData[steamId].info.isCheater then
+        if G.PlayerData[steamId].info.isCheater and Common.IsCheater(steamId) and G.DataBase[steamId] then
+            print(string.format("Player %s is already marked as cheater", player:GetName()))
+        else
             print(string.format("[CD] %s is cheating", player:GetName()))
             client.ChatPrintf(string.format("\x04[CD] \x03%s \x01is\x07ff0019 Cheating\x01! \x01(\x04%s\x01)", player:GetName(), reason))
             if G.Menu.Visuals.partyCallaut then
@@ -81,10 +74,14 @@ function Detections.StrikePlayer(reason, player)
             if G.Menu.Visuals.AutoMark and player ~= pLocal then
                 playerlist.SetPriority(player, 10)
             end
-        else
-            print(string.format("Player %s is already marked as cheater", player:GetName()))
         end
     elseif G.PlayerData[steamId].info.Strikes == math.floor(G.Menu.Main.StrikeLimit / 2) then
+        -- If less than 66 ticks have passed since the last strike, return immediately
+        if G.PlayerData[steamId].info.LastStrike and (globals.TickCount() - G.PlayerData[steamId].info.LastStrike) < 66 then
+            Log:Warn(string.format("player %s triggered AC too fast", player:GetName()))
+            return
+        end
+
         -- If the player has reached half the strike limit, print a suspicious message
         client.ChatPrintf(string.format("\x04[CD] \x03%s\x01 is \x07ffd500Suspicious \x01(\x04%s\x01)", player:GetName(), reason))
 
@@ -152,8 +149,9 @@ function Detections.CheckDuckSpeed(player, entity)
 end
 
 function Detections.KnownCheater(entity)
-    if playerlist.GetPriority(entity) == 10 then
+    if Common.IsCheater(Common.GetSteamID64(entity)) then
         Detections.StrikePlayer("Known Cheater", entity)
+        return
     end
 end
 
@@ -201,19 +199,46 @@ function Detections.CheckBunnyHop(pEntity, entity)
     G.PlayerData[steamId].info.LastVelocity.z = vel.z
 end
 
-function Detections.CheckWarp(pEntity, entity)
-    if G.Menu.Main.WarpDetection.Enable == false then return false end
+function Detections.CheckPacketManipulation(pEntity, entity)
+    if G.Menu.Main.ChokeDetection.Enable == false then return false end
     local steamId = Common.GetSteamID64(pEntity)
 
     if not G.PlayerData[steamId].History then return end
-    if #G.PlayerData[steamId].History < 1 then return end
+    if #G.PlayerData[steamId].History < 66 then return end
 
-    local previousSimTime = G.PlayerData[steamId].History[2].SimTime
-    local currentSimTime = pEntity:GetSimulationTime()
-    print(currentSimTime, previousSimTime, #G.PlayerData[steamId].History)
+    local simTimeDiffs = {}
+    for i = 2, #G.PlayerData[steamId].History do
+        local diff = G.PlayerData[steamId].History[i].SimTime - G.PlayerData[steamId].History[i-1].SimTime
+        local diffInTicks = Common.Conversion.Time_to_Ticks(diff)
+        table.insert(simTimeDiffs, diffInTicks)
+    end
 
-    if currentSimTime < previousSimTime then
-        Detections.StrikePlayer("Dt/Warp", entity)
+    -- Get the threshold from the menu
+    local threshold = G.Menu.Main.ChokeDetection.MaxChoke
+
+    -- Check if any of the simulation time differences exceed the threshold and equal to the time it took for another anomaly to occur
+    local lastAnomalyTick = 0
+    for i, diffInTicks in ipairs(simTimeDiffs) do
+        if diffInTicks > threshold then
+            if i - lastAnomalyTick == diffInTicks then
+                Detections.StrikePlayer("Packet Choke", entity)
+                break
+            end
+            lastAnomalyTick = i
+        end
+    end
+
+    -- Check if any of the simulation time differences are zero or negative and equal to the time it took for another anomaly to occur
+    lastAnomalyTick = 0
+    for i, diffInTicks in ipairs(simTimeDiffs) do
+        if diffInTicks < 0 then
+            print("anomal".. diffInTicks)
+            if i - lastAnomalyTick == -diffInTicks then
+                Detections.StrikePlayer("Dt/Warp", entity)
+                break
+            end
+            lastAnomalyTick = i
+        end
     end
 end
 
@@ -269,34 +294,5 @@ function CheckAimbotFlick(HurtVictim, shooter)
 
     return true
 end
-
--- Event hook function
-local function event_hook(ev)
-    -- Return if the event is not a player hurt event
-    if ev:GetName() ~= "player_hurt" then
-        -- Get the entities involved in the event
-        local attacker = entities.GetByUserID(ev:GetInt("attacker"))
-        if attacker ~= nil and DataBase[Common.GetSteamID64(attacker)] ~= nil
-        and DataBase[Common.GetSteamID64(attacker)].detected == true then return end --skip detected players
-        local Victim = entities.GetByUserID(ev:GetInt("userid"))
-            if attacker == nil or Victim == nil then return end
-            if G.Menu.Main.debug == false and attacker == pLocal then return end
-            if G.Menu.Main.debug == false and TF2.IsFriend(attacker:GetIndex(), true) then return end
-            if playerlist.GetPriority(attacker) == 10 then return end
-            if attacker:IsDormant() then return end
-            if Victim:IsDormant() then return end
-            if not attacker:IsAlive() then return end
-            local pWeapon = attacker:GetPropEntity("m_hActiveWeapon")
-            if pWeapon:GetWeaponProjectileType() ~= 1 then return end --skip projectile weapons
-        --print("pass")
-        --update lastattacker and lastHurtVictim
-        shooter = attacker
-        HurtVictim = Victim
-        --CheckAimbotFlick(HurtVictim , shooter)
-    end
-end
-
-callbacks.Unregister("FireGameEvent", "unique_event_hook")                 -- unregister the "FireGameEvent" callback
-callbacks.Register("FireGameEvent", "unique_event_hook", event_hook)         -- register the "FireGameEvent" callback
 
 return Detections
