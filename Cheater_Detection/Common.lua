@@ -39,7 +39,42 @@ function Common.GetSteamID64(Player)
     return nil
 end
 
-function Common.IsCheater(steamId)
+function Common.IsCheater(playerInfo)
+    local steamId = nil
+
+    if type(playerInfo) == "number" and playerInfo < 101 then --we got index not steamid
+        -- If playerInfo is a number, convert it to a string and check its length
+        local steamIdStr = tostring(playerInfo)
+        if #steamIdStr == 17 then
+            -- If the string representation of playerInfo is 17 characters long, it's a valid SteamID64
+            steamId = playerInfo
+        else
+            local targetIndex = playerInfo -- assuming playerInfo is the index
+            local targetPlayer = nil
+            for _, player in ipairs(G.players) do
+                if player:GetIndex() == targetIndex then
+                    targetPlayer = player
+                    break
+                end
+            end
+            -- Now targetPlayer is the player with the same index, or nil if no such player was found
+            steamId = Common.GetSteamID64(targetPlayer)
+        end
+    elseif type(playerInfo) == "number" then
+        -- If playerInfo is a number, convert it to a string and check its length
+        local steamIdStr = tostring(playerInfo)
+        if #steamIdStr == 17 then
+            -- If the string representation of playerInfo is 17 characters long, it's a valid SteamID64
+            steamId = playerInfo
+        end
+    elseif playerInfo.GetIndex then
+        -- If playerInfo is a player entity, get its SteamID64
+        steamId = Common.GetSteamID64(playerInfo)
+    else
+        -- If playerInfo is neither a valid index, a valid SteamID64, nor a player entity, return false
+        return false
+    end
+
     if playerlist.GetPriority(steamId) == 10 then
         return true
     end
@@ -52,7 +87,7 @@ function Common.IsCheater(steamId)
 end
 
 function Common.IsFriend(entity)
-    return (not G.Menu.Main.debug and TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a valid player
+    return (not G.Menu.Main.debug and TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
 end
 
 function Common.IsValidPlayer(entity, checkFriend)

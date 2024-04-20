@@ -199,7 +199,7 @@ function Detections.CheckBunnyHop(pEntity, entity)
     G.PlayerData[steamId].info.LastVelocity.z = vel.z
 end
 
-function Detections.CheckPacketManipulation(pEntity, entity)
+function Detections.CheckPacketChoke(pEntity, entity)
     if G.Menu.Main.ChokeDetection.Enable == false then return false end
     local steamId = Common.GetSteamID64(pEntity)
 

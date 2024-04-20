@@ -14,6 +14,7 @@ local Config = require("Cheater_Detection.Config")
 local Detections = require("Cheater_Detection.Detections")
 require("Cheater_Detection.Visuals") --wake up the visuals
 require("Cheater_Detection.Modules.EventHandler") --wake up the visuals
+require("Cheater_Detection.Modules.AutoVote") --wake up the visuals
 local Menu = require("Cheater_Detection.Menu")--wake up the menu
 
 --[[ Variables ]]
@@ -79,7 +80,7 @@ local function OnCreateMove(cmd)
                     Detections.CheckAngles(wrappedPlayer, entity)
                     Detections.CheckDuckSpeed(wrappedPlayer, entity)
                     Detections.CheckBunnyHop(wrappedPlayer, entity)
-                    Detections.CheckPacketManipulation(wrappedPlayer, entity)
+                    Detections.CheckPacketChoke(wrappedPlayer, entity)
                 else
                     -- Initialize the current record with just backtrack data
                     G.PlayerData[steamid].Current = Common.createRecord(nil, nil, headHitboxPosition, bodyHitboxPosition, simulationTime, nil)

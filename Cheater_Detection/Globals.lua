@@ -48,6 +48,12 @@ Globals.DefaultPlayerData = {
 }
 
 Globals.PlayerData = {}
+Globals.AutoVote = {
+    Options = { 'Yes', 'No' },
+    VoteCommand = 'vote',
+    VoteIdx = nil,
+    VoteValue = nil, -- Set this to 1 for yes, 2 for no, or nil for off
+}
 
 --[[Shared Varaibles]]
 Globals.DataBase = {}
@@ -88,6 +94,7 @@ Globals.Default_Menu = {
             Enable = true,
             MAXfov = 20,
         },
+        AutoVote = false,
         AntyAimDetection = true,
         DuckSpeedDetection = true,
         debug = false,
@@ -98,6 +105,21 @@ Globals.Default_Menu = {
         partyCallaut = true,
         Chat_Prefix = true,
         Cheater_Tags = true,
+        Vote_Reveal = {
+            Enable = true,
+            TargetTeam = {
+                MyTeam = false,
+                enemyTeam = true,
+            },
+            PartyChat = true,
+            Console = true,
+        },
+        Class_Change_Reveal = {
+            Enable = true,
+            EnemyOnly = true,
+            PartyChat = true,
+            Console = true,
+        },
         Debug = false,
     },
 }
