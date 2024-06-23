@@ -235,19 +235,98 @@ function Detections.CheckPacketChoke(pEntity, entity)
             lastAnomalyTick = i
         end
     end
+end
 
-    --[[ Check if any of the simulation time differences are zero or negative and equal to the time it took for another anomaly to occur
-    lastAnomalyTick = 0
-    for i, diffInTicks in ipairs(simTimeDiffs) do
-        if diffInTicks < -10 then
-            print("anomal".. diffInTicks)
-            if i - lastAnomalyTick == -diffInTicks then
-                Detections.StrikePlayer("Dt/Warp", entity)
-                break
-            end
-            lastAnomalyTick = i
+function Detections.CheckSequenceBurst(pEntity, entity)
+    if not G.Menu.Main.WarpDetection.Enable then return false end
+
+    local steamId = Common.GetSteamID64(pEntity)
+    if not steamId then
+        Log:Warn("Failed to get SteamID for player %s", pEntity:GetName() or "nil")
+        return false
+    end
+
+    -- Initialize PlayerData if it's nil
+    G.PlayerData = G.PlayerData or {}
+
+    -- Initialize record for the player if it doesn't exist
+    local record = G.PlayerData[steamId]
+    if not record then
+        record = table.deepcopy(G.DefaultPlayerData)
+        G.PlayerData[steamId] = record
+    end
+
+    -- Initialize SimTimes and StdDevList if they don't exist
+    record.SimTimes = record.SimTimes or {}
+    record.StdDevList = record.StdDevList or {}
+
+    local simTime = pEntity:GetSimulationTime()
+    table.insert(record.SimTimes, simTime) -- Add the current simulation time to the queue
+
+    if #record.SimTimes > 33 then
+        table.remove(record.SimTimes, 1) -- Remove the oldest simulation time if the queue is too long
+    end
+
+    local deltaTicks = {}
+    for i = 2, #record.SimTimes do
+        local delta = record.SimTimes[i] - record.SimTimes[i - 1]
+        table.insert(deltaTicks, Conversion.Time_to_Ticks(delta))
+    end
+
+    if #deltaTicks < 30 then return false end -- Ensure there are enough delta ticks for analysis
+
+    local meanDeltaTick = 0
+    for _, deltaTick in ipairs(deltaTicks) do
+        meanDeltaTick = meanDeltaTick + deltaTick
+    end
+    meanDeltaTick = meanDeltaTick / #deltaTicks
+
+    local sumOfSquaredDifferences = 0
+    for _, deltaTick in ipairs(deltaTicks) do
+        local difference = deltaTick - meanDeltaTick
+        sumOfSquaredDifferences = sumOfSquaredDifferences + difference * difference
+    end
+
+    local variance = sumOfSquaredDifferences / (#deltaTicks - 1)
+    local standardDeviation = math.sqrt(variance)
+
+    -- Clamp standard deviation to a minimum of -132 to handle specific check
+    standardDeviation = math.max(-132, standardDeviation)
+
+    -- Check if the current tick interval is faster than the expected interval
+    local currentTickCount = globals.TickCount()
+    local currentOsTime = os.time()
+
+    if not record.LastTickCount or not record.LastOsTime then
+        record.LastTickCount = currentTickCount
+        record.LastOsTime = currentOsTime
+    else
+        local tickInterval = globals.TickInterval()
+        local expectedTickCountInterval = (currentOsTime - record.LastOsTime) / tickInterval
+
+        if (currentTickCount - record.LastTickCount) < expectedTickCountInterval then
+            Log:Warn("Detected faster tick interval, possible time warp detected for player %s", pEntity:GetName() or "nil")
+            record.LastTickCount = currentTickCount
+            record.LastOsTime = currentOsTime
+            return false -- The Lua script running person may be warping time, do not strike for sequence burst
         end
-    end]]
+
+        record.LastTickCount = currentTickCount
+        record.LastOsTime = currentOsTime
+    end
+
+    -- Sequence burst detection logic using the clamped standard deviation
+    if standardDeviation == -132 then
+        Detections.StrikePlayer("Sequence Burst", entity)
+        return true -- Player is using a sequence burst exploit
+    end
+
+    table.insert(record.StdDevList, standardDeviation) -- Update the list of standard deviations
+    if #record.StdDevList > 33 then
+        table.remove(record.StdDevList, 1)
+    end
+
+    return false -- Player is not using a sequence burst exploit
 end
 
 

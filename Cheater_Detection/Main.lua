@@ -75,7 +75,8 @@ local function OnCreateMove(cmd)
             Detections.CheckDuckSpeed(wrappedPlayer, entity)
             Detections.CheckBunnyHop(wrappedPlayer, entity)
             Detections.CheckPacketChoke(wrappedPlayer, entity)
-            Detections.rtrue(entity) --debug
+            Detections.CheckSequenceBurst(wrappedPlayer, entity)
+            --Detections.rtrue(entity) --debug
 
             -- Update history
             G.PlayerData[steamid].History = G.PlayerData[steamid].History or {}
