@@ -5,7 +5,8 @@ local Detections = {}
 
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Common")
-local Config = require("Cheater_Detection.Config")
+local Database = require("Cheater_Detection.Database")
+local WorkManager = require("Cheater_Detection.WorkManager")
 local G = require("Cheater_Detection.Globals")
 
 local Lib = Common.Lib
@@ -29,70 +30,78 @@ function Detections.StrikePlayer(reason, player)
     -- Get the player's SteamID
     local steamId = Common.GetSteamID64(player)
     if not steamId then
-        local errormsg = ("Failed to get SteamID for player: " ..  (player:GetName() or "nil"))
+        local errormsg = ("Failed to get SteamID for player: " .. (player:GetName() or "nil"))
         error(errormsg)
         return
     end
 
     -- Initialize the database if it's nil
-    if not G.PlayerData[steamId]
-    or G.PlayerData[steamId] == nil then
+    if not G.PlayerData[steamId] or G.PlayerData[steamId] == nil then
         G.PlayerData[steamId] = G.DefaultPlayerData
     end
 
-    -- Increment the player's strikes
-    G.PlayerData[steamId].info.Strikes = G.PlayerData[steamId].info.Strikes + 1
-
-    -- If the player has reached the strike limit, mark them as a cheater
-    if G.PlayerData[steamId].info.Strikes >= G.Menu.Main.StrikeLimit then
-        -- If the player is not already marked as a cheater, print a cheating message
-        if G.PlayerData[steamId].info.isCheater and Common.IsCheater(steamId) and G.DataBase[steamId] then
-            print(string.format("Player %s is already marked as cheater", player:GetName()))
-        else
-            print(string.format("[CD] %s is cheating", player:GetName()))
-            client.ChatPrintf(string.format("\x04[CD] \x03%s \x01is\x07ff0019 Cheating\x01! \x01(\x04%s\x01)", player:GetName(), reason))
-            if G.Menu.Visuals.partyCallaut then
-                client.Command(string.format("say_party %s is Cheating (%s)", player:GetName(), reason), true)
-            end
-
-            -- Update the player's record
-            G.PlayerData[steamId].info.Name = player:GetName()
-            G.PlayerData[steamId].info.Cause = reason
-            G.PlayerData[steamId].info.Date = os.date("%Y-%m-%d %H:%M:%S")
-            G.PlayerData[steamId].info.LastDetectionTime = globals.TickCount()
-            G.PlayerData[steamId].info.isCheater = true
-
-            G.DataBase[steamId] = G.defaultRecord
-            G.DataBase[steamId].Name = player:GetName()
-            G.DataBase[steamId].Cause = reason
-            G.DataBase[steamId].Date = os.date("%Y-%m-%d %H:%M:%S")
-
-            -- Save the database to a file
-            Config.SaveDatabase(G.DataBase)
-
-            -- Auto mark
-            if G.Menu.Visuals.AutoMark and player ~= pLocal then
-                playerlist.SetPriority(player, 10)
-            end
-        end
-    elseif G.PlayerData[steamId].info.Strikes == math.floor(G.Menu.Main.StrikeLimit / 2) then
-        -- If less than 66 ticks have passed since the last strike, return immediately
-        if G.PlayerData[steamId].info.LastStrike and (globals.TickCount() - G.PlayerData[steamId].info.LastStrike) < 66 then
-            Log:Warn(string.format("player %s triggered AC too fast", player:GetName()))
-            return
-        end
-
-        -- If the player has reached half the strike limit, print a suspicious message
-        client.ChatPrintf(string.format("\x04[CD] \x03%s\x01 is \x07ffd500Suspicious \x01(\x04%s\x01)", player:GetName(), reason))
-
-        -- Auto mark
-        if G.Menu.Visuals.AutoMark and player ~= pLocal then
-            playerlist.SetPriority(player, 5)
-        end
+    -- Check if the player can be struck again
+    if not WorkManager.attemptWork(11, tostring(steamId)) then
+        --Log:Warn(string.format("Player %s triggered AC too fast", player:GetName()))
+        return
     end
 
-    -- Update LastStrike
-    G.PlayerData[steamId].info.LastStrike = globals.TickCount()
+    -- Function to execute the strike logic
+    local function executeStrike()
+        -- Increment the player's strikes
+        G.PlayerData[steamId].info.Strikes = G.PlayerData[steamId].info.Strikes + 1
+
+        -- If the player has reached the strike limit, mark them as a cheater
+        if G.PlayerData[steamId].info.Strikes >= G.Menu.Main.StrikeLimit then
+            if not Common.IsCheater(player) then
+                print(string.format("[CD] %s is cheating", player:GetName()))
+                client.ChatPrintf(string.format("\x04[CD] \x03%s \x01is\x07ff0019 Cheating\x01! \x01(\x04%s\x01)", player:GetName(), reason))
+                if G.Menu.Visuals.partyCallaut then
+                    client.Command(string.format("say_party %s is Cheating (%s)", player:GetName(), reason), true)
+                end
+
+                -- Update the player's record
+                G.PlayerData[steamId].info.Name = player:GetName()
+                G.PlayerData[steamId].info.Cause = reason
+                G.PlayerData[steamId].info.Date = os.date("%Y-%m-%d %H:%M:%S")
+                G.PlayerData[steamId].info.LastDetectionTime = globals.TickCount()
+                G.PlayerData[steamId].info.isCheater = true
+
+                G.DataBase[steamId] = G.defaultRecord
+                G.DataBase[steamId].Name = player:GetName()
+                G.DataBase[steamId].Cause = reason
+                G.DataBase[steamId].Date = os.date("%Y-%m-%d %H:%M:%S")
+
+                -- Save the database to a file
+                Database.SaveDatabase(G.DataBase)
+
+                -- Auto mark
+                if G.Menu.Visuals.AutoMark and player ~= G.pLocal then
+                    playerlist.SetPriority(player, 10)
+                end
+            else
+                print(string.format("Player %s is already marked as cheater", player:GetName()))
+            end
+        elseif G.PlayerData[steamId].info.Strikes >= G.Menu.Main.StrikeLimit / 2 then
+            client.ChatPrintf(string.format("\x04[CD] \x03%s\x01 is \x07ffd500Suspicious \x01(\x04%s\x01)", player:GetName(), reason))
+
+            -- Auto mark
+            if G.Menu.Visuals.AutoMark and player ~= G.pLocal then
+                playerlist.SetPriority(player, 5)
+            end
+        end
+
+        -- Update LastStrike
+        G.PlayerData[steamId].info.LastStrike = globals.TickCount()
+    end
+
+    -- Add the strike work to be executed
+    executeStrike()
+end
+
+function Detections.rtrue(entity)
+    Detections.StrikePlayer("Debug line 103", entity)
+    return true
 end
 
 -- Detects rage pitch (looking up/down too much)
@@ -121,7 +130,6 @@ local tick_count = 0
 function Detections.CheckDuckSpeed(player, entity)
     if G.Menu.Main.DuckSpeedDetection == false then return end
 
-    local angles = player:GetEyeAngles()
     local flags = player:GetPropInt("m_fFlags")
     local OnGround = flags & FL_ONGROUND == 1
     local DUCKING = flags & FL_DUCKING == 2
@@ -228,10 +236,10 @@ function Detections.CheckPacketChoke(pEntity, entity)
         end
     end
 
-    -- Check if any of the simulation time differences are zero or negative and equal to the time it took for another anomaly to occur
+    --[[ Check if any of the simulation time differences are zero or negative and equal to the time it took for another anomaly to occur
     lastAnomalyTick = 0
     for i, diffInTicks in ipairs(simTimeDiffs) do
-        if diffInTicks < 0 then
+        if diffInTicks < -10 then
             print("anomal".. diffInTicks)
             if i - lastAnomalyTick == -diffInTicks then
                 Detections.StrikePlayer("Dt/Warp", entity)
@@ -239,7 +247,7 @@ function Detections.CheckPacketChoke(pEntity, entity)
             end
             lastAnomalyTick = i
         end
-    end
+    end]]
 end
 
 

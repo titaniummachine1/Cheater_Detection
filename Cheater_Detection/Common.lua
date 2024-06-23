@@ -20,74 +20,83 @@ local G = require("Cheater_Detection.Globals")
 -- Require Json.lua directly
 Common.Json = require("Cheater_Detection.Modules.Json")
 
-function Common.GetSteamID64(Player)
-    if Player then
-        local playerInfo = client.GetPlayerInfo(Player:GetIndex())
-        local steamID = playerInfo.SteamID
-        if steamID then
-            --Check if the steamID matches the format of a bot (SteamID3 format [U:1:0])
-            if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then  -- Handle bot cases
-                return playerInfo.UserID  -- Return the bot's name instead of its SteamID
-            end
+local cachedSteamIDs = {}
+local lastTick = -1
 
-            -- Convert and return the SteamID64 for regular players
-            local steamID64 = steam.ToSteamID64(steamID)
-            return steamID64
-        end
-    end
-    Log.Warn("Failed to get SteamID for player %s", Player:GetName() or "nil")
-    return nil
+function Common.GetSteamID64(Player)
+    assert(Player, "Player is nil")
+
+    local currentTick = globals.TickCount()
+    local playerIndex = Player:GetIndex()
+
+    -- Branchless cache reset
+    cachedSteamIDs, lastTick = (lastTick ~= currentTick and {} or cachedSteamIDs), currentTick
+
+    -- Retrieve cached result or calculate it
+    local result = cachedSteamIDs[playerIndex] or (function()
+        local playerInfo = assert(client.GetPlayerInfo(playerIndex), "Failed to get player info")
+        local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
+        return (playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]") and playerInfo.UserID or assert(steam.ToSteamID64(steamID), "Failed to convert SteamID to SteamID64")
+    end)()
+
+    cachedSteamIDs[playerIndex] = result
+    return result
 end
 
 function Common.IsCheater(playerInfo)
     local steamId = nil
 
-    if type(playerInfo) == "number" and playerInfo < 101 then --we got index not steamid
-        -- If playerInfo is a number, convert it to a string and check its length
-        local steamIdStr = tostring(playerInfo)
-        if #steamIdStr == 17 then
-            -- If the string representation of playerInfo is 17 characters long, it's a valid SteamID64
-            steamId = playerInfo
-        else
-            local targetIndex = playerInfo -- assuming playerInfo is the index
-            local targetPlayer = nil
-            for _, player in ipairs(G.players) do
-                if player:GetIndex() == targetIndex then
-                    targetPlayer = player
-                    break
-                end
+    if type(playerInfo) == "number" and playerInfo < 101 then
+        -- Assuming playerInfo is the index
+        local targetIndex = playerInfo
+        local targetPlayer = nil
+
+        -- Find the player with the same index
+        for _, player in ipairs(G.players) do
+            if player:GetIndex() == targetIndex then
+                targetPlayer = player
+                break
             end
-            -- Now targetPlayer is the player with the same index, or nil if no such player was found
-            steamId = Common.GetSteamID64(targetPlayer)
+        end
+
+        -- Check if the target player was found
+        if targetPlayer then
+            steamId = assert(Common.GetSteamID64(targetPlayer), "Failed to get SteamID64 for player")
+        else
+            return false
         end
     elseif type(playerInfo) == "number" then
         -- If playerInfo is a number, convert it to a string and check its length
         local steamIdStr = tostring(playerInfo)
         if #steamIdStr == 17 then
-            -- If the string representation of playerInfo is 17 characters long, it's a valid SteamID64
             steamId = playerInfo
+        else
+            return false
         end
     elseif playerInfo.GetIndex then
         -- If playerInfo is a player entity, get its SteamID64
-        steamId = Common.GetSteamID64(playerInfo)
+        steamId = assert(Common.GetSteamID64(playerInfo), "Failed to get SteamID64 for player entity")
     else
         -- If playerInfo is neither a valid index, a valid SteamID64, nor a player entity, return false
         return false
     end
 
-    if playerlist.GetPriority(steamId) == 10 then
-        return true
+    if not steamId then
+        return false
     end
 
-    -- Check if player is in database or marked as cheater
+    -- Check if the player is marked as a cheater based on various criteria
+    local strikes = G.PlayerData[steamId] and G.PlayerData[steamId].info.Strikes or 0
+    local isMarkedCheater = G.PlayerData[steamId] and G.PlayerData[steamId].info.isCheater
     local inDatabase = G.DataBase[steamId] ~= nil
-    local isMarkedCheater = G.PlayerData[steamId] ~= nil and G.PlayerData[steamId].info ~= nil and G.PlayerData[steamId].info.IsCheater == true
+    local priorityCheater = playerlist.GetPriority(steamId) == 10
 
-    return inDatabase or isMarkedCheater
+    return isMarkedCheater or inDatabase or priorityCheater
 end
 
+
 function Common.IsFriend(entity)
-    return (not G.Menu.Main.debug and TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
+    return (not G.Menu.Main.debug and Common.TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
 end
 
 function Common.IsValidPlayer(entity, checkFriend)
