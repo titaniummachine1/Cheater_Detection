@@ -91,10 +91,24 @@ Database.content = setmetatable({}, {
 
 -- Handle setting an entry with optimized record updating
 function Database.HandleSetEntry(key, value)
+	-- DEBUG: Log function call
+	-- print(string.format("[Database DEBUG Call] HandleSetEntry called with key: %s, value type: %s", tostring(key), type(value)))
+
 	-- Skip nil values or invalid keys
 	if not key then
 		return
 	end
+
+	-- Ensure key is a valid SteamID64 format before adding/updating
+	if type(key) ~= "string" or not key:match("^765611%d{11}$") then
+		-- DEBUG: Log invalid key rejection
+		-- print(string.format("[Database DEBUG Reject] Invalid SteamID64 format for key: %s", tostring(key)))
+		-- Optionally print a warning for invalid keys?
+		-- print("[Database] Warning: Attempted to set entry with invalid SteamID64 key: " .. tostring(key))
+		return
+	end
+	-- DEBUG: Log key validation success
+	-- print(string.format("[Database DEBUG Valid] Key %s passed validation.", key))
 
 	-- Get existing entry
 	local existing = Database.data[key]
@@ -109,24 +123,23 @@ function Database.HandleSetEntry(key, value)
 		return
 	end
 
-	-- Ensure key is a valid SteamID64 format before adding/updating
-	if type(key) ~= "string" or not key:match("^765611%d{11}$") then
-		-- Optionally print a warning for invalid keys?
-		-- print("[Database] Warning: Attempted to set entry with invalid SteamID64 key: " .. tostring(key))
-		return
-	end
-
 	-- If adding a new entry
 	if not existing then
+		-- DEBUG: Log adding new entry
+		-- print(string.format("[Database DEBUG ADD] Adding new entry for key: %s", key))
 		-- Simplified data structure - keep only Name and Reason
 		Database.data[key] = {
 			Name = type(value) == "table" and (value.Name or "Unknown") or "Unknown",
 			Reason = type(value) == "table" and (value.Reason or value.proof or value.cause or "Unknown") or "Unknown", -- Prioritize Reason
 		}
+		-- DEBUG: Log entry after add attempt
+		-- print(string.format("[Database DEBUG Added] Entry state for %s: Name='%s', Reason='%s'", key, Database.data[key].Name, Database.data[key].Reason))
 
 		Database.State.entriesCount = Database.State.entriesCount + 1
 		Database.State.isDirty = true
 	else
+		-- DEBUG: Log updating existing entry
+		-- print(string.format("[Database DEBUG Update] Updating existing entry for key: %s", key))
 		-- Update existing entry but only if the new data has better information
 		if type(value) == "table" then
 			-- Only update name if the new name is better
@@ -725,8 +738,20 @@ function Database.LoadDatabase(silent)
 	return true
 end
 
-InitializeDatabase() -- Initialize the database when this module is loaded
-RegisterCommands() -- Register commands
-callbacks.Register("Unload", "CDDatabase_Unload", OnUnload) -- Register unload callback
+-- Save database automatically when the script unloads
+callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", function()
+	print("[Database] Script unloading, attempting to save database...")
+	-- Call SaveDatabase directly. Force save even if interval hasn't passed,
+	-- but respect the isDirty flag check within SaveDatabase itself.
+	if Database.State and Database.State.isDirty then
+		Database.SaveDatabase()
+		print("[Database] Save attempted on unload.")
+	else
+		print("[Database] Database not dirty, no save needed on unload.")
+	end
+end)
+
+-- Initial load
+Database.Initialize()
 
 return Database

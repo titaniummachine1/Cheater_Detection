@@ -7,6 +7,33 @@ local Common = require("Cheater_Detection.Utils.Common")
 local Tasks = require("Cheater_Detection.Database.Tasks")
 local Sources = require("Cheater_Detection.Database.Sources")
 local Commands = Common.Lib.Utils.Commands -- Use existing Commands
+local Json = Common.Json -- Added for JSON parsing
+
+-- Helper function to convert SteamID3 or SteamID to SteamID64 if needed
+-- Assumes a global or Common.steam table with ToSteamID64 exists
+local function GetSteamID64(id_str)
+	if not id_str then
+		return nil
+	end
+	id_str = id_str:match("^%s*(.-)%s*$") -- Trim
+
+	if id_str:match("^765611%d%d%d%d%d%d%d%d%d%d%d$") then
+		return id_str -- Already SteamID64
+	elseif id_str:match("^STEAM_0:[01]:%d+$") or id_str:match("^%[U:1:%d+%]$") then
+		local success, result = pcall(steam.ToSteamID64, id_str) -- Assumes steam.ToSteamID64 exists
+		if success and result then
+			print(string.format("[Fetcher DEBUG Convert] Converted '%s' to '%s'", id_str, result))
+			return result
+		else
+			print(string.format("[Fetcher DEBUG Convert] Failed to convert '%s'", id_str))
+			return nil
+		end
+	else
+		-- Optional: Could try Common.FromSteamid32To64 if applicable
+		-- print(string.format("[Fetcher DEBUG Convert] Unrecognized format: '%s'", id_str))
+		return nil
+	end
+end
 
 -- Create fetcher object
 local Fetcher = {
@@ -14,16 +41,16 @@ local Fetcher = {
 		AutoFetchOnLoad = false,
 		ShowProgressBar = true,
 		SourceDelay = 2, -- Fixed 2 second delay
-		LinesPerFrame = 250, -- How many lines to process per frame
+		LinesPerFrame = 250, -- How many lines to process per frame (for non-JSON)
 	},
 	Sources = Sources.List,
 	Tasks = Tasks, -- Keep reference for UI
 
 	-- State variables for Draw-based processing
 	isRunning = false,
-	fetchState = "idle", -- idle, delaying, downloading, processing, saving, done, download_error
+	fetchState = "idle", -- idle, delaying, downloading, processing_json, processing_lines, saving, done, download_error
 	currentSourceIndex = 0,
-	currentSourceContentLines = nil, -- Table of lines from downloaded content
+	currentSourceContentLines = nil, -- Table of lines from downloaded content (for line processing)
 	currentSourceProcessedLineIndex = 0,
 	currentSourceAddedCount = 0, -- Added count for the current source
 	totalAdded = 0,
@@ -69,13 +96,73 @@ end
 -- Function to split string by newline characters
 local function splitlines(str)
 	local lines = {}
-	for line in str:gmatch("[^\\r\\n]+") do
+	for line in str:gmatch("[^\r\n]+") do
 		table.insert(lines, line)
 	end
 	return lines
 end
 
--- Processes a single line based on parser type
+-- Process a JSON data structure (e.g., from bots.tf)
+function Fetcher.ProcessJsonData(jsonData, source, db)
+	local addedCount = 0
+	if not jsonData or type(jsonData) ~= "table" then
+		print(string.format("[Fetcher ERROR JSON] Invalid JSON data received for %s", source.name))
+		return 0
+	end
+
+	-- Heuristic check for bots.tf structure (or similar list-based JSON)
+	local players = jsonData.players or jsonData -- Adapt if root is the list
+	if type(players) ~= "table" then
+		print(string.format("[Fetcher ERROR JSON] Could not find player list in JSON for %s", source.name))
+		return 0
+	end
+
+	print(string.format("[Fetcher DEBUG JSON] Processing %d potential players from %s", #players, source.name))
+
+	for i, playerEntry in ipairs(players) do
+		if type(playerEntry) == "table" and playerEntry.steamid then
+			local steamID64 = GetSteamID64(playerEntry.steamid) -- Use conversion helper
+
+			if steamID64 then
+				print(
+					string.format(
+						"[Fetcher DEBUG JSON Check] steamID64: %s, DB entry exists: %s",
+						tostring(steamID64),
+						tostring(db.data[steamID64])
+					)
+				)
+				if not db.data[steamID64] then
+					print(string.format("[Fetcher DEBUG JSON ADD] Attempting to add: %s", steamID64))
+					local success, err = pcall(db.HandleSetEntry, steamID64, {
+						Name = "Unknown", -- Can potentially extract name if available: playerEntry.last_seen and playerEntry.last_seen.player_name or "Unknown"
+						Reason = source.cause, -- Can potentially extract attributes: playerEntry.attributes and table.concat(playerEntry.attributes, ", ") or source.cause
+					})
+					if success then
+						addedCount = addedCount + 1
+						print(string.format("[Fetcher DEBUG JSON ADD] Successfully added: %s", steamID64))
+						pcall(function()
+							playerlist.SetPriority(steamID64, 10)
+						end)
+					else
+						print(string.format("[Fetcher ERROR JSON ADD] Failed to add %s: %s", steamID64, tostring(err)))
+					end
+				end
+			else
+				print(
+					string.format(
+						"[Fetcher DEBUG JSON] Skipping invalid/unconvertible SteamID: %s",
+						tostring(playerEntry.steamid)
+					)
+				)
+			end
+		else
+			print(string.format("[Fetcher DEBUG JSON] Skipping invalid player entry at index %d", i))
+		end
+	end
+	return addedCount
+end
+
+-- Processes a single line based on parser type (used for 'raw' or JSON fallback)
 function Fetcher.ProcessLine(line, source, database)
 	local added = false
 	line = line:match("^%s*(.-)%s*$") -- Trim whitespace
@@ -87,41 +174,56 @@ function Fetcher.ProcessLine(line, source, database)
 
 	local steamID64 = nil
 	if source.parser == "raw" then
-		-- Check if line is a valid SteamID64
-		if line:match("^7656119%d+$") and #line >= 17 then -- Stricter check for SteamID64 format
-			steamID64 = line
-			-- DEBUG: Print extracted ID and DB check result
-			-- print(string.format("[Fetcher DEBUG RAW] Extracted: %s, Exists in DB: %s", steamID64, tostring(Database.data[steamID64])))
-			-- else -- Optional DEBUG for lines failing the raw check
-			-- print(string.format("[Fetcher DEBUG RAW] Invalid format or length: %s", line))
+		-- Try to convert different formats to SteamID64
+		steamID64 = GetSteamID64(line)
+		if steamID64 then
+			print(
+				string.format(
+					"[Fetcher DEBUG RAW] Extracted/Converted: %s, Exists in DB: %s",
+					steamID64,
+					tostring(database.data[steamID64])
+				)
+			)
+		else
+			print(string.format("[Fetcher DEBUG RAW] Invalid format or failed conversion: %s", line))
 		end
 	elseif source.parser == "tf2db" then
-		-- Improved regex to find "steamid": "..." pattern within the line, handling potential whitespace
-		-- It captures the SteamID64 part.
-		local extractedId = line:match('"steamid"%s*:%s*"?(7656119%d+)"?') -- Capture SteamID64 directly
-
-		if extractedId then
-			-- DEBUG: Print extracted ID and DB check result
-			-- print(string.format("[Fetcher DEBUG TF2DB] Extracted: %s, Exists in DB: %s", extractedId, tostring(Database.data[extractedId])))
-			steamID64 = extractedId -- Already SteamID64
-			-- else -- Optional DEBUG for lines failing the tf2db check
-			-- print(string.format("[Fetcher DEBUG TF2DB] No match found in line: %s", line))
+		-- This is now a fallback if JSON parsing failed, try simple regex
+		local extractedId = line:match("(765611%d%d%d%d%d%d%d%d%d%d%d)") -- General match
+		steamID64 = GetSteamID64(extractedId) -- Attempt conversion just in case
+		if steamID64 then
+			print(
+				string.format(
+					"[Fetcher DEBUG TF2DB Fallback] Extracted/Converted: %s, Exists in DB: %s",
+					steamID64,
+					tostring(database.data[steamID64])
+				)
+			)
+		else
+			-- Don't print "No match found" here as it's expected for most lines in JSON fallback
+			-- print(string.format("[Fetcher DEBUG TF2DB Fallback] No valid ID found in line: %s", line))
 		end
-		-- Note: No steam.ToSteamID64 conversion needed as we target SteamID64 directly from the JSON structure
 	end
 
 	-- Add valid IDs to database if not already present
-	if steamID64 and not Database.data[steamID64] then
+	print(
+		string.format(
+			"[Fetcher DEBUG Check] steamID64: %s, DB entry exists: %s",
+			tostring(steamID64),
+			tostring(database.data[steamID64])
+		)
+	)
+	if steamID64 and not database.data[steamID64] then -- Use database instance here
 		-- DEBUG: Log before attempting to add
-		-- print(string.format("[Fetcher DEBUG ADD] Attempting to add: %s", steamID64))
-		local success, err = pcall(Database.HandleSetEntry, steamID64, {
+		print(string.format("[Fetcher DEBUG ADD] Attempting to add: %s", steamID64))
+		local success, err = pcall(database.HandleSetEntry, steamID64, { -- Use database instance here
 			Name = "Unknown", -- Set name to Unknown as requested
 			Reason = source.cause,
 		})
 		if success then
 			added = true
 			-- DEBUG: Log successful addition
-			-- print(string.format("[Fetcher DEBUG ADD] Successfully added: %s", steamID64))
+			print(string.format("[Fetcher DEBUG ADD] Successfully added: %s", steamID64))
 			-- Set player priority (optional, keep pcall)
 			pcall(function()
 				playerlist.SetPriority(steamID64, 10)
@@ -161,102 +263,145 @@ function Fetcher.ProcessStep()
 			Fetcher.fetchState = "downloading"
 			Fetcher.downloadCoroutine = nil -- Ensure coroutine is reset before starting new download
 			Fetcher.downloadContent = nil
-			-- Update progress immediately for download state
-			Tasks.StartSource(sourceName)
+			Tasks.StartSource(sourceName) -- Update progress when starting download attempt
 			Tasks.targetProgress = (Fetcher.currentSourceIndex - 1) / #Fetcher.Sources * 100
+			Tasks.message = "Starting download from " .. sourceName .. "..."
 		else
 			Tasks.message = "Waiting " .. remaining .. "s between requests..."
 		end
 	elseif Fetcher.fetchState == "downloading" then
 		-- Start download coroutine if not already started
 		if not Fetcher.downloadCoroutine then
-			Tasks.message = "Starting download from " .. sourceName .. "..."
-			Fetcher.downloadCoroutine = coroutine.create(function(url) -- Pass URL to coroutine
-				-- Directly call http.Get; pcall is handled outside now
-				return http.Get(url)
+			Tasks.message = "Starting download from " .. sourceName .. "..." -- Initial message
+			Fetcher.downloadCoroutine = coroutine.create(function(url)
+				local ok, res1, res2 = pcall(http.Get, url)
+				if not ok then
+					return false, res1
+				end
+				return true, res1, res2
 			end)
 			Fetcher.downloadContent = nil -- Clear previous content
 		end
 
 		-- Resume the download coroutine
-		-- status: pcall success/fail; coroutine_success: coroutine ran ok; http_results...: return values from http.Get
-		local status, coroutine_success, http_result1, http_result2 =
+		local status, coroutine_ran_ok, get_pcall_ok, result1, result2 =
 			pcall(coroutine.resume, Fetcher.downloadCoroutine, source.url)
 
-		if not status then -- Error resuming coroutine itself (rare)
-			print("[Fetcher] Error resuming download coroutine: " .. tostring(coroutine_success)) -- coroutine_success here is the error msg
+		if not status then -- Error resuming coroutine itself (very rare)
+			print("[Fetcher] Error resuming download coroutine: " .. tostring(coroutine_ran_ok)) -- coroutine_ran_ok here is the error msg
 			Fetcher.fetchState = "download_error"
-			Fetcher.lastActionTime = currentTime
 		elseif coroutine.status(Fetcher.downloadCoroutine) == "suspended" then
-			-- Still downloading, update message maybe?
 			Tasks.message = "Downloading from " .. sourceName .. "... (in progress)"
 		elseif coroutine.status(Fetcher.downloadCoroutine) == "dead" then
-			-- Coroutine finished
 			Fetcher.downloadCoroutine = nil -- Clear the finished coroutine
 
-			if not coroutine_success then
-				-- Error *inside* the coroutine (e.g., http.Get itself errored)
-				print("[Fetcher] Error inside download coroutine for " .. sourceName .. ": " .. tostring(http_result1)) -- http_result1 has error
+			if not coroutine_ran_ok then
+				print(
+					"[Fetcher] Error inside download coroutine function for "
+						.. sourceName
+						.. ": "
+						.. tostring(get_pcall_ok)
+				)
 				Fetcher.fetchState = "download_error"
-			-- Check the actual results from http.Get
-			elseif type(http_result1) == "string" then -- Check if it's a string first
-				-- TEMP DEBUG: Print start of received content
+			elseif not get_pcall_ok then
+				print("[Fetcher] Failed http.Get for " .. sourceName .. ". Reason: " .. tostring(result1))
+				Fetcher.fetchState = "download_error"
+			elseif type(result1) == "string" then
 				print(
 					string.format(
 						"[Fetcher DEBUG] Received content from %s (first 200 chars): %s",
 						sourceName,
-						http_result1:sub(1, 200)
+						result1:sub(1, 200)
 					)
 				)
 
-				if #http_result1 > 0 then
-					-- Success! Got non-empty string content
-					Fetcher.currentSourceContentLines = splitlines(http_result1)
-					http_result1 = nil -- Allow garbage collection
-					Fetcher.currentSourceProcessedLineIndex = 1
-					Fetcher.currentSourceAddedCount = 0
-					Fetcher.fetchState = "processing"
-					Tasks.message = "Processing " .. sourceName
+				if #result1 > 0 then
+					-- Success! Store content and decide processing method
+					Fetcher.downloadContent = result1 -- Store full content
+					result1 = nil -- Allow GC for the potentially large string copy
 					collectgarbage("collect")
+
+					Fetcher.currentSourceAddedCount = 0 -- Reset count for this source
+
+					-- Decide processing method based on parser type
+					if source.parser == "tf2db" then
+						Fetcher.fetchState = "processing_json" -- Try JSON first
+						Tasks.message = "Attempting JSON parse for " .. sourceName
+					else -- Assume 'raw' or other line-based
+						Fetcher.fetchState = "processing_lines"
+						Fetcher.currentSourceContentLines = splitlines(Fetcher.downloadContent)
+						Fetcher.downloadContent = nil -- Content split into lines, free original
+						collectgarbage("collect")
+						Fetcher.currentSourceProcessedLineIndex = 1
+						Tasks.message = "Processing lines for " .. sourceName
+					end
 				else
-					-- It was an empty string
-					local failureReason = "Returned empty string"
-					print("[Fetcher] Failed to download from " .. sourceName .. ". Reason: " .. failureReason)
+					print("[Fetcher] Failed to download from " .. sourceName .. ". Reason: Returned empty string")
 					Fetcher.fetchState = "download_error"
 				end
 			else
-				-- http.Get returned something other than a string
-				local failureReason = "Unknown failure"
-				if http_result1 == nil then
-					-- It explicitly returned nil, often indicates a more severe connection issue?
-					failureReason = "Returned nil"
-						.. (http_result2 and (" (Info: " .. tostring(http_result2) .. ")") or "")
-				elseif http_result1 == false then
-					-- Explicitly returned false, likely indicates HTTP error (4xx, 5xx, redirect?)
-					failureReason = "Returned false"
-						.. (http_result2 and (" (Info: " .. tostring(http_result2) .. ")") or "")
+				-- Handle other http.Get failures (nil, false, etc.)
+				local failureReason = "Unknown http.Get failure"
+				if result1 == nil then
+					failureReason = "Returned nil" .. (result2 and (" (Info: " .. tostring(result2) .. ")") or "")
+				elseif result1 == false then
+					failureReason = "Returned false" .. (result2 and (" (Info: " .. tostring(result2) .. ")") or "")
 				else
-					failureReason = "Returned type: " .. type(http_result1) .. " (" .. tostring(http_result1) .. ")"
+					failureReason = "Returned type: "
+						.. type(result1)
+						.. " ("
+						.. tostring(result1)
+						.. ")"
+						.. (result2 and (", Info: " .. tostring(result2)) or "")
 				end
 				print("[Fetcher] Failed to download from " .. sourceName .. ". Reason: " .. failureReason)
 				Fetcher.fetchState = "download_error"
 			end
 			Fetcher.lastActionTime = currentTime -- Update time after download attempt finished
-		end
+		end -- End of coroutine status check
 	elseif Fetcher.fetchState == "download_error" then
-		-- Handle download error (e.g., skip to next source)
+		-- Handle download error (skip to next source)
 		print("[Fetcher] Skipping source due to download error: " .. sourceName)
+		-- **Print count before skipping**
+		print(
+			"[Fetcher] Added " .. Fetcher.currentSourceAddedCount .. " entries from " .. sourceName .. " (before skip)"
+		)
+		Fetcher.totalAdded = Fetcher.totalAdded + Fetcher.currentSourceAddedCount -- Add to total even if skipped
+
 		Fetcher.currentSourceIndex = Fetcher.currentSourceIndex + 1
 		Fetcher.lastActionTime = currentTime
 		if Fetcher.currentSourceIndex > #Fetcher.Sources then
-			Fetcher.fetchState = "saving" -- Move to saving state if last source failed
+			Fetcher.fetchState = "saving"
 		else
-			Fetcher.fetchState = "delaying" -- Delay before next source
+			Fetcher.fetchState = "delaying"
 		end
-		-- Ensure download coroutine is cleared if it somehow still exists
 		Fetcher.downloadCoroutine = nil
 		Fetcher.downloadContent = nil
-	elseif Fetcher.fetchState == "processing" then
+	elseif Fetcher.fetchState == "processing_json" then
+		-- Attempt to parse the stored content as JSON
+		local success, jsonData = pcall(Json.decode, Fetcher.downloadContent)
+		Fetcher.downloadContent = nil -- Clear original content string
+		collectgarbage("collect")
+
+		if success and jsonData then
+			print("[Fetcher] Successfully parsed JSON for " .. sourceName)
+			-- Process the JSON data structure (this might take time, but not frame-limited here)
+			local addedFromJson = Fetcher.ProcessJsonData(jsonData, source, db)
+			Fetcher.currentSourceAddedCount = Fetcher.currentSourceAddedCount + addedFromJson
+			print("[Fetcher] Finished processing JSON for " .. sourceName)
+			-- Since JSON processing is done in one go, move to next source/state
+			Fetcher.fetchState = "source_done"
+		else
+			-- JSON parsing failed, fall back to line processing
+			print("[Fetcher] Failed to parse JSON for " .. sourceName .. ". Falling back to line processing.")
+			-- Resplit the original content (need to refetch or store it differently?)
+			-- For now, let's just skip this source if JSON fails and it was tf2db
+			-- TODO: Re-evaluate if fallback line processing is desired/possible after failed JSON parse
+			print("[Fetcher] Skipping source " .. sourceName .. " after failed JSON parse.")
+			Fetcher.fetchState = "source_done" -- Treat as done, even though failed
+		end
+	elseif Fetcher.fetchState == "processing_lines" then
+		-- Process lines per frame (for 'raw' or 'tf2db' fallback)
 		local linesProcessedThisFrame = 0
 		local totalLines = #Fetcher.currentSourceContentLines
 
@@ -267,67 +412,65 @@ function Fetcher.ProcessStep()
 			local line = Fetcher.currentSourceContentLines[Fetcher.currentSourceProcessedLineIndex]
 			if Fetcher.ProcessLine(line, source, db) then
 				Fetcher.currentSourceAddedCount = Fetcher.currentSourceAddedCount + 1
-				Fetcher.totalAdded = Fetcher.totalAdded + 1
+				-- Fetcher.totalAdded = Fetcher.totalAdded + 1 -- Move totalAdded increment to 'source_done'
 			end
 			Fetcher.currentSourceProcessedLineIndex = Fetcher.currentSourceProcessedLineIndex + 1
 			linesProcessedThisFrame = linesProcessedThisFrame + 1
 		end
 
-		-- Update progress message
 		Tasks.message = string.format(
-			"Processing %s: %d / %d lines (%d added)",
+			"Processing Lines %s: %d / %d (%d added)",
 			sourceName,
 			Fetcher.currentSourceProcessedLineIndex - 1,
 			totalLines,
 			Fetcher.currentSourceAddedCount
 		)
 
-		-- Check if finished processing this source
 		if Fetcher.currentSourceProcessedLineIndex > totalLines then
-			print("[Fetcher] Added " .. Fetcher.currentSourceAddedCount .. " entries from " .. sourceName)
-			Tasks.SourceDone() -- Mark source done in UI tracker
 			Fetcher.currentSourceContentLines = nil -- Allow GC
 			collectgarbage("collect")
+			Fetcher.fetchState = "source_done" -- Finished processing lines for this source
+		end
+	elseif Fetcher.fetchState == "source_done" then
+		-- This state is reached after processing_json or processing_lines finishes
+		print("[Fetcher] Added " .. Fetcher.currentSourceAddedCount .. " entries from " .. sourceName)
+		Tasks.SourceDone() -- Mark source done in UI tracker
+		Fetcher.totalAdded = Fetcher.totalAdded + Fetcher.currentSourceAddedCount -- Add source total to overall total
 
-			-- Move to next source or finish
-			Fetcher.currentSourceIndex = Fetcher.currentSourceIndex + 1
-			Fetcher.lastActionTime = currentTime
-			if Fetcher.currentSourceIndex > #Fetcher.Sources then
-				Fetcher.fetchState = "saving" -- All sources processed
-			else
-				Fetcher.fetchState = "delaying" -- Need to delay before next source
-			end
+		-- Move to next source or finish
+		Fetcher.currentSourceIndex = Fetcher.currentSourceIndex + 1
+		Fetcher.lastActionTime = currentTime
+		if Fetcher.currentSourceIndex > #Fetcher.Sources then
+			Fetcher.fetchState = "saving" -- All sources processed
+		else
+			Fetcher.fetchState = "delaying" -- Need to delay before next source
 		end
 	elseif Fetcher.fetchState == "saving" then
 		Tasks.message = "Finalizing..."
-		Tasks.targetProgress = 100 -- Ensure progress bar shows 100%
+		Tasks.targetProgress = 100
 		if Fetcher.totalAdded > 0 then
-			db.State.isDirty = true -- Ensure marked dirty
-			-- Schedule save for next frame to avoid issues within Draw
+			db.State.isDirty = true
 			pcall(function()
 				callbacks.Unregister("Draw", "FetcherSaveDelay")
 			end)
 			callbacks.Register("Draw", "FetcherSaveDelay", function()
 				callbacks.Unregister("Draw", "FetcherSaveDelay")
-				if db and db.SaveDatabase then -- Check if db and function exist
+				if db and db.SaveDatabase then
 					print("[Fetcher] Saving database changes...")
 					db.SaveDatabase()
 				else
 					print("[Fetcher] Error: Could not save database.")
 				end
-				Fetcher.fetchState = "done" -- Move to done state *after* save attempt
+				Fetcher.fetchState = "done"
 				Fetcher.lastActionTime = globals.RealTime()
 			end)
-			-- Set state to an intermediate 'waiting_save' to prevent immediate transition to 'done'
 			Fetcher.fetchState = "waiting_save"
 			Tasks.message = "Saving Database..."
 		else
-			-- No changes, just mark as done
 			Fetcher.fetchState = "done"
 			Fetcher.lastActionTime = currentTime
 		end
 	elseif Fetcher.fetchState == "waiting_save" then
-		-- Do nothing, wait for the FetcherSaveDelay callback to trigger
 		Tasks.message = "Saving Database..."
 	elseif Fetcher.fetchState == "done" then
 		Tasks.status = "complete"
@@ -336,13 +479,11 @@ function Fetcher.ProcessStep()
 
 		print("[Fetcher] " .. Tasks.message)
 
-		-- Run callback if provided
 		if Fetcher.callbackRef and type(Fetcher.callbackRef) == "function" then
 			pcall(Fetcher.callbackRef, Fetcher.totalAdded)
 		end
 
-		-- Final cleanup
-		Fetcher.ResetState() -- This also unregisters callbacks
+		Fetcher.ResetState() -- Final cleanup
 	end
 end
 
