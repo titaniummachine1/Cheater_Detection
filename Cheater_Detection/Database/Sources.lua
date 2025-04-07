@@ -7,27 +7,21 @@ Sources.List = {
 	{
 		name = "d3fc0n6 Cheater List",
 		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
-		cause = "Cheater Friend",
+		cause = "Cheater Friend (d3fc0n6)",
 		parser = "raw",
 	},
 	{
 		name = "d3fc0n6 Tacobot List",
 		url = "https://raw.githubusercontent.com/d3fc0n6/TacobotList/master/64ids",
-		cause = "Tacobot",
+		cause = "Tacobot (d3fc0n6)",
 		parser = "raw",
 	},
 	-- Potentially problematic sources last
 	{
-		name = "bots.tf",
+		name = "bots.tf (Official)",
 		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
-		cause = "Bot",
-		parser = "tf2db", -- Use tf2db parser but with enhanced safety
-	},
-	{
-		name = "TF2BD Bots",
-		url = "https://raw.githubusercontent.com/wgetJane/tf2-catkill/master/bots.txt",
-		cause = "Bot",
-		parser = "tf2db", -- Raw parser is safer
+		cause = "Bot (bots.tf)",
+		parser = "tf2db", -- Use tf2db parser for this JSON source
 	},
 }
 

@@ -7,9 +7,52 @@
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Json = Common.Json
-local Database_import = require("Cheater_Detection.Database.Database_Import")
 local Database_Fetcher = require("Cheater_Detection.Database.Database_Fetcher")
-local Restore = require("Cheater_Detection.Database.Database_Restore")
+
+-- Helper function to serialize a Lua table into a string format
+local function serializeTableToLuaString(tbl, level)
+	level = level or 0
+	local indent = string.rep("  ", level)
+	local result = "{\n"
+
+	local keys = {}
+	for k in pairs(tbl) do
+		table.insert(keys, k)
+	end
+	table.sort(keys) -- Sort keys for consistent output
+
+	for i, key in ipairs(keys) do
+		local value = tbl[key]
+		result = result .. indent .. "  "
+
+		-- Format key (assuming keys are SteamID64 strings)
+		result = result .. '["' .. tostring(key) .. '"] = '
+
+		-- Format value (assuming value is a table with Name and Reason)
+		if type(value) == "table" then
+			local nameStr = value.Name or "Unknown"
+			local reasonStr = value.Reason or value.proof or "Unknown" -- Use Reason primarily
+
+			-- Escape quotes and backslashes in strings
+			nameStr = nameStr:gsub('[\\"]', "\\%1")
+			reasonStr = reasonStr:gsub('[\\"]', "\\%1")
+
+			result = result .. '{ Name = "' .. nameStr .. '", Reason = "' .. reasonStr .. '" }'
+		else
+			-- Fallback for unexpected data types (shouldn't happen with proper structure)
+			result = result .. '"' .. tostring(value):gsub('[\\"]', "\\%1") .. '"'
+		end
+
+		-- Add comma if not the last element
+		if i < #keys then
+			result = result .. ","
+		end
+		result = result .. "\n"
+	end
+
+	result = result .. indent .. "}"
+	return result
+end
 
 local Database = {
 	-- Internal data storage (direct table)
@@ -21,9 +64,6 @@ local Database = {
 		SaveInterval = 300, -- 5 minutes
 		DebugMode = false,
 		MaxEntries = 15000, -- Maximum entries to prevent memory issues
-		ValidationMode = true, -- Enable validation mode by default
-		BatchSize = 500, -- Process in smaller batches to prevent overflow
-		ValidateOnly = false, -- If true, only validates but doesn't add new entries
 	},
 
 	-- State tracking
@@ -31,14 +71,6 @@ local Database = {
 		entriesCount = 0,
 		isDirty = false,
 		lastSave = 0,
-	},
-
-	-- Validation statistics
-	ValidationStats = {
-		entriesExisting = 0,
-		entriesAdded = 0,
-		entriesSkipped = 0,
-		lastValidation = 0,
 	},
 }
 
@@ -77,12 +109,19 @@ function Database.HandleSetEntry(key, value)
 		return
 	end
 
+	-- Ensure key is a valid SteamID64 format before adding/updating
+	if type(key) ~= "string" or not key:match("^765611%d{11}$") then
+		-- Optionally print a warning for invalid keys?
+		-- print("[Database] Warning: Attempted to set entry with invalid SteamID64 key: " .. tostring(key))
+		return
+	end
+
 	-- If adding a new entry
 	if not existing then
-		-- Simplified data structure - keep only what's needed
+		-- Simplified data structure - keep only Name and Reason
 		Database.data[key] = {
 			Name = type(value) == "table" and (value.Name or "Unknown") or "Unknown",
-			proof = type(value) == "table" and (value.proof or value.cause or "Unknown") or "Unknown",
+			Reason = type(value) == "table" and (value.Reason or value.proof or value.cause or "Unknown") or "Unknown", -- Prioritize Reason
 		}
 
 		Database.State.entriesCount = Database.State.entriesCount + 1
@@ -96,10 +135,10 @@ function Database.HandleSetEntry(key, value)
 				Database.State.isDirty = true
 			end
 
-			-- Only update proof if the new proof is better
-			local newProof = value.proof or value.cause
-			if newProof and newProof ~= "Unknown" and (not existing.proof or existing.proof == "Unknown") then
-				existing.proof = newProof
+			-- Only update Reason if the new Reason is better
+			local newReason = value.Reason or value.proof or value.cause
+			if newReason and newReason ~= "Unknown" and (not existing.Reason or existing.Reason == "Unknown") then
+				existing.Reason = newReason -- Use Reason field
 				Database.State.isDirty = true
 			end
 		end
@@ -124,416 +163,207 @@ function Database.GetFilePath()
 		".",
 	}
 
+	-- Define the filename we want to use
+	local filename = "/database.lua"
+
 	-- Try to find existing folder first
 	for _, folder in ipairs(possibleFolders) do
+		local potentialPath = folder .. filename
+		if pcall(function()
+			return filesystem.GetFileSize(potentialPath)
+		end) then
+			-- Found existing file in this folder
+			local success, fullPath = pcall(filesystem.FullPath, folder) -- Get full path for consistency
+			if success and fullPath then
+				return fullPath .. filename
+			else
+				return potentialPath -- Fallback to relative path if FullPath fails
+			end
+		end
+		-- Also check if the directory itself exists, even if the file doesn't yet
 		if pcall(function()
 			return filesystem.GetFileSize(folder)
 		end) then
-			return folder .. "/database.json"
+			local success, fullPath = pcall(filesystem.FullPath, folder)
+			if success and fullPath then
+				return fullPath .. filename
+			else
+				return folder .. filename
+			end
 		end
 	end
 
-	-- Try to create folders
-	for _, folder in ipairs(possibleFolders) do
-		if pcall(filesystem.CreateDirectory, folder) then
-			return folder .. "/database.json"
-		end
+	-- Try to create folders if none exist
+	local preferredFolder = possibleFolders[1] -- Use the first one as preferred
+	local success, fullPath = pcall(filesystem.CreateDirectory, preferredFolder)
+	if success and fullPath then
+		return fullPath .. filename
+	elseif success then -- CreateDirectory might return true but empty path on failure in some cases?
+		return preferredFolder .. filename
 	end
 
-	-- Last resort
-	return "./database.json"
+	-- Last resort: current directory
+	print("[Database] Warning: Could not find or create a suitable directory. Using current directory.")
+	return "." .. filename
 end
 
--- Save database to disk with optimized line-by-line writing to prevent overflow
+-- Save database to disk using Lua table serialization
 function Database.SaveDatabase()
-	-- Ensure the database is initialized first
-	Database.EnsureInitialized()
+	-- Ensure the database has been initialized at least once
+	if not Database.data then
+		print("[Database] Cannot save, database not initialized.")
+		return false
+	end
 
-	-- Create a save task to run in coroutine
-	local saveTask = coroutine.create(function()
-		local filePath = Database.GetFilePath()
-		local tempPath = filePath .. ".tmp"
-		local backupPath = filePath .. ".bak"
-
-		-- Let UI know we're starting
-		if G and G.UI and G.UI.ShowMessage then
-			G.UI.ShowMessage("Saving database...")
+	-- Skip saving if no entries or not dirty
+	if Database.State.entriesCount == 0 then
+		if Database.Config.DebugMode then
+			print("[Database] No entries to save.")
 		end
+		return true -- Nothing to do, considered successful
+	end
 
-		-- Skip saving if no entries or not dirty
-		if Database.State.entriesCount == 0 then
-			print("[Database] No entries to save")
-			return true
+	if not Database.State.isDirty then
+		if Database.Config.DebugMode then
+			print("[Database] Database is not dirty, skipping save.")
 		end
+		return true -- Nothing to do, considered successful
+	end
 
-		if not Database.State.isDirty then
-			print("[Database] Database is not dirty, skipping save")
-			return true
-		end
+	local filePath = Database.GetFilePath()
+	local tempPath = filePath .. ".tmp"
+	local backupPath = filePath .. ".bak"
 
-		-- Stage 1: Create a temporary file
+	if G and G.UI and G.UI.ShowMessage then
+		G.UI.ShowMessage("Saving database...")
+	end
+
+	-- Stage 1: Serialize the data table to a Lua string
+	local serializedData = nil
+	local serializeSuccess, errMsg = pcall(function()
+		serializedData = "-- Cheater Detection Database v1\nreturn " .. serializeTableToLuaString(Database.data)
+	end)
+
+	if not serializeSuccess or not serializedData then
+		print("[Database] Failed to serialize database data: " .. tostring(errMsg or "Unknown error"))
+		return false
+	end
+
+	-- Stage 2: Write serialized data to temporary file
+	local writeSuccess, writeErrMsg = pcall(function()
 		local tempFile = io.open(tempPath, "w")
 		if not tempFile then
-			print("[Database] Failed to create temporary file: " .. tempPath)
-			return false
+			error("Failed to open temporary file: " .. tempPath)
 		end
-
-		-- Write opening JSON bracket without using Json.encode
-		tempFile:write("{\n")
-
-		-- Stage 2: Convert entries to direct strings and write in batches
-		-- This avoids creating tables that the JSON encoder would need to process
-		local steamIDs = {}
-		for steamID in pairs(Database.data) do
-			table.insert(steamIDs, steamID)
-		end
-
-		local totalEntries = #steamIDs
-		local batchSize = 200 -- Smaller batches to avoid memory issues
-		local batches = math.ceil(totalEntries / batchSize)
-
-		for batchIndex = 1, batches do
-			local startIdx = (batchIndex - 1) * batchSize + 1
-			local endIdx = math.min(batchIndex * batchSize, totalEntries)
-
-			-- Update progress
-			local progress = math.floor((batchIndex - 1) / batches * 100)
-			if G and G.UI and G.UI.UpdateProgress then
-				G.UI.UpdateProgress(progress, "Saving database... " .. progress .. "%")
-			end
-
-			-- Allow UI to update
-			coroutine.yield()
-
-			-- Process this batch directly as strings
-			for i = startIdx, endIdx do
-				local steamID = steamIDs[i]
-				local entry = Database.data[steamID]
-
-				if entry and type(entry) == "table" then
-					-- Sanitize strings for JSON safety
-					local name = entry.Name or "Unknown"
-					local proof = entry.proof or "Unknown"
-
-					-- Escape quotes and control characters
-					name = name:gsub('"', '\\"'):gsub("[\r\n\t]", " ")
-					proof = proof:gsub('"', '\\"'):gsub("[\r\n\t]", " ")
-
-					-- Build JSON entry manually without encoder
-					local jsonEntry = string.format('"%s":{"Name":"%s","proof":"%s"}', steamID, name, proof)
-
-					-- Add comma for all except the last entry
-					if i < totalEntries then
-						jsonEntry = jsonEntry .. ",\n"
-					else
-						jsonEntry = jsonEntry .. "\n"
-					end
-
-					-- Write directly to file without table operations
-					tempFile:write(jsonEntry)
-				end
-			end
-
-			-- Force flush the batch to disk
-			tempFile:flush()
-
-			-- Clear memory after each batch
-			steamIDs[batchIndex] = nil -- Allow previous batch to be GC'd
-			collectgarbage("step", 200)
-		end
-
-		-- Write closing JSON bracket
-		tempFile:write("}")
+		tempFile:write(serializedData)
 		tempFile:close()
+	end)
 
-		-- Stage 3: Safely replace the original file
-		-- First create a backup if the original file exists
-		local success, backupErr = pcall(function()
-			local existingFile = io.open(filePath, "r")
-			if existingFile then
-				local content = existingFile:read("*a")
-				existingFile:close()
+	serializedData = nil -- Allow GC
+	collectgarbage("collect")
 
-				if content and #content > 0 then
-					local backupFile = io.open(backupPath, "w")
-					if backupFile then
-						backupFile:write(content)
-						backupFile:close()
-					end
-				end
+	if not writeSuccess then
+		print("[Database] Failed to write to temporary file: " .. tostring(writeErrMsg))
+		pcall(os.remove, tempPath) -- Attempt cleanup
+		return false
+	end
+
+	-- Stage 3: Safely replace the original file
+	local replaceSuccess = false
+	local replaceErrMsg = "Unknown replacement error"
+
+	-- Create backup
+	local backupSuccess, backupErr = pcall(function()
+		local fileExists = pcall(function()
+			return filesystem.GetFileSize(filePath)
+		end)
+		if fileExists then
+			os.rename(filePath, backupPath)
+		end
+	end)
+	if not backupSuccess then
+		print("[Database] Warning: Failed to create backup file ('" .. backupPath .. "'): " .. tostring(backupErr))
+		-- Continue anyway, but log the warning
+	end
+
+	-- Rename temp file to final file path
+	local renameSuccess, renameErr = pcall(os.rename, tempPath, filePath)
+	if renameSuccess then
+		replaceSuccess = true
+	else
+		replaceErrMsg = tostring(renameErr)
+		-- Attempt manual copy if rename fails (less atomic)
+		print("[Database] Warning: os.rename failed ('" .. replaceErrMsg .. "'). Attempting manual copy.")
+		local manualCopySuccess, manualCopyErr = pcall(function()
+			local tempFileRead = io.open(tempPath, "rb")
+			if not tempFileRead then
+				error("Cannot open temp file for read.")
 			end
+			local content = tempFileRead:read("*a")
+			tempFileRead:close()
+			local finalFileWrite = io.open(filePath, "wb")
+			if not finalFileWrite then
+				error("Cannot open final file for write.")
+			end
+			finalFileWrite:write(content)
+			finalFileWrite:close()
 		end)
 
-		if not success then
-			print("[Database] Warning: Could not create backup: " .. tostring(backupErr))
-		end
-
-		-- Replace file using atomic operation when possible
-		local replaceSuccess = os.rename(tempPath, filePath)
-
-		-- If rename failed, try copy and delete approach
-		if not replaceSuccess then
-			-- Read temp file
-			local tempContent = nil
-			local tempReader = io.open(tempPath, "r")
-			if tempReader then
-				tempContent = tempReader:read("*a")
-				tempReader:close()
-
-				-- Write to actual file
-				if tempContent then
-					local actualWriter = io.open(filePath, "w")
-					if actualWriter then
-						actualWriter:write(tempContent)
-						actualWriter:close()
-						replaceSuccess = true
-
-						-- Clean up temp file
-						os.remove(tempPath)
-					end
-				end
+		if manualCopySuccess then
+			replaceSuccess = true
+			pcall(os.remove, tempPath) -- Clean up temp file after copy
+		else
+			replaceErrMsg = "Manual copy failed: " .. tostring(manualCopyErr)
+			-- Attempt to restore backup if rename and copy failed
+			local restoreBackupSuccess, restoreBackupErr = pcall(os.rename, backupPath, filePath)
+			if not restoreBackupSuccess then
+				print(
+					"[Database] CRITICAL ERROR: Failed to save database and failed to restore backup ('"
+						.. tostring(restoreBackupErr)
+						.. "'). Data may be lost or corrupted."
+				)
+			else
+				print("[Database] Error saving database, but backup restored.")
 			end
 		end
+	end
 
+	if replaceSuccess then
 		-- Update state
 		Database.State.isDirty = false
 		Database.State.lastSave = os.time()
-
 		if G and G.UI and G.UI.ShowMessage then
 			G.UI.ShowMessage("Database saved with " .. Database.State.entriesCount .. " entries!")
 		end
-
 		if Database.Config.DebugMode then
 			print(string.format("[Database] Saved %d entries to %s", Database.State.entriesCount, filePath))
 		end
-
-		-- Clean up memory before returning
-		steamIDs = nil
-		collectgarbage("collect")
-
-		return replaceSuccess
-	end)
-
-	-- Run the save coroutine
-	local saveCallback = function()
-		-- Only proceed if the coroutine is alive
-		if coroutine.status(saveTask) ~= "dead" then
-			local success, result = pcall(coroutine.resume, saveTask)
-
-			if not success then
-				-- Error occurred
-				print("[Database] Save error: " .. tostring(result))
-				callbacks.Unregister("Draw", "DatabaseSave")
-
-				-- Try fallback save method
-				Database.FallbackSave()
-			end
-		else
-			-- Save completed
-			callbacks.Unregister("Draw", "DatabaseSave")
-		end
+		-- Optionally remove backup on success?
+		-- pcall(os.remove, backupPath)
+	else
+		print("[Database] FAILED TO SAVE DATABASE. Error: " .. replaceErrMsg)
+		-- Ensure state reflects failure
+		Database.State.isDirty = true -- Still dirty as save failed
 	end
 
-	-- Register the callback to run on Draw
-	callbacks.Register("Draw", "DatabaseSave", saveCallback)
-	return true
-end
-
--- Fallback save method with chunking to avoid memory issues
-function Database.FallbackSave()
-	print("[Database] Using fallback save method")
-
-	-- Create a fallback task to run in coroutine
-	local fallbackTask = coroutine.create(function()
-		local filePath = Database.GetFilePath()
-
-		-- Attempt to save in direct chunks without using Json.encode
-		local file = io.open(filePath, "w")
-		if not file then
-			print("[Database] Fallback: Failed to open file for writing")
-			return false
-		end
-
-		-- Build JSON manually in chunks
-		file:write("{\n")
-
-		-- Count entries first to know when to add comma
-		local totalEntries = 0
-		for _ in pairs(Database.data) do
-			totalEntries = totalEntries + 1
-		end
-
-		-- Process entries in smaller batches
-		local entriesProcessed = 0
-		local batchSize = 100 -- Smaller batch for fallback mode
-
-		-- Get all keys
-		local keys = {}
-		for steamID in pairs(Database.data) do
-			table.insert(keys, steamID)
-		end
-
-		-- Process in batches
-		for i = 1, #keys, batchSize do
-			local endIdx = math.min(i + batchSize - 1, #keys)
-
-			-- Process this batch
-			for j = i, endIdx do
-				local steamID = keys[j]
-				local entry = Database.data[steamID]
-
-				entriesProcessed = entriesProcessed + 1
-
-				-- Basic string escaping for safety
-				local name = (entry.Name or "Unknown"):gsub('"', '\\"')
-				local proof = (entry.proof or "Unknown"):gsub('"', '\\"')
-
-				-- Format as JSON directly
-				local line = string.format(
-					'"%s":{"Name":"%s","proof":"%s"}%s\n',
-					steamID,
-					name,
-					proof,
-					entriesProcessed < totalEntries and "," or ""
-				)
-
-				file:write(line)
-			end
-
-			-- Yield to let UI update
-			coroutine.yield()
-		end
-
-		file:write("}")
-		file:close()
-
-		-- Update state
-		Database.State.isDirty = false
-		Database.State.lastSave = os.time()
-
-		-- Clean up memory
-		keys = nil
-		collectgarbage("collect")
-
-		print("[Database] Fallback save completed successfully")
-		return true
-	end)
-
-	-- Process the fallback task with error handling
-	callbacks.Register("Draw", "DatabaseFallbackSave", function()
-		if coroutine.status(fallbackTask) ~= "dead" then
-			local success, result = pcall(coroutine.resume, fallbackTask)
-
-			if not success then
-				print("[Database] Fallback save error: " .. tostring(result))
-				callbacks.Unregister("Draw", "DatabaseFallbackSave")
-			end
-		else
-			callbacks.Unregister("Draw", "DatabaseFallbackSave")
-		end
-	end)
-
-	return true
-end
-
--- Enhanced load function that doesn't reset the database if it already exists
-function Database.LoadDatabaseSafe(silent)
-	-- If database is already loaded and has entries, don't reload completely
-	if Database.State.entriesCount > 0 then
-		if not silent then
-			printc(
-				100,
-				150,
-				255,
-				255,
-				"[Database] Using existing database with " .. Database.State.entriesCount .. " entries"
-			)
-		end
-		return true
-	end
-
-	-- Otherwise, perform normal load
-	return Database.LoadDatabase(silent)
-end
-
--- Load database from disk
-function Database.LoadDatabase(silent)
-	local filePath = Database.GetFilePath()
-
-	-- Try to open file
-	local file = io.open(filePath, "r")
-	if not file then
-		if not silent then
-			print("[Database] Database file not found: " .. filePath)
-		end
-		return false
-	end
-
-	-- Read and parse content
-	local content = file:read("*a")
-	file:close()
-
-	local success, data = pcall(Json.decode, content)
-	if not success or type(data) ~= "table" then
-		if not silent then
-			print("[Database] Failed to decode database file")
-		end
-		return false
-	end
-
-	-- Reset and load data
-	Database.data = {}
-	Database.State.entriesCount = 0
-
-	-- Copy data with minimal structure - enforce entry limit
-	local entriesAdded = 0
-	for steamID, value in pairs(data) do
-		if entriesAdded < Database.Config.MaxEntries then
-			Database.data[steamID] = {
-				Name = type(value) == "table" and (value.Name or "Unknown") or "Unknown",
-				proof = type(value) == "table" and (value.proof or value.cause or "Unknown") or "Unknown",
-			}
-			Database.State.entriesCount = Database.State.entriesCount + 1
-			entriesAdded = entriesAdded + 1
-		else
-			break
-		end
-	end
-
-	-- Clean up memory
 	collectgarbage("collect")
-
-	-- Update state
-	Database.State.isDirty = false
-	Database.State.lastSave = os.time()
-
-	if not silent then
-		printc(
-			0,
-			255,
-			140,
-			255,
-			"[" .. os.date("%H:%M:%S") .. "] Loaded Database with " .. Database.State.entriesCount .. " entries"
-		)
-	end
-
-	return true
+	return replaceSuccess
 end
 
 -- Get a player record
 function Database.GetRecord(steamId)
-	return Database.content[steamId]
+	return Database.data[steamId] -- Access data directly
 end
 
 -- Get proof for a player
-function Database.GetProof(steamId)
-	local record = Database.content[steamId]
-	return record and record.proof or "Unknown"
+function Database.GetReason(steamId) -- Renamed from GetProof
+	local record = Database.data[steamId] -- Access data directly
+	return record and record.Reason or "Unknown"
 end
 
 -- Get name for a player
 function Database.GetName(steamId)
-	local record = Database.content[steamId]
+	local record = Database.data[steamId] -- Access data directly
 	return record and record.Name or "Unknown"
 end
 
@@ -551,14 +381,14 @@ function Database.SetSuspect(steamId, data)
 	-- Create minimal data structure
 	local minimalData = {
 		Name = (data and data.Name) or "Unknown",
-		proof = (data and (data.proof or data.cause)) or "Unknown",
+		Reason = (data and (data.Reason or data.proof or data.cause)) or "Unknown", -- Use Reason
 	}
 
-	-- Store data
-	Database.content[steamId] = minimalData
+	-- Store data using HandleSetEntry to ensure consistency
+	Database.HandleSetEntry(steamId, minimalData)
 
 	-- Also set priority in playerlist
-	playerlist.SetPriority(steamId, 10)
+	pcall(playerlist.SetPriority, steamId, 10)
 end
 
 -- Clear a player from suspect list
@@ -571,11 +401,11 @@ end
 
 -- Get database stats
 function Database.GetStats()
-	-- Count entries by proof type
-	local proofStats = {}
+	-- Count entries by Reason type
+	local reasonStats = {}
 	for steamID, entry in pairs(Database.data) do
-		local proof = entry.proof or "Unknown"
-		proofStats[proof] = (proofStats[proof] or 0) + 1
+		local reason = entry.Reason or "Unknown"
+		reasonStats[reason] = (reasonStats[reason] or 0) + 1
 	end
 
 	return {
@@ -583,401 +413,12 @@ function Database.GetStats()
 		isDirty = Database.State.isDirty,
 		lastSave = Database.State.lastSave,
 		memoryMB = collectgarbage("count") / 1024,
-		proofTypes = proofStats,
+		proofTypes = reasonStats, -- Keep original name for now if used elsewhere, but contains reasons
+		reasonTypes = reasonStats, -- Add new name for clarity
 	}
 end
 
--- Validate database entries against source without complete reload
-function Database.ValidateDatabase(source, sourceName, sourceCause)
-	if not source then
-		return 0
-	end
-
-	-- Initialize counters
-	local added = 0
-	local skipped = 0
-	local existing = 0
-	local totalProcessed = 0
-
-	-- Track start time
-	local startTime = os.time()
-
-	-- Check if we have an existing database
-	if Database.State.entriesCount > 0 then
-		print("[Database] Validating against existing database with " .. Database.State.entriesCount .. " entries")
-	else
-		print("[Database] No existing database, will create new entries")
-	end
-
-	-- Define a processing function that works with strings only
-	local function processValue(steamId, data)
-		-- Skip invalid IDs
-		if not steamId or #steamId < 15 or not steamId:match("^%d+$") then
-			skipped = skipped + 1
-			return
-		end
-
-		-- Check if entry already exists
-		if Database.data[steamId] then
-			existing = existing + 1
-
-			-- Only update if the new data has better information and we're not in validate-only mode
-			if type(data) == "table" and not Database.Config.ValidateOnly then
-				local existingEntry = Database.data[steamId]
-
-				-- Update name if better
-				if
-					data.Name
-					and data.Name ~= "Unknown"
-					and (not existingEntry.Name or existingEntry.Name == "Unknown")
-				then
-					existingEntry.Name = data.Name
-					Database.State.isDirty = true
-				end
-
-				-- Update proof if better
-				local newProof = data.proof or data.cause or sourceCause
-				if
-					newProof
-					and newProof ~= "Unknown"
-					and (not existingEntry.proof or existingEntry.proof == "Unknown")
-				then
-					existingEntry.proof = newProof
-					Database.State.isDirty = true
-				end
-			end
-		else
-			-- Only add if we're not in validate-only mode
-			if not Database.Config.ValidateOnly then
-				-- Add new entry with minimal data
-				Database.data[steamId] = {
-					Name = (type(data) == "table" and data.Name) or "Unknown",
-					proof = (type(data) == "table" and (data.proof or data.cause)) or sourceCause or "Unknown",
-				}
-
-				-- Set priority in player list with error handling
-				pcall(function()
-					playerlist.SetPriority(steamId, 10)
-				end)
-
-				Database.State.entriesCount = Database.State.entriesCount + 1
-				Database.State.isDirty = true
-				added = added + 1
-			else
-				skipped = skipped + 1
-			end
-		end
-
-		-- Track progress
-		totalProcessed = totalProcessed + 1
-
-		-- Periodically yield and update UI for large data sets
-		if totalProcessed % 1000 == 0 and G and G.UI and G.UI.UpdateProgress then
-			G.UI.UpdateProgress(nil, "Validated " .. totalProcessed .. " entries...")
-			coroutine.yield()
-		end
-	end
-
-	-- If source is a table, process entries
-	if type(source) == "table" then
-		-- Process in batches to prevent memory issues
-		local keys = {}
-		local batchCount = 0
-
-		-- Collect keys first (for tables with many entries)
-		for steamId in pairs(source) do
-			table.insert(keys, steamId)
-
-			-- Process in batches
-			if #keys >= Database.Config.BatchSize then
-				-- Process this batch
-				for _, key in ipairs(keys) do
-					processValue(key, source[key])
-				end
-
-				-- Clear batch and force GC
-				keys = {}
-				collectgarbage("step", 100)
-				coroutine.yield()
-				batchCount = batchCount + 1
-
-				-- Update progress
-				if G and G.UI and G.UI.UpdateProgress then
-					G.UI.UpdateProgress(nil, "Validated batch " .. batchCount .. "...")
-				end
-			end
-		end
-
-		-- Process remaining keys
-		for _, key in ipairs(keys) do
-			processValue(key, source[key])
-		end
-	end
-
-	-- Update validation statistics
-	Database.ValidationStats.entriesExisting = Database.ValidationStats.entriesExisting + existing
-	Database.ValidationStats.entriesAdded = Database.ValidationStats.entriesAdded + added
-	Database.ValidationStats.entriesSkipped = Database.ValidationStats.entriesSkipped + skipped
-	Database.ValidationStats.lastValidation = startTime
-
-	-- Log result
-	print(
-		string.format(
-			"[Database] Validation complete for %s: %d added, %d existing, %d skipped",
-			sourceName or "source",
-			added,
-			existing,
-			skipped
-		)
-	)
-
-	-- Auto-save if we've made changes
-	if Database.State.isDirty and added > 0 and Database.Config.AutoSave then
-		print("[Database] Changes detected, scheduling save...")
-		-- Schedule save for next frame to prevent stack overflow
-		callbacks.Register("Draw", "DatabaseValidationSave", function()
-			callbacks.Unregister("Draw", "DatabaseValidationSave")
-			Database.SaveDatabase()
-		end)
-	end
-
-	-- Return added count for compatibility with existing fetch functions
-	return added
-end
-
--- Add utility functions to trigger validation with proper progress updates and coroutine pacing
-function Database.ValidateWithSources(silent)
-	if not Database_Fetcher then
-		if not silent then
-			print("[Database] Error: Database_Fetcher module not found")
-		end
-		return false
-	end
-
-	-- Reset validation statistics
-	Database.ValidationStats.entriesExisting = 0
-	Database.ValidationStats.entriesAdded = 0
-	Database.ValidationStats.entriesSkipped = 0
-	Database.ValidationStats.lastValidation = os.time()
-
-	-- Get active sources with fallback
-	local sources = Database_Fetcher.Sources
-	if not sources then
-		if not silent then
-			print("[Database] Error: No sources found")
-		end
-		return false
-	end
-
-	-- Enable validation mode
-	local prevValidateOnly = Database.Config.ValidateOnly
-	Database.Config.ValidateOnly = false -- We want to add missing entries
-
-	-- Initialize UI with Tasks system
-	local Tasks = Database_Fetcher.Tasks
-	local hasTasks = false
-
-	pcall(function()
-		if Tasks then
-			Tasks.Reset()
-			Tasks.Init(#sources)
-			Tasks.message = "Validating Database"
-			Tasks.Config.SimplifiedUI = true
-			Tasks.isRunning = true
-			hasTasks = true
-
-			-- Make sure we have a Draw hook for Tasks.UpdateProgress
-			callbacks.Register("Draw", "TasksUpdateProgress", Tasks.UpdateProgress)
-		end
-	end)
-
-	-- Create a coroutine to process sources one by one with fixed 2-second delays
-	local validationTask = coroutine.create(function()
-		local totalAdded = 0
-		local totalSources = #sources
-
-		for i, source in ipairs(sources) do
-			if source and source.url and source.cause then
-				-- Update progress display if we have Tasks
-				if hasTasks then
-					Tasks.StartSource(source.name)
-					Tasks.targetProgress = ((i - 1) / totalSources) * 100
-					Tasks.message = "Validating: " .. source.name
-				end
-
-				-- Add a fixed 2-second delay between sources to prevent overloading
-				if i > 1 then
-					local delayTime = 2.0 -- Fixed 2-second delay
-
-					-- Use countdown for better UI feedback
-					local startTime = globals.RealTime()
-					while globals.RealTime() < startTime + delayTime do
-						local remaining = math.ceil((startTime + delayTime) - globals.RealTime())
-						if hasTasks then
-							Tasks.message = string.format("Rate limit: %ds before next request...", remaining)
-						end
-						coroutine.yield() -- Keep yielding to maintain smooth gameplay
-					end
-				end
-
-				-- Get content from source
-				if Database_Fetcher.ProcessSourceInBatches then
-					-- Use the batch processor with built-in coroutine support
-					local content = Database_Fetcher.ProcessSourceInBatches(source, Database)
-					totalAdded = totalAdded + (tonumber(content) or 0)
-				else
-					-- Fall back to direct processing with improved coroutine handling
-					local content = {}
-					local success, rawContent = false, nil
-
-					-- Download in a non-blocking way
-					local dlTask = coroutine.create(function()
-						if hasTasks then
-							Tasks.message = "Downloading from " .. source.name
-						end
-						return pcall(function()
-							return http.Get(source.url)
-						end)
-					end)
-
-					-- Run the download task with yielding
-					while coroutine.status(dlTask) ~= "dead" do
-						local dlSuccess, dlResult, dlContent = coroutine.resume(dlTask)
-
-						if dlSuccess then
-							success = dlResult
-							rawContent = dlContent
-						end
-
-						coroutine.yield() -- Keep game responsive
-					end
-
-					if success and rawContent and #rawContent > 0 then
-						local added = Database.ValidateDatabase(content, source.name, source.cause)
-						totalAdded = totalAdded + added
-					end
-				end
-
-				-- Mark task complete if we have Tasks
-				if hasTasks then
-					Tasks.SourceDone()
-				end
-
-				-- Force a yield even if not needed, to maintain responsiveness
-				coroutine.yield()
-			end
-		end
-
-		-- Restore validation mode
-		Database.Config.ValidateOnly = prevValidateOnly
-
-		-- Show completion if we have Tasks
-		if hasTasks then
-			Tasks.targetProgress = 100
-			Tasks.status = "complete"
-			Tasks.message = "Validation Complete"
-			Tasks.completedTime = globals.RealTime()
-		end
-
-		if not silent then
-			printc(
-				0,
-				255,
-				0,
-				255,
-				string.format(
-					"[Database] Validation complete: %d added, %d existing, %d skipped",
-					Database.ValidationStats.entriesAdded,
-					Database.ValidationStats.entriesExisting,
-					Database.ValidationStats.entriesSkipped
-				)
-			)
-		end
-
-		-- Save if needed
-		if Database.State.isDirty and Database.ValidationStats.entriesAdded > 0 then
-			Database.SaveDatabase()
-		end
-
-		return totalAdded
-	end)
-
-	-- Register the validation task
-	callbacks.Register("Draw", "DatabaseValidationTask", function()
-		if coroutine.status(validationTask) ~= "dead" then
-			local success, result = pcall(coroutine.resume, validationTask)
-			if not success then
-				print("[Database] Validation error: " .. tostring(result))
-				callbacks.Unregister("Draw", "DatabaseValidationTask")
-				Database.Config.ValidateOnly = prevValidateOnly
-			end
-		else
-			callbacks.Unregister("Draw", "DatabaseValidationTask")
-			Database.Config.ValidateOnly = prevValidateOnly
-		end
-	end)
-
-	return true
-end
-
--- Import function for database updating
-function Database.ImportDatabase()
-	-- Ensure database is properly initialized
-	Database.EnsureInitialized()
-
-	-- Simple import from Database_import module
-	local beforeCount = Database.State.entriesCount
-
-	-- Import additional data
-	Database_import.importDatabase(Database)
-
-	-- Count entries after import
-	local afterCount = Database.State.entriesCount
-
-	-- Show a summary of the import
-	local newEntries = afterCount - beforeCount
-	if newEntries > 0 then
-		printc(255, 255, 0, 255, string.format("[Database] Imported %d new entries from external sources", newEntries))
-
-		-- Save the updated database
-		if Database.SaveDatabase() then
-			printc(100, 255, 100, 255, string.format("[Database] Saved database with %d total entries", afterCount))
-		end
-	end
-
-	return newEntries
-end
-
--- Add utility functions to trigger fetching
-function Database.FetchUpdates(silent)
-	-- Ensure database is properly initialized
-	Database.EnsureInitialized()
-
-	if Database_Fetcher then
-		return Database_Fetcher.FetchAll(Database, function(totalAdded)
-			if totalAdded and totalAdded > 0 then
-				Database.SaveDatabase()
-				if not silent then
-					printc(0, 255, 0, 255, "[Database] Updated with " .. totalAdded .. " new entries")
-				end
-			elseif not silent then
-				print("[Database] No new entries were added")
-			end
-		end, silent)
-	else
-		if not silent then
-			print("[Database] Error: Database_Fetcher module not found")
-		end
-		return false
-	end
-end
-
--- Auto update function that can be called from anywhere
-function Database.AutoUpdate()
-	return Database.FetchUpdates(true)
-end
-
--- Clean database by removing least important entries
+-- Clean database by removing least important entries (Simplified Logic)
 function Database.Cleanup(maxEntries)
 	maxEntries = maxEntries or Database.Config.MaxEntries
 
@@ -986,87 +427,37 @@ function Database.Cleanup(maxEntries)
 		return 0
 	end
 
-	-- Create a priority list for entries to keep
-	local priorities = {
-		-- Highest priority to keep (exact string matching)
-		"RGL",
-		"Bot",
-		"Pazer List",
-		"Community",
-		-- Lower priority categories
-		"Cheater",
-		"Tacobot",
-		"MCDB",
-		"Suspicious",
-		"Watched",
-	}
+	print(
+		string.format("[Database] Cleaning up entries (Current: %d, Max: %d)", Database.State.entriesCount, maxEntries)
+	)
+	local toRemoveCount = Database.State.entriesCount - maxEntries
+	local removedCount = 0
 
-	-- Count entries to remove
-	local toRemove = Database.State.entriesCount - maxEntries
-	local removed = 0
-
-	-- Remove entries not in priority list first
-	if toRemove > 0 then
-		local nonPriorityEntries = {}
-
-		for steamId, data in pairs(Database.data) do
-			-- Check if this entry is a priority
-			local isPriority = false
-			local proof = (data.proof or ""):lower()
-
-			for _, priority in ipairs(priorities) do
-				if proof:find(priority:lower()) then
-					isPriority = true
-					break
-				end
-			end
-
-			if not isPriority then
-				table.insert(nonPriorityEntries, steamId)
-				if #nonPriorityEntries >= toRemove then
-					break
-				end
-			end
-		end
-
-		-- Remove the non-priority entries
-		for _, steamId in ipairs(nonPriorityEntries) do
-			Database.content[steamId] = nil
-			removed = removed + 1
+	-- Simple approach: Remove entries arbitrarily until limit is met.
+	-- A more sophisticated approach (like keeping specific sources) could be added if needed.
+	local keysToRemove = {}
+	for steamId in pairs(Database.data) do
+		table.insert(keysToRemove, steamId)
+		if #keysToRemove >= toRemoveCount then
+			break -- Collected enough keys to remove
 		end
 	end
 
-	-- If we still need to remove more, start removing lowest priority entries
-	if removed < toRemove then
-		-- Process in reverse priority order
-		for i = #priorities, 1, -1 do
-			local priority = priorities[i]:lower()
-
-			for steamId, data in pairs(Database.data) do
-				local proof = (data.proof or ""):lower()
-
-				if proof:find(priority) then
-					Database.content[steamId] = nil
-					removed = removed + 1
-
-					if removed >= toRemove then
-						break
-					end
-				end
-			end
-
-			if removed >= toRemove then
-				break
-			end
-		end
+	-- Remove the selected entries
+	for _, steamId in ipairs(keysToRemove) do
+		Database.HandleSetEntry(steamId, nil) -- Use HandleSetEntry to correctly decrement count and set dirty flag
+		removedCount = removedCount + 1
 	end
 
-	-- Save the cleaned database
-	if removed > 0 and Database.State.isDirty then
+	-- Save the cleaned database immediately if changes were made
+	if removedCount > 0 then -- Check if any were actually removed (HandleSetEntry might skip if already nil)
+		print(string.format("[Database] Removed %d entries during cleanup.", removedCount))
 		Database.SaveDatabase()
+	elseif Database.Config.DebugMode then
+		print("[Database] Cleanup ran but no entries needed removal or were already nil.")
 	end
 
-	return removed
+	return removedCount
 end
 
 -- Register database commands
@@ -1112,195 +503,227 @@ local function OnUnload()
 	end
 end
 
--- Initialize the database
+-- Simplified Initialize function
 local function InitializeDatabase()
-	-- Ensure database structure is properly initialized
-	Database.EnsureInitialized()
+	print("[Database] Initializing...")
 
-	-- Try to restore the database first
-	if Restore.RestoreDatabase(Database) then
-		-- Successfully restored, skip loading from file
-		print("[Database] Successfully restored database from memory")
-
-		-- Clean up if over limit
-		if Database.State.entriesCount > Database.Config.MaxEntries then
-			local removed = Database.Cleanup()
-			if removed > 0 and Database.Config.DebugMode then
-				print(string.format("[Database] Cleaned %d entries to stay under limit", removed))
-			end
-		end
-
-		return true
-	end
-
-	-- Otherwise, continue with normal database loading
-	Database.LoadDatabase()
-	Database.State.isDirty = true
-	-- Import additional data
-	Database.ImportDatabase()
-
-	-- Clean up if over limit
-	if Database.State.entriesCount > Database.Config.MaxEntries then
-		local removed = Database.Cleanup()
-		if removed > 0 and Database.Config.DebugMode then
-			print(string.format("[Database] Cleaned %d entries to stay under limit", removed))
-		end
-	end
-
-	-- Check if Database_Fetcher is available and has auto-fetch enabled
-	pcall(function()
-		if Database_Fetcher and Database_Fetcher.Config and Database_Fetcher.Config.AutoFetchOnLoad then
-			Database_Fetcher.AutoFetch(Database)
-		end
-	end)
-end
-
--- Make sure structures exist
-function Database.EnsureInitialized()
-	-- Create data table if needed
-	Database.data = Database.data or {}
-
-	-- Create state tracking
-	Database.State = Database.State or {
+	-- Set initial state
+	Database.State = {
 		entriesCount = 0,
 		isDirty = false,
 		lastSave = 0,
 	}
+	Database.data = Database.data or {} -- Ensure data table exists
 
-	-- Create content accessor
-	if not Database.content then
-		Database.content = setmetatable({}, {
-			__index = function(_, key)
-				return Database.data[key]
-			end,
-			__newindex = function(_, key, value)
-				Database.HandleSetEntry(key, value)
-			end,
-			__pairs = function()
-				return pairs(Database.data)
-			end,
-		})
+	-- Load existing data from file
+	local loadSuccess = Database.LoadDatabase()
+
+	if not loadSuccess then
+		printc(
+			255,
+			100,
+			100,
+			255,
+			"[Database] Warning: Failed to load database file properly. Starting potentially empty."
+		)
+		-- Save an empty file if load failed completely and no backup worked
+		if Database.State.entriesCount == 0 then
+			Database.State.isDirty = true -- Mark as dirty to force save
+			Database.SaveDatabase()
+		end
 	end
 
-	return true
+	-- Clean up if over limit after loading
+	if Database.State.entriesCount > Database.Config.MaxEntries then
+		local removed = Database.Cleanup()
+		if removed > 0 and Database.Config.DebugMode then
+			print(
+				string.format(
+					"[Database] Cleaned %d entries after loading to stay under limit (%d).",
+					removed,
+					Database.Config.MaxEntries
+				)
+			)
+		end
+	end
+
+	-- Check for AutoFetch *after* loading
+	pcall(function()
+		if Database_Fetcher and Database_Fetcher.Config and Database_Fetcher.Config.AutoFetchOnLoad then
+			print("[Database] Triggering AutoFetch after initialization.")
+			Database_Fetcher.StartFetch(Database, function(added) -- Use StartFetch
+				if added > 0 then
+					printc(80, 200, 120, 255, "[Database] AutoFetch added " .. added .. " new entries.")
+					-- Save is handled by the fetcher itself now
+				else
+					print("[Database] AutoFetch finished, no new entries added.")
+				end
+			end, true) -- Run silently
+		end
+	end)
 end
 
--- Simplified update function that just adds new entries
-function Database.DirectUpdate(source, sourceName, sourceCause)
-	if type(source) ~= "table" then
-		return 0
+-- Load database from disk using Lua's load function
+function Database.LoadDatabase(silent)
+	local filePath = Database.GetFilePath()
+
+	-- Check if file exists
+	local fileExists = pcall(function()
+		return filesystem.GetFileSize(filePath)
+	end)
+	if not fileExists then
+		if not silent then
+			print("[Database] Database file not found: " .. filePath .. ". Creating new database.")
+		end
+		Database.data = {} -- Initialize empty table
+		Database.State.entriesCount = 0
+		Database.State.isDirty = false -- New database isn't dirty yet
+		Database.State.lastSave = 0
+		collectgarbage("collect")
+		return true -- Successfully "loaded" an empty database
 	end
 
-	local added = 0
-	for steamId, data in pairs(source) do
-		-- Only process valid Steam IDs
-		if type(steamId) == "string" and #steamId >= 15 and steamId:match("^%d+$") then
-			-- Add if doesn't exist
-			if not Database.data[steamId] then
-				Database.data[steamId] = {
-					Name = (type(data) == "table" and data.Name) or "Unknown",
-					proof = (type(data) == "table" and (data.proof or data.cause)) or sourceCause or "Unknown",
-				}
-
-				-- Update state
-				Database.State.entriesCount = Database.State.entriesCount + 1
-				Database.State.isDirty = true
-
-				-- Set priority
-				pcall(function()
-					playerlist.SetPriority(steamId, 10)
-				end)
-
-				added = added + 1
-			end
+	-- Load the Lua file content
+	local loadedData = nil
+	local success, result = pcall(function()
+		local chunk = loadfile(filePath)
+		if chunk then
+			return chunk()
+		else
+			error("Failed to load database chunk from " .. filePath)
 		end
-
-		-- Yield periodically to avoid freezing
-		if added % 500 == 0 then
-			coroutine.yield()
-		end
-	end
-
-	return added
-end
-
--- Save database with simpler approach
-function Database.QuickSave()
-	-- Create a save task in a coroutine
-	local saveTask = coroutine.create(function()
-		-- Open file
-		local filePath = Database.GetFilePath()
-		local file = io.open(filePath, "w")
-		if not file then
-			print("[Database] Failed to open file for writing: " .. filePath)
-			return false
-		end
-
-		-- Write opening bracket
-		file:write("{\n")
-
-		-- Get all IDs
-		local ids = {}
-		for id in pairs(Database.data) do
-			table.insert(ids, id)
-		end
-
-		-- Write each entry
-		local totalEntries = #ids
-		for i, id in ipairs(ids) do
-			local entry = Database.data[id]
-
-			-- Get and sanitize data
-			local name = entry.Name or "Unknown"
-			local proof = entry.proof or "Unknown"
-			name = name:gsub('"', '\\"'):gsub("[\r\n\t]", " ")
-			proof = proof:gsub('"', '\\"'):gsub("[\r\n\t]", " ")
-
-			-- Write JSON entry
-			local line = string.format('"%s":{"Name":"%s","proof":"%s"}', id, name, proof)
-			if i < totalEntries then
-				line = line .. ","
-			end
-			line = line .. "\n"
-			file:write(line)
-
-			-- Yield periodically
-			if i % 200 == 0 then
-				coroutine.yield()
-			end
-		end
-
-		-- Write closing bracket
-		file:write("}")
-		file:close()
-
-		-- Update state
-		Database.State.isDirty = false
-		Database.State.lastSave = os.time()
-
-		print("[Database] Saved " .. totalEntries .. " entries to " .. filePath)
-		return true
 	end)
 
-	-- Run the save coroutine
-	callbacks.Register("Draw", "DatabaseQuickSave", function()
-		if coroutine.status(saveTask) ~= "dead" then
-			local success, result = pcall(coroutine.resume, saveTask)
-			if not success then
-				print("[Database] Save error: " .. tostring(result))
-				callbacks.Unregister("Draw", "DatabaseQuickSave")
+	if not success then
+		if not silent then
+			print("[Database] Failed to load/parse database file ('" .. filePath .. "'): " .. tostring(result))
+			print("[Database] Attempting to load backup: " .. filePath .. ".bak")
+		end
+		-- Attempt to load backup
+		local backupFilePath = filePath .. ".bak"
+		local backupExists = pcall(function()
+			return filesystem.GetFileSize(backupFilePath)
+		end)
+		if backupExists then
+			local backupSuccess, backupResult = pcall(function()
+				local chunk = loadfile(backupFilePath)
+				if chunk then
+					return chunk()
+				else
+					error("Failed to load backup chunk.")
+				end
+			end)
+			if backupSuccess and type(backupResult) == "table" then
+				if not silent then
+					printc(255, 165, 0, 255, "[Database] Successfully loaded from backup file.")
+				end
+				success = true
+				result = backupResult
+				-- Optionally try to restore the main file from backup here
+				pcall(function()
+					local bf = io.open(backupFilePath, "rb")
+					if bf then
+						local content = bf:read("*a")
+						bf:close()
+						local mf = io.open(filePath, "wb")
+						if mf then
+							mf:write(content)
+							mf:close()
+						end
+					end
+				end)
+			else
+				if not silent then
+					print("[Database] Failed to load backup file: " .. tostring(backupResult))
+				end
 			end
 		else
-			callbacks.Unregister("Draw", "DatabaseQuickSave")
+			if not silent then
+				print("[Database] Backup file not found.")
+			end
 		end
-	end)
 
+		-- If both fail, start with empty
+		if not success then
+			printc(
+				255,
+				0,
+				0,
+				255,
+				"[Database] CRITICAL: Failed to load main database and backup. Starting with an empty database."
+			)
+			Database.data = {}
+			Database.State.entriesCount = 0
+			Database.State.isDirty = true -- Mark dirty as we failed to load
+			Database.State.lastSave = 0
+			return false -- Indicate load failure
+		end
+	end
+
+	-- Validate loaded data
+	if type(result) ~= "table" then
+		if not silent then
+			print("[Database] Loaded data is not a table. Starting with an empty database.")
+		end
+		Database.data = {}
+		Database.State.entriesCount = 0
+		Database.State.isDirty = true
+		Database.State.lastSave = 0
+		return false -- Indicate load failure
+	end
+
+	-- Successfully loaded data
+	Database.data = result
+
+	-- Recalculate entry count and enforce structure
+	local count = 0
+	local entriesToRemove = {}
+	for steamID, value in pairs(Database.data) do
+		-- Basic validation
+		if type(steamID) ~= "string" or not steamID:match("^765611") or type(value) ~= "table" or not value.Reason then -- Check for Reason field now
+			table.insert(entriesToRemove, steamID)
+		else
+			count = count + 1
+			-- Ensure Name exists
+			if not value.Name then
+				value.Name = "Unknown"
+			end
+			-- Remove old 'Reason' field if it exists
+			if value.Reason then
+				value.Reason = nil
+			end
+		end
+	end
+
+	-- Remove invalid entries
+	if #entriesToRemove > 0 then
+		if not silent then
+			print("[Database] Removing " .. #entriesToRemove .. " invalid entries during load.")
+		end
+		for _, key in ipairs(entriesToRemove) do
+			Database.data[key] = nil
+		end
+		Database.State.isDirty = true -- Mark dirty if we removed entries
+	else
+		Database.State.isDirty = false -- Loaded cleanly
+	end
+
+	Database.State.entriesCount = count
+	Database.State.lastSave = os.time() -- Treat load time as last save time
+
+	if not silent then
+		printc(
+			0,
+			255,
+			140,
+			255,
+			"[" .. os.date("%H:%M:%S") .. "] Loaded Database with " .. Database.State.entriesCount .. " entries"
+		)
+	end
+
+	collectgarbage("collect")
 	return true
 end
-
--- Replace existing functions with simplified versions
-Database.SaveDatabase = Database.QuickSave
-Database.ValidateDatabase = Database.DirectUpdate
 
 InitializeDatabase() -- Initialize the database when this module is loaded
 RegisterCommands() -- Register commands

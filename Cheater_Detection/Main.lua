@@ -33,7 +33,7 @@ local function InitializeSystems()
 	Config.LoadCFG()
 
 	-- Initialize database system through manager (this handles loading, importing and auto-fetching)
-	G.Database = DBManager.Initialize({
+	G.Database = DBManager.Initialize({ -- DBManager.Initialize now returns the Database module itself
 		AutoFetchOnLoad = true, -- Automatically fetch updates on startup
 		CheckInterval = 24, -- Check for updates every 24 hours
 	})
@@ -42,12 +42,13 @@ local function InitializeSystems()
 	local localPlayer = entities.GetLocalPlayer()
 	if localPlayer then
 		local mySteamID = Common.GetSteamID64(localPlayer)
-		playerlist.SetPriority(mySteamID, 0)
+		pcall(playerlist.SetPriority, mySteamID, 0) -- Use pcall for safety
 	end
 
 	-- Print initialization message
 	local dbStats = DBManager.GetStats()
-	if dbStats.totalEntries == nil then
+	-- Check entryCount instead of totalEntries
+	if not dbStats or not dbStats.entryCount or dbStats.entryCount == 0 then
 		printc(255, 100, 100, 255, "[Cheater Detection] No database entries found. Please update the database.")
 	else
 		printc(
@@ -55,7 +56,7 @@ local function InitializeSystems()
 			255,
 			100,
 			255,
-			string.format("[Cheater Detection] Initialized with %d database entries", dbStats.totalEntries)
+			string.format("[Cheater Detection] Initialized with %d database entries", dbStats.entryCount)
 		)
 	end
 
@@ -71,25 +72,26 @@ local function InitializeSystems()
 
 		-- Check if it's a valid SteamID
 		if query:match("^%d+$") and #query >= 17 then
+			-- Access Database module directly via G.Database
 			local record = G.Database.GetRecord(query)
 			if record then
 				found = true
 				print(string.format("[Database] Found record for SteamID: %s", query))
 				print(string.format("  Name: %s", record.Name or "Unknown"))
-				print(string.format("  Cause: %s", record.cause or "Unknown"))
-				print(string.format("  Date: %s", record.date or "Unknown"))
+				print(string.format("  Reason: %s", record.Reason or "Unknown")) -- Use Reason
+				-- print(string.format("  Date: %s", record.date or "Unknown")) -- Date is not stored
 			end
 		end
 
 		-- If not found by SteamID, search by name
 		if not found then
 			local matches = 0
-			for steamId, data in pairs(G.Database.content or {}) do
+			for steamId, data in pairs(G.Database.data or {}) do -- Iterate over G.Database.data
 				if data.Name and data.Name:lower():find(query:lower()) then
 					matches = matches + 1
 					print(string.format("[Database] Match %d: %s (SteamID: %s)", matches, data.Name, steamId))
-					print(string.format("  Cause: %s", data.cause or "Unknown"))
-					print(string.format("  Date: %s", data.date or "Unknown"))
+					print(string.format("  Reason: %s", data.Reason or "Unknown")) -- Use Reason
+					-- print(string.format("  Date: %s", data.date or "Unknown")) -- Date is not stored
 
 					-- Limit to 5 matches to avoid spam
 					if matches >= 5 then
@@ -195,11 +197,14 @@ InitializeSystems()
 -- Provide global access to main module functions
 return {
 	ReloadDatabase = function()
-		G.Database = DBManager.Initialize({ AutoFetchOnLoad = true })
+		print("[Cheater Detection] Reloading database...")
+		-- Directly call the LoadDatabase function from the Database module
+		return G.Database.LoadDatabase()
 	end,
 
 	UpdateDatabase = function()
-		DBManager.ForceUpdate()
+		print("[Cheater Detection] Triggering manual database update...")
+		return DBManager.UpdateDatabase() -- Manager handles triggering the fetcher
 	end,
 
 	GetDatabaseStats = DBManager.GetStats,
