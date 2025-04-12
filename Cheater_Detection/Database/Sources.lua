@@ -7,22 +7,39 @@ Sources.List = {
 	{
 		name = "d3fc0n6 Cheater List",
 		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
-		cause = "Cheater Friend (d3fc0n6)",
+		cause = "Cheater Friend",
 		parser = "raw",
 	},
 	{
 		name = "d3fc0n6 Tacobot List",
 		url = "https://raw.githubusercontent.com/d3fc0n6/TacobotList/master/64ids",
-		cause = "Tacobot (d3fc0n6)",
+		cause = "Cheater Tacobot",
 		parser = "raw",
 	},
-	--[[Potentially problematic sources last
+	{
+		name = "d3fc0n6 Tacobot List",
+		url = "https://raw.githubusercontent.com/d3fc0n6/TacobotList/master/64ids",
+		cause = "PazerOP list Bot",
+		parser = "raw",
+	},
+	{
+		name = "tf2db-sleepy-list",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy-bots.merged.json",
+		cause = "Sleepy Bot",
+		parser = "tf2db",
+	},
+	{
+		name = "Sleepy List RGL",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.rgl-gg.json",
+		cause = "Sleepy RGL",
+		parser = "tf2db",
+	},
 	{
 		name = "bot detector (Official)",
 		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
 		cause = "Bot (bot detector)",
 		parser = "tf2db", -- Use tf2db parser for this JSON source
-	},]]
+	},
 }
 
 -- Function to add a custom source

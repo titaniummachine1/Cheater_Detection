@@ -3,6 +3,72 @@ local Json = Common.Json
 
 local Parsers = {}
 
+-- Stats tracking for parser operations
+Parsers.ParseStats = {
+	sources = {},
+	totalProcessed = 0,
+	totalAdded = 0,
+	totalExisting = 0,
+	totalErrors = 0,
+}
+
+-- Reset stats for a new parsing session
+function Parsers.ResetStats()
+	Parsers.ParseStats = {
+		sources = {},
+		totalProcessed = 0,
+		totalAdded = 0,
+		totalExisting = 0,
+		totalErrors = 0,
+	}
+end
+
+-- Add stats for a source
+function Parsers.AddSourceStats(sourceName, processed, added, existing, errors)
+	Parsers.ParseStats.sources[sourceName] = {
+		processed = processed or 0,
+		added = added or 0,
+		existing = existing or 0,
+		errors = errors or 0,
+	}
+
+	-- Update totals
+	Parsers.ParseStats.totalProcessed = Parsers.ParseStats.totalProcessed + processed
+	Parsers.ParseStats.totalAdded = Parsers.ParseStats.totalAdded + added
+	Parsers.ParseStats.totalExisting = Parsers.ParseStats.totalExisting + existing
+	Parsers.ParseStats.totalErrors = Parsers.ParseStats.totalErrors + errors
+end
+
+-- Get a formatted summary of all parsing statistics
+function Parsers.GetStatsSummary()
+	local summary = "[PARSE STATS SUMMARY]\n"
+
+	-- Add per-source stats
+	for sourceName, stats in pairs(Parsers.ParseStats.sources) do
+		summary = summary
+			.. string.format(
+				"[Source: %s] Processed: %d, Added: %d, Already Exists: %d, Errors: %d\n",
+				sourceName,
+				stats.processed,
+				stats.added,
+				stats.existing,
+				stats.errors
+			)
+	end
+
+	-- Add total stats
+	summary = summary
+		.. string.format(
+			"[TOTAL] Processed: %d, Added: %d, Already Exists: %d, Errors: %d",
+			Parsers.ParseStats.totalProcessed,
+			Parsers.ParseStats.totalAdded,
+			Parsers.ParseStats.totalExisting,
+			Parsers.ParseStats.totalErrors
+		)
+
+	return summary
+end
+
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
 function Parsers.GetSteamID64(input)
@@ -11,7 +77,6 @@ function Parsers.GetSteamID64(input)
 	end
 
 	local id_str = tostring(input):match("^%s*(.-)%s*$") -- Trim
-	print(string.format("[Parser GetSteamID64 DBG] Input: '%s', Trimmed: '%s'", tostring(input), id_str)) -- ++DEBUG
 	if not id_str then
 		return nil
 	end
@@ -20,14 +85,12 @@ function Parsers.GetSteamID64(input)
 	if id_str:match("^%d+$") then
 		local num = tonumber(id_str)
 		if num and num >= 76500000000000000 and num <= 77000000000000000 then
-			print("[Parser GetSteamID64 DBG] Valid numeric SteamID64 detected directly.") -- ++DEBUG
 			return id_str
 		end
 	end
 
 	-- 2. Validate against standard SteamID64 format
 	if id_str:match("^7656119%d+$") and string.len(id_str) >= 17 then
-		print("[Parser GetSteamID64 DBG] Matched SteamID64 format directly.") -- ++DEBUG
 		return id_str
 	end
 
@@ -35,14 +98,6 @@ function Parsers.GetSteamID64(input)
 	local steamID64_from_pcall = nil
 	if steam and steam.ToSteamID64 then -- Ensure steam API is available
 		local success, result = pcall(steam.ToSteamID64, id_str)
-		print(
-			string.format(
-				"[Parser GetSteamID64 DBG] pcall(steam.ToSteamID64) success: %s, result: %s",
-				tostring(success),
-				tostring(result)
-			)
-		) -- ++DEBUG
-		print(string.format("[Parser GetSteamID64 DBG] Type of pcall result: %s", type(result))) -- ++DEBUG
 
 		-- Check if pcall succeeded AND the result is usable (string or number)
 		local result_str = nil
@@ -50,39 +105,22 @@ function Parsers.GetSteamID64(input)
 			-- Convert to string if necessary
 			if type(result) == "number" then
 				result_str = tostring(result)
-				print("[Parser GetSteamID64 DBG] Converted number result to string.") -- ++DEBUG
 			elseif type(result) == "string" then
 				result_str = result
-			else
-				print("[Parser GetSteamID64 DBG] pcall result type was unexpected: " .. type(result)) -- ++DEBUG
-				-- result_str remains nil
 			end
 
 			-- If we got a usable string, trim and validate it
 			if result_str then
 				local trimmed_result = result_str:match("^%s*(.-)%s*$")
-				print(
-					string.format(
-						"[Parser GetSteamID64 DBG] Trimmed pcall result string for matching: '%s'",
-						trimmed_result
-					)
-				) -- ++DEBUG
 
 				-- Check if this is a valid SteamID64 by numeric range instead of strict pattern
 				if trimmed_result and trimmed_result:match("^%d+$") then
 					local num = tonumber(trimmed_result)
 					if num and num >= 76500000000000000 and num <= 77000000000000000 then
-						print("[Parser GetSteamID64 DBG] Valid SteamID64 range detected from pcall result.") -- ++DEBUG
 						return trimmed_result
-					else
-						print("[Parser GetSteamID64 DBG] Numeric result from pcall not in valid SteamID64 range.") -- ++DEBUG
 					end
-				else
-					print("[Parser GetSteamID64 DBG] Trimmed pcall result not a valid numeric string.") -- ++DEBUG
 				end
 			end
-		else
-			print("[Parser GetSteamID64 DBG] pcall failed or result was nil.") -- ++DEBUG
 		end
 	else
 		print("[Parser GetSteamID64 DBG] steam or steam.ToSteamID64 not available.") -- ++DEBUG
@@ -94,20 +132,16 @@ function Parsers.GetSteamID64(input)
 	end
 
 	-- 4. Manual fallback for SteamID3 (only if steps 1 & 2 failed)
-	print("[Parser GetSteamID64 DBG] Proceeding to manual SteamID3 check...") -- ++DEBUG
 	local accountID = id_str:match("%[U:1:(%d+)%]")
-	print(string.format("[Parser GetSteamID64 DBG] Manual SteamID3 match result: %s", tostring(accountID))) -- ++DEBUG
 	if accountID then
 		accountID = tonumber(accountID)
 		if accountID then
 			local steamID64 = tostring(76561197960265728 + accountID)
-			print(string.format("[Parser GetSteamID64 DBG] Manual SteamID3 calculated: %s", steamID64)) -- ++DEBUG
 			return steamID64
 		end
 	end
 
 	-- 5. All attempts failed
-	print("[Parser GetSteamID64 DBG] Failed all conversion attempts.") -- ++DEBUG
 	return nil
 end
 
@@ -118,32 +152,20 @@ function Parsers.ParseJsonTF2DB(contentString)
 		return nil, "Empty content string"
 	end
 
-	-- print("[Parser DBG] Attempting JSON decode...")
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success or type(data) ~= "table" then
-		-- print(string.format("[Parser ERR] JSON decode failed: %s", tostring(data)))
 		return nil, "JSON decode failed: " .. tostring(data)
-	end
-
-	-- Validate structure (very basic check for players list)
-	if data.players and type(data.players) == "table" then
-		print(string.format("[Parser ParseJsonTF2DB DBG] Found %d players in data.players table.", #data.players)) -- ++DEBUG
-	else
-		print("[Parser ParseJsonTF2DB DBG] data.players field not found or not a table.") -- ++DEBUG
 	end
 
 	if not data.players or type(data.players) ~= "table" then
 		-- Allow if the root object itself is the list of players
 		if type(data) == "table" and #data > 0 and type(data[1]) == "table" and data[1].steamid then
-			-- print("[Parser DBG] JSON data is array of players at root.")
 			return { players = data }, nil -- Wrap it for consistency
 		end
-		-- print("[Parser ERR] JSON missing 'players' array.")
 		return nil, "JSON missing 'players' array"
 	end
 
-	-- print("[Parser DBG] JSON decode successful.")
 	return data, nil
 end
 
@@ -163,13 +185,6 @@ function Parsers.ParseRawLine(lineString)
 
 	-- Attempt to get SteamID64
 	local steamID64 = Parsers.GetSteamID64(trimmedLine)
-	print(
-		string.format(
-			"[Parser ParseRawLine DBG] Input line: '%s', Result steamID64: %s",
-			lineString,
-			tostring(steamID64)
-		)
-	) -- ++DEBUG
 	return steamID64
 end
 
@@ -178,7 +193,6 @@ end
 function Parsers.ParseRawIDs(contentString, cause)
 	local entries = {}
 	if not contentString or contentString == "" then
-		print("[Parser WRN] ParseRawIDs received empty content.") -- ++DEBUG
 		return entries -- Return empty table, not an error
 	end
 
@@ -201,10 +215,101 @@ function Parsers.ParseRawIDs(contentString, cause)
 		end
 	end
 
-	print(
-		string.format("[Parser DBG] ParseRawIDs processed %d lines, added %d unique SteamIDs.", lineCount, addedCount)
-	) -- ++DEBUG
 	return entries, nil -- Return the table of entries
+end
+
+-- Parse TF2 Bot Detector JSON format and convert to our database format
+-- Returns: { [steamid64] = { Name="...", Reason="..." }, ... } or nil, errorMsg
+function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntries, sourceStats)
+	if not contentString or contentString == "" then
+		if sourceStats then
+			sourceStats.errors = (sourceStats.errors or 0) + 1
+		end
+		return nil, "Empty content string"
+	end
+
+	local entries = existingEntries or {}
+	local stats = {
+		processed = 0,
+		added = 0,
+		existing = 0,
+		errors = 0,
+	}
+
+	-- Try to decode JSON
+	local success, data = pcall(Json.decode, contentString)
+
+	if not success or type(data) ~= "table" then
+		if sourceStats then
+			sourceStats.errors = (sourceStats.errors or 0) + 1
+		end
+		return nil, "JSON decode failed: " .. tostring(data)
+	end
+
+	-- Find the players array
+	local players = data.players
+	if not players then
+		if sourceStats then
+			sourceStats.errors = (sourceStats.errors or 0) + 1
+		end
+		return nil, "JSON missing 'players' array"
+	end
+
+	-- Process each player
+	for _, player in ipairs(players) do
+		stats.processed = stats.processed + 1
+
+		-- Get the SteamID and convert to SteamID64
+		local steamID64 = Parsers.GetSteamID64(player.steamid)
+		if steamID64 then
+			-- Determine player name (from last_seen if available)
+			local playerName = "Unknown"
+			if player.last_seen and player.last_seen.player_name then
+				playerName = player.last_seen.player_name
+			end
+
+			-- Get the first attribute as the reason
+			local reason = defaultReason or "Unknown Source"
+			if player.attributes and #player.attributes > 0 then
+				-- Use first attribute, capitalized
+				local firstAttribute = player.attributes[1]
+				reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
+
+				-- If default reason was provided, use that instead
+				if defaultReason then
+					reason = defaultReason
+				end
+			end
+
+			-- Add to entries if not already there
+			if entries[steamID64] then
+				stats.existing = stats.existing + 1
+			else
+				entries[steamID64] = {
+					Name = playerName,
+					Reason = reason,
+				}
+				stats.added = stats.added + 1
+			end
+		else
+			stats.errors = stats.errors + 1
+		end
+	end
+
+	-- Update source stats if provided
+	if sourceStats then
+		sourceStats.processed = (sourceStats.processed or 0) + stats.processed
+		sourceStats.added = (sourceStats.added or 0) + stats.added
+		sourceStats.existing = (sourceStats.existing or 0) + stats.existing
+		sourceStats.errors = (sourceStats.errors or 0) + stats.errors
+	end
+
+	return entries, nil, stats
+end
+
+-- Formats and prints a statistics bundle for all parsing operations
+function Parsers.PrintStatsSummary()
+	print(Parsers.GetStatsSummary())
 end
 
 return Parsers

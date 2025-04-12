@@ -166,12 +166,112 @@ local function processSource(source)
 
 	print(string.format("[FETCHER SOURCE] Download successful from %s. Size: %d bytes", source.name, #response_content))
 
-	-- Determine which parser to use
-	local parse_function = nil
+	-- Create source stats object for tracking
+	local sourceStats = {
+		processed = 0,
+		added = 0,
+		existing = 0,
+		errors = 0,
+	}
+
+	-- Determine which parser to use and parse the content
+	local added = 0
+	local isDirtyBefore = Database.State.isDirty
+
 	if source.parser == "raw" then
-		parse_function = Parsers.ParseRawIDs
+		-- Parse raw list of IDs
+		local entries, errorMsg = Parsers.ParseRawIDs(response_content, source.cause)
+
+		if entries then
+			-- Count how many are added vs existing
+			local processedCount = 0
+			local existingCount = 0
+			local addedCount = 0
+
+			for steamID64, entryData in pairs(entries) do
+				processedCount = processedCount + 1
+
+				if not G.DataBase[steamID64] then
+					G.DataBase[steamID64] = entryData
+					addedCount = addedCount + 1
+				else
+					existingCount = existingCount + 1
+				end
+			end
+
+			added = addedCount
+			sourceStats.processed = processedCount
+			sourceStats.added = addedCount
+			sourceStats.existing = existingCount
+		else
+			print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
+			sourceStats.errors = sourceStats.errors + 1
+		end
 	elseif source.parser == "tf2db" then
-		parse_function = Parsers.ParseJsonTF2DB
+		-- Use the specialized TF2BotDetector parser if it's the playerlist.official.json
+		if source.url:find("tf2_bot_detector") and source.url:find("playerlist%.official%.json") then
+			local updatedEntries, errorMsg, stats =
+				Parsers.ParseTF2BotDetector(response_content, source.cause, G.DataBase)
+
+			if updatedEntries then
+				added = stats.added
+				sourceStats = stats
+			else
+				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
+				sourceStats.errors = sourceStats.errors + 1
+			end
+		else
+			-- Use standard TF2DB parser for other formats
+			local data, errorMsg = Parsers.ParseJsonTF2DB(response_content)
+
+			if data and data.players then
+				-- Process each player
+				local processedCount = 0
+				local existingCount = 0
+				local addedCount = 0
+
+				for _, player in ipairs(data.players) do
+					processedCount = processedCount + 1
+
+					-- Extract SteamID64
+					local steamID64 = nil
+					if player.steamid then
+						steamID64 = Parsers.GetSteamID64(player.steamid)
+					end
+
+					if steamID64 then
+						-- Get player name and reason
+						local playerName = "Unknown"
+						if player.last_seen and player.last_seen.player_name then
+							playerName = player.last_seen.player_name
+						end
+
+						local reason = source.cause or "Unknown Source"
+
+						-- Add to database if not already present
+						if not G.DataBase[steamID64] then
+							G.DataBase[steamID64] = {
+								Name = playerName,
+								Reason = reason,
+							}
+							addedCount = addedCount + 1
+						else
+							existingCount = existingCount + 1
+						end
+					else
+						sourceStats.errors = sourceStats.errors + 1
+					end
+				end
+
+				added = addedCount
+				sourceStats.processed = processedCount
+				sourceStats.added = addedCount
+				sourceStats.existing = existingCount
+			else
+				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
+				sourceStats.errors = sourceStats.errors + 1
+			end
+		end
 	else
 		print(
 			string.format("[FETCHER SOURCE] Error: Unknown parser type '%s' for source %s", source.parser, source.name)
@@ -181,51 +281,29 @@ local function processSource(source)
 		return 0
 	end
 
-	-- Parse the content
-	local parse_success, entries = pcall(parse_function, response_content, source.cause)
-	response_content = nil -- Allow GC
-
-	if not parse_success then
-		print(string.format("[FETCHER SOURCE] Failed to parse content from %s: %s", source.name, tostring(entries)))
-		Fetcher.State.sourcesStatus[source.name].status = "parse_failed"
-		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0
-	end
-
-	-- Process the entries
-	local added_count = 0
-	if type(entries) == "table" then
-		local current_source_added = 0
-
-		for steamId64_from_parser, record in pairs(entries) do
-			local steamId64 = GetSteamID64(tostring(steamId64_from_parser))
-			if steamId64 then
-				-- Only add if the SteamID is NOT already in the local database
-				if not G.DataBase[steamId64] then
-					G.DataBase[steamId64] = {
-						Name = record.Name or "Unknown",
-						Reason = record.Reason or record.cause or "Unknown",
-					}
-					current_source_added = current_source_added + 1
-					Database.State.isDirty = true -- Mark dirty only when adding a new entry
-					-- Removed the 'else' block that handled updating existing entries
-				end
-			end
-		end
-
-		added_count = current_source_added
-		-- Removed redundant Database.State.isDirty assignment here
-	else
-		print(string.format("[FETCHER SOURCE] Warning: Parser for %s returned invalid data type", source.name))
-	end
-
 	-- Update source status
 	Fetcher.State.sourcesStatus[source.name].status = "completed"
-	Fetcher.State.sourcesStatus[source.name].entriesAdded = added_count
+	Fetcher.State.sourcesStatus[source.name].added = added
 	Fetcher.State.completedSources = Fetcher.State.completedSources + 1
 
-	print(string.format("[FETCHER SOURCE] Added %d new entries from %s", added_count, source.name))
-	return added_count
+	-- Record source stats
+	Parsers.AddSourceStats(
+		source.name,
+		sourceStats.processed,
+		sourceStats.added,
+		sourceStats.existing,
+		sourceStats.errors
+	)
+
+	-- Check if database changed
+	if added > 0 and not isDirtyBefore then
+		Database.State.isDirty = true
+	end
+
+	print(string.format("[FETCHER SOURCE] Added %d new entries from %s", added, source.name))
+	response_content = nil -- Enable GC
+	collectgarbage("step", 10)
+	return added
 end
 
 -- Monitor function that gets called each frame to check on fetch progress
@@ -280,6 +358,9 @@ function Fetcher.Start()
 		return
 	end
 
+	-- Reset parser statistics
+	Parsers.ResetStats()
+
 	-- Initialize state
 	Fetcher.State.isRunning = true
 	Fetcher.State.startTime = globals.RealTime()
@@ -320,6 +401,9 @@ function Fetcher.FinishFetch()
 			Fetcher.State.results.errors
 		)
 	)
+
+	-- Print the detailed statistics summary
+	Parsers.PrintStatsSummary()
 
 	-- Save database if needed
 	if Database.State.isDirty then
