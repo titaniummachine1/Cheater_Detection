@@ -274,12 +274,23 @@ end
 
 -- Save database automatically when the script unloads (if dirty)
 callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", function()
-	Log(LogLevel.DEBUG, "[DB] Checking if save needed on unload")
-	if Database.Config.SaveOnExit and Database.State and Database.State.isDirty then
-		Log(LogLevel.INFO, "[DB] Database modified, saving on exit")
+	Log(LogLevel.DEBUG, "[DB] Unloading database, saving data...")
+
+	-- Always save on unload to prevent data loss
+	if Database.Config.SaveOnExit then
+		-- If not dirty, mark as dirty temporarily to force save
+		local wasDirty = Database.State.isDirty
+		Database.State.isDirty = true
+
+		Log(LogLevel.INFO, "[DB] Saving database on exit")
 		Database.SaveDatabase()
+
+		-- Restore original dirty state if it wasn't modified
+		if not wasDirty then
+			Database.State.isDirty = false
+		end
 	else
-		Log(LogLevel.DEBUG, "[DB] No changes to save on exit")
+		Log(LogLevel.WARNING, "[DB] SaveOnExit disabled, skipping final save")
 	end
 end)
 

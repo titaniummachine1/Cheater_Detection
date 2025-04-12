@@ -285,10 +285,8 @@ local function processSource(source)
 							local firstAttribute = player.attributes[1]
 							reason = firstAttribute:gsub("^%l", string.upper)
 
-							-- If default reason was provided, use that instead
-							if source.cause then
-								reason = source.cause
-							end
+							-- Don't override with source.cause anymore
+							-- Only use source.cause when no attributes available
 						end
 
 						-- Add to database if not already present
@@ -364,7 +362,8 @@ local function processSource(source)
 		sourceStats.processed,
 		sourceStats.added,
 		sourceStats.existing,
-		sourceStats.errors
+		sourceStats.errors,
+		sourceStats.updated
 	)
 
 	-- Check if database changed (additions or updates)
@@ -479,30 +478,43 @@ function Fetcher.FinishFetch()
 		return
 	end
 
+	-- Print summary
 	print(
-		string.format(
-			"[FETCHER SOURCE] Fetch process completed. Added %d entries with %d errors",
-			Fetcher.State.results.total_added,
-			Fetcher.State.results.errors
-		)
+		"[FETCHER SOURCE] Fetch process completed. Added "
+			.. Fetcher.State.results.total_added
+			.. " entries with "
+			.. Fetcher.State.results.errors
+			.. " errors"
 	)
 
-	-- Print the detailed statistics summary
+	-- Print detailed statistics
 	Parsers.PrintStatsSummary()
 
-	-- Save database if needed
+	-- Calculate total updates across all sources
+	local totalUpdated = 0
+	for sourceName, status in pairs(Fetcher.State.sourcesStatus) do
+		if status.updated and status.updated > 0 then
+			totalUpdated = totalUpdated + status.updated
+		end
+	end
+
+	-- Include update information in final message if any
+	if totalUpdated > 0 then
+		print(string.format("[FETCHER SOURCE] Enhanced %d existing entries with better information", totalUpdated))
+	end
+
+	-- Check if database needs saving
 	if Database.State.isDirty then
-		print("[FETCHER SOURCE] Saving database as changes were detected")
+		print("[FETCHER SOURCE] Changes detected, saving database")
 		Database.SaveDatabase()
 	else
 		print("[FETCHER SOURCE] No changes detected, skipping database save")
 	end
 
-	-- Clean up
+	-- Mark as no longer running
 	Fetcher.State.isRunning = false
-	collectgarbage("collect")
 
-	-- Unregister the monitor callback
+	-- Unregister monitoring
 	callbacks.Unregister("Draw", "fetcher_monitor_callback")
 
 	print("[FETCHER SOURCE] Fetch process finished")

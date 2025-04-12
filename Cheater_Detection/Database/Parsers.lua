@@ -10,6 +10,7 @@ Parsers.ParseStats = {
 	totalAdded = 0,
 	totalExisting = 0,
 	totalErrors = 0,
+	totalUpdated = 0,
 }
 
 -- Reset stats for a new parsing session
@@ -20,16 +21,18 @@ function Parsers.ResetStats()
 		totalAdded = 0,
 		totalExisting = 0,
 		totalErrors = 0,
+		totalUpdated = 0,
 	}
 end
 
 -- Add stats for a source
-function Parsers.AddSourceStats(sourceName, processed, added, existing, errors)
+function Parsers.AddSourceStats(sourceName, processed, added, existing, errors, updated)
 	Parsers.ParseStats.sources[sourceName] = {
 		processed = processed or 0,
 		added = added or 0,
 		existing = existing or 0,
 		errors = errors or 0,
+		updated = updated or 0,
 	}
 
 	-- Update totals
@@ -37,6 +40,8 @@ function Parsers.AddSourceStats(sourceName, processed, added, existing, errors)
 	Parsers.ParseStats.totalAdded = Parsers.ParseStats.totalAdded + added
 	Parsers.ParseStats.totalExisting = Parsers.ParseStats.totalExisting + existing
 	Parsers.ParseStats.totalErrors = Parsers.ParseStats.totalErrors + errors
+	-- Add updating to totals if it exists
+	Parsers.ParseStats.totalUpdated = (Parsers.ParseStats.totalUpdated or 0) + (updated or 0)
 end
 
 -- Get a formatted summary of all parsing statistics
@@ -45,24 +50,43 @@ function Parsers.GetStatsSummary()
 
 	-- Add per-source stats
 	for sourceName, stats in pairs(Parsers.ParseStats.sources) do
+		-- Check if source has any updates to report
+		local updatesInfo = ""
+		if stats.updated and stats.updated > 0 then
+			updatesInfo = string.format(", Updated: %d", stats.updated)
+		end
+
 		summary = summary
 			.. string.format(
-				"[Source: %s] Processed: %d, Added: %d, Already Exists: %d, Errors: %d\n",
+				"[Source: %s] Processed: %d, Added: %d, Already Exists: %d%s, Errors: %d\n",
 				sourceName,
 				stats.processed,
 				stats.added,
 				stats.existing,
+				updatesInfo,
 				stats.errors
 			)
 	end
 
-	-- Add total stats
+	-- Calculate total updates
+	local totalUpdated = 0
+	for _, stats in pairs(Parsers.ParseStats.sources) do
+		totalUpdated = totalUpdated + (stats.updated or 0)
+	end
+
+	-- Add total stats with updates info
+	local totalUpdatesInfo = ""
+	if totalUpdated > 0 then
+		totalUpdatesInfo = string.format(", Updated: %d", totalUpdated)
+	end
+
 	summary = summary
 		.. string.format(
-			"[TOTAL] Processed: %d, Added: %d, Already Exists: %d, Errors: %d",
+			"[TOTAL] Processed: %d, Added: %d, Already Exists: %d%s, Errors: %d",
 			Parsers.ParseStats.totalProcessed,
 			Parsers.ParseStats.totalAdded,
 			Parsers.ParseStats.totalExisting,
+			totalUpdatesInfo,
 			Parsers.ParseStats.totalErrors
 		)
 
@@ -233,6 +257,7 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 		processed = 0,
 		added = 0,
 		existing = 0,
+		updated = 0, -- New field to track updated entries
 		errors = 0,
 	}
 
@@ -275,15 +300,42 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 				local firstAttribute = player.attributes[1]
 				reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
 
-				-- If default reason was provided, use that instead
-				if defaultReason then
-					reason = defaultReason
-				end
+				-- Only use default reason if no attributes available
+				-- NOT overriding attribute with defaultReason anymore
 			end
 
 			-- Add to entries if not already there
 			if entries[steamID64] then
 				stats.existing = stats.existing + 1
+
+				-- "Stealer mode" - Update entry if it has better information
+				local existingEntry = entries[steamID64]
+				local updated = false
+
+				-- If existing entry has unknown name and this one has a name
+				if
+					(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
+					and playerName
+					and playerName ~= "Unknown"
+				then
+					existingEntry.Name = playerName
+					updated = true
+				end
+
+				-- If existing entry has unknown reason and this one has a reason
+				if
+					(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
+					and reason
+					and reason ~= "Unknown Source"
+				then
+					existingEntry.Reason = reason
+					updated = true
+				end
+
+				-- Increment update counter if we made changes
+				if updated then
+					stats.updated = stats.updated + 1
+				end
 			else
 				entries[steamID64] = {
 					Name = playerName,
@@ -301,6 +353,7 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 		sourceStats.processed = (sourceStats.processed or 0) + stats.processed
 		sourceStats.added = (sourceStats.added or 0) + stats.added
 		sourceStats.existing = (sourceStats.existing or 0) + stats.existing
+		sourceStats.updated = (sourceStats.updated or 0) + stats.updated
 		sourceStats.errors = (sourceStats.errors or 0) + stats.errors
 	end
 
