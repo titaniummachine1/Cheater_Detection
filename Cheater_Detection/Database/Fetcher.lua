@@ -314,15 +314,20 @@ local function processSource(source)
 								Database.State.isDirty = true
 							end
 
-							-- If existing entry has unknown reason and this one has a reason
-							if
-								(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
-								and reason
-								and reason ~= "Unknown Source"
-							then
-								existingEntry.Reason = reason
-								updatedCount = updatedCount + 1
-								Database.State.isDirty = true
+							-- Update reason logic
+							if reason and reason ~= "Unknown Source" then
+								local existingReason = existingEntry.Reason
+								if not existingReason or existingReason == "Unknown Source" then
+									-- If existing reason is generic, replace it
+									existingEntry.Reason = reason
+									updatedCount = updatedCount + 1
+									Database.State.isDirty = true
+								elseif existingReason ~= reason and not existingReason:find(reason, 1, true) then
+									-- If existing reason is specific, different, and doesn't already contain the new one, append
+									existingEntry.Reason = existingReason .. " | " .. reason
+									updatedCount = updatedCount + 1
+									Database.State.isDirty = true
+								end
 							end
 						end
 					else
