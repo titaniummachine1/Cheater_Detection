@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "llm-context": {
+      "command": "C:\\Users\\Terminatort8000\\.local\\bin\\lc-mcp.exe",
+      "args": [],
+      "env": {
+        "PYTHONUTF8": "1"
+      }
+    }
+  }
+} 

@@ -246,12 +246,41 @@ function Parsers.ProcessRawLine(line, database, sourceCause)
 
 			-- Add to database if valid and not duplicate
 			if steamID64 then
-				if not database.content[steamID64] then
-					-- Add new entry
-					database.content[steamID64] = {
-						Name = "Unknown",
-						proof = sourceCause,
-					}
+				-- Check if entry already exists - use database.Contains if available, otherwise check database.data or content
+				local exists = false
+				if database.Contains and type(database.Contains) == "function" then
+					exists = database.Contains(steamID64)
+				elseif database.data and database.data[steamID64] then
+					exists = true
+				elseif database.content and database.content[steamID64] then
+					exists = true
+				end
+
+				if not exists then
+					-- Use updateDatabase if available, otherwise fallback to manual insert
+					if database.updateDatabase and type(database.updateDatabase) == "function" then
+						database.updateDatabase(steamID64, {
+							Name = "Unknown",
+							Reason = sourceCause,
+						})
+					else
+						-- Fallback method - directly insert into whatever container is available
+						local container = database.data or database.content
+						if container then
+							container[steamID64] = {
+								Name = "Unknown",
+								Reason = sourceCause,
+							}
+
+							-- Mark database as dirty if possible
+							if database.State then
+								database.State.isDirty = true
+								if database.State.entriesCount then
+									database.State.entriesCount = database.State.entriesCount + 1
+								end
+							end
+						end
+					end
 
 					-- Set player priority with error handling
 					pcall(function()
@@ -471,11 +500,40 @@ function Parsers.ProcessBotsTF(content, database, sourceName, sourceCause)
 		-- We should already have valid SteamID64s at this point
 
 		-- Add to database if not duplicate
-		if not database.content[steamID64] then
-			database.content[steamID64] = {
-				Name = "Unknown",
-				proof = sourceCause,
-			}
+		local exists = false
+		if database.Contains and type(database.Contains) == "function" then
+			exists = database.Contains(steamID64)
+		elseif database.data and database.data[steamID64] then
+			exists = true
+		elseif database.content and database.content[steamID64] then
+			exists = true
+		end
+
+		if not exists then
+			-- Use updateDatabase if available, otherwise fallback to manual insert
+			if database.updateDatabase and type(database.updateDatabase) == "function" then
+				database.updateDatabase(steamID64, {
+					Name = "Unknown",
+					Reason = sourceCause,
+				})
+			else
+				-- Fallback method - directly insert into whatever container is available
+				local container = database.data or database.content
+				if container then
+					container[steamID64] = {
+						Name = "Unknown",
+						Reason = sourceCause,
+					}
+
+					-- Mark database as dirty if possible
+					if database.State then
+						database.State.isDirty = true
+						if database.State.entriesCount then
+							database.State.entriesCount = database.State.entriesCount + 1
+						end
+					end
+				end
+			end
 
 			-- Set player priority with error handling
 			pcall(function()

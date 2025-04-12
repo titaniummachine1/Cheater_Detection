@@ -17,6 +17,35 @@ function Fetcher.FetchSource(source, database)
 
 	print(string.format("[Database Fetcher] Fetching from %s...", source.name))
 
+	-- Ensure compatibility between different database versions
+	if database.data and not database.content then
+		-- Create the content accessor if it doesn't exist
+		if type(database.content) ~= "table" then
+			print("[Database Fetcher] Adding accessor to database.data")
+			database.content = setmetatable({}, {
+				__index = function(_, key)
+					return database.data[key]
+				end,
+				__newindex = function(_, key, value)
+					if database.HandleSetEntry then
+						database.HandleSetEntry(key, value)
+					else
+						database.data[key] = value
+						if database.State then
+							database.State.isDirty = true
+						end
+					end
+				end,
+				__pairs = function()
+					return pairs(database.data)
+				end,
+			})
+		end
+	elseif database.content and not database.data then
+		-- If database only has content but no data, ensure data points to content
+		database.data = database.content
+	end
+
 	-- Regular HTTP request (non-coroutine)
 	local content
 	local success, result = pcall(http.Get, source.url)
@@ -40,6 +69,12 @@ function Fetcher.FetchSource(source, database)
 		return 0
 	end
 
+	-- Explicitly mark the database as dirty if entries were added
+	if count > 0 and database.State then
+		database.State.isDirty = true
+		print(string.format("[Database Fetcher] Marked database as dirty after adding %d entries", count))
+	end
+
 	print(string.format("[Database Fetcher] Added %d entries from %s", count, source.name))
 	return count
 end
@@ -48,10 +83,66 @@ end
 function Fetcher.FetchAll(database, callback)
 	-- Initialize
 	database = database or {}
-	database.content = database.content or {}
+
+	-- Ensure compatibility between different database versions
+	if database.data and not database.content then
+		-- Create the content accessor if it doesn't exist
+		if type(database.content) ~= "table" then
+			print("[Database Fetcher] Adding accessor to database.data")
+			database.content = setmetatable({}, {
+				__index = function(_, key)
+					return database.data[key]
+				end,
+				__newindex = function(_, key, value)
+					if database.HandleSetEntry then
+						database.HandleSetEntry(key, value)
+					else
+						database.data[key] = value
+						if database.State then
+							database.State.isDirty = true
+						end
+					end
+				end,
+				__pairs = function()
+					return pairs(database.data)
+				end,
+			})
+		end
+	elseif database.content and not database.data then
+		-- If database only has content but no data, ensure data points to content
+		database.data = database.content
+	end
+
+	-- Make sure the database interface is consistent
+	if not database.updateDatabase and database.HandleSetEntry then
+		database.updateDatabase = function(steamID64, details)
+			database.HandleSetEntry(steamID64, details)
+		end
+	end
 
 	-- Set callback to run when all tasks complete
-	Tasks.callback = callback
+	Tasks.callback = function(totalAddedResult)
+		if type(totalAddedResult) == "number" and totalAddedResult > 0 then
+			-- Explicitly mark the database as dirty
+			if database.State then
+				database.State.isDirty = true
+			end
+
+			-- Try to save the database explicitly
+			if database.SaveDatabase and type(database.SaveDatabase) == "function" then
+				print("[Database Fetcher] Saving database after fetch...")
+				local saveResult = database.SaveDatabase()
+				if not saveResult then
+					print("[Database Fetcher] WARNING: Database save failed after fetch")
+				end
+			end
+		end
+
+		-- Call the original callback
+		if callback then
+			callback(totalAddedResult)
+		end
+	end
 
 	-- Clear any existing tasks
 	Tasks.queue = {}

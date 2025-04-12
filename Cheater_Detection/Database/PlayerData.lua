@@ -10,15 +10,10 @@ PlayerData.DefaultPlayerData = {
 	Entity = nil,
 	info = {
 		Name = "NN",
-		Proof = "None",
-		Date = os.date("%Y-%m-%d %H:%M:%S"),
-		Strikes = 0,
 		IsCheater = false,
-		LastStrike = globals.TickCount(),
 		bhop = 0,
 		LastOnGround = true,
 		LastVelocity = Vector3(0, 0, 0),
-		Class = 0,
 	},
 
 	Current = {
@@ -50,7 +45,6 @@ PlayerData.DefaultPlayerData = {
 PlayerData.defaultRecord = {
 	Name = "NN",
 	Cause = "Known Cheater",
-	Date = os.date("%Y-%m-%d %H:%M:%S"),
 }
 
 return playerData

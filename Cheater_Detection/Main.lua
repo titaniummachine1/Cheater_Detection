@@ -13,7 +13,8 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Config = require("Cheater_Detection.Utils.Config")
 
 --[[ Import database system ]]
-local DBManager = require("Cheater_Detection.Database.Manager")
+local Database = require("Cheater_Detection.Database.Database") -- Require simplified DB
+local Fetcher = require("Cheater_Detection.Database.Fetcher") -- Require simplified Fetcher
 
 --[[ UI components ]]
 require("Cheater_Detection.Misc.Visuals.Menu")
@@ -32,11 +33,21 @@ local function InitializeSystems()
 	-- Load config
 	Config.LoadCFG()
 
-	-- Initialize database system through manager (this handles loading, importing and auto-fetching)
-	G.Database = DBManager.Initialize({ -- DBManager.Initialize now returns the Database module itself
-		AutoFetchOnLoad = true, -- Automatically fetch updates on startup
-		CheckInterval = 24, -- Check for updates every 24 hours
-	})
+	-- Initialize database by loading it
+	print("[Cheater Detection] Initializing - Loading Database...")
+	Database.LoadDatabase() -- Directly load the database
+
+	-- G.DataBase should now be populated (or initialized as {} if file not found)
+	if not G.DataBase then
+		printc(255, 0, 0, 255, "[Cheater Detection] CRITICAL: G.DataBase is nil after LoadDatabase!")
+		G.DataBase = {} -- Fallback
+	else
+		print("[Cheater Detection] G.DataBase initialized, type:", type(G.DataBase))
+	end
+
+	-- Trigger initial fetch (optional, can be manual)
+	print("[Cheater Detection] Initializing - Starting Fetcher...")
+	Fetcher.Start() -- Uncomment to auto-fetch on load
 
 	-- Clear local player from cheater list (for debugging)
 	local localPlayer = entities.GetLocalPlayer()
@@ -46,17 +57,22 @@ local function InitializeSystems()
 	end
 
 	-- Print initialization message
-	local dbStats = DBManager.GetStats()
-	-- Check entryCount instead of totalEntries
-	if not dbStats or not dbStats.entryCount or dbStats.entryCount == 0 then
-		printc(255, 100, 100, 255, "[Cheater Detection] No database entries found. Please update the database.")
+	local entryCount = 0
+	if G.DataBase and type(G.DataBase) == "table" then
+		for _ in pairs(G.DataBase) do
+			entryCount = entryCount + 1
+		end
+	end
+
+	if entryCount == 0 then
+		printc(255, 100, 100, 255, "[Cheater Detection] No database entries found. Fetch data or check logs.")
 	else
 		printc(
 			100,
 			255,
 			100,
 			255,
-			string.format("[Cheater Detection] Initialized with %d database entries", dbStats.entryCount)
+			string.format("[Cheater Detection] Initialized with %d database entries", entryCount)
 		)
 	end
 
@@ -72,31 +88,30 @@ local function InitializeSystems()
 
 		-- Check if it's a valid SteamID
 		if query:match("^%d+$") and #query >= 17 then
-			-- Access Database module directly via G.Database
-			local record = G.Database.GetRecord(query)
+			-- Simplified version doesn't have GetRecord, access G.DataBase directly
+			local record = G.DataBase and G.DataBase[query]
 			if record then
 				found = true
 				print(string.format("[Database] Found record for SteamID: %s", query))
 				print(string.format("  Name: %s", record.Name or "Unknown"))
-				print(string.format("  Reason: %s", record.Reason or "Unknown")) -- Use Reason
-				-- print(string.format("  Date: %s", record.date or "Unknown")) -- Date is not stored
+				print(string.format("  Reason: %s", record.Reason or "Unknown"))
 			end
 		end
 
 		-- If not found by SteamID, search by name
 		if not found then
 			local matches = 0
-			for steamId, data in pairs(G.Database.data or {}) do -- Iterate over G.Database.data
-				if data.Name and data.Name:lower():find(query:lower()) then
-					matches = matches + 1
-					print(string.format("[Database] Match %d: %s (SteamID: %s)", matches, data.Name, steamId))
-					print(string.format("  Reason: %s", data.Reason or "Unknown")) -- Use Reason
-					-- print(string.format("  Date: %s", data.date or "Unknown")) -- Date is not stored
+			if G.DataBase and type(G.DataBase) == "table" then
+				for steamId, data in pairs(G.DataBase) do
+					if type(data) == "table" and data.Name and data.Name:lower():find(query:lower()) then
+						matches = matches + 1
+						print(string.format("[Database] Match %d: %s (SteamID: %s)", matches, data.Name, steamId))
+						print(string.format("  Reason: %s", data.Reason or "Unknown"))
 
-					-- Limit to 5 matches to avoid spam
-					if matches >= 5 then
-						print(string.format("[Database] Found more matches, showing first 5 only"))
-						break
+						if matches >= 5 then
+							print("[Database] Found more matches, showing first 5 only")
+							break
+						end
 					end
 				end
 			end
@@ -125,12 +140,12 @@ local function OnCreateMove(cmd)
 		-- Get the steamid for the player
 		local steamid = Common.GetSteamID64(entity)
 		if not steamid then
-			warn("Failed to get SteamID for player %s", entity:GetName() or "nil")
-			return
+			-- warn("Failed to get SteamID for player %s", entity:GetName() or "nil") -- Commented out warn
+			goto continue -- Use goto instead of return
 		end
 
 		-- Check if player is a known cheater in database
-		if G.Database and G.Database.GetRecord(steamid) then
+		if G.DataBase and G.DataBase[steamid] then
 			-- Player is in database, mark them
 			local priority = playerlist.GetPriority(steamid)
 			if priority < 10 then
@@ -149,7 +164,7 @@ local function OnCreateMove(cmd)
 			local wrappedPlayer = WPlayer.FromEntity(entity)
 			local viewAngles = wrappedPlayer:GetEyeAngles()
 			local entityFlags = entity:GetPropInt("m_fFlags")
-			local isOnGround = entityFlags & FL_ONGROUND == FL_ONGROUND
+			local isOnGround = bit.band(entityFlags, FL_ONGROUND) ~= 0 -- Correct bitwise check
 			local headHitboxPosition = wrappedPlayer:GetHitboxPos(1)
 			local bodyHitboxPosition = wrappedPlayer:GetHitboxPos(4)
 			local viewPos = wrappedPlayer:GetEyePos()
@@ -166,13 +181,13 @@ local function OnCreateMove(cmd)
 			)
 
 			-- Perform detection checks (when Detections module is enabled)
-			if Detections then
-				Detections.CheckAngles(wrappedPlayer, entity)
-				Detections.CheckDuckSpeed(wrappedPlayer, entity)
-				Detections.CheckBunnyHop(wrappedPlayer, entity)
-				Detections.CheckPacketChoke(wrappedPlayer, entity)
-				Detections.CheckSequenceBurst(wrappedPlayer, entity)
-			end
+			-- if Detections then
+			-- 	Detections.CheckAngles(wrappedPlayer, entity)
+			-- 	Detections.CheckDuckSpeed(wrappedPlayer, entity)
+			-- 	Detections.CheckBunnyHop(wrappedPlayer, entity)
+			-- 	Detections.CheckPacketChoke(wrappedPlayer, entity)
+			-- 	Detections.CheckSequenceBurst(wrappedPlayer, entity)
+			-- end
 
 			-- Update history
 			G.PlayerData[steamid].History = G.PlayerData[steamid].History or {}
@@ -198,14 +213,13 @@ InitializeSystems()
 return {
 	ReloadDatabase = function()
 		print("[Cheater Detection] Reloading database...")
-		-- Directly call the LoadDatabase function from the Database module
-		return G.Database.LoadDatabase()
+		return Database.LoadDatabase and Database.LoadDatabase() -- Call simplified LoadDatabase
 	end,
 
 	UpdateDatabase = function()
 		print("[Cheater Detection] Triggering manual database update...")
-		return DBManager.UpdateDatabase() -- Manager handles triggering the fetcher
+		return Fetcher.Start and Fetcher.Start() -- Call simplified Fetcher.Start
 	end,
 
-	GetDatabaseStats = DBManager.GetStats,
+	-- GetDatabaseStats = Database.GetStats, -- Removed, simplified DB doesn't have GetStats
 }

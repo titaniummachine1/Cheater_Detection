@@ -16,13 +16,13 @@ Sources.List = {
 		cause = "Tacobot (d3fc0n6)",
 		parser = "raw",
 	},
-	-- Potentially problematic sources last
+	--[[Potentially problematic sources last
 	{
-		name = "bots.tf (Official)",
+		name = "bot detector (Official)",
 		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
-		cause = "Bot (bots.tf)",
+		cause = "Bot (bot detector)",
 		parser = "tf2db", -- Use tf2db parser for this JSON source
-	},
+	},]]
 }
 
 -- Function to add a custom source
