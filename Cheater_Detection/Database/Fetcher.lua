@@ -200,47 +200,21 @@ local function processSource(source)
 		for steamId64_from_parser, record in pairs(entries) do
 			local steamId64 = GetSteamID64(tostring(steamId64_from_parser))
 			if steamId64 then
+				-- Only add if the SteamID is NOT already in the local database
 				if not G.DataBase[steamId64] then
 					G.DataBase[steamId64] = {
 						Name = record.Name or "Unknown",
 						Reason = record.Reason or record.cause or "Unknown",
 					}
 					current_source_added = current_source_added + 1
-				else
-					-- Update logic for existing entries
-					local existing = G.DataBase[steamId64]
-					local needsUpdate = false
-
-					if
-						record.Name
-						and record.Name ~= "Unknown"
-						and (not existing.Name or existing.Name == "Unknown")
-					then
-						existing.Name = record.Name
-						needsUpdate = true
-					end
-
-					local newReason = record.Reason or record.cause
-					if
-						newReason
-						and newReason ~= "Unknown"
-						and (not existing.Reason or existing.Reason == "Unknown")
-					then
-						existing.Reason = newReason
-						needsUpdate = true
-					end
-
-					if needsUpdate then
-						Database.State.isDirty = true
-					end
+					Database.State.isDirty = true -- Mark dirty only when adding a new entry
+					-- Removed the 'else' block that handled updating existing entries
 				end
 			end
 		end
 
 		added_count = current_source_added
-		if added_count > 0 then
-			Database.State.isDirty = true
-		end
+		-- Removed redundant Database.State.isDirty assignment here
 	else
 		print(string.format("[FETCHER SOURCE] Warning: Parser for %s returned invalid data type", source.name))
 	end
