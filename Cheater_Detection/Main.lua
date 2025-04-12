@@ -26,26 +26,15 @@ require("Cheater_Detection.Misc.Visuals.Menu")
 
 --[[ Variables ]]
 local WPlayer, PR = Common.WPlayer, Common.PlayerResource
-local Commands = Common.Lib.Utils.Commands
 
 --[[ Initialize systems ]]
 local function InitializeSystems()
 	-- Load config
 	Config.LoadCFG()
 
-	-- Initialize database by loading it
-	print("[Cheater Detection] Initializing - Loading Database...")
-	-- Pass false for silent loading, false for not forcing reload
-	-- This will be ignored if database is already initialized internally
-	Database.LoadDatabase(false, false)
-
-	-- G.DataBase should now be populated (or initialized as {} if file not found)
-	if not G.DataBase then
-		printc(255, 0, 0, 255, "[Cheater Detection] CRITICAL: G.DataBase is nil after LoadDatabase!")
-		G.DataBase = {} -- Fallback
-	else
-		print("[Cheater Detection] G.DataBase initialized, type:", type(G.DataBase))
-	end
+	-- Initialize database (this now handles loading/creating the DB)
+	print("[Cheater Detection] Initializing - Initializing Database...")
+	Database.Initialize(false) -- Pass false for non-silent initialization
 
 	-- Trigger initial fetch (optional, can be manual)
 	print("[Cheater Detection] Initializing - Starting Fetcher...")
@@ -56,26 +45,6 @@ local function InitializeSystems()
 	if localPlayer then
 		local mySteamID = Common.GetSteamID64(localPlayer)
 		pcall(playerlist.SetPriority, mySteamID, 0) -- Use pcall for safety
-	end
-
-	-- Print initialization message
-	local entryCount = 0
-	if G.DataBase and type(G.DataBase) == "table" then
-		for _ in pairs(G.DataBase) do
-			entryCount = entryCount + 1
-		end
-	end
-
-	if entryCount == 0 then
-		printc(255, 100, 100, 255, "[Cheater Detection] No database entries found. Fetch data or check logs.")
-	else
-		printc(
-			100,
-			255,
-			100,
-			255,
-			string.format("[Cheater Detection] Initialized with %d database entries", entryCount)
-		)
 	end
 
 	-- Console command removed for automatic operation

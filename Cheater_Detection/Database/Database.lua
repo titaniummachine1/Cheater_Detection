@@ -298,4 +298,44 @@ end)
 InitializeDatabase()
 
 Log(LogLevel.DEBUG, "[DB] Module initialization complete")
+
+--[[ Add Initialize function here ]]
+--
+function Database.Initialize(silent)
+	Log(LogLevel.DEBUG, "[DB] Initializing Database module...")
+
+	-- Load the database (this function handles creating an empty one if needed)
+	Database.LoadDatabase(silent, false)
+
+	-- Verify G.DataBase is initialized (LoadDatabase should ensure this)
+	if not G.DataBase then
+		Log(LogLevel.ERROR, "[DB] CRITICAL: G.DataBase is nil after LoadDatabase!")
+		G.DataBase = {} -- Critical fallback
+		Database.State.isDirty = true
+	else
+		Log(LogLevel.DEBUG, "[DB] G.DataBase initialized, type:" .. type(G.DataBase))
+	end
+
+	local entryCount = 0
+	if type(G.DataBase) == "table" then
+		for _ in pairs(G.DataBase) do
+			entryCount = entryCount + 1
+		end
+	end
+
+	if not silent then
+		if entryCount == 0 then
+			Log(LogLevel.WARNING, "[DB] Database is empty or could not be loaded. Fetch data or check logs.")
+		else
+			Log(
+				LogLevel.INFO,
+				string.format("[DB] Initialized with %d database entries", entryCount),
+				{ 0, 255, 140, 255 }
+			)
+		end
+	end
+
+	Log(LogLevel.DEBUG, "[DB] Database initialization complete.")
+end
+
 return Database
