@@ -171,11 +171,13 @@ local function processSource(source)
 		processed = 0,
 		added = 0,
 		existing = 0,
+		updated = 0, -- New stat for tracking updated entries
 		errors = 0,
 	}
 
 	-- Determine which parser to use and parse the content
 	local added = 0
+	local updated = 0 -- Track updated entries
 	local isDirtyBefore = Database.State.isDirty
 
 	if source.parser == "raw" then
@@ -183,26 +185,56 @@ local function processSource(source)
 		local entries, errorMsg = Parsers.ParseRawIDs(response_content, source.cause)
 
 		if entries then
-			-- Count how many are added vs existing
+			-- Count how many are added vs existing vs updated
 			local processedCount = 0
 			local existingCount = 0
 			local addedCount = 0
+			local updatedCount = 0
 
 			for steamID64, entryData in pairs(entries) do
 				processedCount = processedCount + 1
 
 				if not G.DataBase[steamID64] then
+					-- New entry, add it
 					G.DataBase[steamID64] = entryData
 					addedCount = addedCount + 1
 				else
+					-- Entry exists - check if we should update it
 					existingCount = existingCount + 1
+
+					-- Update if existing entry has less information
+					local existingEntry = G.DataBase[steamID64]
+
+					-- If existing entry has unknown name and this one has a name
+					if
+						(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
+						and entryData.Name
+						and entryData.Name ~= "Unknown"
+					then
+						existingEntry.Name = entryData.Name
+						updatedCount = updatedCount + 1
+						Database.State.isDirty = true
+					end
+
+					-- If existing entry has unknown reason and this one has a reason
+					if
+						(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
+						and entryData.Reason
+						and entryData.Reason ~= "Unknown Source"
+					then
+						existingEntry.Reason = entryData.Reason
+						updatedCount = updatedCount + 1
+						Database.State.isDirty = true
+					end
 				end
 			end
 
 			added = addedCount
+			updated = updatedCount
 			sourceStats.processed = processedCount
 			sourceStats.added = addedCount
 			sourceStats.existing = existingCount
+			sourceStats.updated = updatedCount
 		else
 			print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 			sourceStats.errors = sourceStats.errors + 1
@@ -229,6 +261,7 @@ local function processSource(source)
 				local processedCount = 0
 				local existingCount = 0
 				local addedCount = 0
+				local updatedCount = 0
 
 				for _, player in ipairs(data.players) do
 					processedCount = processedCount + 1
@@ -247,6 +280,16 @@ local function processSource(source)
 						end
 
 						local reason = source.cause or "Unknown Source"
+						if player.attributes and #player.attributes > 0 then
+							-- Use first attribute as reason, capitalized
+							local firstAttribute = player.attributes[1]
+							reason = firstAttribute:gsub("^%l", string.upper)
+
+							-- If default reason was provided, use that instead
+							if source.cause then
+								reason = source.cause
+							end
+						end
 
 						-- Add to database if not already present
 						if not G.DataBase[steamID64] then
@@ -256,7 +299,33 @@ local function processSource(source)
 							}
 							addedCount = addedCount + 1
 						else
+							-- Entry exists - check if we should update it
 							existingCount = existingCount + 1
+
+							-- Update if existing entry has less information
+							local existingEntry = G.DataBase[steamID64]
+
+							-- If existing entry has unknown name and this one has a name
+							if
+								(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
+								and playerName
+								and playerName ~= "Unknown"
+							then
+								existingEntry.Name = playerName
+								updatedCount = updatedCount + 1
+								Database.State.isDirty = true
+							end
+
+							-- If existing entry has unknown reason and this one has a reason
+							if
+								(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
+								and reason
+								and reason ~= "Unknown Source"
+							then
+								existingEntry.Reason = reason
+								updatedCount = updatedCount + 1
+								Database.State.isDirty = true
+							end
 						end
 					else
 						sourceStats.errors = sourceStats.errors + 1
@@ -264,9 +333,11 @@ local function processSource(source)
 				end
 
 				added = addedCount
+				updated = updatedCount
 				sourceStats.processed = processedCount
 				sourceStats.added = addedCount
 				sourceStats.existing = existingCount
+				sourceStats.updated = updatedCount
 			else
 				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 				sourceStats.errors = sourceStats.errors + 1
@@ -284,6 +355,7 @@ local function processSource(source)
 	-- Update source status
 	Fetcher.State.sourcesStatus[source.name].status = "completed"
 	Fetcher.State.sourcesStatus[source.name].added = added
+	Fetcher.State.sourcesStatus[source.name].updated = updated
 	Fetcher.State.completedSources = Fetcher.State.completedSources + 1
 
 	-- Record source stats
@@ -295,15 +367,28 @@ local function processSource(source)
 		sourceStats.errors
 	)
 
-	-- Check if database changed
-	if added > 0 and not isDirtyBefore then
+	-- Check if database changed (additions or updates)
+	if (added > 0 or updated > 0) and not isDirtyBefore then
 		Database.State.isDirty = true
 	end
 
-	print(string.format("[FETCHER SOURCE] Added %d new entries from %s", added, source.name))
+	-- Print detailed summary
+	if updated > 0 then
+		print(
+			string.format(
+				"[FETCHER SOURCE] Added %d new entries and updated %d existing entries from %s",
+				added,
+				updated,
+				source.name
+			)
+		)
+	else
+		print(string.format("[FETCHER SOURCE] Added %d new entries from %s", added, source.name))
+	end
+
 	response_content = nil -- Enable GC
 	collectgarbage("step", 10)
-	return added
+	return added + updated -- Return total changes
 end
 
 -- Monitor function that gets called each frame to check on fetch progress

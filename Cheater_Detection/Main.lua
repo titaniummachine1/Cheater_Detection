@@ -35,7 +35,9 @@ local function InitializeSystems()
 
 	-- Initialize database by loading it
 	print("[Cheater Detection] Initializing - Loading Database...")
-	Database.LoadDatabase() -- Directly load the database
+	-- Pass true for silent loading, false for not forcing reload
+	-- This will be ignored if database is already initialized internally
+	Database.LoadDatabase(false, false)
 
 	-- G.DataBase should now be populated (or initialized as {} if file not found)
 	if not G.DataBase then
@@ -213,7 +215,8 @@ InitializeSystems()
 return {
 	ReloadDatabase = function()
 		print("[Cheater Detection] Reloading database...")
-		return Database.LoadDatabase and Database.LoadDatabase() -- Call simplified LoadDatabase
+		-- Pass true for force parameter to ensure reload happens
+		return Database.LoadDatabase and Database.LoadDatabase(false, true)
 	end,
 
 	UpdateDatabase = function()

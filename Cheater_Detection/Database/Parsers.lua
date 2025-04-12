@@ -123,7 +123,7 @@ function Parsers.GetSteamID64(input)
 			end
 		end
 	else
-		print("[Parser GetSteamID64 DBG] steam or steam.ToSteamID64 not available.") -- ++DEBUG
+		-- Debug print statement removed
 	end
 
 	-- If conversion via pcall was successful, return that result

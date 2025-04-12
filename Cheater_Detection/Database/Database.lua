@@ -27,13 +27,52 @@ local Database = {
 		isDirty = false, -- Still potentially useful for SaveOnExit
 		lastSave = 0,
 		lastLoaded = 0,
+		isInitialized = false,
 	},
 	-- Removed saveCount
 }
 
--- Removed Database.content metatable accessor
+-- Logger utility with severity levels
+local LogLevel = {
+	ERROR = 1,
+	WARNING = 2,
+	INFO = 3,
+	DEBUG = 4,
+}
 
--- Removed HandleSetEntry function
+local currentLogLevel = LogLevel.INFO -- Default log level
+local showDebug = false -- Set to true to see all debug messages
+
+-- Log function with severity level and colors
+local function Log(level, message, color)
+	-- Skip logging if message level is higher than current level
+	if level > currentLogLevel and not showDebug then
+		return
+	end
+
+	local prefix = ""
+	local defaultColor = { 255, 255, 255, 255 }
+
+	if level == LogLevel.ERROR then
+		prefix = "[ERROR] "
+		color = color or { 255, 100, 100, 255 }
+	elseif level == LogLevel.WARNING then
+		prefix = "[WARNING] "
+		color = color or { 255, 255, 100, 255 }
+	elseif level == LogLevel.INFO then
+		prefix = "[INFO] "
+		color = color or { 100, 255, 255, 255 }
+	elseif level == LogLevel.DEBUG then
+		prefix = "[DEBUG] "
+		color = color or { 180, 180, 180, 255 }
+	end
+
+	if color then
+		printc(color[1], color[2], color[3], color[4], prefix .. message)
+	else
+		print(prefix .. message)
+	end
+end
 
 -- Find best path for database storage (saves as JSON now)
 function Database.GetFilePath()
@@ -44,181 +83,148 @@ end
 
 -- Save the G.DataBase table to the JSON file
 function Database.SaveDatabase()
-	print("[DB SOURCE SaveDatabase] >>> ENTERED SaveDatabase function.") -- ++DEBUG
+	Log(LogLevel.DEBUG, "[DB] Starting database save operation")
 
 	if not Database.State.isDirty then
-		print("[DB SOURCE SaveDatabase] Database not dirty, skipping save.") -- ++DEBUG
-		return -- No need to return true, just exit
+		Log(LogLevel.DEBUG, "[DB] Database not dirty, skipping save")
+		return
 	end
 
 	if type(G.DataBase) ~= "table" then
-		printc(255, 100, 100, 255, "[DB SOURCE Save JSON] Aborting: G.DataBase is not a table.") -- ++DEBUG
-		return -- Exit if not a table
+		Log(LogLevel.ERROR, "[DB] Cannot save: G.DataBase is not a table")
+		return
 	end
 
-	print("[DB SOURCE Save JSON] Encoding data to JSON...") -- ++DEBUG
-	local encodedData = Json.encode(G.DataBase) -- Assumes this works
-	print("[DB SOURCE Save JSON] Encode successful.") -- ++DEBUG
-
-	-- Handle potential encode failure gracefully by checking result
+	local encodedData = Json.encode(G.DataBase)
 	if not encodedData then
-		printc(255, 100, 100, 255, "[DB SOURCE Save JSON] FAILED TO ENCODE database.") -- ++DEBUG
-		return -- Exit if encoding failed
+		Log(LogLevel.ERROR, "[DB] Failed to encode database to JSON")
+		return
 	end
 
 	local filepath = Database.GetFilePath()
-	print(string.format("[DB SOURCE Save JSON] Writing JSON to file: %s", filepath)) -- ++DEBUG
+	Log(LogLevel.DEBUG, "[DB] Writing to file: " .. filepath)
 
-	-- Write directly using io functions, assume success mostly
 	local file = io.open(filepath, "w")
 	if not file then
-		printc(255, 100, 100, 255, "[DB SOURCE Save JSON] FAILED TO OPEN FILE FOR WRITING: " .. filepath) -- ++DEBUG
-		return -- Exit if file cannot be opened
+		Log(LogLevel.ERROR, "[DB] Failed to open file for writing: " .. filepath)
+		return
 	end
 
-	-- Assume write works
 	file:write(encodedData)
-	print("[DB SOURCE Save JSON] Write operation performed.") -- ++DEBUG
 	file:close()
 
 	encodedData = nil -- Clear reference for GC
 	collectgarbage("collect")
 
-	print(string.format("[DB SOURCE Save JSON] Data written to %s", filepath)) -- ++DEBUG
 	Database.State.isDirty = false
 	Database.State.lastSave = os.time()
 
-	printc(0, 255, 140, 255, "[" .. os.date("%H:%M:%S") .. "] [DB SOURCE] Saved JSON database.") -- ++DEBUG
-	print("[DB SOURCE SaveDatabase] <<< EXITED SaveDatabase function.") -- ++DEBUG
-	-- No explicit return needed
+	Log(LogLevel.INFO, "[DB] Database saved successfully", { 0, 255, 140, 255 })
 end
 
 -- Load the database from the JSON file
-function Database.LoadDatabase(silent)
-	print("[DB SOURCE Loaddatabase] >>> ENTERED Loaddatabase function.") -- ++DEBUG
+function Database.LoadDatabase(silent, force)
+	-- Skip loading if recently loaded (within 10 seconds) unless forced
+	local currentTime = os.time()
+	if Database.State.isInitialized and not force and (currentTime - Database.State.lastLoaded < 10) then
+		Log(LogLevel.DEBUG, "[DB] Skipping reload, database already loaded recently")
+		return
+	end
+
+	Log(LogLevel.DEBUG, "[DB] Starting database load operation")
 	local filePath = Database.GetFilePath()
 
 	local file = io.open(filePath, "r")
-
 	if not file then
 		if not silent then
-			print("[DB SOURCE Load JSON] Database file not found: " .. filePath .. ". Initializing empty database.") -- ++DEBUG
+			Log(LogLevel.WARNING, "[DB] Database file not found, initializing empty database")
 		end
 		G.DataBase = {}
-		Database.State.isDirty = true -- Mark dirty so it's saved on exit
+		Database.State.isDirty = true
 		Database.State.lastLoaded = os.time()
-		print("[DB SOURCE Loaddatabase] <<< EXITED Loaddatabase (file not found).") -- ++DEBUG
-		return -- Exit, database is empty
+		return
 	end
 
-	print("[DB SOURCE Load JSON] File opened. Reading content...") -- ++DEBUG
 	local content = file:read("*a")
 	file:close()
-	print("[DB SOURCE Load JSON] File read and closed.") -- ++DEBUG
 
 	if not content or #content == 0 then
 		if not silent then
-			print("[DB SOURCE Load JSON] Database file is empty: " .. filePath .. ". Initializing empty database.") -- ++DEBUG
+			Log(LogLevel.WARNING, "[DB] Database file is empty, initializing empty database")
 		end
 		G.DataBase = {}
-		Database.State.isDirty = true -- Mark dirty
+		Database.State.isDirty = true
 		Database.State.lastLoaded = os.time()
-		print("[DB SOURCE Loaddatabase] <<< EXITED Loaddatabase (empty file).") -- ++DEBUG
-		return -- Exit, database is empty
+		return
 	end
 
-	print("[DB SOURCE Load JSON] Decoding JSON content...") -- ++DEBUG
+	Log(LogLevel.DEBUG, "[DB] Decoding JSON content")
 	local decodedData = Json.decode(content)
 	content = nil
 	collectgarbage("collect")
 
-	-- ++DEBUG: Check decoded data type and initial count
-	if decodedData then
-		local decodedType = type(decodedData)
-		local initialDecodedCount = 0
-		if decodedType == "table" then
-			for _ in pairs(decodedData) do
-				initialDecodedCount = initialDecodedCount + 1
-			end
-		end
-		print(
-			string.format(
-				"[DB SOURCE Load JSON DEBUG] Decoded data type: %s, Initial entry count: %d",
-				decodedType,
-				initialDecodedCount
-			)
-		) -- ++DEBUG
-	else
-		print("[DB SOURCE Load JSON DEBUG] decodedData is nil after Json.decode") -- ++DEBUG
-	end
-
-	-- Check if decode result is a table
 	if type(decodedData) ~= "table" then
 		if not silent then
-			printc(255, 100, 100, 255, "[DB SOURCE Load JSON] Error: Decode result is not a table. File: " .. filePath) -- ++DEBUG
+			Log(LogLevel.ERROR, "[DB] JSON decode failed or result is not a table")
 		end
-		print("[DB SOURCE Load JSON] Decode failed or result not a table.") -- ++DEBUG
-		G.DataBase = {} -- Initialize empty
+		G.DataBase = {}
 		Database.State.isDirty = true
 		Database.State.lastLoaded = os.time()
-		print("[DB SOURCE Loaddatabase] <<< EXITED Loaddatabase (decode failed or not table).") -- ++DEBUG
-		return -- Exit, database is empty
+		return
 	end
 
-	print("[DB SOURCE Load JSON] Decode successful.") -- ++DEBUG
+	-- Count initial entries for reporting
+	local initialCount = 0
+	for _ in pairs(decodedData) do
+		initialCount = initialCount + 1
+	end
+
+	Log(LogLevel.DEBUG, string.format("[DB] Decoded %d entries from JSON", initialCount))
 	G.DataBase = decodedData
-	-- ++DEBUG: Check G.DataBase immediately after assignment
-	local gdbType = type(G.DataBase)
-	local gdbCount = 0
-	if gdbType == "table" then
-		for _ in pairs(G.DataBase) do
-			gdbCount = gdbCount + 1
-		end
-	end
-	print(string.format("[DB SOURCE Loaddatabase DEBUG] G.DataBase type post-assign: %s, Count: %d", gdbType, gdbCount)) -- ++DEBUG
 
-	print("[DB SOURCE Loaddatabase] Assigned decoded data to G.DataBase.") -- ++DEBUG
-
-	-- Validation (Keep existing validation logic for data integrity)
-	print("[DB SOURCE Loaddatabase] Starting validation...") -- ++DEBUG
+	-- Validation with progress reporting
+	Log(LogLevel.DEBUG, "[DB] Starting database validation")
 	local changesMade = false
 	local entriesToRemove = {}
-	local initialCount = 0
+	local totalEntries = 0
+	local passedCount = 0
+	local failedCount = 0
+
+	-- Process entries in batches
 	for steamID, value in pairs(G.DataBase) do
-		initialCount = initialCount + 1
-		print(
-			string.format(
-				"[DB SOURCE Validation DEBUG] Processing Key: %s, Value Type: %s",
-				tostring(steamID),
-				type(value)
-			)
-		) -- ++DEBUG
+		totalEntries = totalEntries + 1
+
 		-- Basic validation (ensure it's a table and key looks like a SteamID64)
 		if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^765611%d+$") then
-			print(string.format("[DB SOURCE Validation DEBUG] FAILED initial check for Key: %s", tostring(steamID))) -- ++DEBUG
-			if not silent then
-				print(
-					string.format(
-						"[DB SOURCE Load JSON] Invalid entry found: Key=%s, Type=%s. Removing.",
-						tostring(steamID),
-						type(value)
-					)
-				) -- ++DEBUG
-			end
+			failedCount = failedCount + 1
 			table.insert(entriesToRemove, steamID)
 		else
-			print(string.format("[DB SOURCE Validation DEBUG] PASSED initial check for Key: %s", tostring(steamID))) -- ++DEBUG
-			-- Optional: Ensure standard fields exist (uncomment if needed)
-			-- if not value.Name then value.Name = "Unknown"; changesMade = true end
-			-- if not value.Reason then value.Reason = "Unknown"; changesMade = true end
+			passedCount = passedCount + 1
+		end
+
+		-- Print batch progress less frequently for large databases
+		if totalEntries % 1000 == 0 then
+			Log(
+				LogLevel.DEBUG,
+				string.format(
+					"[DB] Validated %d entries so far (%d passed, %d failed)",
+					totalEntries,
+					passedCount,
+					failedCount
+				)
+			)
 		end
 	end
-	print(string.format("[DB SOURCE Loaddatabase] Validation checked %d entries.", initialCount)) -- ++DEBUG
-	print(string.format("[DB SOURCE Loaddatabase DEBUG] Total entries marked for removal: %d", #entriesToRemove)) -- ++DEBUG
+
+	-- Final validation summary
+	Log(
+		LogLevel.INFO,
+		string.format("[DB] Validated %d entries (%d passed, %d failed)", totalEntries, passedCount, failedCount)
+	)
 
 	if #entriesToRemove > 0 then
 		if not silent then
-			print("[DB SOURCE Load JSON] Removing " .. #entriesToRemove .. " invalid entries during load.") -- ++DEBUG
+			Log(LogLevel.WARNING, string.format("[DB] Removing %d invalid entries", #entriesToRemove))
 		end
 		for _, key in ipairs(entriesToRemove) do
 			G.DataBase[key] = nil
@@ -226,64 +232,59 @@ function Database.LoadDatabase(silent)
 		changesMade = true
 	end
 
-	Database.State.isDirty = changesMade -- Only dirty if validation changed things
+	Database.State.isDirty = changesMade
 	Database.State.lastLoaded = os.time()
-	print(string.format("[DB SOURCE Loaddatabase] Finished validation. isDirty = %s", tostring(Database.State.isDirty))) -- ++DEBUG
+	Database.State.isInitialized = true
 
 	if not silent then
 		local finalCount = 0
 		for _ in pairs(G.DataBase) do
 			finalCount = finalCount + 1
-		end -- Recount after removal
-		printc(
-			0,
-			255,
-			140,
-			255,
-			"[" .. os.date("%H:%M:%S") .. "] [DB SOURCE] Loaded JSON Database with " .. finalCount .. " valid entries."
-		) -- ++DEBUG
+		end
+		Log(
+			LogLevel.INFO,
+			string.format("[DB] Database loaded with %d valid entries", finalCount),
+			{ 0, 255, 140, 255 }
+		)
 	end
 
 	collectgarbage("collect")
-	print("[DB SOURCE Loaddatabase] <<< EXITED Loaddatabase function successfully.") -- ++DEBUG
-	-- No explicit return needed
 end
 
 -- Simplified Initialize function
 local function InitializeDatabase()
-	print("[DB SOURCE Initialize] >>> ENTERED Initialize function.") -- ++DEBUG
-	print("[Database] Initializing JSON Database Module...") -- ++DEBUG
+	-- Skip if already initialized
+	if Database.State.isInitialized then
+		Log(LogLevel.DEBUG, "[DB] Database already initialized, skipping")
+		return
+	end
+
+	Log(LogLevel.DEBUG, "[DB] Initializing database module")
 
 	-- Ensure G.DataBase exists as a table before loading
 	if type(G.DataBase) ~= "table" then
-		print("[DB SOURCE Initialize] G.DataBase not found or not a table. Initializing empty.") -- ++DEBUG
+		Log(LogLevel.DEBUG, "[DB] G.DataBase not found, initializing empty")
 		G.DataBase = {}
 	end
 
-	-- Load existing data. LoadDatabase handles initializing empty if needed.
-	Database.LoadDatabase() -- Assume LoadDatabase prints relevant info
-	print("[DB SOURCE Initialize] LoadDatabase finished execution.") -- ++DEBUG
-
-	print("[DB SOURCE Initialize] <<< EXITED Initialize function.") -- ++DEBUG
+	-- Load existing data
+	Database.LoadDatabase()
+	Log(LogLevel.DEBUG, "[DB] Database initialization complete")
 end
-
--- Removed RegisterCommands (can be re-added if simple commands are needed)
-
--- Removed GetRecord, GetReason, GetName, Contains, updateDatabase, GetStats, Cleanup
 
 -- Save database automatically when the script unloads (if dirty)
 callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", function()
-	print("[DB SOURCE Unload] >>> Checking if save needed...") -- ++DEBUG
+	Log(LogLevel.DEBUG, "[DB] Checking if save needed on unload")
 	if Database.Config.SaveOnExit and Database.State and Database.State.isDirty then
-		print("[DB SOURCE Unload] Database is dirty, attempting save...") -- ++DEBUG
+		Log(LogLevel.INFO, "[DB] Database modified, saving on exit")
 		Database.SaveDatabase()
 	else
-		print("[DB SOURCE Unload] Database not dirty or SaveOnExit disabled, no save needed.") -- ++DEBUG
+		Log(LogLevel.DEBUG, "[DB] No changes to save on exit")
 	end
 end)
 
 -- Initial load and setup
-InitializeDatabase() -- Call the local function to load/initialize
+InitializeDatabase()
 
-print("[DB SOURCE] >>> Module execution finished. Returning Database table.") -- ++DEBUG
-return Database -- Return the module table (even though most functions are removed)
+Log(LogLevel.DEBUG, "[DB] Module initialization complete")
+return Database
