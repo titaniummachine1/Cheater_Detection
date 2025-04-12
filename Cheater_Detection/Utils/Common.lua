@@ -1,6 +1,7 @@
 ---@diagnostic disable: duplicate-set-field, undefined-field
 
--- Create and initialize the Common table first
+--[[ Imports ]]
+--
 local Common = {
 	Lib = nil,
 	ImMenu = nil,
@@ -14,6 +15,11 @@ local Common = {
 	PR = nil,
 	Helpers = nil,
 }
+
+-- Move requires here
+Common.ImMenu = require("Cheater_Detection.Libs.ImMenu")
+Common.Json = require("Cheater_Detection.Libs.Json")
+local G = require("Cheater_Detection.Utils.Globals")
 
 if UnloadLib ~= nil then
 	UnloadLib()
@@ -107,10 +113,6 @@ local latestLNXlib = "https://" .. "github.com/lnx00/Lmaobox-Library/releases/la
 
 -- Initialize libraries in order
 Common.Lib = loadlib("LNXlib", latestLNXlib)
-Common.ImMenu = require("Cheater_Detection.Libs.ImMenu")
-Common.Json = require("Cheater_Detection.Libs.Json")
-
-local G = require("Cheater_Detection.Utils.Globals")
 
 -- Now initialize remaining Common fields using the loaded libraries
 Common.Log = Common.Lib.Utils.Logger.new("Cheater Detection")
@@ -280,21 +282,20 @@ Common.RoundCoord = function(value)
 	return math.floor(value + 0.5)
 end
 
---[[ Callbacks ]]
+--[[ Registrations and final actions ]]
+--
 local function OnUnload() -- Called when the script is unloaded
 	UnloadLib() --unloading lualib
 	engine.PlaySound("hl1/fvox/deactivated.wav") --deactivated
 end
 
---[[ Unregister previous callbacks ]]
---
+-- Unregister previous callbacks
 callbacks.Unregister("Unload", "CD_Unload") -- unregister the "Unload" callback
---[[ Register callbacks ]]
---
+
+-- Register callbacks
 callbacks.Register("Unload", "CD_Unload", OnUnload) -- Register the "Unload" callback
 
---[[ Play sound when loaded ]]
---
+-- Play sound when loaded
 engine.PlaySound("hl1/fvox/activated.wav")
 
 return Common

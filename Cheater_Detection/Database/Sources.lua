@@ -17,6 +17,12 @@ Sources.List = {
 		parser = "raw",
 	},
 	{
+		name = "d3fc0n6 Group List",
+		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/Group/64ids",
+		cause = "Suspected (Group Member)",
+		parser = "raw",
+	},
+	{
 		name = "Sleepy List RGL",
 		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.rgl-gg.json",
 		cause = "Sleepy RGL",
@@ -33,6 +39,18 @@ Sources.List = {
 		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
 		cause = "Cheater (MegaScaterbomb)",
 		parser = "tf2db", -- Use tf2db parser for this JSON source
+	},
+	{
+		name = "qfoxb Player List",
+		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
+		cause = "TF2BD Community (qfoxb)",
+		parser = "tf2db",
+	},
+	{
+		name = "joekiller Player List",
+		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
+		cause = "TF2BD Community (joekiller)",
+		parser = "tf2db",
 	},
 }
 

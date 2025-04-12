@@ -1,4 +1,6 @@
+--[[ Imports first --]]
 local Globals = {}
+Globals.Menu = require("Cheater_Detection.Utils.DefaultConfig")
 
 Globals.AutoVote = {
 	Options = { "Yes", "No" },
@@ -14,8 +16,6 @@ Globals.pLocal = nil
 Globals.WLocal = nil
 Globals.latin = nil
 Globals.latout = nil
-
-Globals.Menu = require("Cheater_Detection.Utils.DefaultConfig")
 
 -- Global utility functions and UI helpers
 

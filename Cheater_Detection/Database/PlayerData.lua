@@ -47,4 +47,4 @@ PlayerData.defaultRecord = {
 	Cause = "Known Cheater",
 }
 
-return playerData
+return PlayerData

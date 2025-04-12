@@ -35,7 +35,7 @@ local function InitializeSystems()
 
 	-- Initialize database by loading it
 	print("[Cheater Detection] Initializing - Loading Database...")
-	-- Pass true for silent loading, false for not forcing reload
+	-- Pass false for silent loading, false for not forcing reload
 	-- This will be ignored if database is already initialized internally
 	Database.LoadDatabase(false, false)
 
@@ -78,51 +78,7 @@ local function InitializeSystems()
 		)
 	end
 
-	-- Register console commands for database management
-	Commands.Register("cd_check", function(args)
-		if #args < 1 then
-			print("Usage: cd_check <steamid or name fragment>")
-			return
-		end
-
-		local query = args[1]
-		local found = false
-
-		-- Check if it's a valid SteamID
-		if query:match("^%d+$") and #query >= 17 then
-			-- Simplified version doesn't have GetRecord, access G.DataBase directly
-			local record = G.DataBase and G.DataBase[query]
-			if record then
-				found = true
-				print(string.format("[Database] Found record for SteamID: %s", query))
-				print(string.format("  Name: %s", record.Name or "Unknown"))
-				print(string.format("  Reason: %s", record.Reason or "Unknown"))
-			end
-		end
-
-		-- If not found by SteamID, search by name
-		if not found then
-			local matches = 0
-			if G.DataBase and type(G.DataBase) == "table" then
-				for steamId, data in pairs(G.DataBase) do
-					if type(data) == "table" and data.Name and data.Name:lower():find(query:lower()) then
-						matches = matches + 1
-						print(string.format("[Database] Match %d: %s (SteamID: %s)", matches, data.Name, steamId))
-						print(string.format("  Reason: %s", data.Reason or "Unknown"))
-
-						if matches >= 5 then
-							print("[Database] Found more matches, showing first 5 only")
-							break
-						end
-					end
-				end
-			end
-
-			if matches == 0 then
-				print(string.format("[Database] No records found for: %s", query))
-			end
-		end
-	end, "Check if a player is in the cheat database")
+	-- Console command removed for automatic operation
 end
 
 --[[ Update the player data every tick ]]
