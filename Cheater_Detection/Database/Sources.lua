@@ -28,6 +28,12 @@ Sources.List = {
 		cause = "Bot (bot detector)",
 		parser = "tf2db", -- Use tf2db parser for this JSON source
 	},
+	{
+		name = "MegaScaterbomb (Scraped)",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
+		cause = "Cheater (MegaScaterbomb)",
+		parser = "tf2db", -- Use tf2db parser for this JSON source
+	},
 }
 
 -- Function to add a custom source
