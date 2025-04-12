@@ -82,4 +82,16 @@ function Config.LoadCFG()
 	end
 end
 
+-- Save configuration automatically when the script unloads
+callbacks.Register("Unload", "ConfigAutoSaveOnUnload", function()
+	print("[CONFIG] Unloading script, saving configuration...")
+
+	-- Save the current configuration state
+	if G.Menu then
+		Config.CreateCFG(G.Menu)
+	else
+		printc(255, 0, 0, 255, "[CONFIG] Warning: Unable to save config, G.Menu is nil")
+	end
+end)
+
 return Config
