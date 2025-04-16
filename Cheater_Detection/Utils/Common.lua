@@ -51,7 +51,7 @@ local function loadlib(libName, libURL)
 
 		if success and localLib then
 			-- Local version exists and loaded successfully
-			lnxLib = localLib
+			LnxLib = localLib
 			print("Loaded local lnxLib")
 		else
 			-- Local version doesn't exist, download from GitHub
@@ -81,7 +81,7 @@ local function loadlib(libName, libURL)
 			end
 
 			-- Assign globally
-			lnxLib = lib
+			LnxLib = lib
 			print("Downloaded and loaded lnxLib from GitHub")
 		end
 
