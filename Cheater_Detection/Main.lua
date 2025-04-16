@@ -1,3 +1,5 @@
+--[[ Imported by: Cheater_Detection/init.lua ]]
+
 --[[
     Cheater Detection for Lmaobox Recode
     Author: titaniummachine1 (https://github.com/titaniummachine1)
@@ -8,16 +10,16 @@
 ]]
 
 --[[ Import core utilities ]]
-local Common = require("Cheater_Detection.Utils.Common")
-local G = require("Cheater_Detection.Utils.Globals")
-require("Cheater_Detection.Utils.Config")
+local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
+local G = require("Cheater_Detection.Utils.Globals") --[[ Imported by: Main.lua ]]
+require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
 
 --[[ Import database system ]]
-require("Cheater_Detection.Database.Database") -- Require simplified DB
-require("Cheater_Detection.Database.Fetcher") -- Require simplified Fetcher
+require("Cheater_Detection.Database.Database") --[[ Imported by: Main.lua ]]
+require("Cheater_Detection.Database.Fetcher") --[[ Imported by: Main.lua ]]
 
 --[[ UI components ]]
-require("Cheater_Detection.Misc.Visuals.Menu")
+require("Cheater_Detection.Misc.Visuals.Menu") --[[ Imported by: Main.lua ]]
 
 --[[ Detection modules (uncomment when needed) ]]
 --local Detections = require("Cheater_Detection.Detections")
