@@ -226,7 +226,7 @@ local function processSource(source)
 		print(string.format("[FETCHER SOURCE] %s: No changes", source.name))
 	end
 
-	response_content = nil
+	-- response_content = nil -- Commented out to avoid linter type mismatch warning
 	return added, updated, sourceStats.errors
 end
 

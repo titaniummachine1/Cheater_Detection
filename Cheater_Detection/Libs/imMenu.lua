@@ -448,7 +448,7 @@ function ImMenu.Begin(title, visible)
     draw.SetFont(BoldFont)  -- Set the bold font before getting text size
     local titleText = ImMenu.GetLabel(title)
     local txtWidth, txtHeight = draw.GetTextSize(titleText)
-    local titleHeight = txtHeight + Style.ItemPadding
+    local titleHeight = txtHeight + (Style.ItemPadding or 5) -- Default padding if nil
     local hovered, clicked, active = ImMenu.GetInteraction(window.X, window.Y, window.W, titleHeight, title)
 
     -- Title bar

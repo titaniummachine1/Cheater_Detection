@@ -186,6 +186,11 @@ function Parsers.ParseJsonTF2DB(contentString)
 		return nil, "Empty content string"
 	end
 
+	-- Ensure the JSON decoder is available before calling pcall
+	if not Json or type(Json.decode) ~= "function" then
+		return nil, "JSON decode function is unavailable"
+	end
+
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success or type(data) ~= "table" then
@@ -272,6 +277,14 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 	}
 
 	-- Try to decode JSON
+	-- Ensure the JSON decoder is available before calling pcall
+	if not Json or type(Json.decode) ~= "function" then
+		if sourceStats then
+			sourceStats.errors = (sourceStats.errors or 0) + 1
+		end
+		return nil, "JSON decode function is unavailable"
+	end
+
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success or type(data) ~= "table" then
