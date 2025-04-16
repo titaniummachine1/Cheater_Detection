@@ -10,11 +10,11 @@
 --[[ Import core utilities ]]
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
-local Config = require("Cheater_Detection.Utils.Config")
+require("Cheater_Detection.Utils.Config")
 
 --[[ Import database system ]]
-local Database = require("Cheater_Detection.Database.Database") -- Require simplified DB
-local Fetcher = require("Cheater_Detection.Database.Fetcher") -- Require simplified Fetcher
+require("Cheater_Detection.Database.Database") -- Require simplified DB
+require("Cheater_Detection.Database.Fetcher") -- Require simplified Fetcher
 
 --[[ UI components ]]
 require("Cheater_Detection.Misc.Visuals.Menu")
@@ -26,29 +26,6 @@ require("Cheater_Detection.Misc.Visuals.Menu")
 
 --[[ Variables ]]
 local WPlayer, PR = Common.WPlayer, Common.PlayerResource
-
---[[ Initialize systems ]]
-local function InitializeSystems()
-	-- Load config
-	Config.LoadCFG()
-
-	-- Initialize database (this now handles loading/creating the DB)
-	print("[Cheater Detection] Initializing - Initializing Database...")
-	Database.Initialize(false) -- Pass false for non-silent initialization
-
-	-- Trigger initial fetch (optional, can be manual)
-	print("[Cheater Detection] Initializing - Starting Fetcher...")
-	Fetcher.Start() -- Uncomment to auto-fetch on load
-
-	-- Clear local player from cheater list (for debugging)
-	local localPlayer = entities.GetLocalPlayer()
-	if localPlayer then
-		local mySteamID = Common.GetSteamID64(localPlayer)
-		pcall(playerlist.SetPriority, mySteamID, 0) -- Use pcall for safety
-	end
-
-	-- Console command removed for automatic operation
-end
 
 --[[ Update the player data every tick ]]
 --
@@ -63,7 +40,7 @@ local function OnCreateMove(cmd)
 	G.WLocal = WPlayer.FromEntity(G.pLocal)
 	G.connectionState = PR.GetConnectionState()[G.pLocal:GetIndex()]
 
-	for _, entity in ipairs(G.players) do
+	for _, entity in pairs(G.players) do
 		-- Get the steamid for the player
 		local steamid = Common.GetSteamID64(entity)
 		if not steamid then
@@ -132,22 +109,3 @@ end
 
 --[[ Callbacks ]]
 callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
-
--- Initialize everything on script load
-InitializeSystems()
-
--- Provide global access to main module functions
-return {
-	ReloadDatabase = function()
-		print("[Cheater Detection] Reloading database...")
-		-- Pass true for force parameter to ensure reload happens
-		return Database.LoadDatabase and Database.LoadDatabase(false, true)
-	end,
-
-	UpdateDatabase = function()
-		print("[Cheater Detection] Triggering manual database update...")
-		return Fetcher.Start and Fetcher.Start() -- Call simplified Fetcher.Start
-	end,
-
-	-- GetDatabaseStats = Database.GetStats, -- Removed, simplified DB doesn't have GetStats
-}

@@ -1,6 +1,0 @@
-use_config_ignore: true
-use_gitignore: true
-include_patterns:
-  - "src/**/*.rs"  # Include all Rust files in src and subdirectories
-  - "Cargo.toml"
-  - ".cargo/config.toml" 

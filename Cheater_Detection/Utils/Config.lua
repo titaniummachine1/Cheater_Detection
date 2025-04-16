@@ -15,7 +15,10 @@ local folder_name = string.format([[Lua %s]], script_name)
 
 --[[ Helper Functions ]]
 function Config.GetFilePath()
-	local success, fullPath = filesystem.CreateDirectory(folder_name)
+	-- Note: filesystem.CreateDirectory() returns true only if it created a new directory,
+	-- not if the directory already exists. The function succeeds in both cases, but
+	-- returns different boolean values.
+	local CreatedDirectory, fullPath = filesystem.CreateDirectory(folder_name)
 	return fullPath .. "/config.cfg"
 end
 
@@ -80,10 +83,17 @@ function Config.LoadCFG()
 		Config.CreateCFG(Default_Config)
 		G.Menu = Default_Config
 	end
+
+	-- Set G.Config with key settings for other modules
+	G.Config = G.Config or {}
+	G.Config.AutoFetch = G.Menu.Main.AutoFetch -- Pull from Menu settings
 end
 
+--load on load
+Config.LoadCFG()
+
 -- Save configuration automatically when the script unloads
-callbacks.Register("Unload", "ConfigAutoSaveOnUnload", function()
+local function ConfigAutoSaveOnUnload()
 	print("[CONFIG] Unloading script, saving configuration...")
 
 	-- Save the current configuration state
@@ -92,6 +102,8 @@ callbacks.Register("Unload", "ConfigAutoSaveOnUnload", function()
 	else
 		printc(255, 0, 0, 255, "[CONFIG] Warning: Unable to save config, G.Menu is nil")
 	end
-end)
+end
+
+callbacks.Register("Unload", "ConfigAutoSaveOnUnload", ConfigAutoSaveOnUnload)
 
 return Config

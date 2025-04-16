@@ -3,6 +3,7 @@ local Default_Config = {
 
 	Main = {
 		AutoMark = true,
+		AutoFetch = true, -- Automatically fetch database on startup
 		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,

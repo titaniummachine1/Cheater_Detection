@@ -114,7 +114,6 @@ function Database.SaveDatabase()
 	file:close()
 
 	encodedData = nil -- Clear reference for GC
-	collectgarbage("collect")
 
 	Database.State.isDirty = false
 	Database.State.lastSave = os.time()
@@ -161,7 +160,6 @@ function Database.LoadDatabase(silent, force)
 	Log(LogLevel.DEBUG, "[DB] Decoding JSON content")
 	local decodedData = Json.decode(content)
 	content = nil
-	collectgarbage("collect")
 
 	if type(decodedData) ~= "table" then
 		if not silent then
@@ -247,62 +245,23 @@ function Database.LoadDatabase(silent, force)
 			{ 0, 255, 140, 255 }
 		)
 	end
-
-	collectgarbage("collect")
 end
 
--- Simplified Initialize function
-local function InitializeDatabase()
-	-- Skip if already initialized
+-- Simplified Initialize function that serves both internal and external needs
+function Database.Initialize(silent)
+	-- Skip if already initialized and not forcing
 	if Database.State.isInitialized then
 		Log(LogLevel.DEBUG, "[DB] Database already initialized, skipping")
 		return
 	end
 
-	Log(LogLevel.DEBUG, "[DB] Initializing database module")
+	Log(LogLevel.DEBUG, "[DB] Initializing Database module...")
 
 	-- Ensure G.DataBase exists as a table before loading
 	if type(G.DataBase) ~= "table" then
 		Log(LogLevel.DEBUG, "[DB] G.DataBase not found, initializing empty")
 		G.DataBase = {}
 	end
-
-	-- Load existing data
-	Database.LoadDatabase()
-	Log(LogLevel.DEBUG, "[DB] Database initialization complete")
-end
-
--- Save database automatically when the script unloads (if dirty)
-callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", function()
-	Log(LogLevel.DEBUG, "[DB] Unloading database, saving data...")
-
-	-- Always save on unload to prevent data loss
-	if Database.Config.SaveOnExit then
-		-- If not dirty, mark as dirty temporarily to force save
-		local wasDirty = Database.State.isDirty
-		Database.State.isDirty = true
-
-		Log(LogLevel.INFO, "[DB] Saving database on exit")
-		Database.SaveDatabase()
-
-		-- Restore original dirty state if it wasn't modified
-		if not wasDirty then
-			Database.State.isDirty = false
-		end
-	else
-		Log(LogLevel.WARNING, "[DB] SaveOnExit disabled, skipping final save")
-	end
-end)
-
--- Initial load and setup
-InitializeDatabase()
-
-Log(LogLevel.DEBUG, "[DB] Module initialization complete")
-
---[[ Add Initialize function here ]]
---
-function Database.Initialize(silent)
-	Log(LogLevel.DEBUG, "[DB] Initializing Database module...")
 
 	-- Load the database (this function handles creating an empty one if needed)
 	Database.LoadDatabase(silent, false)
@@ -335,7 +294,45 @@ function Database.Initialize(silent)
 		end
 	end
 
+	-- Clear local player from cheater list (for debugging)
+	local localPlayer = entities.GetLocalPlayer()
+	if localPlayer then
+		local mySteamID = Common.GetSteamID64(localPlayer)
+		if mySteamID then
+			Log(LogLevel.DEBUG, "[DB] Clearing local player from cheater list")
+			pcall(playerlist.SetPriority, mySteamID, 0) -- Use pcall for safety
+		end
+	end
+
 	Log(LogLevel.DEBUG, "[DB] Database initialization complete.")
+	Database.State.isInitialized = true
 end
+
+-- Save database automatically when the script unloads (if dirty)
+local function DatabaseAutoSaveOnUnload()
+	Log(LogLevel.DEBUG, "[DB] Unloading database, saving data...")
+
+	-- Always save on unload to prevent data loss
+	if Database.Config.SaveOnExit then
+		-- If not dirty, mark as dirty temporarily to force save
+		local wasDirty = Database.State.isDirty
+		Database.State.isDirty = true
+
+		Log(LogLevel.INFO, "[DB] Saving database on exit")
+		Database.SaveDatabase()
+
+		-- Restore original dirty state if it wasn't modified
+		if not wasDirty then
+			Database.State.isDirty = false
+		end
+	else
+		Log(LogLevel.WARNING, "[DB] SaveOnExit disabled, skipping final save")
+	end
+end
+
+callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
+
+-- Initial load and setup (silent=true to avoid verbose messages at load time)
+Database.Initialize(true)
 
 return Database

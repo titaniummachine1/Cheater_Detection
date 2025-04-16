@@ -1,29 +1,24 @@
---[[ Cheater Detection - Database Fetcher - Coroutine Version ]]
+--[[ Cheater Detection - Database Fetcher - Simplified Version ]]
 print("[FETCHER SOURCE] >>> Module Start") -- ++DEBUG
 
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Json = Common.Json
-print("[FETCHER SOURCE] Attempting to require Database module...") -- ++DEBUG
 local Database = require("Cheater_Detection.Database.Database") -- For SaveDatabase
-print("[FETCHER SOURCE] Database module require result: Type =", type(Database)) -- ++DEBUG
 local Sources = require("Cheater_Detection.Database.Sources") -- Require Sources
 local Parsers = require("Cheater_Detection.Database.Parsers") -- Require Parsers
 
 local Fetcher = {}
 
--- State tracking
+-- Simplified State tracking
 Fetcher.State = {
 	isRunning = false,
 	startTime = 0,
-	totalSources = 0,
-	completedSources = 0,
-	activeCoroutines = {},
-	sourcesStatus = {},
 	results = {
 		total_added = 0,
 		errors = 0,
 	},
+	-- Removed totalSources, completedSources, activeCoroutines, sourcesStatus
 }
 
 -- Helper function to check if all required modules are properly loaded
@@ -69,80 +64,17 @@ local function checkRequirements()
 end
 
 -- Helper function to convert SteamID3 or SteamID to SteamID64 if needed
-local function GetSteamID64(id_str)
-	if not id_str then
-		return nil
-	end
-	id_str = id_str:match("^%s*(.-)%s*$") -- Trim
-
-	-- Direct SteamID64 match
-	if id_str:match("^7656119%d%d%d%d%d%d%d%d%d%d$") then
-		return id_str -- Already SteamID64
-	elseif id_str:match("^STEAM_0:[01]:%d+$") or id_str:match("^%[U:1:%d+%]$") then
-		local success, result = pcall(steam.ToSteamID64, id_str)
-		return success and result or nil
-	else
-		-- Check if it's already a valid numeric SteamID64
-		local numeric_id = tonumber(id_str)
-		if
-			numeric_id
-			and tostring(numeric_id) == id_str
-			and numeric_id > 76500000000000000
-			and numeric_id < 77000000000000000
-		then
-			return id_str
-		end
-		return nil -- Unrecognized format
-	end
-end
+-- Removed, use Parsers.GetSteamID64 directly if needed elsewhere or keep Parsers dependency
 
 -- Coroutine-based HTTP fetch with timeout detection
-local function fetchUrl(url)
-	local co = coroutine.create(function()
-		local success, content_or_error = pcall(http.Get, url)
-		coroutine.yield(success, content_or_error)
-	end)
-
-	-- Add to active coroutines list with timestamp
-	Fetcher.State.activeCoroutines[co] = {
-		startTime = globals.RealTime(),
-		url = url,
-		status = "running",
-	}
-
-	-- Resume the coroutine
-	local resume_success, yield_success, yield_content_or_error = coroutine.resume(co)
-
-	-- Update the coroutine status
-	if Fetcher.State.activeCoroutines[co] then
-		Fetcher.State.activeCoroutines[co].status = "completed"
-		Fetcher.State.activeCoroutines[co] = nil -- Remove from active list
-	end
-
-	-- Return the result
-	if not resume_success then
-		return false, "Coroutine resume error: " .. tostring(yield_success)
-	end
-
-	return yield_success, yield_content_or_error
-end
+-- Removed fetchUrl function
 
 -- Process a single source and add its entries to the database
 local function processSource(source)
 	print(string.format("[FETCHER SOURCE] Processing source: %s (%s)", source.name, source.url))
 
-	-- Update source status
-	Fetcher.State.sourcesStatus[source.name] = {
-		status = "fetching",
-		url = source.url,
-		startTime = globals.RealTime(),
-	}
-
-	-- Fetch the URL
-	local fetch_success, response_content_or_error = fetchUrl(source.url)
-
-	-- Update source status
-	Fetcher.State.sourcesStatus[source.name].status = fetch_success and "parsing" or "fetch_failed"
+	-- Fetch the URL directly using pcall
+	local fetch_success, response_content_or_error = pcall(http.Get, source.url)
 
 	if not fetch_success then
 		print(
@@ -153,15 +85,14 @@ local function processSource(source)
 			)
 		)
 		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0
+		return 0, 0 -- Return added, updated
 	end
 
 	local response_content = response_content_or_error
 	if type(response_content) ~= "string" or response_content == "" then
 		print(string.format("[FETCHER SOURCE] Empty or invalid content from %s", source.name))
-		Fetcher.State.sourcesStatus[source.name].status = "invalid_content"
 		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0
+		return 0, 0 -- Return added, updated
 	end
 
 	print(string.format("[FETCHER SOURCE] Download successful from %s. Size: %d bytes", source.name, #response_content))
@@ -171,41 +102,27 @@ local function processSource(source)
 		processed = 0,
 		added = 0,
 		existing = 0,
-		updated = 0, -- New stat for tracking updated entries
+		updated = 0,
 		errors = 0,
 	}
 
-	-- Determine which parser to use and parse the content
 	local added = 0
-	local updated = 0 -- Track updated entries
+	local updated = 0
 	local isDirtyBefore = Database.State.isDirty
 
+	-- Determine which parser to use and parse the content
 	if source.parser == "raw" then
-		-- Parse raw list of IDs
 		local entries, errorMsg = Parsers.ParseRawIDs(response_content, source.cause)
-
 		if entries then
-			-- Count how many are added vs existing vs updated
-			local processedCount = 0
-			local existingCount = 0
-			local addedCount = 0
-			local updatedCount = 0
-
+			local processedCount, existingCount, addedCount, updatedCount = 0, 0, 0, 0
 			for steamID64, entryData in pairs(entries) do
 				processedCount = processedCount + 1
-
 				if not G.DataBase[steamID64] then
-					-- New entry, add it
 					G.DataBase[steamID64] = entryData
 					addedCount = addedCount + 1
 				else
-					-- Entry exists - check if we should update it
 					existingCount = existingCount + 1
-
-					-- Update if existing entry has less information
 					local existingEntry = G.DataBase[steamID64]
-
-					-- If existing entry has unknown name and this one has a name
 					if
 						(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
 						and entryData.Name
@@ -215,8 +132,6 @@ local function processSource(source)
 						updatedCount = updatedCount + 1
 						Database.State.isDirty = true
 					end
-
-					-- If existing entry has unknown reason and this one has a reason
 					if
 						(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
 						and entryData.Reason
@@ -228,82 +143,47 @@ local function processSource(source)
 					end
 				end
 			end
-
-			added = addedCount
-			updated = updatedCount
-			sourceStats.processed = processedCount
-			sourceStats.added = addedCount
-			sourceStats.existing = existingCount
-			sourceStats.updated = updatedCount
+			added, updated = addedCount, updatedCount
+			sourceStats = {
+				processed = processedCount,
+				added = addedCount,
+				existing = existingCount,
+				updated = updatedCount,
+				errors = 0,
+			}
 		else
 			print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 			sourceStats.errors = sourceStats.errors + 1
 		end
 	elseif source.parser == "tf2db" then
-		-- Use the specialized TF2BotDetector parser if it's the playerlist.official.json
 		if source.url:find("tf2_bot_detector") and source.url:find("playerlist%.official%.json") then
-			local updatedEntries, errorMsg, stats =
-				Parsers.ParseTF2BotDetector(response_content, source.cause, G.DataBase)
-
-			if updatedEntries then
-				added = stats.added
+			local _, errorMsg, stats = Parsers.ParseTF2BotDetector(response_content, source.cause, G.DataBase)
+			if stats then
+				added, updated = stats.added, stats.updated
 				sourceStats = stats
 			else
 				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 				sourceStats.errors = sourceStats.errors + 1
 			end
 		else
-			-- Use standard TF2DB parser for other formats
 			local data, errorMsg = Parsers.ParseJsonTF2DB(response_content)
-
 			if data and data.players then
-				-- Process each player
-				local processedCount = 0
-				local existingCount = 0
-				local addedCount = 0
-				local updatedCount = 0
-
+				local processedCount, existingCount, addedCount, updatedCount = 0, 0, 0, 0
 				for _, player in ipairs(data.players) do
 					processedCount = processedCount + 1
-
-					-- Extract SteamID64
-					local steamID64 = nil
-					if player.steamid then
-						steamID64 = Parsers.GetSteamID64(player.steamid)
-					end
-
+					local steamID64 = player.steamid and Parsers.GetSteamID64(player.steamid) or nil
 					if steamID64 then
-						-- Get player name and reason
-						local playerName = "Unknown"
-						if player.last_seen and player.last_seen.player_name then
-							playerName = player.last_seen.player_name
-						end
-
+						local playerName = (player.last_seen and player.last_seen.player_name) or "Unknown"
 						local reason = source.cause or "Unknown Source"
 						if player.attributes and #player.attributes > 0 then
-							-- Use first attribute as reason, capitalized
-							local firstAttribute = player.attributes[1]
-							reason = firstAttribute:gsub("^%l", string.upper)
-
-							-- Don't override with source.cause anymore
-							-- Only use source.cause when no attributes available
+							reason = player.attributes[1]:gsub("^%l", string.upper)
 						end
-
-						-- Add to database if not already present
 						if not G.DataBase[steamID64] then
-							G.DataBase[steamID64] = {
-								Name = playerName,
-								Reason = reason,
-							}
+							G.DataBase[steamID64] = { Name = playerName, Reason = reason }
 							addedCount = addedCount + 1
 						else
-							-- Entry exists - check if we should update it
 							existingCount = existingCount + 1
-
-							-- Update if existing entry has less information
 							local existingEntry = G.DataBase[steamID64]
-
-							-- If existing entry has unknown name and this one has a name
 							if
 								(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
 								and playerName
@@ -313,17 +193,13 @@ local function processSource(source)
 								updatedCount = updatedCount + 1
 								Database.State.isDirty = true
 							end
-
-							-- Update reason logic
 							if reason and reason ~= "Unknown Source" then
 								local existingReason = existingEntry.Reason
 								if not existingReason or existingReason == "Unknown Source" then
-									-- If existing reason is generic, replace it
 									existingEntry.Reason = reason
 									updatedCount = updatedCount + 1
 									Database.State.isDirty = true
 								elseif existingReason ~= reason and not existingReason:find(reason, 1, true) then
-									-- If existing reason is specific, different, and doesn't already contain the new one, append
 									existingEntry.Reason = existingReason .. " | " .. reason
 									updatedCount = updatedCount + 1
 									Database.State.isDirty = true
@@ -334,13 +210,14 @@ local function processSource(source)
 						sourceStats.errors = sourceStats.errors + 1
 					end
 				end
-
-				added = addedCount
-				updated = updatedCount
-				sourceStats.processed = processedCount
-				sourceStats.added = addedCount
-				sourceStats.existing = existingCount
-				sourceStats.updated = updatedCount
+				added, updated = addedCount, updatedCount
+				sourceStats = {
+					processed = processedCount,
+					added = addedCount,
+					existing = existingCount,
+					updated = updatedCount,
+					errors = sourceStats.errors,
+				}
 			else
 				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 				sourceStats.errors = sourceStats.errors + 1
@@ -350,16 +227,9 @@ local function processSource(source)
 		print(
 			string.format("[FETCHER SOURCE] Error: Unknown parser type '%s' for source %s", source.parser, source.name)
 		)
-		Fetcher.State.sourcesStatus[source.name].status = "unknown_parser"
 		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0
+		return 0, 0 -- Return added, updated
 	end
-
-	-- Update source status
-	Fetcher.State.sourcesStatus[source.name].status = "completed"
-	Fetcher.State.sourcesStatus[source.name].added = added
-	Fetcher.State.sourcesStatus[source.name].updated = updated
-	Fetcher.State.completedSources = Fetcher.State.completedSources + 1
 
 	-- Record source stats
 	Parsers.AddSourceStats(
@@ -376,139 +246,77 @@ local function processSource(source)
 		Database.State.isDirty = true
 	end
 
-	-- Print detailed summary
+	-- Print detailed summary for this source
 	if updated > 0 then
-		print(
-			string.format(
-				"[FETCHER SOURCE] Added %d new entries and updated %d existing entries from %s",
-				added,
-				updated,
-				source.name
-			)
-		)
+		print(string.format("[FETCHER SOURCE] %s: Added %d, Updated %d", source.name, added, updated))
+	elseif added > 0 then
+		print(string.format("[FETCHER SOURCE] %s: Added %d", source.name, added))
 	else
-		print(string.format("[FETCHER SOURCE] Added %d new entries from %s", added, source.name))
+		print(string.format("[FETCHER SOURCE] %s: No changes", source.name))
 	end
 
 	response_content = nil -- Enable GC
-	collectgarbage("step", 10)
-	return added + updated -- Return total changes
+	return added, updated -- Return changes from this source
 end
 
--- Monitor function that gets called each frame to check on fetch progress
-local function monitorFetchProgress()
-	if not Fetcher.State.isRunning then
-		callbacks.Unregister("Draw", "fetcher_monitor_callback")
-		return
-	end
+-- Monitor function - Removed
 
-	-- Check if we've been running too long (over 60 seconds)
-	local currentTime = globals.RealTime()
-	local elapsedTime = currentTime - Fetcher.State.startTime
-
-	if elapsedTime > 60 then
-		print("[FETCHER SOURCE] WARNING: Fetch operation running for over 60 seconds, may be stalled")
-	end
-
-	-- Check for any stalled coroutines (running for over 10 seconds)
-	for co, info in pairs(Fetcher.State.activeCoroutines) do
-		local coRunTime = currentTime - info.startTime
-		if coRunTime > 10 and info.status == "running" then
-			print(
-				string.format(
-					"[FETCHER SOURCE] WARNING: Coroutine for URL %s may be stalled (running for %.1f seconds)",
-					info.url,
-					coRunTime
-				)
-			)
-			-- Could add forced termination of stuck coroutines here if needed
-		end
-	end
-
-	-- Check if all sources are processed
-	if Fetcher.State.completedSources >= Fetcher.State.totalSources then
-		Fetcher.FinishFetch()
-	end
-end
-
--- Start the fetch process
+-- Start the fetch process (Simplified)
 function Fetcher.Start()
 	print("[FETCHER SOURCE] Starting database fetch process")
 
-	-- Check if already running
 	if Fetcher.State.isRunning then
 		print("[FETCHER SOURCE] Fetch process already running, ignoring request")
 		return
 	end
 
-	-- Check requirements first
 	if not checkRequirements() then
 		print("[FETCHER SOURCE] Requirements check failed, aborting fetch")
 		return
 	end
 
-	-- Reset parser statistics
 	Parsers.ResetStats()
 
-	-- Initialize state
 	Fetcher.State.isRunning = true
 	Fetcher.State.startTime = globals.RealTime()
-	Fetcher.State.completedSources = 0
-	Fetcher.State.activeCoroutines = {}
-	Fetcher.State.sourcesStatus = {}
 	Fetcher.State.results.total_added = 0
 	Fetcher.State.results.errors = 0
+	local total_updated = 0 -- Track total updates across all sources
 
-	-- Get active sources
 	local active_sources = Sources.GetActiveSources()
-	Fetcher.State.totalSources = #active_sources
-
 	print(string.format("[FETCHER SOURCE] Found %d active sources", #active_sources))
 
-	-- Set up progress monitoring
-	callbacks.Register("Draw", "fetcher_monitor_callback", monitorFetchProgress)
-
-	-- Process each source
-	for _, source in ipairs(active_sources) do
-		local added = processSource(source)
+	-- Process each source synchronously
+	for i, source in ipairs(active_sources) do
+		print(string.format("[FETCHER SOURCE] Processing source %d/%d: %s", i, #active_sources, source.name))
+		local added, updated = processSource(source)
 		Fetcher.State.results.total_added = Fetcher.State.results.total_added + added
+		total_updated = total_updated + updated
 	end
 
-	-- The monitorFetchProgress function will call FinishFetch when all sources are processed
+	-- Fetch completed, call FinishFetch directly
+	Fetcher.FinishFetch(total_updated)
 end
 
--- Complete the fetch process and save the database
-function Fetcher.FinishFetch()
+-- Complete the fetch process and save the database (Simplified)
+function Fetcher.FinishFetch(totalUpdated)
 	if not Fetcher.State.isRunning then
 		return
 	end
 
-	-- Print summary
+	local elapsedTime = globals.RealTime() - Fetcher.State.startTime
 	print(
-		"[FETCHER SOURCE] Fetch process completed. Added "
-			.. Fetcher.State.results.total_added
-			.. " entries with "
-			.. Fetcher.State.results.errors
-			.. " errors"
+		string.format(
+			"[FETCHER SOURCE] Fetch process completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
+			elapsedTime,
+			Fetcher.State.results.total_added,
+			totalUpdated or 0,
+			Fetcher.State.results.errors
+		)
 	)
 
-	-- Print detailed statistics
 	Parsers.PrintStatsSummary()
 
-	-- Calculate total updates across all sources
-	local totalUpdated = 0
-	for sourceName, status in pairs(Fetcher.State.sourcesStatus) do
-		if status.updated and status.updated > 0 then
-			totalUpdated = totalUpdated + status.updated
-		end
-	end
-
-	-- Include update information in final message if any
-	if totalUpdated > 0 then
-		print(string.format("[FETCHER SOURCE] Enhanced %d existing entries with better information", totalUpdated))
-	end
-
-	-- Check if database needs saving
 	if Database.State.isDirty then
 		print("[FETCHER SOURCE] Changes detected, saving database")
 		Database.SaveDatabase()
@@ -516,29 +324,35 @@ function Fetcher.FinishFetch()
 		print("[FETCHER SOURCE] No changes detected, skipping database save")
 	end
 
-	-- Mark as no longer running
 	Fetcher.State.isRunning = false
-
-	-- Unregister monitoring
-	callbacks.Unregister("Draw", "fetcher_monitor_callback")
-
 	print("[FETCHER SOURCE] Fetch process finished")
 end
 
--- Get current fetch status
+-- Get current fetch status (Simplified)
 function Fetcher.GetStatus()
-	local status = {
+	return {
 		running = Fetcher.State.isRunning,
-		elapsed = Fetcher.State.isRunning and (globals.RealTime() - Fetcher.State.startTime) or 0,
-		totalSources = Fetcher.State.totalSources,
-		completedSources = Fetcher.State.completedSources,
-		activeCoroutines = #Fetcher.State.activeCoroutines,
-		totalAdded = Fetcher.State.results.total_added,
-		errors = Fetcher.State.results.errors,
+		-- No longer tracking detailed progress
 	}
-
-	return status
 end
+
+-- Automatic initialization on module loading (Simplified)
+local function InitializeFetcher()
+	print("[FETCHER SOURCE] Checking if auto-fetch is enabled...")
+	-- Ensure G and G.Config are checked before accessing AutoFetch
+	if type(G) == "table" and type(G.Config) == "table" and G.Config.AutoFetch then
+		print("[FETCHER SOURCE] Auto-fetch enabled, starting fetch process...")
+		Fetcher.Start()
+	else
+		print("[FETCHER SOURCE] Auto-fetch disabled or not configured, skipping initial fetch.")
+	end
+end
+
+-- Delayed initialization (simplified, no longer needs separate function)
+callbacks.Register("Draw", "fetcher_init_callback", function()
+	callbacks.Unregister("Draw", "fetcher_init_callback") -- Run only once
+	InitializeFetcher()
+end)
 
 print("[FETCHER SOURCE] >>> Module execution finished. Returning Fetcher table.") -- ++DEBUG
 return Fetcher

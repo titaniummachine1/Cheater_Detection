@@ -14,6 +14,15 @@ PlayerData.DefaultPlayerData = {
 		bhop = 0,
 		LastOnGround = true,
 		LastVelocity = Vector3(0, 0, 0),
+		LastStrike = 0,
+	},
+
+	Evidence = {
+		TotalScore = 0,
+		LastUpdateTick = 0,
+		Reasons = {
+			-- Populated dynamically by detections
+		},
 	},
 
 	Current = {
@@ -44,7 +53,8 @@ PlayerData.DefaultPlayerData = {
 
 PlayerData.defaultRecord = {
 	Name = "NN",
-	Cause = "Known Cheater",
+	Reason = "Unknown Source",
+	Date = "",
 }
 
 return PlayerData

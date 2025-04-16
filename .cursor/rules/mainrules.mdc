@@ -1,0 +1,65 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+**Project Philosophy:**
+This project values simplicity, readability, and consistency above strict adherence to traditional software engineering principles. If a tradeoff must be made, always choose the approach that makes the code easier to read, understand, and maintain—even if it means minor code duplication, more use of globals, or less modularity.
+
+1. **Simplicity First:** Prefer simple solutions over complex ones whenever possible. When in doubt, favor code that is simple, readable, and consistent—even if it means minor violations of DRY, modularity, or other best practices.
+
+2. **DRY Principle:** Avoid duplicating code. Reuse or adapt existing code before writing new functionality. *If following DRY or modularity would require complex data passing, indirection, or abstraction, prefer a small amount of code duplication or a more direct approach for the sake of clarity and maintainability.*
+
+3. **Consistency:** Prefer a consistent style and structure across the codebase, even if it means not always using the "best" or most advanced pattern for a given situation.
+
+4. **Targeted Changes:** Only make changes directly requested or necessary for the request. Avoid speculative changes.
+
+5. **Fix, Then Replace:** Prioritize fixing issues within the existing implementation. If a new approach is needed, remove the old implementation.
+
+6. **Clean & Focused Code:** Strive to keep the codebase clean, well-organized, readable, and modular. Avoid letting individual files grow too large (aim for < 500 lines); refactor large files into smaller, focused modules.
+
+7. **No Production Mocking:** Use mocked/fake data only for testing, never in production code.
+
+8. **Functional Style:** Prefer functional programming patterns. Clearly define function inputs/outputs.
+
+9. **Module Imports & Dependencies:** Place all `require` statements at the top of modules. Below imports, add reverse import comments (e.g., `--[[ Imported by: ModuleA ]]`).
+
+10. **Use Custom `G` Module for Shared Data:** *Actively use* the custom `G` (globals) module to store frequently accessed, shared runtime data (e.g., `G.DataBase`, `G.PlayerData`). This simplifies access across modules and avoids polluting the built-in Lua global table (`_G`). **Do not** store application state directly in `_G`. Add comments in `globals.lua` indicating which modules use each variable in `G`.
+
+11. **Frequent Commits:** Make small, frequent commits with descriptive messages.
+
+12. **Avoid Anonymous Functions:** Use named functions instead of anonymous ones (`function() ... end`). Named functions improve readability, stack traces, and profiling. Only use anonymous functions if there is a *very* compelling reason and it demonstrably improves clarity in that specific context.
+
+13. **Self-Contained Initialization:** Modules managing state/resources (e.g., `Database`, `Config`, `Fetcher`) should handle their own initialization internally (ideally once, either on first `require` or via an `Initialize()` function). Avoid complex setup logic in `Main.lua`.
+
+14. **Avoid `collectgarbage`:** Do not use `collectgarbage()` unless specifically requested. If requested, question the necessity and discuss alternatives first.
+
+15. **Controlled Global Returns:** Avoid returning modules globally from `Main.lua` *unless* they are intended for direct user interaction (e.g., triggering a `Fetcher.Start()` from a menu). For accessing shared *data*, use the `G` module (Rule 10). For accessing another module's *functions*, use `require` directly.
+
+16. **Low Coupling:** Design modules to be as independent as possible, primarily interacting through shared data in `G` or explicit function calls via `require`.
+
+17. **Avoid Over-Engineering:** Do not introduce abstractions, patterns, or indirection unless they provide clear, immediate value for readability or maintainability.
+
+18. **Documentation for Simplicity:** If a simple or "less correct" approach is chosen for clarity, add a brief comment explaining why, so future maintainers understand the reasoning.
+
+19. **Library Requires:** If requiring a library that may not exist (e.g., optional or external dependencies), always use `pcall(require, ...)` and handle errors gracefully. If the file is inside the workspace and should always be present, use a direct `require` without `pcall`.
+
+20. **Code Organization:** Follow this standard order in module files:
+    1. **Imports** (`require` statements)
+    2. **Module Declaration** (`local ModuleName = {}`)
+    3. **Local Variables/Utilities** (constants, helper variables)
+    4. **Helper/Private Functions** (internal utility functions)
+    5. **Public Module Functions** (functions exposed in the module's interface)
+    6. **Self-Initialization** (if the module self-initializes)
+    7. **Callback Registration** (any event handlers or callbacks)
+    8. **Module Return** (`return ModuleName`)
+
+21. Consult Lmaobox Documentation: Before using any function specific to the Lmaobox API (e.g., from client, engine, entities, draw, callbacks, etc.), consult the lmaobox_lua_documentation.md file to verify its usage, parameters, return values, and potential side effects. Do not rely solely on assumptions or examples.
+lmaobox_lua_documentation.md its in root of workspace
+
+---
+**Lua Specific Notes:**
+*   **Vector Normalization:** Normalize `Vec` using `Vec / Vec:Length()`.
+*   **`atan` Function:** Use `math.atan(y, x)` instead of the deprecated `atan2`.
+*   **Function Order:** Define functions *before* they are called in the script.
+

@@ -1,9 +1,0 @@
-use_config_ignore: true
-use_gitignore: true
-include_patterns:
-  - "Cheater_Detection/**/*.lua" # Include all Lua files in the project
-  - "Cheater_Detection/Database/*.lua" # Specifically include database files
-  - "README.md" # Include project documentation
-exclude_patterns:
-  - "**/node_modules/**"
-  - "**/.git/**"
