@@ -1,12 +1,18 @@
---[[ Cheater Detection - Database Fetcher - Simplified Version ]]
+--[[ Cheater Detection - Database Fetcher - Synchronous Simplified Version ]]
 print("[FETCHER SOURCE] >>> Module Start") -- ++DEBUG
 
 local Common = require("Cheater_Detection.Utils.Common")
+-- [[ Imported by: Main.lua ]]
 local G = require("Cheater_Detection.Utils.Globals")
+-- [[ Imported by: None ]]
 local Json = Common.Json
+-- [[ Imported by: Fetcher.lua (indirectly via Common) ]]
 local Database = require("Cheater_Detection.Database.Database") -- For SaveDatabase
+-- [[ Imported by: Fetcher.lua ]]
 local Sources = require("Cheater_Detection.Database.Sources") -- Require Sources
+-- [[ Imported by: Fetcher.lua ]]
 local Parsers = require("Cheater_Detection.Database.Parsers") -- Require Parsers
+-- [[ Imported by: Fetcher.lua ]]
 
 local Fetcher = {}
 
@@ -16,58 +22,41 @@ Fetcher.State = {
 	startTime = 0,
 	results = {
 		total_added = 0,
+		total_updated = 0, -- Keep track of updates
 		errors = 0,
 	},
-	-- Removed totalSources, completedSources, activeCoroutines, sourcesStatus
 }
 
 -- Helper function to check if all required modules are properly loaded
 local function checkRequirements()
 	print("[FETCHER SOURCE] Checking requirements...")
-
-	-- Check G.DataBase
 	if type(G) ~= "table" then
 		print("[FETCHER SOURCE] CRITICAL ERROR: Globals module not loaded properly")
 		return false
 	end
-
 	if type(G.DataBase) ~= "table" then
 		print("[FETCHER SOURCE] CRITICAL ERROR: G.DataBase is not initialized")
 		return false
 	end
-
-	-- Check Database module
 	if type(Database) ~= "table" then
 		print("[FETCHER SOURCE] CRITICAL ERROR: Database module not loaded properly")
 		return false
 	end
-
 	if type(Database.SaveDatabase) ~= "function" then
 		print("[FETCHER SOURCE] CRITICAL ERROR: Database.SaveDatabase function missing")
 		return false
 	end
-
-	-- Check Sources module
 	if type(Sources) ~= "table" or type(Sources.GetActiveSources) ~= "function" then
 		print("[FETCHER SOURCE] CRITICAL ERROR: Sources module not loaded properly")
 		return false
 	end
-
-	-- Check Parsers module
 	if type(Parsers) ~= "table" then
 		print("[FETCHER SOURCE] CRITICAL ERROR: Parsers module not loaded properly")
 		return false
 	end
-
 	print("[FETCHER SOURCE] All requirements satisfied")
 	return true
 end
-
--- Helper function to convert SteamID3 or SteamID to SteamID64 if needed
--- Removed, use Parsers.GetSteamID64 directly if needed elsewhere or keep Parsers dependency
-
--- Coroutine-based HTTP fetch with timeout detection
--- Removed fetchUrl function
 
 -- Process a single source and add its entries to the database
 local function processSource(source)
@@ -84,33 +73,23 @@ local function processSource(source)
 				tostring(response_content_or_error)
 			)
 		)
-		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0, 0 -- Return added, updated
+		return 0, 0, 1 -- added, updated, errors
 	end
 
 	local response_content = response_content_or_error
 	if type(response_content) ~= "string" or response_content == "" then
 		print(string.format("[FETCHER SOURCE] Empty or invalid content from %s", source.name))
-		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0, 0 -- Return added, updated
+		return 0, 0, 1 -- added, updated, errors
 	end
 
 	print(string.format("[FETCHER SOURCE] Download successful from %s. Size: %d bytes", source.name, #response_content))
 
-	-- Create source stats object for tracking
-	local sourceStats = {
-		processed = 0,
-		added = 0,
-		existing = 0,
-		updated = 0,
-		errors = 0,
-	}
-
+	local sourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 	local added = 0
 	local updated = 0
 	local isDirtyBefore = Database.State.isDirty
 
-	-- Determine which parser to use and parse the content
+	-- Parsing logic (remains the same)
 	if source.parser == "raw" then
 		local entries, errorMsg = Parsers.ParseRawIDs(response_content, source.cause)
 		if entries then
@@ -143,14 +122,12 @@ local function processSource(source)
 					end
 				end
 			end
-			added, updated = addedCount, updatedCount
-			sourceStats = {
-				processed = processedCount,
-				added = addedCount,
-				existing = existingCount,
-				updated = updatedCount,
-				errors = 0,
-			}
+			added = addedCount
+			updated = updatedCount
+			sourceStats.processed = processedCount
+			sourceStats.added = addedCount
+			sourceStats.existing = existingCount
+			sourceStats.updated = updatedCount
 		else
 			print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 			sourceStats.errors = sourceStats.errors + 1
@@ -210,14 +187,12 @@ local function processSource(source)
 						sourceStats.errors = sourceStats.errors + 1
 					end
 				end
-				added, updated = addedCount, updatedCount
-				sourceStats = {
-					processed = processedCount,
-					added = addedCount,
-					existing = existingCount,
-					updated = updatedCount,
-					errors = sourceStats.errors,
-				}
+				added = addedCount
+				updated = updatedCount
+				sourceStats.processed = processedCount
+				sourceStats.added = addedCount
+				sourceStats.existing = existingCount
+				sourceStats.updated = updatedCount
 			else
 				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
 				sourceStats.errors = sourceStats.errors + 1
@@ -227,11 +202,9 @@ local function processSource(source)
 		print(
 			string.format("[FETCHER SOURCE] Error: Unknown parser type '%s' for source %s", source.parser, source.name)
 		)
-		Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-		return 0, 0 -- Return added, updated
+		return 0, 0, 1 -- added, updated, errors
 	end
 
-	-- Record source stats
 	Parsers.AddSourceStats(
 		source.name,
 		sourceStats.processed,
@@ -241,12 +214,10 @@ local function processSource(source)
 		sourceStats.updated
 	)
 
-	-- Check if database changed (additions or updates)
 	if (added > 0 or updated > 0) and not isDirtyBefore then
 		Database.State.isDirty = true
 	end
 
-	-- Print detailed summary for this source
 	if updated > 0 then
 		print(string.format("[FETCHER SOURCE] %s: Added %d, Updated %d", source.name, added, updated))
 	elseif added > 0 then
@@ -255,15 +226,13 @@ local function processSource(source)
 		print(string.format("[FETCHER SOURCE] %s: No changes", source.name))
 	end
 
-	response_content = nil -- Enable GC
-	return added, updated -- Return changes from this source
+	response_content = nil
+	return added, updated, sourceStats.errors
 end
 
--- Monitor function - Removed
-
--- Start the fetch process (Simplified)
+-- Public Module Functions
 function Fetcher.Start()
-	print("[FETCHER SOURCE] Starting database fetch process")
+	print("[FETCHER SOURCE] Starting SYNC database fetch process")
 
 	if Fetcher.State.isRunning then
 		print("[FETCHER SOURCE] Fetch process already running, ignoring request")
@@ -280,26 +249,32 @@ function Fetcher.Start()
 	Fetcher.State.isRunning = true
 	Fetcher.State.startTime = globals.RealTime()
 	Fetcher.State.results.total_added = 0
+	Fetcher.State.results.total_updated = 0
 	Fetcher.State.results.errors = 0
-	local total_updated = 0 -- Track total updates across all sources
 
 	local active_sources = Sources.GetActiveSources()
 	print(string.format("[FETCHER SOURCE] Found %d active sources", #active_sources))
 
+	if #active_sources == 0 then
+		print("[FETCHER SOURCE] No active sources found, finishing immediately.")
+		Fetcher.FinishFetch()
+		return
+	end
+
 	-- Process each source synchronously
 	for i, source in ipairs(active_sources) do
 		print(string.format("[FETCHER SOURCE] Processing source %d/%d: %s", i, #active_sources, source.name))
-		local added, updated = processSource(source)
+		local added, updated, errors = processSource(source)
 		Fetcher.State.results.total_added = Fetcher.State.results.total_added + added
-		total_updated = total_updated + updated
+		Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + updated
+		Fetcher.State.results.errors = Fetcher.State.results.errors + errors
 	end
 
 	-- Fetch completed, call FinishFetch directly
-	Fetcher.FinishFetch(total_updated)
+	Fetcher.FinishFetch()
 end
 
--- Complete the fetch process and save the database (Simplified)
-function Fetcher.FinishFetch(totalUpdated)
+function Fetcher.FinishFetch()
 	if not Fetcher.State.isRunning then
 		return
 	end
@@ -307,10 +282,10 @@ function Fetcher.FinishFetch(totalUpdated)
 	local elapsedTime = globals.RealTime() - Fetcher.State.startTime
 	print(
 		string.format(
-			"[FETCHER SOURCE] Fetch process completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
+			"[FETCHER SOURCE] SYNC Fetch process completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
 			elapsedTime,
 			Fetcher.State.results.total_added,
-			totalUpdated or 0,
+			Fetcher.State.results.total_updated,
 			Fetcher.State.results.errors
 		)
 	)
@@ -328,18 +303,15 @@ function Fetcher.FinishFetch(totalUpdated)
 	print("[FETCHER SOURCE] Fetch process finished")
 end
 
--- Get current fetch status (Simplified)
 function Fetcher.GetStatus()
 	return {
 		running = Fetcher.State.isRunning,
-		-- No longer tracking detailed progress
 	}
 end
 
--- Automatic initialization on module loading (Simplified)
+-- Self-Initialization
 local function InitializeFetcher()
 	print("[FETCHER SOURCE] Checking if auto-fetch is enabled...")
-	-- Ensure G and G.Config are checked before accessing AutoFetch
 	if type(G) == "table" and type(G.Config) == "table" and G.Config.AutoFetch then
 		print("[FETCHER SOURCE] Auto-fetch enabled, starting fetch process...")
 		Fetcher.Start()
@@ -348,11 +320,13 @@ local function InitializeFetcher()
 	end
 end
 
--- Delayed initialization (simplified, no longer needs separate function)
-callbacks.Register("Draw", "fetcher_init_callback", function()
+-- Callback Registration
+local function DelayedInit()
 	callbacks.Unregister("Draw", "fetcher_init_callback") -- Run only once
 	InitializeFetcher()
-end)
+end
+
+callbacks.Register("Draw", "fetcher_init_callback", DelayedInit)
 
 print("[FETCHER SOURCE] >>> Module execution finished. Returning Fetcher table.") -- ++DEBUG
 return Fetcher

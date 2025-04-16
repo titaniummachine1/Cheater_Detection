@@ -4,17 +4,16 @@
     Stores only essential data: name and proof for each SteamID64
 ]]
 
+--[[ Imports ]]
 local Common = require("Cheater_Detection.Utils.Common")
+-- [[ Imported by: Fetcher.lua (indirectly) ]]
 local G = require("Cheater_Detection.Utils.Globals")
+-- [[ Imported by: Fetcher.lua, Database.lua ]]
 local Json = Common.Json
--- local Database_Fetcher = require("Cheater_Detection.Database.Database_Fetcher") -- No longer needed here
+-- [[ Imported by: Database.lua ]]
 
---[[ Removed serializeTableToLuaString function as we now use JSON ]]
-
+--[[ Module Declaration ]]
 local Database = {
-	-- Removed internal data storage
-	-- data = {},
-
 	-- Configuration (Simplified)
 	Config = {
 		SaveOnExit = true,
@@ -32,7 +31,7 @@ local Database = {
 	-- Removed saveCount
 }
 
--- Logger utility with severity levels
+--[[ Local Variables/Utilities ]]
 local LogLevel = {
 	ERROR = 1,
 	WARNING = 2,
@@ -43,6 +42,7 @@ local LogLevel = {
 local currentLogLevel = LogLevel.INFO -- Default log level
 local showDebug = false -- Set to true to see all debug messages
 
+--[[ Helper/Private Functions ]]
 -- Log function with severity level and colors
 local function Log(level, message, color)
 	-- Skip logging if message level is higher than current level
@@ -74,6 +74,29 @@ local function Log(level, message, color)
 	end
 end
 
+-- Save database automatically when the script unloads (if dirty)
+local function DatabaseAutoSaveOnUnload()
+	Log(LogLevel.DEBUG, "[DB] Unloading database, saving data...")
+
+	-- Always save on unload to prevent data loss
+	if Database.Config.SaveOnExit then
+		-- If not dirty, mark as dirty temporarily to force save
+		local wasDirty = Database.State.isDirty
+		Database.State.isDirty = true
+
+		Log(LogLevel.INFO, "[DB] Saving database on exit")
+		Database.SaveDatabase()
+
+		-- Restore original dirty state if it wasn't modified
+		if not wasDirty then
+			Database.State.isDirty = false
+		end
+	else
+		Log(LogLevel.WARNING, "[DB] SaveOnExit disabled, skipping final save")
+	end
+end
+
+--[[ Public Module Functions ]]
 -- Find best path for database storage (saves as JSON now)
 function Database.GetFilePath()
 	-- Ensure base directory exists
@@ -308,31 +331,11 @@ function Database.Initialize(silent)
 	Database.State.isInitialized = true
 end
 
--- Save database automatically when the script unloads (if dirty)
-local function DatabaseAutoSaveOnUnload()
-	Log(LogLevel.DEBUG, "[DB] Unloading database, saving data...")
-
-	-- Always save on unload to prevent data loss
-	if Database.Config.SaveOnExit then
-		-- If not dirty, mark as dirty temporarily to force save
-		local wasDirty = Database.State.isDirty
-		Database.State.isDirty = true
-
-		Log(LogLevel.INFO, "[DB] Saving database on exit")
-		Database.SaveDatabase()
-
-		-- Restore original dirty state if it wasn't modified
-		if not wasDirty then
-			Database.State.isDirty = false
-		end
-	else
-		Log(LogLevel.WARNING, "[DB] SaveOnExit disabled, skipping final save")
-	end
-end
-
-callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
-
+--[[ Self-Initialization ]]
 -- Initial load and setup (silent=true to avoid verbose messages at load time)
 Database.Initialize(true)
+
+--[[ Callback Registration ]]
+callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
 
 return Database

@@ -1,7 +1,13 @@
 -- Source definitions with safer processing options
 
+--[[ Imports (None) ]]
+-- No direct imports needed
+-- [[ Imported by: Fetcher.lua ]]
+
+--[[ Module Declaration ]]
 local Sources = {}
 
+--[[ Local Variables/Utilities ]]
 -- List of available sources
 Sources.List = {
 	{
@@ -54,6 +60,9 @@ Sources.List = {
 	},
 }
 
+--[[ Helper/Private Functions (None) ]]
+
+--[[ Public Module Functions ]]
 -- Function to add a custom source
 function Sources.AddSource(name, url, cause, parser)
 	if not name or not url or not cause or not parser then
@@ -100,5 +109,9 @@ function Sources.GetActiveSources()
 	end
 	return active
 end
+
+--[[ Self-Initialization (None) ]]
+
+--[[ Callback Registration (None) ]]
 
 return Sources

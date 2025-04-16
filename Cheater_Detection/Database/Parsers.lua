@@ -1,5 +1,10 @@
 local Common = require("Cheater_Detection.Utils.Common")
+-- [[ Imported by: Fetcher.lua (indirectly) ]]
 local Json = Common.Json
+-- [[ Imported by: Parsers.lua ]]
+
+local G = require("Cheater_Detection.Utils.Globals")
+-- [[ Imported by: Fetcher.lua, Parsers.lua ]]
 
 local Parsers = {}
 
@@ -91,6 +96,11 @@ function Parsers.GetStatsSummary()
 		)
 
 	return summary
+end
+
+-- Formats and prints a statistics bundle for all parsing operations
+function Parsers.PrintStatsSummary()
+	print(Parsers.GetStatsSummary())
 end
 
 -- Robust SteamID conversion function (moved from Fetcher)
@@ -358,11 +368,6 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 	end
 
 	return entries, nil, stats
-end
-
--- Formats and prints a statistics bundle for all parsing operations
-function Parsers.PrintStatsSummary()
-	print(Parsers.GetStatsSummary())
 end
 
 return Parsers
