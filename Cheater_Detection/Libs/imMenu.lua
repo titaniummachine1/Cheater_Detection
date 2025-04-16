@@ -587,7 +587,11 @@ function ImMenu.Begin(title, visible)
 	end
 
 	-- Mouse drag
-	local mX, mY = table.unpack(input.GetMousePos())
+	local mousePos = input.GetMousePos()
+	local mX, mY = table.unpack(mousePos or { window.X, window.Y }) -- Provide default if nil
+	mX = (type(mX) == "number" and mX) or window.X -- Ensure mX is a number
+	mY = (type(mY) == "number" and mY) or window.Y -- Ensure mY is a number
+
 	if clicked then
 		window.DragPos = { X = mX - window.X, Y = mY - window.Y }
 		window.IsDragging = true
@@ -596,15 +600,19 @@ function ImMenu.Begin(title, visible)
 	end
 
 	if window.IsDragging then
+		-- Ensure DragPos exists and is valid before using it
+		local dragX = (window.DragPos and type(window.DragPos.X) == "number" and window.DragPos.X) or 0
+		local dragY = (window.DragPos and type(window.DragPos.Y) == "number" and window.DragPos.Y) or 0
 		-- Ensure clamped values are integers
-		window.X = math.floor(clamp(mX - window.DragPos.X, 0, screenWidth - window.W))
-		window.Y = math.floor(clamp(mY - window.DragPos.Y, 0, screenHeight - window.H - titleHeight))
+		window.X = math.floor(clamp(mX - dragX, 0, screenWidth - window.W))
+		window.Y = math.floor(clamp(mY - dragY, 0, screenHeight - window.H - titleHeight))
 	end
 
 	-- Update the cursor
 	ImMenu.Cursor.X = math.floor(window.X)
 	ImMenu.Cursor.Y = math.floor(window.Y + titleHeight)
 
+	---@diagnostic disable-next-line: missing-parameter -- Add disable for linter error
 	ImMenu.BeginFrame()
 
 	-- Store and push the window
@@ -654,9 +662,10 @@ local function ExecutePopupContent(x, y, func)
 	-- Draw the popup
 	ImMenu.PushStyle("FramePadding", 0) -- OK: key is string, value is number
 	ImMenu.PushStyle("ItemMargin", 0) -- OK: key is string, value is number
+	---@diagnostic disable-next-line: missing-parameter -- Add disable for linter error
 	ImMenu.BeginFrame() -- This call is valid as params are optional
 	func() -- Execute the user's popup content function
-	---@diagnostic disable-next-line: missing-parameter -- Re-add disable for linter error
+	---@diagnostic disable-next-line: missing-parameter
 	local frame = ImMenu.EndFrame() -- This call is valid as params are optional
 	ImMenu.PopStyle(2)
 
@@ -847,7 +856,10 @@ function ImMenu.Slider(text, value, min, max, step)
 	draw.Text(math.floor(ix + (width / 2) - (txtWidth / 2)), math.floor(iy + (height / 2) - (txtHeight / 2)), label)
 
 	if active then
-		local mX, _ = input.GetMousePos()
+		local mousePos = input.GetMousePos()
+		local mX, _ = table.unpack(mousePos or { ix }) -- Provide default if nil
+		mX = (type(mX) == "number" and mX) or ix -- Ensure mX is a number, default to slider x
+
 		local percent = clamp((mX - ix) / width, 0, 1)
 		value = round((min + (max - min) * percent) / step) * step
 		value = math.max(min, math.min(max, value)) -- Ensure value stays within bounds
@@ -1121,12 +1133,14 @@ function ImMenu.List(text, items)
 
 	ImMenu.PushStyle("FramePadding", 0) -- OK
 	ImMenu.PushStyle("ItemSize", { width, height }) -- OK
+	---@diagnostic disable-next-line: missing-parameter -- Add disable for linter error
 	ImMenu.BeginFrame() -- OK
 	ImMenu.Text(text)
 	for _, item in ipairs(items) do
 		ImMenu.Button(tostring(item))
 	end
-	ImMenu.EndFrame()
+	---@diagnostic disable-next-line: missing-parameter
+	ImMenu.EndFrame() -- OK
 	ImMenu.PopStyle(2) -- Pop FramePadding and ItemSize
 end
 
