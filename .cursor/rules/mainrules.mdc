@@ -57,6 +57,8 @@ This project values simplicity, readability, and consistency above strict adhere
 21. Consult Lmaobox Documentation: Before using any function specific to the Lmaobox API (e.g., from client, engine, entities, draw, callbacks, etc.), consult the lmaobox_lua_documentation.md file to verify its usage, parameters, return values, and potential side effects. Do not rely solely on assumptions or examples.
 lmaobox_lua_documentation.md its in root of workspace
 
+22. **Correct Bitwise Flag Checking:** When checking player state flags using raw integers (like `m_fFlags`), **use the bitwise AND operator (`&`) combined with the documented global flag constant**. The correct check is `(flags & FLAG_CONSTANT) ~= 0`. **Do NOT** compare the result to `1` (e.g., `flags & FLAG_CONSTANT == 1`), as this is often incorrect. Ensure the `FLAG_CONSTANT` (e.g., `FL_ONGROUND`, `FL_DUCKING`) is the correct, documented global constant for the flag you are checking (Refer to Rule #21). Using dedicated API functions (e.g., `player:IsOnGround()`) is an acceptable alternative, especially if the flag constant is not readily documented or the function enhances clarity.
+
 ---
 **Lua Specific Notes:**
 *   **Vector Normalization:** Normalize `Vec` using `Vec / Vec:Length()`.

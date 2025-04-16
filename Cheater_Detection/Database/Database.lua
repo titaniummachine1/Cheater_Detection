@@ -118,7 +118,14 @@ function Database.SaveDatabase()
 		return
 	end
 
-	local encodedData = Json.encode(G.DataBase)
+	local encodedData
+	if Json and Json.encode then -- Add nil check for Json.encode
+		encodedData = Json.encode(G.DataBase)
+	else
+		Log(LogLevel.ERROR, "[DB] Json.encode function is not available!")
+		return -- Cannot proceed without encoder
+	end
+
 	if not encodedData then
 		Log(LogLevel.ERROR, "[DB] Failed to encode database to JSON")
 		return
@@ -136,11 +143,13 @@ function Database.SaveDatabase()
 	file:write(encodedData)
 	file:close()
 
+	--@diagnostic disable-next-line: cast-local-type -- Disable incorrect linter warning
 	encodedData = nil -- Clear reference for GC
 
 	Database.State.isDirty = false
 	Database.State.lastSave = os.time()
 
+	---@diagnostic disable-next-line: param-type-mismatch -- Disable incorrect linter warning
 	Log(LogLevel.INFO, "[DB] Database saved successfully", { 0, 255, 140, 255 })
 end
 
@@ -181,8 +190,17 @@ function Database.LoadDatabase(silent, force)
 	end
 
 	Log(LogLevel.DEBUG, "[DB] Decoding JSON content")
-	local decodedData = Json.decode(content)
-	content = nil
+	local decodedData
+	if Json and Json.decode then -- Add nil check for Json.decode
+		decodedData = Json.decode(content)
+	else
+		Log(LogLevel.ERROR, "[DB] Json.decode function is not available!")
+		G.DataBase = {} -- Fallback to empty DB
+		Database.State.isDirty = true
+		Database.State.lastLoaded = os.time()
+		return -- Cannot proceed without decoder
+	end
+	content = nil -- Clear content reference
 
 	if type(decodedData) ~= "table" then
 		if not silent then
