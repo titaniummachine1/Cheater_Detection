@@ -16,6 +16,61 @@ local Parsers = require("Cheater_Detection.Database.Parsers") -- Require Parsers
 
 local Fetcher = {}
 
+-- Define LogLevel locally within Fetcher
+local LogLevel = {
+	ERROR = 1,
+	WARNING = 2,
+	SUCCESS = 3,
+	INFO = 4,
+	DEBUG = 5,
+}
+
+-- Local Log function for Fetcher module (Defined early)
+local function Log(level, message, color)
+	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+
+	-- Determine if the message should be shown
+	local shouldShow = false
+	if isDebugMode then
+		shouldShow = true -- Show all levels in debug mode
+	elseif level <= LogLevel.SUCCESS then
+		shouldShow = true -- Show ERROR, WARNING, SUCCESS in non-debug mode
+	end
+
+	if not shouldShow then
+		return
+	end
+
+	local prefix = ""
+	local defaultColor = { 255, 255, 255, 255 }
+
+	if level == LogLevel.ERROR then
+		prefix = "[FETCHER ERROR] "
+		color = color or { 255, 100, 100, 255 } -- Red
+	elseif level == LogLevel.WARNING then
+		prefix = "[FETCHER WARNING] "
+		color = color or { 255, 255, 100, 255 } -- Yellow
+	elseif level == LogLevel.SUCCESS then
+		prefix = "[FETCHER SUCCESS] "
+		color = color or { 0, 255, 140, 255 } -- Bright Green
+	elseif level == LogLevel.INFO then
+		if not isDebugMode then
+			return
+		end
+		prefix = "[FETCHER INFO] "
+		color = color or { 100, 255, 255, 255 } -- Cyan
+	elseif level == LogLevel.DEBUG then
+		if not isDebugMode then
+			return
+		end
+		prefix = "[FETCHER DEBUG] "
+		color = color or { 180, 180, 180, 255 } -- Grey
+	end
+
+	color = color or defaultColor
+	printc(color[1], color[2], color[3], color[4], prefix .. message)
+end
+
 -- Simplified State tracking
 Fetcher.State = {
 	isRunning = false,
@@ -29,46 +84,47 @@ Fetcher.State = {
 
 -- Helper function to check if all required modules are properly loaded
 local function checkRequirements()
-	print("[FETCHER SOURCE] Checking requirements...")
+	Log(LogLevel.DEBUG, "[FETCHER] Checking requirements...") -- Use Log
 	if type(G) ~= "table" then
-		print("[FETCHER SOURCE] CRITICAL ERROR: Globals module not loaded properly")
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Globals module not loaded properly") -- Use Log
 		return false
 	end
 	if type(G.DataBase) ~= "table" then
-		print("[FETCHER SOURCE] CRITICAL ERROR: G.DataBase is not initialized")
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: G.DataBase is not initialized") -- Use Log
 		return false
 	end
 	if type(Database) ~= "table" then
-		print("[FETCHER SOURCE] CRITICAL ERROR: Database module not loaded properly")
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Database module not loaded properly") -- Use Log
 		return false
 	end
 	if type(Database.SaveDatabase) ~= "function" then
-		print("[FETCHER SOURCE] CRITICAL ERROR: Database.SaveDatabase function missing")
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Database.SaveDatabase function missing") -- Use Log
 		return false
 	end
 	if type(Sources) ~= "table" or type(Sources.GetActiveSources) ~= "function" then
-		print("[FETCHER SOURCE] CRITICAL ERROR: Sources module not loaded properly")
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Sources module not loaded properly") -- Use Log
 		return false
 	end
 	if type(Parsers) ~= "table" then
-		print("[FETCHER SOURCE] CRITICAL ERROR: Parsers module not loaded properly")
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Parsers module not loaded properly") -- Use Log
 		return false
 	end
-	print("[FETCHER SOURCE] All requirements satisfied")
+	Log(LogLevel.DEBUG, "[FETCHER] All requirements satisfied") -- Use Log
 	return true
 end
 
 -- Process a single source and add its entries to the database
 local function processSource(source)
-	print(string.format("[FETCHER SOURCE] Processing source: %s (%s)", source.name, source.url))
+	Log(LogLevel.INFO, string.format("[FETCHER] Processing source: %s (%s)", source.name, source.url)) -- Use Log
 
 	-- Fetch the URL directly using pcall
 	local fetch_success, response_content_or_error = pcall(http.Get, source.url)
 
 	if not fetch_success then
-		print(
+		Log( -- Use Log
+			LogLevel.WARNING, -- Log as Warning instead of Error, maybe temporary network issue
 			string.format(
-				"[FETCHER SOURCE] Failed to fetch data from %s: %s",
+				"[FETCHER] Failed to fetch data from %s: %s",
 				source.name,
 				tostring(response_content_or_error)
 			)
@@ -78,11 +134,14 @@ local function processSource(source)
 
 	local response_content = response_content_or_error
 	if type(response_content) ~= "string" or response_content == "" then
-		print(string.format("[FETCHER SOURCE] Empty or invalid content from %s", source.name))
+		Log(LogLevel.WARNING, string.format("[FETCHER] Empty or invalid content from %s", source.name)) -- Use Log
 		return 0, 0, 1 -- added, updated, errors
 	end
 
-	print(string.format("[FETCHER SOURCE] Download successful from %s. Size: %d bytes", source.name, #response_content))
+	Log(
+		LogLevel.DEBUG,
+		string.format("[FETCHER] Download successful from %s. Size: %d bytes", source.name, #response_content)
+	) -- Use Log (Debug)
 
 	local sourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 	local added = 0
@@ -129,7 +188,10 @@ local function processSource(source)
 			sourceStats.existing = existingCount
 			sourceStats.updated = updatedCount
 		else
-			print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
+			Log(
+				LogLevel.WARNING,
+				string.format("[FETCHER] Error parsing %s: %s", source.name, errorMsg or "Unknown error")
+			) -- Use Log
 			sourceStats.errors = sourceStats.errors + 1
 		end
 	elseif source.parser == "tf2db" then
@@ -139,7 +201,10 @@ local function processSource(source)
 				added, updated = stats.added, stats.updated
 				sourceStats = stats
 			else
-				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
+				Log(
+					LogLevel.WARNING,
+					string.format("[FETCHER] Error parsing %s: %s", source.name, errorMsg or "Unknown error")
+				) -- Use Log
 				sourceStats.errors = sourceStats.errors + 1
 			end
 		else
@@ -194,13 +259,17 @@ local function processSource(source)
 				sourceStats.existing = existingCount
 				sourceStats.updated = updatedCount
 			else
-				print(string.format("[FETCHER SOURCE] Error parsing %s: %s", source.name, errorMsg or "Unknown error"))
+				Log(
+					LogLevel.WARNING,
+					string.format("[FETCHER] Error parsing %s: %s", source.name, errorMsg or "Unknown error")
+				) -- Use Log
 				sourceStats.errors = sourceStats.errors + 1
 			end
 		end
 	else
-		print(
-			string.format("[FETCHER SOURCE] Error: Unknown parser type '%s' for source %s", source.parser, source.name)
+		Log( -- Use Log
+			LogLevel.ERROR,
+			string.format("[FETCHER] Error: Unknown parser type '%s' for source %s", source.parser, source.name)
 		)
 		return 0, 0, 1 -- added, updated, errors
 	end
@@ -219,11 +288,11 @@ local function processSource(source)
 	end
 
 	if updated > 0 then
-		print(string.format("[FETCHER SOURCE] %s: Added %d, Updated %d", source.name, added, updated))
+		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: Added %d, Updated %d", source.name, added, updated)) -- Debug level
 	elseif added > 0 then
-		print(string.format("[FETCHER SOURCE] %s: Added %d", source.name, added))
+		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: Added %d", source.name, added)) -- Debug level
 	else
-		print(string.format("[FETCHER SOURCE] %s: No changes", source.name))
+		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: No changes", source.name)) -- Debug level
 	end
 
 	-- response_content = nil -- Commented out to avoid linter type mismatch warning
@@ -232,15 +301,15 @@ end
 
 -- Public Module Functions
 function Fetcher.Start()
-	print("[FETCHER SOURCE] Starting SYNC database fetch process")
+	Log(LogLevel.INFO, "[FETCHER] Starting SYNC database fetch process") -- Use Log
 
 	if Fetcher.State.isRunning then
-		print("[FETCHER SOURCE] Fetch process already running, ignoring request")
+		Log(LogLevel.WARNING, "[FETCHER] Fetch process already running, ignoring request") -- Use Log
 		return
 	end
 
 	if not checkRequirements() then
-		print("[FETCHER SOURCE] Requirements check failed, aborting fetch")
+		Log(LogLevel.ERROR, "[FETCHER] Requirements check failed, aborting fetch") -- Use Log
 		return
 	end
 
@@ -253,17 +322,17 @@ function Fetcher.Start()
 	Fetcher.State.results.errors = 0
 
 	local active_sources = Sources.GetActiveSources()
-	print(string.format("[FETCHER SOURCE] Found %d active sources", #active_sources))
+	Log(LogLevel.INFO, string.format("[FETCHER] Found %d active sources", #active_sources)) -- Use Log
 
 	if #active_sources == 0 then
-		print("[FETCHER SOURCE] No active sources found, finishing immediately.")
+		Log(LogLevel.INFO, "[FETCHER] No active sources found, finishing immediately.") -- Use Log
 		Fetcher.FinishFetch()
 		return
 	end
 
 	-- Process each source synchronously
 	for i, source in ipairs(active_sources) do
-		print(string.format("[FETCHER SOURCE] Processing source %d/%d: %s", i, #active_sources, source.name))
+		Log(LogLevel.DEBUG, string.format("[FETCHER] Processing source %d/%d: %s", i, #active_sources, source.name)) -- Use Log (Debug)
 		local added, updated, errors = processSource(source)
 		Fetcher.State.results.total_added = Fetcher.State.results.total_added + added
 		Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + updated
@@ -280,27 +349,54 @@ function Fetcher.FinishFetch()
 	end
 
 	local elapsedTime = globals.RealTime() - Fetcher.State.startTime
-	print(
-		string.format(
-			"[FETCHER SOURCE] SYNC Fetch process completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
-			elapsedTime,
-			Fetcher.State.results.total_added,
-			Fetcher.State.results.total_updated,
-			Fetcher.State.results.errors
-		)
-	)
 
-	Parsers.PrintStatsSummary()
+	-- Only show detailed debug output in debug mode (via Parsers.PrintStatsSummary)
+	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	if isDebugMode then
+		-- Log the full details only in debug mode
+		Log(
+			LogLevel.INFO,
+			string.format(
+				"SYNC Fetch completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
+				elapsedTime,
+				Fetcher.State.results.total_added,
+				Fetcher.State.results.total_updated,
+				Fetcher.State.results.errors
+			)
+		)
+
+		-- Show detailed stats in debug mode
+		Parsers.PrintStatsSummary()
+	else
+		-- User-friendly output with color coding and separate lines for key metrics
+		-- Always show processed and added counts in green
+		printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
+		printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
+
+		-- Only show errors if there are any (in red)
+		if Parsers.ParseStats.totalErrors > 0 then
+			printc(255, 100, 100, 255, string.format("Database errors: %d", Parsers.ParseStats.totalErrors))
+		end
+
+		-- Show database entry count in green
+		local dbCount = 0
+		if type(G.DataBase) == "table" then
+			for _ in pairs(G.DataBase) do
+				dbCount = dbCount + 1
+			end
+		end
+		printc(0, 255, 140, 255, string.format("Total database entries: %d", dbCount))
+	end
 
 	if Database.State.isDirty then
-		print("[FETCHER SOURCE] Changes detected, saving database")
+		Log(LogLevel.INFO, "Changes detected, saving database")
 		Database.SaveDatabase()
 	else
-		print("[FETCHER SOURCE] No changes detected, skipping database save")
+		Log(LogLevel.INFO, "No changes detected, skipping database save")
 	end
 
 	Fetcher.State.isRunning = false
-	print("[FETCHER SOURCE] Fetch process finished")
+	Log(LogLevel.DEBUG, "Fetch process finished")
 end
 
 function Fetcher.GetStatus()
@@ -311,12 +407,12 @@ end
 
 -- Self-Initialization
 local function InitializeFetcher()
-	print("[FETCHER SOURCE] Checking if auto-fetch is enabled...")
+	Log(LogLevel.DEBUG, "[FETCHER] Checking if auto-fetch is enabled...") -- Use Log
 	if type(G) == "table" and type(G.Config) == "table" and G.Config.AutoFetch then
-		print("[FETCHER SOURCE] Auto-fetch enabled, starting fetch process...")
+		Log(LogLevel.INFO, "[FETCHER] Auto-fetch enabled, starting fetch process...") -- Use Log
 		Fetcher.Start()
 	else
-		print("[FETCHER SOURCE] Auto-fetch disabled or not configured, skipping initial fetch.")
+		Log(LogLevel.INFO, "[FETCHER] Auto-fetch disabled or not configured, skipping initial fetch.") -- Use Log
 	end
 end
 
@@ -328,5 +424,5 @@ end
 
 callbacks.Register("Draw", "fetcher_init_callback", DelayedInit)
 
-print("[FETCHER SOURCE] >>> Module execution finished. Returning Fetcher table.") -- ++DEBUG
+Log(LogLevel.DEBUG, "[FETCHER] >>> Module execution finished. Returning Fetcher table.") -- Use Log (Debug)
 return Fetcher

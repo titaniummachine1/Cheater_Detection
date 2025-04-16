@@ -31,6 +31,8 @@ local WPlayer, PR = Common.WPlayer, Common.PlayerResource
 
 --[[ Update the player data every tick ]]
 --
+--[[ Update the player data every tick ]]
+--
 local function OnCreateMove(cmd)
 	local DebugMode = G.Menu.Main.debug
 	G.pLocal = entities.GetLocalPlayer()
@@ -42,23 +44,12 @@ local function OnCreateMove(cmd)
 	G.WLocal = WPlayer.FromEntity(G.pLocal)
 	G.connectionState = PR.GetConnectionState()[G.pLocal:GetIndex()]
 
-	for _, entity in pairs(G.players) do
+	for _, entity in ipairs(G.players) do
 		-- Get the steamid for the player
 		local steamid = Common.GetSteamID64(entity)
 		if not steamid then
-			-- warn("Failed to get SteamID for player %s", entity:GetName() or "nil") -- Commented out warn
-			goto continue -- Use goto instead of return
-		end
-
-		-- Check if player is a known cheater in database
-		if G.DataBase and G.DataBase[steamid] then
-			-- Player is in database, mark them
-			local priority = playerlist.GetPriority(steamid)
-			if priority < 10 then
-				playerlist.SetPriority(steamid, 10)
-			end
-			-- Skip detection checks for known cheaters
-			goto continue
+			warn("Failed to get SteamID for player %s", entity:GetName() or "nil")
+			return
 		end
 
 		if Common.IsValidPlayer(entity, true) and not Common.IsCheater(steamid) then
@@ -70,7 +61,7 @@ local function OnCreateMove(cmd)
 			local wrappedPlayer = WPlayer.FromEntity(entity)
 			local viewAngles = wrappedPlayer:GetEyeAngles()
 			local entityFlags = entity:GetPropInt("m_fFlags")
-			local isOnGround = bit.band(entityFlags, FL_ONGROUND) ~= 0 -- Correct bitwise check
+			local isOnGround = entityFlags & FL_ONGROUND == FL_ONGROUND
 			local headHitboxPosition = wrappedPlayer:GetHitboxPos(1)
 			local bodyHitboxPosition = wrappedPlayer:GetHitboxPos(4)
 			local viewPos = wrappedPlayer:GetEyePos()
@@ -86,14 +77,13 @@ local function OnCreateMove(cmd)
 				isOnGround
 			)
 
-			-- Perform detection checks (when Detections module is enabled)
-			-- if Detections then
-			-- 	Detections.CheckAngles(wrappedPlayer, entity)
-			-- 	Detections.CheckDuckSpeed(wrappedPlayer, entity)
-			-- 	Detections.CheckBunnyHop(wrappedPlayer, entity)
-			-- 	Detections.CheckPacketChoke(wrappedPlayer, entity)
-			-- 	Detections.CheckSequenceBurst(wrappedPlayer, entity)
-			-- end
+			-- Perform detection checks
+			--Detections.CheckAngles(wrappedPlayer, entity)
+			--Detections.CheckDuckSpeed(wrappedPlayer, entity)
+			--Detections.CheckBunnyHop(wrappedPlayer, entity)
+			--Detections.CheckPacketChoke(wrappedPlayer, entity)
+			--Detections.CheckSequenceBurst(wrappedPlayer, entity)
+			--Detections.rtrue(entity) --debug
 
 			-- Update history
 			G.PlayerData[steamid].History = G.PlayerData[steamid].History or {}
@@ -104,8 +94,6 @@ local function OnCreateMove(cmd)
 				table.remove(G.PlayerData[steamid].History, 1)
 			end
 		end
-
-		::continue::
 	end
 end
 

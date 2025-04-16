@@ -35,42 +35,25 @@ local Database = {
 local LogLevel = {
 	ERROR = 1,
 	WARNING = 2,
-	INFO = 3,
-	DEBUG = 4,
+	SUCCESS = 3, -- Added Success level
+	INFO = 4, -- Shifted Info down
+	DEBUG = 5, -- Shifted Debug down
 }
 
-local currentLogLevel = LogLevel.INFO -- Default log level
+local currentLogLevel = LogLevel.INFO -- Default log level still includes SUCCESS
 local showDebug = false -- Set to true to see all debug messages
 
 --[[ Helper/Private Functions ]]
--- Log function with severity level and colors
+-- Log function with severity level and colors (Refactored to use Database's Log)
 local function Log(level, message, color)
-	-- Skip logging if message level is higher than current level
-	if level > currentLogLevel and not showDebug then
-		return
-	end
-
-	local prefix = ""
-	local defaultColor = { 255, 255, 255, 255 }
-
-	if level == LogLevel.ERROR then
-		prefix = "[ERROR] "
-		color = color or { 255, 100, 100, 255 }
-	elseif level == LogLevel.WARNING then
-		prefix = "[WARNING] "
-		color = color or { 255, 255, 100, 255 }
-	elseif level == LogLevel.INFO then
-		prefix = "[INFO] "
-		color = color or { 100, 255, 255, 255 }
-	elseif level == LogLevel.DEBUG then
-		prefix = "[DEBUG] "
-		color = color or { 180, 180, 180, 255 }
-	end
-
-	if color then
-		printc(color[1], color[2], color[3], color[4], prefix .. message)
+	-- Ensure Database and its Log function are available
+	if Database and Database.Log then
+		Database.Log(level, message, color)
 	else
-		print(prefix .. message)
+		-- Fallback to plain print if Database.Log is unavailable
+		local prefixMap =
+			{ [1] = "[ERROR] ", [2] = "[WARNING] ", [3] = "[SUCCESS] ", [4] = "[INFO] ", [5] = "[DEBUG] " }
+		print((prefixMap[level] or "") .. message)
 	end
 end
 
@@ -150,7 +133,7 @@ function Database.SaveDatabase()
 	Database.State.lastSave = os.time()
 
 	---@diagnostic disable-next-line: param-type-mismatch -- Disable incorrect linter warning
-	Log(LogLevel.INFO, "[DB] Database saved successfully", { 0, 255, 140, 255 })
+	Log(LogLevel.SUCCESS, "[DB] Database saved successfully")
 end
 
 -- Load the database from the JSON file
@@ -162,14 +145,13 @@ function Database.LoadDatabase(silent, force)
 		return
 	end
 
-	Log(LogLevel.DEBUG, "[DB] Starting database load operation")
+	Log(LogLevel.DEBUG, "[DB] Starting database load operation") -- Keep DEBUG
 	local filePath = Database.GetFilePath()
 
 	local file = io.open(filePath, "r")
 	if not file then
-		if not silent then
-			Log(LogLevel.WARNING, "[DB] Database file not found, initializing empty database")
-		end
+		-- Always log warning if file missing, as it prevents loading
+		Log(LogLevel.WARNING, "[DB] Database file not found, initializing empty database")
 		G.DataBase = {}
 		Database.State.isDirty = true
 		Database.State.lastLoaded = os.time()
@@ -180,20 +162,20 @@ function Database.LoadDatabase(silent, force)
 	file:close()
 
 	if not content or #content == 0 then
-		if not silent then
-			Log(LogLevel.WARNING, "[DB] Database file is empty, initializing empty database")
-		end
+		-- Always log warning if file empty, as it means no data
+		Log(LogLevel.WARNING, "[DB] Database file is empty, initializing empty database")
 		G.DataBase = {}
 		Database.State.isDirty = true
 		Database.State.lastLoaded = os.time()
 		return
 	end
 
-	Log(LogLevel.DEBUG, "[DB] Decoding JSON content")
+	Log(LogLevel.DEBUG, "[DB] Decoding JSON content") -- Keep DEBUG
 	local decodedData
 	if Json and Json.decode then -- Add nil check for Json.decode
 		decodedData = Json.decode(content)
 	else
+		-- Always log critical error
 		Log(LogLevel.ERROR, "[DB] Json.decode function is not available!")
 		G.DataBase = {} -- Fallback to empty DB
 		Database.State.isDirty = true
@@ -203,68 +185,64 @@ function Database.LoadDatabase(silent, force)
 	content = nil -- Clear content reference
 
 	if type(decodedData) ~= "table" then
-		if not silent then
-			Log(LogLevel.ERROR, "[DB] JSON decode failed or result is not a table")
-		end
+		-- Always log critical error
+		Log(LogLevel.ERROR, "[DB] JSON decode failed or result is not a table")
 		G.DataBase = {}
 		Database.State.isDirty = true
 		Database.State.lastLoaded = os.time()
 		return
 	end
 
-	-- Count initial entries for reporting
+	Log(LogLevel.DEBUG, "[DB] Starting database validation") -- Keep DEBUG
 	local initialCount = 0
 	for _ in pairs(decodedData) do
 		initialCount = initialCount + 1
 	end
+	G.DataBase = decodedData -- Assign after counting
 
-	Log(LogLevel.DEBUG, string.format("[DB] Decoded %d entries from JSON", initialCount))
-	G.DataBase = decodedData
-
-	-- Validation with progress reporting
-	Log(LogLevel.DEBUG, "[DB] Starting database validation")
 	local changesMade = false
 	local entriesToRemove = {}
 	local totalEntries = 0
 	local passedCount = 0
 	local failedCount = 0
 
-	-- Process entries in batches
 	for steamID, value in pairs(G.DataBase) do
 		totalEntries = totalEntries + 1
-
-		-- Basic validation (ensure it's a table and key looks like a SteamID64)
 		if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^765611%d+$") then
 			failedCount = failedCount + 1
 			table.insert(entriesToRemove, steamID)
 		else
 			passedCount = passedCount + 1
 		end
-
-		-- Print batch progress less frequently for large databases
-		if totalEntries % 1000 == 0 then
-			Log(
-				LogLevel.DEBUG,
-				string.format(
-					"[DB] Validated %d entries so far (%d passed, %d failed)",
-					totalEntries,
-					passedCount,
-					failedCount
-				)
-			)
-		end
+		-- Removed periodic validation progress log
 	end
 
-	-- Final validation summary
-	Log(
-		LogLevel.INFO,
-		string.format("[DB] Validated %d entries (%d passed, %d failed)", totalEntries, passedCount, failedCount)
-	)
+	-- Always Log validation summary, color based on failures
+	if failedCount > 0 then
+		Log(
+			LogLevel.WARNING, -- Yellow if failures
+			string.format(
+				"[DB] Validation finished: %d total, %d passed, %d FAILED",
+				totalEntries,
+				passedCount,
+				failedCount
+			)
+		)
+	elseif not silent then -- Only log non-failure summary if not silent
+		Log(
+			LogLevel.INFO, -- Cyan if no failures and not silent
+			string.format(
+				"[DB] Validation finished: %d total, %d passed, %d failed",
+				totalEntries,
+				passedCount,
+				failedCount
+			)
+		)
+	end
 
+	-- Always log if removing entries (Warning)
 	if #entriesToRemove > 0 then
-		if not silent then
-			Log(LogLevel.WARNING, string.format("[DB] Removing %d invalid entries", #entriesToRemove))
-		end
+		Log(LogLevel.WARNING, string.format("[DB] Removing %d invalid entries", #entriesToRemove))
 		for _, key in ipairs(entriesToRemove) do
 			G.DataBase[key] = nil
 		end
@@ -275,16 +253,14 @@ function Database.LoadDatabase(silent, force)
 	Database.State.lastLoaded = os.time()
 	Database.State.isInitialized = true
 
+	-- Only log final success count if not silent
 	if not silent then
 		local finalCount = 0
 		for _ in pairs(G.DataBase) do
 			finalCount = finalCount + 1
 		end
-		Log(
-			LogLevel.INFO,
-			string.format("[DB] Database loaded with %d valid entries", finalCount),
-			{ 0, 255, 140, 255 }
-		)
+		-- Always print the final count summary using printc in green, regardless of debug mode
+		Log(Database.LogLevel.SUCCESS, string.format("[DB] Database loaded with %d valid entries", finalCount))
 	end
 end
 
@@ -296,7 +272,7 @@ function Database.Initialize(silent)
 		return
 	end
 
-	Log(LogLevel.DEBUG, "[DB] Initializing Database module...")
+	Log(LogLevel.DEBUG, "[DB] Initializing Database module...") -- Keep DEBUG
 
 	-- Ensure G.DataBase exists as a table before loading
 	if type(G.DataBase) ~= "table" then
@@ -304,36 +280,20 @@ function Database.Initialize(silent)
 		G.DataBase = {}
 	end
 
-	-- Load the database (this function handles creating an empty one if needed)
+	-- Load the database (uses the updated LoadDatabase logging)
 	Database.LoadDatabase(silent, false)
 
 	-- Verify G.DataBase is initialized (LoadDatabase should ensure this)
 	if not G.DataBase then
+		-- Always log critical error
 		Log(LogLevel.ERROR, "[DB] CRITICAL: G.DataBase is nil after LoadDatabase!")
 		G.DataBase = {} -- Critical fallback
 		Database.State.isDirty = true
 	else
-		Log(LogLevel.DEBUG, "[DB] G.DataBase initialized, type:" .. type(G.DataBase))
+		Log(LogLevel.DEBUG, "[DB] G.DataBase initialized, type:" .. type(G.DataBase)) -- Keep DEBUG
 	end
 
-	local entryCount = 0
-	if type(G.DataBase) == "table" then
-		for _ in pairs(G.DataBase) do
-			entryCount = entryCount + 1
-		end
-	end
-
-	if not silent then
-		if entryCount == 0 then
-			Log(LogLevel.WARNING, "[DB] Database is empty or could not be loaded. Fetch data or check logs.")
-		else
-			Log(
-				LogLevel.INFO,
-				string.format("[DB] Initialized with %d database entries", entryCount),
-				{ 0, 255, 140, 255 }
-			)
-		end
-	end
+	-- Removed redundant final count log here, handled in LoadDatabase
 
 	-- Clear local player from cheater list (for debugging)
 	local localPlayer = entities.GetLocalPlayer()
@@ -345,7 +305,7 @@ function Database.Initialize(silent)
 		end
 	end
 
-	Log(LogLevel.DEBUG, "[DB] Database initialization complete.")
+	Log(LogLevel.DEBUG, "[DB] Database initialization complete.") -- Keep DEBUG
 	Database.State.isInitialized = true
 end
 

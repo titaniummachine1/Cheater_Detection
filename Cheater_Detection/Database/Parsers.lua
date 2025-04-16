@@ -99,8 +99,21 @@ function Parsers.GetStatsSummary()
 end
 
 -- Formats and prints a statistics bundle for all parsing operations
+--[[ DEPRECATED: Printing is now handled by Fetcher using GetStatsSummary and Database.Log
 function Parsers.PrintStatsSummary()
 	print(Parsers.GetStatsSummary())
+end
+]]
+-- Restore the function
+function Parsers.PrintStatsSummary()
+	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	-- Only print the summary if in debug mode
+	if isDebugMode then
+		local summary = Parsers.GetStatsSummary()
+		if summary then
+			print(summary) -- Keep using plain print for multi-line debug summary
+		end
+	end
 end
 
 -- Robust SteamID conversion function (moved from Fetcher)
@@ -150,14 +163,18 @@ function Parsers.GetSteamID64(input)
 				-- Check if this is a valid SteamID64 by numeric range instead of strict pattern
 				if trimmed_result and trimmed_result:match("^%d+$") then
 					local num = tonumber(trimmed_result)
-					if num and num >= 76500000000000000 and num <= 77000000000000000 then
+					if num and num >= 76561197960265728 and num <= 77000000000000000 then -- Corrected range
 						return trimmed_result
 					end
 				end
 			end
+		else
+			-- Debug print statement removed
+			-- Log(LogLevel.DEBUG, "[PARSERS] steam API or steam.ToSteamID64 not available for conversion attempt")
 		end
 	else
 		-- Debug print statement removed
+		-- Log(LogLevel.DEBUG, "[PARSERS] steam API or steam.ToSteamID64 not available for conversion attempt")
 	end
 
 	-- If conversion via pcall was successful, return that result
