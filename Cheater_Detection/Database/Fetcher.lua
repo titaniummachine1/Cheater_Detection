@@ -1,6 +1,4 @@
 --[[ Cheater Detection - Database Fetcher - Synchronous Simplified Version ]]
-print("[FETCHER SOURCE] >>> Module Start") -- ++DEBUG
-
 local Common = require("Cheater_Detection.Utils.Common")
 -- [[ Imported by: Main.lua ]]
 local G = require("Cheater_Detection.Utils.Globals")

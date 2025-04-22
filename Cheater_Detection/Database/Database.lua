@@ -49,7 +49,7 @@ local function Log(level, message, color)
 	-- Ensure Database and its Log function are available
 	if Database and Database.Log then
 		Database.Log(level, message, color)
-	else
+	elseif G.Menu.Advanced.debug then
 		-- Fallback to plain print if Database.Log is unavailable
 		local prefixMap =
 			{ [1] = "[ERROR] ", [2] = "[WARNING] ", [3] = "[SUCCESS] ", [4] = "[INFO] ", [5] = "[DEBUG] " }
