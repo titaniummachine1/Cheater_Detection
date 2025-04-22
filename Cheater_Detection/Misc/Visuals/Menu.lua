@@ -38,6 +38,7 @@ local function DrawMenu()
 			local Main = G.Menu.Main
 
 			ImMenu.BeginFrame()
+			Main.Fetch_Database = ImMenu.Checkbox("Fetch Database", Main.Fetch_Database)
 			Main.AutoMark = ImMenu.Checkbox("Auto Mark", Main.AutoMark)
 			Main.partyCallaut = ImMenu.Checkbox("Party Callout", Main.partyCallaut)
 			Main.Chat_Prefix = ImMenu.Checkbox("Chat Prefix", Main.Chat_Prefix)

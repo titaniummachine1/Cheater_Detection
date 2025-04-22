@@ -407,12 +407,17 @@ end
 
 -- Self-Initialization
 local function InitializeFetcher()
-	Log(LogLevel.DEBUG, "[FETCHER] Checking if auto-fetch is enabled...") -- Use Log
-	if type(G) == "table" and type(G.Config) == "table" and G.Config.AutoFetch then
-		Log(LogLevel.INFO, "[FETCHER] Auto-fetch enabled, starting fetch process...") -- Use Log
+	Log(LogLevel.DEBUG, "[FETCHER] Checking if fetch on load is enabled...") -- Use Log (Updated message)
+	-- Check G.Menu.Main.Fetch_Database instead of G.Config.AutoFetch
+	if type(G) == "table"
+		and type(G.Menu) == "table"
+		and type(G.Menu.Main) == "table"
+		and G.Menu.Main.Fetch_Database == true
+	then
+		Log(LogLevel.INFO, "[FETCHER] Fetch on load enabled, starting fetch process...") -- Use Log (Updated message)
 		Fetcher.Start()
 	else
-		Log(LogLevel.INFO, "[FETCHER] Auto-fetch disabled or not configured, skipping initial fetch.") -- Use Log
+		Log(LogLevel.INFO, "[FETCHER] Fetch on load disabled or not configured, skipping initial fetch.") -- Use Log (Updated message)
 	end
 end
 
