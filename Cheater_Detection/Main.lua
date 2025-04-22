@@ -1,5 +1,3 @@
---[[ Imported by: Cheater_Detection/init.lua ]]
-
 --[[
     Cheater Detection for Lmaobox Recode
     Author: titaniummachine1 (https://github.com/titaniummachine1)
@@ -10,8 +8,8 @@
 ]]
 
 --[[ Import core utilities ]]
-local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
 local G = require("Cheater_Detection.Utils.Globals") --[[ Imported by: Main.lua ]]
+local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
 
 --[[ Import database system ]]
@@ -31,8 +29,6 @@ local WPlayer, PR = Common.WPlayer, Common.PlayerResource
 
 --[[ Update the player data every tick ]]
 --
---[[ Update the player data every tick ]]
---
 local function OnCreateMove(cmd)
 	local DebugMode = G.Menu.Main.debug
 	G.pLocal = entities.GetLocalPlayer()
@@ -41,8 +37,8 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	G.WLocal = WPlayer.FromEntity(G.pLocal)
-	G.connectionState = PR.GetConnectionState()[G.pLocal:GetIndex()]
+	-- Check connection state and store in G
+	G.ConnectionState = Common.CheckConnectionState()
 
 	for _, entity in ipairs(G.players) do
 		-- Get the steamid for the player
@@ -67,6 +63,9 @@ local function OnCreateMove(cmd)
 			local viewPos = wrappedPlayer:GetEyePos()
 			local simulationTime = wrappedPlayer:GetSimulationTime()
 
+			-- Update history
+			G.PlayerData[steamid].History = G.PlayerData[steamid].History or {}
+
 			-- Gather player data
 			G.PlayerData[steamid].Current = Common.createRecord(
 				viewAngles,
@@ -77,21 +76,25 @@ local function OnCreateMove(cmd)
 				isOnGround
 			)
 
-			-- Perform detection checks
-			--Detections.CheckAngles(wrappedPlayer, entity)
-			--Detections.CheckDuckSpeed(wrappedPlayer, entity)
-			--Detections.CheckBunnyHop(wrappedPlayer, entity)
-			--Detections.CheckPacketChoke(wrappedPlayer, entity)
-			--Detections.CheckSequenceBurst(wrappedPlayer, entity)
-			--Detections.rtrue(entity) --debug
-
-			-- Update history
-			G.PlayerData[steamid].History = G.PlayerData[steamid].History or {}
 			table.insert(G.PlayerData[steamid].History, G.PlayerData[steamid].Current)
 
 			-- Keep the history table size to a maximum of 66
 			if #G.PlayerData[steamid].History > 66 then
 				table.remove(G.PlayerData[steamid].History, 1)
+			end
+
+			-- Perform detection checks
+			--Detections.CheckAngles(wrappedPlayer, entity)
+			--Detections.CheckDuckSpeed(wrappedPlayer, entity)
+			--Detections.CheckBunnyHop(wrappedPlayer, entity)
+
+			if G.ConnectionState.stable then
+				-- Optionally, print or log the reason for instability
+				--FakeLag_check(wrappedPlayer, entity)
+				--Warp_check(wrappedPlayer, entity)
+				--warp_recharge_check(wrappedPlayer, entity)
+				--triggerbot_check(wrappedPlayer, entity)
+				--smooth_aimbot_check(wrappedPlayer, entity)
 			end
 		end
 	end

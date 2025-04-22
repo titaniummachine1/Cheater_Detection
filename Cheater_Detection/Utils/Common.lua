@@ -17,7 +17,6 @@ local Common = {
 }
 
 -- Move requires here
-Common.ImMenu = require("Cheater_Detection.Libs.ImMenu")
 Common.Json = require("Cheater_Detection.Libs.Json")
 local G = require("Cheater_Detection.Utils.Globals")
 
@@ -34,7 +33,7 @@ end
 --Library loading--
 --------------------------------------------------------------------------------------
 
--- Function to download content from a URL
+--Function to download content from a URL
 local function downloadFile(url)
 	local success, body = pcall(http.Get, url)
 	if not success or not body or body == "" then
@@ -45,13 +44,14 @@ end
 
 -- Load and validate library
 local function loadlib(libName, libURL)
-	if libName == "LNXlib" then
+	local lnxLib = nil
+	if libName == "lnxLib" then
 		-- First try to load local LNXlib if it exists
 		local success, localLib = pcall(require, "lnxLib")
 
 		if success and localLib then
 			-- Local version exists and loaded successfully
-			LnxLib = localLib
+			lnxLib = localLib
 			print("Loaded local lnxLib")
 		else
 			-- Local version doesn't exist, download from GitHub
@@ -81,38 +81,26 @@ local function loadlib(libName, libURL)
 			end
 
 			-- Assign globally
-			LnxLib = lib
+			lnxLib = lib
 			print("Downloaded and loaded lnxLib from GitHub")
-		end
-
-		-- Allow require("lnxLib") to return global
-		package.preload["lnxLib"] = function()
-			return lnxLib
 		end
 
 		return lnxLib
 	else
-		-- For ImMenu, load normally but modify its code first
-		local libContent = downloadFile(libURL)
-		if libName == "ImMenu" then
-			-- Replace the header but keep rest of the code
-			libContent = libContent:gsub(
-				".-\n\nlocal Fonts", -- Match everything up to "local Fonts"
-				"--[[ ImMenu ]]--\n\nlocal lnxLib = _G.lnxLib\nlocal Fonts" -- Replace with our simple header
-			)
-		end
-
-		-- Execute modified code and capture return value
-		local libFunction = assert(load(libContent))
-		return libFunction() -- Return the module table
+		error("Unsupported library: " .. libName)
 	end
 end
 
---why
+--why is this not working? added dpots tp prevent strign from makign this library link isntead of module in git comands so it doesnt break everything for git pull and stuff
 local latestLNXlib = "https://" .. "github.com/lnx00/Lmaobox-Library/releases/latest/download/lnxLib.lua"
+local lnxLib = loadlib("lnxLib", latestLNXlib)
 
--- Initialize libraries in order
-Common.Lib = loadlib("LNXlib", latestLNXlib)
+if not lnxLib then
+	error("Failed to load lnxLib")
+end
+
+Common.Lib = lnxLib
+Common.ImMenu = ImMenu
 
 -- Now initialize remaining Common fields using the loaded libraries
 Common.Log = Common.Lib.Utils.Logger.new("Cheater Detection")
@@ -280,6 +268,42 @@ Common.RoundCoord = function(value)
 	end
 
 	return math.floor(value + 0.5)
+end
+
+local E_Flows = { FLOW_OUTGOING = 0, FLOW_INCOMING = 1, MAX_FLOWS = 2 }
+
+function Common.CheckConnectionState()
+	local netChannel = clientstate.GetNetChannel()
+	if not netChannel then
+		return { stable = false, reason = "No NetChannel" }
+	end
+
+	-- Check for timeout
+	if netChannel:IsTimingOut() then
+		return { stable = false, reason = "Timing out" }
+	end
+
+	-- Check for demo playback (not a real server)
+	if netChannel:IsPlayback() then
+		return { stable = true, reason = "Demo playback" }
+	end
+
+	-- Check latency, choke, and loss (incoming)
+	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
+	local choke = netChannel:GetAvgChoke(E_Flows.FLOW_INCOMING)
+	local loss = netChannel:GetAvgLoss(E_Flows.FLOW_INCOMING)
+	-- Thresholds: adjust as needed for your use case
+	if latency > 0.5 then
+		return { stable = false, reason = string.format("High latency: %.2f", latency) }
+	end
+	if choke > 0.2 then
+		return { stable = false, reason = string.format("High choke: %.2f", choke) }
+	end
+	if loss > 0.1 then
+		return { stable = false, reason = string.format("High loss: %.2f", loss) }
+	end
+
+	return { stable = true }
 end
 
 --[[ Registrations and final actions ]]

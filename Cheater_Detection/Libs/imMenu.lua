@@ -1,15 +1,57 @@
 --[[
     Immediate mode menu library for Lmaobox
     Author: github.com/lnx00
+    Modified heavily by: github.com/titaniummachine1
 ]]
 
--- Get the global lnxLib instance instead of requiring Common
-if not lnxLib then
+--get common.lib
+local common = require("Cheater_Detection.Utils.Common")
+if not common.Lib then
 	error("lnxLib not found. Make sure it's loaded before ImMenu")
 end
 
-local Fonts, Notify = lnxLib.UI.Fonts, lnxLib.UI.Notify
-local KeyHelper, Input, Timer = lnxLib.Utils.KeyHelper, lnxLib.Utils.Input, lnxLib.Utils.Timer
+-- Stack implementation (simple LIFO data structure)
+---@class Stack
+---@field private items table
+Stack = {}
+Stack.__index = Stack
+
+-- Error logging helper
+local function LogError(message)
+	draw.Color(255, 0, 0, 255)
+	client.Command(string.format('echo "[ImMenu ERROR] %s"', message))
+end
+
+---@return Stack
+function Stack.new()
+	local self = setmetatable({}, Stack)
+	self.items = {}
+	return self
+end
+
+---@param item any
+function Stack:push(item)
+	table.insert(self.items, item)
+end
+
+---@return any
+function Stack:pop()
+	if #self.items == 0 then
+		return nil
+	end
+	return table.remove(self.items)
+end
+
+---@return any
+function Stack:peek()
+	if #self.items == 0 then
+		return nil
+	end
+	return self.items[#self.items]
+end
+
+local Fonts, Notify = common.Lib.UI.Fonts, common.Lib.UI.Notify
+local KeyHelper, Input, Timer = common.Lib.Utils.KeyHelper, common.Lib.Utils.Input, common.Lib.Utils.Timer
 
 -- Annotation aliases
 ---@alias ImItemID string
@@ -265,18 +307,18 @@ function ImMenu.AddStyle(key, value)
 	Style[key] = value
 end
 
--- Executes drawing functions layer by layer
-function ImMenu.LateDraw()
+-- Executes drawing functions layer by layer from bottom to top
+function ImMenu.DrawLayers()
 	draw.Color(255, 255, 255, 255)
 
-	-- Get sorted layer keys
+	-- Get sorted layer keys (from lowest to highest)
 	local sortedLayers = {}
 	for k in pairs(DrawLayers) do
 		table.insert(sortedLayers, k)
 	end
 	table.sort(sortedLayers)
 
-	-- Run functions layer by layer
+	-- Run functions layer by layer (from bottom to top)
 	for _, layerIndex in ipairs(sortedLayers) do
 		if DrawLayers[layerIndex] then
 			for _, func in ipairs(DrawLayers[layerIndex]) do
@@ -343,18 +385,24 @@ end
 ---@param id string
 ---@return boolean hovered, boolean clicked, boolean active
 function ImMenu.GetInteraction(x, y, width, height, id)
+	-- Check for Escape key to close any active popup
+	if input.IsButtonPressed(KEY_ESCAPE) and ImMenu.ActivePopup then
+		ImMenu.ActivePopup = nil
+		return false, false, false
+	end
+
 	-- Is a different element active?
 	if ImMenu.ActiveItem ~= nil and ImMenu.ActiveItem ~= id then
 		return false, false, false
 	end
 
-	-- Is a popup active?
-	if ImMenu.ActivePopup ~= nil and not inPopup then
+	-- Is a popup active? (Skip this check if processing click-through)
+	if ImMenu.ActivePopup ~= nil and not inPopup and not justClosedPopup then
 		return false, false, false
 	end
 
 	local hovered = Input.MouseInBounds(x, y, x + width, y + height) or id == ImMenu.ActiveItem
-	local clicked = hovered and (MouseHelper:Pressed() or EnterHelper:Pressed())
+	local clicked = hovered and (MouseHelper:Released() or EnterHelper:Released()) -- Use Released() for click detection
 	local active = hovered and (MouseHelper:Down() or EnterHelper:Down())
 
 	-- Should this element be active?
@@ -516,6 +564,9 @@ function ImMenu.Begin(title, visible)
 		return false
 	end
 
+	-- Process any delayed clicks from previous frame
+	ImMenu.ProcessClickAfterPopupClose()
+
 	-- Create the window if it doesn't exist
 	if not Windows[title] then
 		Windows[title] = {
@@ -635,7 +686,7 @@ function ImMenu.End()
 	window.H = frame.H
 
 	-- Draw late draw list (now layers)
-	ImMenu.LateDraw()
+	ImMenu.DrawLayers()
 
 	return window
 end
@@ -650,7 +701,10 @@ function ImMenu.DrawOnLayer(layer, func)
 	table.insert(DrawLayers[layer], func)
 end
 
--- Helper function for Popup Late Draw (Named Function)
+-- Flag to track if we just closed a popup and should process the click again
+local justClosedPopup = false
+local lastMousePos = { 0, 0 }
+
 local function ExecutePopupContent(x, y, func)
 	inPopup = true
 	local currentCursorX, currentCursorY = ImMenu.Cursor.X, ImMenu.Cursor.Y -- Save cursor
@@ -660,22 +714,48 @@ local function ExecutePopupContent(x, y, func)
 	ImMenu.Cursor.Y = math.floor(y)
 
 	-- Draw the popup
-	ImMenu.PushStyle("FramePadding", 0) -- OK: key is string, value is number
-	ImMenu.PushStyle("ItemMargin", 0) -- OK: key is string, value is number
-	---@diagnostic disable-next-line: missing-parameter -- Add disable for linter error
-	ImMenu.BeginFrame() -- This call is valid as params are optional
+	ImMenu.PushStyle("FramePadding", 0)
+	ImMenu.PushStyle("ItemMargin", 0)
+	ImMenu.BeginFrame()
 	func() -- Execute the user's popup content function
-	---@diagnostic disable-next-line: missing-parameter
-	local frame = ImMenu.EndFrame() -- This call is valid as params are optional
+	local frame = ImMenu.EndFrame()
 	ImMenu.PopStyle(2)
 
-	-- Close the popup if clicked outside of it
-	if not Input.MouseInBounds(frame.X, frame.Y, frame.X + frame.W, frame.Y + frame.H) and MouseHelper:Pressed() then
+	local mousePos = input.GetMousePos()
+	local mouseInsidePopup = false
+	if mousePos then
+		lastMousePos = mousePos -- Save for click-through
+		local mouseX, mouseY = mousePos[1], mousePos[2]
+		mouseInsidePopup = (
+			mouseX >= frame.X
+			and mouseX <= frame.X + frame.W
+			and mouseY >= frame.Y
+			and mouseY <= frame.Y + frame.H
+		)
+	end
+
+	-- Close popup on click outside or Escape key, but allow the click to be processed by other elements
+	if MouseHelper:Released() and not mouseInsidePopup then
+		local currentPopup = ImMenu.ActivePopup
+		ImMenu.ActivePopup = nil
+		justClosedPopup = true -- Set flag so click can be processed by elements underneath
+	elseif input.IsButtonPressed(KEY_ESCAPE) then
 		ImMenu.ActivePopup = nil
 	end
 
 	inPopup = false
 	ImMenu.Cursor.X, ImMenu.Cursor.Y = currentCursorX, currentCursorY -- Restore cursor
+end
+
+-- Process any pending click after popup is closed
+function ImMenu.ProcessClickAfterPopupClose()
+	if justClosedPopup and lastMousePos then
+		justClosedPopup = false
+		-- Reset MouseHelper's state to simulate a fresh click
+		MouseHelper._LastState = false
+		return true
+	end
+	return false
 end
 
 ---@param x integer
@@ -992,7 +1072,10 @@ function ImMenu.TextInput(label, text, charLimit)
 	-- Toggle writing mode
 	if clicked then
 		state.isWriting = not state.isWriting
-	elseif MouseHelper:Pressed() and not hovered and state.isWriting then
+		if state.isWriting then
+			state.cursorPos = #text -- Set cursor at end when activating
+		end
+	elseif MouseHelper:Released() and not hovered and state.isWriting then
 		state.isWriting = false
 	end
 
@@ -1149,31 +1232,43 @@ end
 ---@param options string[]
 ---@return table selected
 function ImMenu.Combo(text, selected, options)
+	if not selected then
+		selected = {}
+	end
+
 	local _, txtHeight = draw.GetTextSize(text)
 	local pad = Style.ItemPadding or 5
 	local width, height = ImMenu.GetSize(250, txtHeight + pad * 2)
 	width, height = math.floor(width), math.floor(height)
 
-	ImMenu.PushStyle("ItemSize", { width, height }) -- OK
+	ImMenu.PushStyle("ItemSize", { width, height })
 	if ImMenu.Button(text) then
-		ImMenu.ActivePopup = text
+		if ImMenu.ActivePopup == text then
+			ImMenu.ActivePopup = nil
+		else
+			ImMenu.ActivePopup = text
+		end
 	end
 
 	if ImMenu.ActivePopup == text then
-		local px, py = ImMenu.Cursor.X, ImMenu.Cursor.Y -- Get cursor pos before popup button
+		local px, py = math.floor(ImMenu.Cursor.X), math.floor(ImMenu.Cursor.Y + height)
 		local popupFunc = function()
-			ImMenu.PushStyle("ItemSize", { width, height }) -- OK
+			ImMenu.PushStyle("ItemSize", { width, height })
 			for i, option in ipairs(options) do
 				local isSelected = selected[i] or false
+
 				if isSelected then
 					ImMenu.PushColor("Item", Colors.ItemActive)
+				else
+					ImMenu.PushColor("Item", Colors.Item)
 				end
-				if ImMenu.Button(tostring(option)) then
+
+				local optionClicked = ImMenu.Button(tostring(option))
+				if optionClicked then
 					selected[i] = not selected[i]
 				end
-				if isSelected then
-					ImMenu.PopColor()
-				end
+
+				ImMenu.PopColor()
 			end
 			ImMenu.PopStyle(1)
 		end
@@ -1380,6 +1475,102 @@ function ImMenu.Keybind(text)
 	ImMenu.UpdateCursor(width, height)
 end
 
-lnxLib.UI.Notify.Simple("ImMenu loaded", string.format("Version: %.2f", ImMenu.GetVersion()))
+---@param text string
+---@param selected integer
+---@param options string[]
+---@return integer selected
+function ImMenu.Dropdown(text, selected, options)
+	if type(selected) ~= "number" then
+		LogError("Expected 'selected' to be a number, got " .. type(selected))
+		return selected
+	end
+	if type(options) ~= "table" then
+		LogError("Expected 'options' to be a table, got " .. type(options))
+		return selected
+	end
+	if #options == 0 then
+		LogError("Options table is empty")
+		return selected
+	end
+
+	local x, y = math.floor(ImMenu.Cursor.X), math.floor(ImMenu.Cursor.Y)
+	local label = string.format("%s: %s", ImMenu.GetLabel(text), options[selected] or "Invalid")
+	local txtWidth, txtHeight = draw.GetTextSize(label)
+	local pad = Style.ItemPadding or 5
+	local width, height = ImMenu.GetSize(250, txtHeight + pad * 2)
+	width, height = math.floor(width), math.floor(height)
+	local ix, iy = math.floor(x), math.floor(y)
+	local hovered, clicked, active = ImMenu.GetInteraction(ix, iy, width, height, text)
+
+	-- Background
+	ImMenu.InteractionColor(hovered, active)
+	draw.FilledRect(ix, iy, ix + width, iy + height)
+
+	-- Border
+	if Style.ButtonBorder then
+		draw.Color(UnpackColor(Colors.Border))
+		draw.OutlinedRect(ix, iy, ix + width, iy + height)
+	end
+
+	-- Dropdown arrow
+	draw.Color(UnpackColor(Colors.Text))
+	local arrowSize = math.floor(height / 3)
+	local arrowX = math.floor(ix + width - arrowSize - pad)
+	local arrowY = math.floor(iy + (height - arrowSize) / 2)
+	draw.FilledRect(arrowX, arrowY, arrowX + arrowSize, arrowY + 2)
+	draw.Line(arrowX, arrowY + 2, arrowX + arrowSize / 2, arrowY + arrowSize)
+	draw.Line(arrowX + arrowSize, arrowY + 2, arrowX + arrowSize / 2, arrowY + arrowSize)
+
+	-- Text
+	draw.Color(UnpackColor(Colors.Text))
+	draw.Text(math.floor(ix + pad), math.floor(iy + (height - txtHeight) / 2), label)
+
+	-- Handle dropdown popup activation with toggle
+	if clicked then
+		if ImMenu.ActivePopup == text then
+			ImMenu.ActivePopup = nil
+		else
+			ImMenu.ActivePopup = text
+		end
+	end
+
+	if ImMenu.ActivePopup == text then
+		local px, py = math.floor(x), math.floor(y + height)
+		local popupFunc = function()
+			ImMenu.PushStyle("ItemSize", { width, height })
+			for i, option in ipairs(options) do
+				local isSelected = (i == selected)
+				if isSelected then
+					ImMenu.PushColor("Item", Colors.ItemActive)
+				end
+
+				local optionClicked = ImMenu.Button(tostring(option))
+				if optionClicked then
+					selected = i
+					ImMenu.ActivePopup = nil
+				end
+
+				if isSelected then
+					ImMenu.PopColor()
+				end
+			end
+			ImMenu.PopStyle()
+		end
+
+		ImMenu.Popup(px, py, popupFunc)
+	end
+
+	ImMenu.UpdateCursor(width, height)
+	return selected
+end
+
+-- Add a global function to force-close any active popup
+function ImMenu.CloseActivePopup()
+	if ImMenu.ActivePopup then
+		ImMenu.ActivePopup = nil
+	end
+end
+
+common.Lib.UI.Notify.Simple("ImMenu loaded", string.format("Version: %.2f", ImMenu.GetVersion()))
 
 return ImMenu

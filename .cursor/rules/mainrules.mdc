@@ -65,3 +65,7 @@ lmaobox_lua_documentation.md its in root of workspace
 *   **`atan` Function:** Use `math.atan(y, x)` instead of the deprecated `atan2`.
 *   **Function Order:** Define functions *before* they are called in the script.
 
+dont use bit.band if you ever encoutner it it is isue as its never used and not allowed in my api
+
+for flags
+
