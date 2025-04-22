@@ -2,6 +2,7 @@ local Default_Config = {
 	currentTab = "Main",
 
 	Main = {
+		Fetch_Database = true,
 		AutoMark = true,
 		AutoFetch = true, -- Automatically fetch database on startup
 		partyCallaut = true,

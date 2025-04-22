@@ -14,22 +14,6 @@ local function roundCoord(value)
 	return math.floor(value + 0.5)
 end
 
--- Initialize additional menu settings if not already present
-if not G.Menu.Settings then
-	G.Menu.Settings = {
-		notificationLevel = 1,
-		notificationLevelOptions = { "None", "Errors Only", "Warnings & Errors", "All Messages" },
-		customMessage = "Cheater detected!",
-		teamOptions = { "All", "My Team", "Enemy Team" },
-		teamSelection = 1,
-		includeTypes = {
-			[1] = true, -- Cheaters
-			[2] = false, -- Bots
-			[3] = true, -- Suspicious
-		},
-	}
-end
-
 local function DrawMenu()
 	ImMenu.BeginFrame(1)
 
@@ -42,8 +26,8 @@ local function DrawMenu()
 	if gui.IsMenuOpen() and ImMenu.Begin("Cheater Detection", true) then
 		-- Tabs for different sections
 		ImMenu.BeginFrame(1)
-		local tabs = { "Main", "Advanced", "Misc", "Settings" }
-		G.Menu.currentTab = ImMenu.TabControl(tabs, G.Menu.currentTab)
+			local tabs = { "Main", "Advanced", "Misc"}
+			G.Menu.currentTab = ImMenu.TabControl(tabs, G.Menu.currentTab)
 		ImMenu.EndFrame()
 
 		draw.SetFont(Fonts.Verdana)

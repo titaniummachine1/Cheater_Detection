@@ -416,13 +416,7 @@ local function InitializeFetcher()
 	end
 end
 
--- Callback Registration
-local function DelayedInit()
-	callbacks.Unregister("Draw", "fetcher_init_callback") -- Run only once
-	InitializeFetcher()
-end
-
-callbacks.Register("Draw", "fetcher_init_callback", DelayedInit)
+InitializeFetcher()
 
 Log(LogLevel.DEBUG, "[FETCHER] >>> Module execution finished. Returning Fetcher table.") -- Use Log (Debug)
 return Fetcher
