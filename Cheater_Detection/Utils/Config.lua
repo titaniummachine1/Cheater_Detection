@@ -49,7 +49,7 @@ function Config.CreateCFG(cfgTable)
 		file:write(serializedConfig)
 		file:close()
 		printc(100, 183, 0, 255, "Success Saving Config: Path: " .. shortFilePath)
-		Notify.Simple("Success! Saved Config to:", shortFilePath, 5)
+		Common.Notify.Simple("Success! Saved Config to:", shortFilePath, 5)
 	else
 		local errorMessage = "Failed to open: " .. shortFilePath
 		printc(255, 0, 0, 255, errorMessage)
