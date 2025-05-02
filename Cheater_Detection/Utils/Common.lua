@@ -195,7 +195,8 @@ end
 ---@param entity Entity
 ---@param checkFriend boolean?
 ---@param checkDormant boolean?
-function Common.IsValidPlayer(entity, checkFriend, checkDormant, pLocal)
+---@param skipEntity Entity? Optional entity to skip (e.g., the local player)
+function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 	-- Check if the entity is a valid player
 	if
 		not entity
@@ -204,7 +205,7 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, pLocal)
 		or (checkDormant and entity:IsDormant())
 		or entity:GetTeamNumber() == TEAM_SPECTATOR
 		or entity:GetTeamNumber() == TEAM_UNASSIGNED --can be simplified to entity:GetTeamNumber() > 1
-		or (pLocal and entity == pLocal)
+		or (skipEntity and entity == skipEntity)
 	then
 		return false -- Entity is not a valid player
 	end
