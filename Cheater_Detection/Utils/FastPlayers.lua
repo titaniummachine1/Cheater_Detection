@@ -35,14 +35,15 @@ end
 
 --- Returns list of valid, non-dormant players once per tick.
 ---@return WrappedPlayer[]
-function FastPlayers.GetAll()
+function FastPlayers.GetAll(excludelocal)
 	if FastPlayers.AllUpdated then
 		return cachedAllPlayers
 	end
+	excludelocal = excludelocal and FastPlayers.GetLocal() or nil
 	cachedAllPlayers = {}
 	local debugMode = G.Menu.Advanced.debug
 	for _, ent in pairs(entities.FindByClass("CTFPlayer") or {}) do
-		if Common.IsValidPlayer(ent, debugMode, true) then
+		if Common.IsValidPlayer(ent, debugMode, true, excludelocal) then
 			local wrapped = WrappedPlayer.FromEntity(ent)
 			if wrapped then
 				cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
@@ -53,16 +54,13 @@ function FastPlayers.GetAll()
 	return cachedAllPlayers
 end
 
---- Returns the local player as a WrappedPlayer instance, cached after first wrap.
+--- Returns the local player as a CustomPlayer instance, cached after first wrap.
 function FastPlayers.GetLocal()
-	-- Return cached local if already wrapped
 	if not cachedLocal then
-		-- Wrap the raw local player entity directly
-		local pLocal = entities.GetLocalPlayer()
-		local wrapped = pLocal and WrappedPlayer.FromEntity(pLocal) or nil
-		cachedLocal = wrapped
+		local rawLocal = entities.GetLocalPlayer()
+		cachedLocal = rawLocal and WrappedPlayer.FromEntity(rawLocal) or nil
 	end
-	return wrapped
+	return cachedLocal
 end
 
 --- Returns list of teammates, excluding a specified player or the local player by default.

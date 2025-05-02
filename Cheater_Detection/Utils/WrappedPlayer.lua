@@ -4,8 +4,8 @@
 local WrappedPlayer = {}
 WrappedPlayer.__index = WrappedPlayer
 
--- Define player flag constants (ensure these are correct for TF2/Lmaobox)
-local FL_ONGROUND = 1 -- Example, verify correct value
+--[[ Imports ]]
+local Common = require("Cheater_Detection.Utils.Common")
 
 --[[ Constructor ]]
 
@@ -34,42 +34,18 @@ function WrappedPlayer:GetRawEntity()
 	return self._rawEntity
 end
 
--- Get player index
---- @return number
-function WrappedPlayer:GetIndex()
-	return self._rawEntity:GetIndex()
+---@param entity Entity
+---@param checkFriend boolean?
+---@param checkDormant boolean?
+---@param skipEntity Entity? Optional entity to skip (e.g., the local player)
+function WrappedPlayer:IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
+	return Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 end
 
--- Get User ID
---- @return number or nil
-function WrappedPlayer:GetUserID()
-	local index = self:GetIndex()
-	local info = client.GetPlayerInfo(index)
-	return info and info.UserID or nil
-end
-
--- Get team number
---- @return number
-function WrappedPlayer:GetTeamNumber()
-	return self._rawEntity:GetTeamNumber()
-end
-
--- Check if alive
---- @return boolean
-function WrappedPlayer:IsAlive()
-	return self._rawEntity:IsAlive()
-end
-
--- Get health
---- @return number
-function WrappedPlayer:GetHealth()
-	return self._rawEntity:GetHealth()
-end
-
--- Get origin
---- @return Vector3
-function WrappedPlayer:GetAbsOrigin()
-	return self._rawEntity:GetAbsOrigin()
+-- Get SteamID64
+--- @return number|string
+function WrappedPlayer:GetSteamID64()
+	return Common.GetSteamID64(self)
 end
 
 -- Check if player is on the ground using correct bitwise check
@@ -80,11 +56,61 @@ function WrappedPlayer:IsOnGround()
 	return (flags & FL_ONGROUND) ~= 0
 end
 
--- Add more wrapper methods as needed, mirroring the lnxLib example
--- or adding custom functionality. Examples:
--- function WrappedPlayer:GetEyePos() ... end
--- function WrappedPlayer:GetHitboxPos(hitboxID) ... end
--- function WrappedPlayer:GetActiveWeapon() ... end
+-- Returns the view offset from the player's origin as a Vector3
+function WrappedPlayer:GetViewOffset()
+	return self._rawEntity:GetPropVector("localdata", "m_vecViewOffset[0]")
+end
 
-print("[WrappedPlayer] Module loaded.")
+-- Returns the player's eye position in world coordinates
+function WrappedPlayer:GetEyePos()
+	return self:GetAbsOrigin() + self:GetViewOffset()
+end
+
+-- Returns the player's eye angles as an EulerAngles object
+function WrappedPlayer:GetEyeAngles()
+	local ang = self._rawEntity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+	return EulerAngles(ang.x, ang.y, ang.z)
+end
+
+-- Returns the world position the player is looking at by tracing a ray
+function WrappedPlayer:GetLookPos()
+	local eyePos = self:GetEyePos()
+	local eyeAng = self:GetEyeAngles()
+	local targetPos = eyePos + eyeAng:Forward() * 8192
+	local tr = engine.TraceLine(eyePos, targetPos, MASK_SHOT)
+	return tr and tr.endpos or nil
+end
+
+function WrappedPlayer:GetActiveWeapon()
+	local w = self._rawEntity:GetPropEntity("m_hActiveWeapon")
+	return w and WrappedWeapon.FromEntity(w) or nil
+end
+
+function WrappedPlayer:GetObserverMode()
+	return self._rawEntity:GetPropInt("m_iObserverMode")
+end
+
+function WrappedPlayer:GetObserverTarget()
+	local target = self._rawEntity:GetPropEntity("m_hObserverTarget")
+	return WrappedPlayer.FromEntity(target)
+end
+
+function WrappedPlayer:GetNextAttack()
+	return self._rawEntity:GetPropFloat("m_flNextAttack")
+end
+
+-- Hitbox-related helper methods
+function WrappedPlayer:GetHitboxes()
+	return engine.GetHitboxes(self._rawEntity)
+end
+
+function WrappedPlayer:GetHitboxPos(hitboxID)
+	local hitboxes = self:GetHitboxes()
+	local hb = hitboxes and hitboxes[hitboxID]
+	if not hb then
+		return nil
+	end
+	return (hb[1] + hb[2]) * 0.5
+end
+
 return WrappedPlayer
