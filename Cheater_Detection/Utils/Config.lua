@@ -1,6 +1,7 @@
 --[[ Imports ]]
-local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
+
+local Common = require("Cheater_Detection.Utils.Common")
 local json = require("Cheater_Detection.Libs.Json")
 local Default_Config = require("Cheater_Detection.Utils.DefaultConfig")
 

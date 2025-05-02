@@ -192,9 +192,20 @@ function Common.IsFriend(entity)
 	return (not G.Menu.Main.debug and Common.TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
 end
 
-function Common.IsValidPlayer(entity, checkFriend)
+---@param entity Entity
+---@param checkFriend boolean?
+---@param checkDormant boolean?
+function Common.IsValidPlayer(entity, checkFriend, checkDormant, pLocal)
 	-- Check if the entity is a valid player
-	if not entity or entity:IsDormant() or not entity:IsAlive() then
+	if
+		not entity
+		or not entity:IsValid()
+		or not entity:IsAlive()
+		or (checkDormant and entity:IsDormant())
+		or entity:GetTeamNumber() == TEAM_SPECTATOR
+		or entity:GetTeamNumber() == TEAM_UNASSIGNED --can be simplified to entity:GetTeamNumber() > 1
+		or (pLocal and entity == pLocal)
+	then
 		return false -- Entity is not a valid player
 	end
 
