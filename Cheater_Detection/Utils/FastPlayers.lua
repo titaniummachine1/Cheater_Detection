@@ -56,28 +56,30 @@ end
 --- Returns the local player as a WrappedPlayer instance, cached after first wrap.
 function FastPlayers.GetLocal()
 	-- Return cached local if already wrapped
-	if cachedLocal then
-		return cachedLocal
+	if not cachedLocal then
+		-- Wrap the raw local player entity directly
+		local pLocal = entities.GetLocalPlayer()
+		local wrapped = pLocal and WrappedPlayer.FromEntity(pLocal) or nil
+		cachedLocal = wrapped
 	end
-	-- Wrap the raw local player entity directly
-	local pLocal = entities.GetLocalPlayer()
-	local wrapped = pLocal and WrappedPlayer.FromEntity(pLocal) or nil
-	cachedLocal = wrapped
 	return wrapped
 end
 
---- Returns list of teammates (excluding local), builds cache on first access this tick.
-function FastPlayers.GetTeammates()
+--- Returns list of teammates, excluding a specified player or the local player by default.
+---@param excludePlayer WrappedPlayer? Optional wrapped instance to exclude (default is local player)
+---@return WrappedPlayer[]
+function FastPlayers.GetTeammates(excludePlayer)
 	if not FastPlayers.TeammatesUpdated then
 		if not FastPlayers.AllUpdated then
 			FastPlayers.GetAll()
 		end
 		cachedTeammates = {}
-		local localWrapped = FastPlayers.GetLocal()
-		if localWrapped then
-			local myTeam = localWrapped:GetTeamNumber()
+		-- Default exclusion is the local player
+		local exclude = excludePlayer or FastPlayers.GetLocal()
+		if exclude then
+			local myTeam = exclude:GetTeamNumber()
 			for _, wp in ipairs(cachedAllPlayers) do
-				if wp ~= localWrapped and wp:GetTeamNumber() == myTeam then
+				if wp:GetTeamNumber() == myTeam and wp ~= exclude then
 					cachedTeammates[#cachedTeammates + 1] = wp
 				end
 			end
@@ -87,22 +89,25 @@ function FastPlayers.GetTeammates()
 	return cachedTeammates
 end
 
---- Returns list of enemies (excluding local), builds cache on first access this tick.
+--- Returns list of enemies (players on a different team).
+---@return WrappedPlayer[]
 function FastPlayers.GetEnemies()
 	if not FastPlayers.EnemiesUpdated then
 		if not FastPlayers.AllUpdated then
 			FastPlayers.GetAll()
 		end
 		cachedEnemies = {}
-
-		local myTeam = FastPlayers.GetLocal():GetTeamNumber()
-		for _, wp in ipairs(cachedAllPlayers) do
-			if wp ~= localWrapped and wp:GetTeamNumber() ~= myTeam then
-				cachedEnemies[#cachedEnemies + 1] = wp
+		local localWrapped = FastPlayers.GetLocal()
+		if localWrapped then
+			local myTeam = localWrapped:GetTeamNumber()
+			for _, wp in ipairs(cachedAllPlayers) do
+				if wp:GetTeamNumber() ~= myTeam then
+					cachedEnemies[#cachedEnemies + 1] = wp
+				end
 			end
 		end
+		FastPlayers.EnemiesUpdated = true
 	end
-	FastPlayers.EnemiesUpdated = true
 	return cachedEnemies
 end
 
