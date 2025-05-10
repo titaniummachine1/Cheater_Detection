@@ -5,7 +5,6 @@
             "label": "Run BundleAndDeploy.bat",
             "type": "shell",
             "command": "${workspaceFolder}/BundleAndDeploy.bat",
-            "problemMatcher": [],
             "group": {
                 "kind": "build",
                 "isDefault": true

@@ -108,7 +108,7 @@ Common.Notify = Common.Lib.UI.Notify
 Common.TF2 = Common.Lib.TF2
 Common.Math = Common.Lib.Utils.Math
 Common.Conversion = Common.Lib.Utils.Conversion
-Common.WPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
+Common.WPlayer = Common.TF2.WPlayer
 Common.PR = Common.Lib.TF2.PlayerResource
 Common.Helpers = Common.Lib.TF2.Helpers
 

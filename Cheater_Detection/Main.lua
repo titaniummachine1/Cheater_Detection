@@ -48,7 +48,7 @@ local function OnCreateMove(cmd)
 	for _, Player in ipairs(allPlayers) do
 		-- Get the steamid for the player
 		local steamid = Player:GetSteamID64()
-		print(steamid)
+
 		if steamid then
 			local viewAngles = Player:GetEyeAngles()
 			local entityFlags = Player:GetPropInt("m_fFlags")

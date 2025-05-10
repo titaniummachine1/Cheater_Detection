@@ -5,8 +5,9 @@
 -- Get required modules
 local Common = require("Cheater_Detection.Utils.Common")
 
-local lnxLib = Common.Lib
-assert(lnxLib, "lnxLib is nil")
+assert(Common, "Common is nil")
+local WPlayer = Common.WPlayer
+assert(WPlayer, "WPlayer is nil")
 
 ---@class WrappedPlayer
 ---@field _basePlayer table Base WPlayer from lnxLib
@@ -22,7 +23,7 @@ function WrappedPlayer.FromEntity(entity)
 		return nil
 	end
 
-	local basePlayer = lnxLib.TF2.WPlayer.FromEntity(entity)
+	local basePlayer = WPlayer.FromEntity(entity)
 	if not basePlayer then
 		return nil
 	end
@@ -51,7 +52,7 @@ setmetatable(WrappedPlayer, {
 		end
 
 		-- If this is a function, wrap it to properly handle 'self'
-		local baseValue = lnxLib.TF2.WPlayer[key]
+		local baseValue = WPlayer[key]
 		if type(baseValue) == "function" then
 			return function(self, ...)
 				return self._basePlayer[key](self._basePlayer, ...)

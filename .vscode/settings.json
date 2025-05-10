@@ -5,6 +5,16 @@
       // Or if using LuaFormat: "editor.defaultFormatter": "koihik.vscode-lua-format",
       "editor.formatOnSave": true
     },
-    "stylua.targetLuaVersion": "5.4",
-    "stylua.searchParentDirectories": true
-  }
+    "stylua.searchParentDirectories": true,
+    "emeraldwalk.runonsave": {
+        "commands": [
+            {
+                "match": "\\.lua$",
+                "isAsync": true,
+                "cmd": "${workspaceFolder}/BundleAndDeploy.bat",
+                "message": "Attempting to run default build task for ${fileBasename}...",
+                "autoShowOutputPanel": "error"
+            }
+        ]
+    }
+}
