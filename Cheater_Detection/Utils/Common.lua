@@ -342,16 +342,16 @@ function Common.CheckConnectionState()
 		return { stable = false, reason = "Timing out" }
 	end
 
-	-- Check for demo playback (not a real server)
+	-- If we're just playing a demo, consider connection perfectly stable and skip further checks
 	if netChannel:IsPlayback() then
-		return { stable = true, reason = "Demo playback" }
+		return { stable = true, reason = "Demo" }
 	end
 
-	-- Check latency, choke, and loss (incoming)
+	-- Check latency, choke, and loss (incoming) — only for real servers
 	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
 	local choke = netChannel:GetAvgChoke(E_Flows.FLOW_INCOMING)
 	local loss = netChannel:GetAvgLoss(E_Flows.FLOW_INCOMING)
-	-- Thresholds: adjust as needed for your use case
+	-- Thresholds: adjust as needed
 	if latency > 0.5 then
 		return { stable = false, reason = string.format("High latency: %.2f", latency) }
 	end
