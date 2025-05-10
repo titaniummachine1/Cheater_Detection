@@ -240,7 +240,9 @@ Common.MAX_HISTORY = 66
 ---@param player table|Entity WrappedPlayer or entity implementing required methods
 ---@return table record
 function Common.createRecordFromPlayer(player)
-	if not player or type(player.GetEyeAngles) ~= "function" then return nil end
+	if not player or type(player.GetEyeAngles) ~= "function" then
+		return nil
+	end
 
 	return Common.createRecord(
 		player:GetEyeAngles(),
@@ -253,16 +255,20 @@ function Common.createRecordFromPlayer(player)
 end
 
 -- Push snapshot into player's history and keep size bounded
----@param steamid integer|string SteamID64
 ---@param player Entity|table Wrapped player / entity
-function Common.pushHistory(steamid, player)
-	if not steamid or not player then return end
+function Common.pushHistory(player)
+	local steamid = player:GetSteamID64()
+	if not steamid or not player then
+		return
+	end
 	G.PlayerData[steamid] = G.PlayerData[steamid] or {}
 	local pdata = G.PlayerData[steamid]
 	pdata.History = pdata.History or {}
 
 	local record = Common.createRecordFromPlayer(player)
-	if not record then return end -- skip invalid player
+	if not record then
+		return
+	end -- skip invalid player
 
 	pdata.Current = record
 	table.insert(pdata.History, record)

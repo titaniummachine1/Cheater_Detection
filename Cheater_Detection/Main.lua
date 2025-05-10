@@ -44,28 +44,26 @@ local function OnCreateMove(cmd)
 	-- Check connection state and store in G
 	local ConnectionState = Common.CheckConnectionState()
 
+	--if not stable connection then dont do any checks
+	if not ConnectionState.stable then
+		return
+	end
+
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do
-		-- Get the steamid for the player
-		local steamid = Player:GetSteamID64()
+		Common.pushHistory(Player)
 
-		if steamid then
-			Common.pushHistory(steamid, Player)
+		-- Perform detection checks
+		--Detections.CheckAngles(Player, entity)
+		--Detections.CheckDuckSpeed(Player, entity)
+		--Detections.CheckBunnyHop(Player, entity)
 
-			-- Perform detection checks
-			--Detections.CheckAngles(wrappedPlayer, entity)
-			--Detections.CheckDuckSpeed(wrappedPlayer, entity)
-			--Detections.CheckBunnyHop(wrappedPlayer, entity)
-
-			if G.ConnectionState.stable then
-				-- Optionally, print or log the reason for instability
-				--FakeLag_check(wrappedPlayer, entity)
-				--Warp_check(wrappedPlayer, entity)
-				--warp_recharge_check(wrappedPlayer, entity)
-				--triggerbot_check(wrappedPlayer, entity)
-				--smooth_aimbot_check(wrappedPlayer, entity)
-			end
-		end
+		-- Optionally, print or log the reason for instability
+		--FakeLag_check(wrappedPlayer, entity)
+		--Warp_check(wrappedPlayer, entity)
+		--warp_recharge_check(wrappedPlayer, entity)
+		--triggerbot_check(wrappedPlayer, entity)
+		--smooth_aimbot_check(wrappedPlayer, entity)
 	end
 end
 
