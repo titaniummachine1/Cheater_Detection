@@ -64,25 +64,36 @@ function FastPlayers.GetLocal()
 	return cachedLocal
 end
 
---- Returns list of teammates, excluding a specified player or the local player by default.
----@param excludePlayer WrappedPlayer? Optional wrapped instance to exclude (default is local player)
+--- Returns list of teammates, optionally excluding a player (or the local player).
+---@param exclude boolean|WrappedPlayer? Pass `true` to exclude the local player, or a WrappedPlayer instance to exclude that specific teammate. Omit/nil to include everyone.
 ---@return WrappedPlayer[]
-function FastPlayers.GetTeammates(excludePlayer)
+function FastPlayers.GetTeammates(exclude)
 	if not FastPlayers.TeammatesUpdated then
 		if not FastPlayers.AllUpdated then
 			FastPlayers.GetAll()
 		end
+
 		cachedTeammates = {}
-		-- Default exclusion is the local player
-		local exclude = excludePlayer or FastPlayers.GetLocal()
-		if exclude then
-			local myTeam = exclude:GetTeamNumber()
+
+		-- Determine which player (if any) to exclude
+		local localPlayer = FastPlayers.GetLocal()
+		local excludePlayer = nil
+		if exclude == true then
+			excludePlayer = localPlayer -- explicitly exclude self
+		elseif type(exclude) == "table" then
+			excludePlayer = exclude
+		end
+
+		-- Use local player's team for filtering
+		local myTeam = localPlayer and localPlayer:GetTeamNumber() or nil
+		if myTeam then
 			for _, wp in ipairs(cachedAllPlayers) do
-				if wp:GetTeamNumber() == myTeam and wp ~= exclude then
+				if wp:GetTeamNumber() == myTeam and wp ~= excludePlayer then
 					cachedTeammates[#cachedTeammates + 1] = wp
 				end
 			end
 		end
+
 		FastPlayers.TeammatesUpdated = true
 	end
 	return cachedTeammates
@@ -96,9 +107,9 @@ function FastPlayers.GetEnemies()
 			FastPlayers.GetAll()
 		end
 		cachedEnemies = {}
-		local localWrapped = FastPlayers.GetLocal()
-		if localWrapped then
-			local myTeam = localWrapped:GetTeamNumber()
+		local pLocal = FastPlayers.GetLocal()
+		if pLocal then
+			local myTeam = pLocal:GetTeamNumber()
 			for _, wp in ipairs(cachedAllPlayers) do
 				if wp:GetTeamNumber() ~= myTeam then
 					cachedEnemies[#cachedEnemies + 1] = wp
