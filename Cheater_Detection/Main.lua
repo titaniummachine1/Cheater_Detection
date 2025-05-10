@@ -50,28 +50,7 @@ local function OnCreateMove(cmd)
 		local steamid = Player:GetSteamID64()
 
 		if steamid then
-			local viewAngles = Player:GetEyeAngles()
-			local entityFlags = Player:GetPropInt("m_fFlags")
-			-- Correct bitwise flag check (assuming FL_ONGROUND is the correct global constant)
-			local isOnGround = (entityFlags & FL_ONGROUND) ~= 0
-			local headHitboxPosition = Player:GetHitboxPos(1)
-			local bodyHitboxPosition = Player:GetHitboxPos(4)
-			local viewPos = Player:GetEyePos()
-			local simulationTime = Player:GetSimulationTime()
-
-			--[[Update history
-			G.PlayerData[steamid].History = G.PlayerData[steamid].History or {}
-
-			-- Gather player data
-			G.PlayerData[steamid].Current =
-				Common.createRecord(viewAngles, viewPos, headHitboxPosition, bodyHitboxPosition, simulationTime, isOnGround)
-
-			table.insert(G.PlayerData[steamid].History, G.PlayerData[steamid].Current)
-
-			-- Keep the history table size to a maximum of 66
-			if #G.PlayerData[steamid].History > 66 then
-				table.remove(G.PlayerData[steamid].History, 1)
-			end
+			Common.pushHistory(steamid, Player)
 
 			-- Perform detection checks
 			--Detections.CheckAngles(wrappedPlayer, entity)
@@ -85,7 +64,7 @@ local function OnCreateMove(cmd)
 				--warp_recharge_check(wrappedPlayer, entity)
 				--triggerbot_check(wrappedPlayer, entity)
 				--smooth_aimbot_check(wrappedPlayer, entity)
-			end]]
+			end
 		end
 	end
 end

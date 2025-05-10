@@ -233,6 +233,45 @@ function Common.createRecord(angle, position, headHitbox, bodyHitbox, simTime, o
 	}
 end
 
+-- Maximum number of historical snapshots to keep per player
+Common.MAX_HISTORY = 66
+
+-- Convenience: build a record directly from a player wrapper/entity
+---@param player table|Entity WrappedPlayer or entity implementing required methods
+---@return table record
+function Common.createRecordFromPlayer(player)
+	if not player or type(player.GetEyeAngles) ~= "function" then return nil end
+
+	return Common.createRecord(
+		player:GetEyeAngles(),
+		player:GetEyePos(),
+		player:GetHitboxPos(1), -- Head
+		player:GetHitboxPos(4), -- Body
+		player:GetSimulationTime(),
+		player:IsOnGround()
+	)
+end
+
+-- Push snapshot into player's history and keep size bounded
+---@param steamid integer|string SteamID64
+---@param player Entity|table Wrapped player / entity
+function Common.pushHistory(steamid, player)
+	if not steamid or not player then return end
+	G.PlayerData[steamid] = G.PlayerData[steamid] or {}
+	local pdata = G.PlayerData[steamid]
+	pdata.History = pdata.History or {}
+
+	local record = Common.createRecordFromPlayer(player)
+	if not record then return end -- skip invalid player
+
+	pdata.Current = record
+	table.insert(pdata.History, record)
+
+	if #pdata.History > Common.MAX_HISTORY then
+		table.remove(pdata.History, 1)
+	end
+end
+
 function Common.FromSteamid32To64(steamid32)
 	return "[U:1:" .. steamid32 .. "]"
 end
