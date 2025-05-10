@@ -1,0 +1,37 @@
+{
+    "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
+    "Lua.runtime.version": "Lua 5.4",
+    "Lua.diagnostics.globals": [
+        "client",
+        "entities",
+        "engine",
+        "draw",
+        "callbacks",
+        "FL_ONGROUND",
+        "playerlist",
+        "FL_DUCKING",
+        "FL_WATERJUMP",
+        "FL_ONTRAIN",
+        "FL_INRAIN",
+        "FL_FROZEN",
+        "FL_ATCONTROLS",
+        "FL_FAKECLIENT",
+        "FL_INWATER",
+        "MASK_SHOT",
+        "globals",
+        "TEAM_UNASSIGNED",
+        "TEAM_SPECTATOR",
+        "EulerAngles",
+        "Vector3",
+        "steam",
+        "http",
+        "printc",
+        "warn",
+        "ImMenu",
+        "loadlib"
+    ],
+    "Lua.runtime.pathStrict": false,
+    "Lua.workspace.library": [
+        "${3rd}/lfs/library"
+    ]
+}

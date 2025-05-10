@@ -108,80 +108,11 @@ Common.Notify = Common.Lib.UI.Notify
 Common.TF2 = Common.Lib.TF2
 Common.Math = Common.Lib.Utils.Math
 Common.Conversion = Common.Lib.Utils.Conversion
-Common.WPlayer = Common.Lib.TF2.WPlayer
+Common.WPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 Common.PR = Common.Lib.TF2.PlayerResource
 Common.Helpers = Common.Lib.TF2.Helpers
 
--- Monkey-patch WPlayer with additional helpers
-do
-	--- Returns the underlying raw entity
-	function Common.WPlayer:GetRawEntity()
-		return self._rawEntity
-	end
-
-	--- Checks if a given entity is valid through Common.IsValidPlayer
-	function Common.WPlayer:IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
-		return Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
-	end
-
-	--- Get SteamID64 for this player object
-	function Common.WPlayer:GetSteamID64()
-		return Common.GetSteamID64(self)
-	end
-
-	--- Check if player is on the ground via m_fFlags
-	function Common.WPlayer:IsOnGround()
-		local flags = self:GetPropInt("m_fFlags")
-		return (flags & FL_ONGROUND) ~= 0
-	end
-
-	--- Returns the view offset from the player's origin as a Vector3
-	function Common.WPlayer:GetViewOffset()
-		return self:GetPropVector("localdata", "m_vecViewOffset[0]")
-	end
-
-	--- Returns the player's eye position in world coordinates
-	function Common.WPlayer:GetEyePos()
-		return self:GetAbsOrigin() + self:GetViewOffset()
-	end
-
-	--- Returns the player's eye angles as an EulerAngles object
-	function Common.WPlayer:GetEyeAngles()
-		local ang = self:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
-		return EulerAngles(ang.x, ang.y, ang.z)
-	end
-
-	--- Returns the world position the player is looking at by tracing a ray
-	function Common.WPlayer:GetLookPos()
-		local eyePos = self:GetEyePos()
-		local eyeAng = self:GetEyeAngles()
-		local targetPos = eyePos + eyeAng:Forward() * 8192
-		local tr = engine.TraceLine(eyePos, targetPos, MASK_SHOT)
-		return tr and tr.endpos or nil
-	end
-
-	--- Returns the currently active weapon wrapper
-	function Common.WPlayer:GetActiveWeapon()
-		local w = self:GetPropEntity("m_hActiveWeapon")
-		return w and Common.WWeapon.FromEntity(w) or nil
-	end
-
-	--- Returns the player's observer mode
-	function Common.WPlayer:GetObserverMode()
-		return self:GetPropInt("m_iObserverMode")
-	end
-
-	--- Returns the player's observer target wrapper
-	function Common.WPlayer:GetObserverTarget()
-		local target = self:GetPropEntity("m_hObserverTarget")
-		return WPlayer.FromEntity(target)
-	end
-
-	--- Returns the next attack time
-	function Common.WPlayer:GetNextAttack()
-		return self:GetPropFloat("m_flNextAttack")
-	end
-end
+-- Now using WrappedPlayer module instead of monkey patching
 
 local cachedSteamIDs = {}
 local lastTick = -1

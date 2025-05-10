@@ -1,0 +1,1 @@
+{"version":3,"file":"ModuleBundlingError.d.ts","sourceRoot":"","sources":["../src/errors/ModuleBundlingError.ts"],"names":[],"mappings":"AAAA,MAAM,CAAC,OAAO,OAAO,mBAAoB,SAAQ,KAAK;IACrD,UAAU,EAAE,MAAM,CAAA;IAClB,KAAK,EAAE,KAAK,CAAA;gBAEA,UAAU,EAAE,MAAM,EAAE,KAAK,EAAE,KAAK;CAK5C"}

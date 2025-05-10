@@ -5,6 +5,7 @@
 --[[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
+local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 
 --[[ Module Declaration ]]
 local FastPlayers = {}
@@ -33,7 +34,7 @@ end
 --[[ Public API ]]
 
 --- Returns list of valid, non-dormant players once per tick.
----@return Common.WPlayer[]
+---@return WrappedPlayer[]
 function FastPlayers.GetAll(excludelocal)
 	if FastPlayers.AllUpdated then
 		return cachedAllPlayers
@@ -43,7 +44,7 @@ function FastPlayers.GetAll(excludelocal)
 	local debugMode = G.Menu.Advanced.debug
 	for _, ent in pairs(entities.FindByClass("CTFPlayer") or {}) do
 		if Common.IsValidPlayer(ent, debugMode, true, excludelocal) then
-			local wrapped = Common.WPlayer.FromEntity(ent)
+			local wrapped = WrappedPlayer.FromEntity(ent)
 			if wrapped then
 				cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
 			end
@@ -53,19 +54,19 @@ function FastPlayers.GetAll(excludelocal)
 	return cachedAllPlayers
 end
 
---- Returns the local player as a WPlayer instance, cached after first wrap.
----@return Common.WPlayer?
+--- Returns the local player as a WrappedPlayer instance, cached after first wrap.
+---@return WrappedPlayer?
 function FastPlayers.GetLocal()
 	if not cachedLocal then
 		local rawLocal = entities.GetLocalPlayer()
-		cachedLocal = rawLocal and Common.WPlayer.FromEntity(rawLocal) or nil
+		cachedLocal = rawLocal and WrappedPlayer.FromEntity(rawLocal) or nil
 	end
 	return cachedLocal
 end
 
 --- Returns list of teammates, excluding a specified player or the local player by default.
----@param excludePlayer Common.WPlayer? Optional wrapped instance to exclude (default is local player)
----@return Common.WPlayer[]
+---@param excludePlayer WrappedPlayer? Optional wrapped instance to exclude (default is local player)
+---@return WrappedPlayer[]
 function FastPlayers.GetTeammates(excludePlayer)
 	if not FastPlayers.TeammatesUpdated then
 		if not FastPlayers.AllUpdated then
@@ -88,7 +89,7 @@ function FastPlayers.GetTeammates(excludePlayer)
 end
 
 --- Returns list of enemies (players on a different team).
----@return Common.WPlayer[]
+---@return WrappedPlayer[]
 function FastPlayers.GetEnemies()
 	if not FastPlayers.EnemiesUpdated then
 		if not FastPlayers.AllUpdated then
