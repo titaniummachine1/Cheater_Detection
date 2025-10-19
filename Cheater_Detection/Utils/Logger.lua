@@ -12,13 +12,12 @@ Logger.Levels = {
 	ERROR = 4,   -- Errors
 }
 
--- Color codes for console
+-- Color codes (RGBA)
 local Colors = {
-	DEBUG = "\x07AAAAAA",   -- Gray
-	INFO = "\x0799CCFF",    -- Light blue
-	WARNING = "\x07FFAA00", -- Orange
-	ERROR = "\x07FF4444",   -- Red
-	RESET = "\x07FFFFFF",   -- White
+	DEBUG = {170, 170, 170, 255},   -- Gray
+	INFO = {153, 204, 255, 255},    -- Light blue
+	WARNING = {255, 170, 0, 255},   -- Orange
+	ERROR = {255, 68, 68, 255},     -- Red
 }
 
 --- Check if log level is enabled
@@ -43,7 +42,7 @@ function Logger.Log(level, category, message)
 	end
 	
 	local levelName = ""
-	local color = Colors.RESET
+	local color = nil
 	
 	if level == Logger.Levels.DEBUG then
 		levelName = "DEBUG"
@@ -59,7 +58,11 @@ function Logger.Log(level, category, message)
 		color = Colors.ERROR
 	end
 	
-	print(string.format("%s[%s] [%s]%s %s", color, levelName, category, Colors.RESET, message))
+	if color then
+		printc(color[1], color[2], color[3], color[4], string.format("[%s] [%s] %s", levelName, category, message))
+	else
+		print(string.format("[%s] [%s] %s", levelName, category, message))
+	end
 end
 
 --- Convenience functions
