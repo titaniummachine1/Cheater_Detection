@@ -98,11 +98,17 @@ local function DrawMenu()
 		Advanced.Aimbot.enable = TimMenu.Checkbox("Enable Aimbot Detection", Advanced.Aimbot.enable)
 		TimMenu.NextLine()
 		if Advanced.Aimbot.enable then
-			Advanced.Aimbot.silent = TimMenu.Checkbox("  Silent Aim", Advanced.Aimbot.silent)
-			TimMenu.NextLine()
-			Advanced.Aimbot.plain = TimMenu.Checkbox("  Plain Aim", Advanced.Aimbot.plain)
-			TimMenu.NextLine()
-			Advanced.Aimbot.smooth = TimMenu.Checkbox("  Smooth Aim", Advanced.Aimbot.smooth)
+			-- Initialize if needed
+			if type(Advanced.Aimbot.silent) ~= "boolean" then Advanced.Aimbot.silent = true end
+			if type(Advanced.Aimbot.plain) ~= "boolean" then Advanced.Aimbot.plain = true end
+			if type(Advanced.Aimbot.smooth) ~= "boolean" then Advanced.Aimbot.smooth = true end
+			
+			local aimbotTypes = {"Silent Aim", "Plain Aim", "Smooth Aim"}
+			local aimbotTable = {Advanced.Aimbot.silent, Advanced.Aimbot.plain, Advanced.Aimbot.smooth}
+			aimbotTable = TimMenu.Combo("Aimbot Types", aimbotTable, aimbotTypes)
+			Advanced.Aimbot.silent = aimbotTable[1]
+			Advanced.Aimbot.plain = aimbotTable[2]
+			Advanced.Aimbot.smooth = aimbotTable[3]
 			TimMenu.NextLine()
 		end
 		Advanced.triggerbot = TimMenu.Checkbox("Triggerbot Detection", Advanced.triggerbot)
@@ -122,13 +128,19 @@ local function DrawMenu()
 		Misc.Autovote = TimMenu.Checkbox("Enable Auto Vote", Misc.Autovote)
 		TimMenu.NextLine()
 		if Misc.Autovote then
-			Misc.intent.legit = TimMenu.Checkbox("  Vote Legit Players", Misc.intent.legit)
-			TimMenu.NextLine()
-			Misc.intent.cheater = TimMenu.Checkbox("  Vote Cheaters", Misc.intent.cheater)
-			TimMenu.NextLine()
-			Misc.intent.bot = TimMenu.Checkbox("  Vote Bots", Misc.intent.bot)
-			TimMenu.NextLine()
-			Misc.intent.friend = TimMenu.Checkbox("  Exclude Friends", Misc.intent.friend)
+			-- Initialize if needed
+			if type(Misc.intent.legit) ~= "boolean" then Misc.intent.legit = true end
+			if type(Misc.intent.cheater) ~= "boolean" then Misc.intent.cheater = true end
+			if type(Misc.intent.bot) ~= "boolean" then Misc.intent.bot = true end
+			if type(Misc.intent.friend) ~= "boolean" then Misc.intent.friend = false end
+			
+			local voteTargets = {"Legit Players", "Cheaters", "Bots", "Exclude Friends"}
+			local voteTable = {Misc.intent.legit, Misc.intent.cheater, Misc.intent.bot, Misc.intent.friend}
+			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
+			Misc.intent.legit = voteTable[1]
+			Misc.intent.cheater = voteTable[2]
+			Misc.intent.bot = voteTable[3]
+			Misc.intent.friend = voteTable[4]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
@@ -138,29 +150,46 @@ local function DrawMenu()
 		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Enable Vote Reveal", Misc.Vote_Reveal.Enable)
 		TimMenu.NextLine()
 		if Misc.Vote_Reveal.Enable then
-			Misc.Vote_Reveal.TargetTeam.MyTeam = TimMenu.Checkbox("  My Team", Misc.Vote_Reveal.TargetTeam.MyTeam)
+			-- Initialize if needed
+			if type(Misc.Vote_Reveal.TargetTeam.MyTeam) ~= "boolean" then Misc.Vote_Reveal.TargetTeam.MyTeam = true end
+			if type(Misc.Vote_Reveal.TargetTeam.enemyTeam) ~= "boolean" then Misc.Vote_Reveal.TargetTeam.enemyTeam = true end
+			if type(Misc.Vote_Reveal.PartyChat) ~= "boolean" then Misc.Vote_Reveal.PartyChat = true end
+			if type(Misc.Vote_Reveal.Console) ~= "boolean" then Misc.Vote_Reveal.Console = true end
+			
+			local teamOptions = {"My Team", "Enemy Team"}
+			local teamTable = {Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam}
+			teamTable = TimMenu.Combo("Target Teams", teamTable, teamOptions)
+			Misc.Vote_Reveal.TargetTeam.MyTeam = teamTable[1]
+			Misc.Vote_Reveal.TargetTeam.enemyTeam = teamTable[2]
 			TimMenu.NextLine()
-			Misc.Vote_Reveal.TargetTeam.enemyTeam =
-				TimMenu.Checkbox("  Enemy Team", Misc.Vote_Reveal.TargetTeam.enemyTeam)
-			TimMenu.NextLine()
-			Misc.Vote_Reveal.PartyChat = TimMenu.Checkbox("  Party Chat", Misc.Vote_Reveal.PartyChat)
-			TimMenu.NextLine()
-			Misc.Vote_Reveal.Console = TimMenu.Checkbox("  Console Log", Misc.Vote_Reveal.Console)
+			
+			local outputOptions = {"Party Chat", "Console"}
+			local outputTable = {Misc.Vote_Reveal.PartyChat, Misc.Vote_Reveal.Console}
+			outputTable = TimMenu.Combo("Vote Output", outputTable, outputOptions)
+			Misc.Vote_Reveal.PartyChat = outputTable[1]
+			Misc.Vote_Reveal.Console = outputTable[2]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Class Change Reveal")
-		Misc.Class_Change_Reveal.Enable =
-			TimMenu.Checkbox("Enable Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Enable Class Change Reveal", Misc.Class_Change_Reveal.Enable)
 		TimMenu.NextLine()
 		if Misc.Class_Change_Reveal.Enable then
-			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("  Enemy Only", Misc.Class_Change_Reveal.EnemyOnly)
+			-- Initialize if needed
+			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then Misc.Class_Change_Reveal.EnemyOnly = true end
+			if type(Misc.Class_Change_Reveal.PartyChat) ~= "boolean" then Misc.Class_Change_Reveal.PartyChat = true end
+			if type(Misc.Class_Change_Reveal.Console) ~= "boolean" then Misc.Class_Change_Reveal.Console = true end
+			
+			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly)
 			TimMenu.NextLine()
-			Misc.Class_Change_Reveal.PartyChat = TimMenu.Checkbox("  Party Chat", Misc.Class_Change_Reveal.PartyChat)
-			TimMenu.NextLine()
-			Misc.Class_Change_Reveal.Console = TimMenu.Checkbox("  Console Log", Misc.Class_Change_Reveal.Console)
+			
+			local classOutputOptions = {"Party Chat", "Console"}
+			local classOutputTable = {Misc.Class_Change_Reveal.PartyChat, Misc.Class_Change_Reveal.Console}
+			classOutputTable = TimMenu.Combo("Class Change Output", classOutputTable, classOutputOptions)
+			Misc.Class_Change_Reveal.PartyChat = classOutputTable[1]
+			Misc.Class_Change_Reveal.Console = classOutputTable[2]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
