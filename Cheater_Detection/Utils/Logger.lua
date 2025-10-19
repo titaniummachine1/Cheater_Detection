@@ -28,7 +28,21 @@ local function isLevelEnabled(level)
 		return level >= Logger.Levels.INFO -- Default: INFO and above
 	end
 	
-	local enabledLevel = G.Menu.Advanced.LogLevel
+	-- Convert boolean table to level number: [Debug, Info, Warning, Error]
+	local logLevelTable = G.Menu.Advanced.LogLevel
+	local enabledLevel = Logger.Levels.INFO -- Default
+	
+	if type(logLevelTable) == "table" then
+		for i = 1, 4 do
+			if logLevelTable[i] then
+				enabledLevel = i
+				break
+			end
+		end
+	elseif type(logLevelTable) == "number" then
+		enabledLevel = logLevelTable
+	end
+	
 	return level >= enabledLevel
 end
 

@@ -13,7 +13,7 @@ local Default_Config = {
 
 	Advanced = {
 		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
-		LogLevel = 2, -- 1=Debug, 2=Info, 3=Warning, 4=Error (default: Info)
+		LogLevel = {false, true, false, false}, -- [Debug, Info, Warning, Error] (default: Info)
 		Choke = true, --fakelag
 		Warp = true,
 		Bhop = true,
