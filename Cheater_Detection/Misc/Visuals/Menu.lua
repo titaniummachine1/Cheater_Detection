@@ -23,7 +23,12 @@ local function DrawMenu()
 	end
 
 	-- Debug mode indicator (drawn outside TimMenu window)
-	if G.Menu.Advanced.debug then
+	local debugMode = false
+	if type(G.Menu.Advanced.LogLevel) == "table" and G.Menu.Advanced.LogLevel[1] then
+		debugMode = true
+	end
+	
+	if debugMode then
 		draw.Color(255, 0, 0, 255)
 		draw.SetFont(Fonts.Verdana)
 		draw.Text(20, 120, "Debug Mode!!! Some Features Might malfunction")
