@@ -27,7 +27,7 @@ local function DrawMenu()
 	if type(G.Menu.Advanced.LogLevel) == "table" and G.Menu.Advanced.LogLevel[1] then
 		debugMode = true
 	end
-	
+
 	if debugMode then
 		draw.Color(255, 0, 0, 255)
 		draw.SetFont(Fonts.Verdana)
@@ -99,12 +99,18 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		if Advanced.Aimbot.enable then
 			-- Initialize if needed
-			if type(Advanced.Aimbot.silent) ~= "boolean" then Advanced.Aimbot.silent = true end
-			if type(Advanced.Aimbot.plain) ~= "boolean" then Advanced.Aimbot.plain = true end
-			if type(Advanced.Aimbot.smooth) ~= "boolean" then Advanced.Aimbot.smooth = true end
-			
-			local aimbotTypes = {"Silent Aim", "Plain Aim", "Smooth Aim"}
-			local aimbotTable = {Advanced.Aimbot.silent, Advanced.Aimbot.plain, Advanced.Aimbot.smooth}
+			if type(Advanced.Aimbot.silent) ~= "boolean" then
+				Advanced.Aimbot.silent = true
+			end
+			if type(Advanced.Aimbot.plain) ~= "boolean" then
+				Advanced.Aimbot.plain = true
+			end
+			if type(Advanced.Aimbot.smooth) ~= "boolean" then
+				Advanced.Aimbot.smooth = true
+			end
+
+			local aimbotTypes = { "Silent Aim", "Plain Aim", "Smooth Aim" }
+			local aimbotTable = { Advanced.Aimbot.silent, Advanced.Aimbot.plain, Advanced.Aimbot.smooth }
 			aimbotTable = TimMenu.Combo("Aimbot Types", aimbotTable, aimbotTypes)
 			Advanced.Aimbot.silent = aimbotTable[1]
 			Advanced.Aimbot.plain = aimbotTable[2]
@@ -116,7 +122,7 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Logging")
-		local logLevels = {"Debug", "Info", "Warning", "Error"}
+		local logLevels = { "Debug", "Info", "Warning", "Error" }
 		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
 		TimMenu.Tooltip("Debug: All details | Info: Detections & saves | Warning: Issues | Error: Critical errors")
 		TimMenu.EndSector()
@@ -129,13 +135,21 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		if Misc.Autovote then
 			-- Initialize if needed
-			if type(Misc.intent.legit) ~= "boolean" then Misc.intent.legit = true end
-			if type(Misc.intent.cheater) ~= "boolean" then Misc.intent.cheater = true end
-			if type(Misc.intent.bot) ~= "boolean" then Misc.intent.bot = true end
-			if type(Misc.intent.friend) ~= "boolean" then Misc.intent.friend = false end
-			
-			local voteTargets = {"Legit Players", "Cheaters", "Bots", "Exclude Friends"}
-			local voteTable = {Misc.intent.legit, Misc.intent.cheater, Misc.intent.bot, Misc.intent.friend}
+			if type(Misc.intent.legit) ~= "boolean" then
+				Misc.intent.legit = true
+			end
+			if type(Misc.intent.cheater) ~= "boolean" then
+				Misc.intent.cheater = true
+			end
+			if type(Misc.intent.bot) ~= "boolean" then
+				Misc.intent.bot = true
+			end
+			if type(Misc.intent.friend) ~= "boolean" then
+				Misc.intent.friend = false
+			end
+
+			local voteTargets = { "Legit Players", "Cheaters", "Bots", "Exclude Friends" }
+			local voteTable = { Misc.intent.legit, Misc.intent.cheater, Misc.intent.bot, Misc.intent.friend }
 			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
 			Misc.intent.legit = voteTable[1]
 			Misc.intent.cheater = voteTable[2]
@@ -151,36 +165,48 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		if Misc.Vote_Reveal.Enable then
 			-- Initialize if needed
-			if type(Misc.Vote_Reveal.TargetTeam.MyTeam) ~= "boolean" then Misc.Vote_Reveal.TargetTeam.MyTeam = true end
-			if type(Misc.Vote_Reveal.TargetTeam.enemyTeam) ~= "boolean" then Misc.Vote_Reveal.TargetTeam.enemyTeam = true end
-			
+			if type(Misc.Vote_Reveal.TargetTeam.MyTeam) ~= "boolean" then
+				Misc.Vote_Reveal.TargetTeam.MyTeam = true
+			end
+			if type(Misc.Vote_Reveal.TargetTeam.enemyTeam) ~= "boolean" then
+				Misc.Vote_Reveal.TargetTeam.enemyTeam = true
+			end
+
 			-- Initialize new output options
 			Misc.Vote_Reveal.Output = Misc.Vote_Reveal.Output or {}
-			if type(Misc.Vote_Reveal.Output.PublicChat) ~= "boolean" then Misc.Vote_Reveal.Output.PublicChat = false end
-			if type(Misc.Vote_Reveal.Output.PartyChat) ~= "boolean" then Misc.Vote_Reveal.Output.PartyChat = true end
-			if type(Misc.Vote_Reveal.Output.ClientChat) ~= "boolean" then Misc.Vote_Reveal.Output.ClientChat = false end
-			if type(Misc.Vote_Reveal.Output.Console) ~= "boolean" then Misc.Vote_Reveal.Output.Console = true end
-			
-			local teamOptions = {"My Team", "Enemy Team"}
-			local teamTable = {Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam}
+			if type(Misc.Vote_Reveal.Output.PublicChat) ~= "boolean" then
+				Misc.Vote_Reveal.Output.PublicChat = false
+			end
+			if type(Misc.Vote_Reveal.Output.PartyChat) ~= "boolean" then
+				Misc.Vote_Reveal.Output.PartyChat = true
+			end
+			if type(Misc.Vote_Reveal.Output.ClientChat) ~= "boolean" then
+				Misc.Vote_Reveal.Output.ClientChat = false
+			end
+			if type(Misc.Vote_Reveal.Output.Console) ~= "boolean" then
+				Misc.Vote_Reveal.Output.Console = true
+			end
+
+			local teamOptions = { "My Team", "Enemy Team" }
+			local teamTable = { Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam }
 			teamTable = TimMenu.Combo("Target Teams", teamTable, teamOptions)
 			Misc.Vote_Reveal.TargetTeam.MyTeam = teamTable[1]
 			Misc.Vote_Reveal.TargetTeam.enemyTeam = teamTable[2]
 			TimMenu.NextLine()
-			
-			local outputOptions = {"Public Chat", "Party Chat", "Client Chat", "Console"}
+
+			local outputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
 			local outputTable = {
 				Misc.Vote_Reveal.Output.PublicChat,
 				Misc.Vote_Reveal.Output.PartyChat,
 				Misc.Vote_Reveal.Output.ClientChat,
-				Misc.Vote_Reveal.Output.Console
+				Misc.Vote_Reveal.Output.Console,
 			}
 			outputTable = TimMenu.Combo("Vote Output", outputTable, outputOptions)
 			Misc.Vote_Reveal.Output.PublicChat = outputTable[1]
 			Misc.Vote_Reveal.Output.PartyChat = outputTable[2]
 			Misc.Vote_Reveal.Output.ClientChat = outputTable[3]
 			Misc.Vote_Reveal.Output.Console = outputTable[4]
-			
+
 			-- Maintain backwards compatibility with old PartyChat/Console fields
 			Misc.Vote_Reveal.PartyChat = Misc.Vote_Reveal.Output.PartyChat
 			Misc.Vote_Reveal.Console = Misc.Vote_Reveal.Output.Console
@@ -190,35 +216,46 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Class Change Reveal")
-		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Enable Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		Misc.Class_Change_Reveal.Enable =
+			TimMenu.Checkbox("Enable Class Change Reveal", Misc.Class_Change_Reveal.Enable)
 		TimMenu.NextLine()
 		if Misc.Class_Change_Reveal.Enable then
 			-- Initialize if needed
-			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then Misc.Class_Change_Reveal.EnemyOnly = true end
-			
+			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then
+				Misc.Class_Change_Reveal.EnemyOnly = true
+			end
+
 			-- Initialize new output options
 			Misc.Class_Change_Reveal.Output = Misc.Class_Change_Reveal.Output or {}
-			if type(Misc.Class_Change_Reveal.Output.PublicChat) ~= "boolean" then Misc.Class_Change_Reveal.Output.PublicChat = false end
-			if type(Misc.Class_Change_Reveal.Output.PartyChat) ~= "boolean" then Misc.Class_Change_Reveal.Output.PartyChat = true end
-			if type(Misc.Class_Change_Reveal.Output.ClientChat) ~= "boolean" then Misc.Class_Change_Reveal.Output.ClientChat = false end
-			if type(Misc.Class_Change_Reveal.Output.Console) ~= "boolean" then Misc.Class_Change_Reveal.Output.Console = true end
-			
+			if type(Misc.Class_Change_Reveal.Output.PublicChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.PublicChat = false
+			end
+			if type(Misc.Class_Change_Reveal.Output.PartyChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.PartyChat = true
+			end
+			if type(Misc.Class_Change_Reveal.Output.ClientChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.ClientChat = false
+			end
+			if type(Misc.Class_Change_Reveal.Output.Console) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.Console = true
+			end
+
 			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly)
 			TimMenu.NextLine()
-			
-			local classOutputOptions = {"Public Chat", "Party Chat", "Client Chat", "Console"}
+
+			local classOutputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
 			local classOutputTable = {
 				Misc.Class_Change_Reveal.Output.PublicChat,
 				Misc.Class_Change_Reveal.Output.PartyChat,
 				Misc.Class_Change_Reveal.Output.ClientChat,
-				Misc.Class_Change_Reveal.Output.Console
+				Misc.Class_Change_Reveal.Output.Console,
 			}
 			classOutputTable = TimMenu.Combo("Class Change Output", classOutputTable, classOutputOptions)
 			Misc.Class_Change_Reveal.Output.PublicChat = classOutputTable[1]
 			Misc.Class_Change_Reveal.Output.PartyChat = classOutputTable[2]
 			Misc.Class_Change_Reveal.Output.ClientChat = classOutputTable[3]
 			Misc.Class_Change_Reveal.Output.Console = classOutputTable[4]
-			
+
 			-- Maintain backwards compatibility with old PartyChat/Console fields
 			Misc.Class_Change_Reveal.PartyChat = Misc.Class_Change_Reveal.Output.PartyChat
 			Misc.Class_Change_Reveal.Console = Misc.Class_Change_Reveal.Output.Console
@@ -227,8 +264,142 @@ local function DrawMenu()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Notifications")
-		Misc.Chat_notify = TimMenu.Checkbox("Chat Notifications", Misc.Chat_notify)
+		TimMenu.BeginSector("Join Notifications")
+		-- Initialize JoinNotifications if needed
+		Misc.JoinNotifications = Misc.JoinNotifications or {}
+		local JN = Misc.JoinNotifications
+
+		if type(JN.Enable) ~= "boolean" then
+			JN.Enable = true
+		end
+		if type(JN.CheckCheater) ~= "boolean" then
+			JN.CheckCheater = true
+		end
+		if type(JN.CheckValve) ~= "boolean" then
+			JN.CheckValve = true
+		end
+		if type(JN.ValveAutoDisconnect) ~= "boolean" then
+			JN.ValveAutoDisconnect = false
+		end
+
+		JN.Enable = TimMenu.Checkbox("Enable Join Notifications", JN.Enable)
+		TimMenu.NextLine()
+
+		if JN.Enable then
+			-- Target filters
+			local notifTypes = { "Cheaters", "Valve" }
+			local notifTable = { JN.CheckCheater, JN.CheckValve }
+			notifTable = TimMenu.Combo("Notify For", notifTable, notifTypes)
+			JN.CheckCheater = notifTable[1]
+			JN.CheckValve = notifTable[2]
+			TimMenu.NextLine()
+
+			-- Default output channels
+			JN.DefaultOutput = JN.DefaultOutput or {}
+			if type(JN.DefaultOutput.PublicChat) ~= "boolean" then
+				JN.DefaultOutput.PublicChat = false
+			end
+			if type(JN.DefaultOutput.PartyChat) ~= "boolean" then
+				JN.DefaultOutput.PartyChat = true
+			end
+			if type(JN.DefaultOutput.ClientChat) ~= "boolean" then
+				JN.DefaultOutput.ClientChat = false
+			end
+			if type(JN.DefaultOutput.Console) ~= "boolean" then
+				JN.DefaultOutput.Console = true
+			end
+
+			local defaultOutputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
+			local defaultOutputTable = {
+				JN.DefaultOutput.PublicChat,
+				JN.DefaultOutput.PartyChat,
+				JN.DefaultOutput.ClientChat,
+				JN.DefaultOutput.Console,
+			}
+			defaultOutputTable = TimMenu.Combo("Default Output", defaultOutputTable, defaultOutputOptions)
+			JN.DefaultOutput.PublicChat = defaultOutputTable[1]
+			JN.DefaultOutput.PartyChat = defaultOutputTable[2]
+			JN.DefaultOutput.ClientChat = defaultOutputTable[3]
+			JN.DefaultOutput.Console = defaultOutputTable[4]
+			TimMenu.NextLine()
+
+			-- Cheater override
+			if type(JN.UseCheaterOverride) ~= "boolean" then
+				JN.UseCheaterOverride = false
+			end
+			JN.UseCheaterOverride = TimMenu.Checkbox("Override Cheater Output", JN.UseCheaterOverride)
+			TimMenu.NextLine()
+
+			if JN.UseCheaterOverride then
+				JN.CheaterOverride = JN.CheaterOverride or {}
+				if type(JN.CheaterOverride.PublicChat) ~= "boolean" then
+					JN.CheaterOverride.PublicChat = false
+				end
+				if type(JN.CheaterOverride.PartyChat) ~= "boolean" then
+					JN.CheaterOverride.PartyChat = true
+				end
+				if type(JN.CheaterOverride.ClientChat) ~= "boolean" then
+					JN.CheaterOverride.ClientChat = false
+				end
+				if type(JN.CheaterOverride.Console) ~= "boolean" then
+					JN.CheaterOverride.Console = true
+				end
+
+				local cheaterOutputTable = {
+					JN.CheaterOverride.PublicChat,
+					JN.CheaterOverride.PartyChat,
+					JN.CheaterOverride.ClientChat,
+					JN.CheaterOverride.Console,
+				}
+				cheaterOutputTable = TimMenu.Combo("Cheater Output", cheaterOutputTable, defaultOutputOptions)
+				JN.CheaterOverride.PublicChat = cheaterOutputTable[1]
+				JN.CheaterOverride.PartyChat = cheaterOutputTable[2]
+				JN.CheaterOverride.ClientChat = cheaterOutputTable[3]
+				JN.CheaterOverride.Console = cheaterOutputTable[4]
+				TimMenu.NextLine()
+			end
+
+			-- Valve override
+			if type(JN.UseValveOverride) ~= "boolean" then
+				JN.UseValveOverride = false
+			end
+			JN.UseValveOverride = TimMenu.Checkbox("Override Valve Employee Output", JN.UseValveOverride)
+			TimMenu.NextLine()
+
+			if JN.UseValveOverride then
+				JN.ValveOverride = JN.ValveOverride or {}
+				if type(JN.ValveOverride.PublicChat) ~= "boolean" then
+					JN.ValveOverride.PublicChat = false
+				end
+				if type(JN.ValveOverride.PartyChat) ~= "boolean" then
+					JN.ValveOverride.PartyChat = false
+				end
+				if type(JN.ValveOverride.ClientChat) ~= "boolean" then
+					JN.ValveOverride.ClientChat = true
+				end
+				if type(JN.ValveOverride.Console) ~= "boolean" then
+					JN.ValveOverride.Console = true
+				end
+
+				local valveOutputTable = {
+					JN.ValveOverride.PublicChat,
+					JN.ValveOverride.PartyChat,
+					JN.ValveOverride.ClientChat,
+					JN.ValveOverride.Console,
+				}
+				valveOutputTable = TimMenu.Combo("Valve Output", valveOutputTable, defaultOutputOptions)
+				JN.ValveOverride.PublicChat = valveOutputTable[1]
+				JN.ValveOverride.PartyChat = valveOutputTable[2]
+				JN.ValveOverride.ClientChat = valveOutputTable[3]
+				JN.ValveOverride.Console = valveOutputTable[4]
+				TimMenu.NextLine()
+			end
+
+			-- Auto-disconnect option
+			JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Disconnect on Valve Join", JN.ValveAutoDisconnect)
+			TimMenu.Tooltip("Automatically disconnect when a Valve employee joins the server")
+			TimMenu.NextLine()
+		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	end

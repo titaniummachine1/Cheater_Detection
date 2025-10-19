@@ -6,6 +6,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")
+local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 
 local ChatPrefix = {}
 
@@ -29,7 +30,7 @@ end
 ---@param b number Blue (0-255)
 ---@return string Hex color code
 local function rgbToHex(r, g, b)
-	local hexadecimal = string.char(7) -- Use char(7) instead of \x07
+	local hexadecimal = "\x07"
 
 	for _, value in pairs({ r, g, b }) do
 		local hex = ""
@@ -49,7 +50,6 @@ local function rgbToHex(r, g, b)
 		hexadecimal = hexadecimal .. hex
 	end
 
-	print("DEBUG: rgbToHex result length=" .. #hexadecimal)
 	return hexadecimal
 end
 
@@ -58,24 +58,16 @@ end
 ---@param text string
 local function ChangeMessageContents(bf, text)
 	if not bf or type(text) ~= "string" then
-		print("DEBUG: ChangeMessageContents - invalid input!")
 		return
-	end
-
-	print("DEBUG: ChangeMessageContents - writing string length=" .. #text)
-	print("DEBUG: ChangeMessageContents - text bytes:")
-	for i = 1, #text do
-		print(string.format("  [%d] = %d (%s)", i, string.byte(text, i), string.sub(text, i, i)))
 	end
 
 	bf:SetCurBit(16)
 	bf:WriteString(text)
-	print("DEBUG: ChangeMessageContents - WriteString complete")
 end
 
 ---Get cheater status for a player
 ---@param player Entity
----@return string|nil status "CHEATER" or "SUSPICIOUS" or nil
+---@return string|nil status "CHEATER", "SUSPICIOUS", "VALVE" or nil
 ---@return table color RGB color {r, g, b}
 local function GetCheaterStatus(player)
 	if not player then
@@ -87,10 +79,17 @@ local function GetCheaterStatus(player)
 		return nil, { 255, 255, 255 }
 	end
 
+	-- Check if Valve employee first (takes priority)
+	local isValve, valveName = ValveEmployees.IsValveEmployee(steamID)
+	if isValve then
+		-- Purple for Valve employee (Valve quality item color #8650AC)
+		return "VALVE", { 134, 80, 172 }
+	end
+
 	-- Check if marked by Evidence system
 	local isMarkedCheater = Evidence.IsMarkedCheater(steamID)
 
-	-- Check if in database
+	-- Check if player is in database
 	local dbEntry = Database.GetCheater(steamID)
 	local inDatabase = dbEntry ~= nil
 
@@ -136,45 +135,52 @@ local function OnUserMessage(msg)
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)
 
-	-- DEBUG: Print all received data
-	print("=== CHAT DEBUG ===")
-	print("chatType: " .. tostring(chatType))
-	print("playerName: " .. tostring(playerName))
-	print("messageText: " .. tostring(messageText))
-	print("messageText length: " .. tostring(#messageText))
-
 	-- Get player entity
 	local player = GetPlayerFromName(playerName)
 	if not player then
-		print("DEBUG: Player entity not found!")
 		return
 	end
 
 	-- Get cheater status
 	local status, color = GetCheaterStatus(player)
-	print("DEBUG: status=" .. tostring(status))
 
 	if status then
 		-- Build colored status tag
 		local colorHex = rgbToHex(color[1], color[2], color[3])
-		print("DEBUG: colorHex=" .. tostring(colorHex))
 
 		-- Check if team message
 		local isTeamMessage = chatType ~= "TF_Chat_All"
-		print("DEBUG: isTeamMessage=" .. tostring(isTeamMessage))
 
-		-- Build message: [COLORED_TAG] PlayerName :  message (chatType is NOT included in display)
-		local newMessage = string.format("%s[%s]\x01 %s :  %s", colorHex, status, playerName, messageText)
-
-		if isTeamMessage then
-			newMessage = "(Team) " .. newMessage
+		-- Get player team color
+		local teamColor = "\x01" -- Default white
+		local playerTeam = player:GetTeamNumber()
+		if playerTeam == 2 then
+			teamColor = "\x07FF4040" -- RED team color
+		elseif playerTeam == 3 then
+			teamColor = "\x0799CCFF" -- BLU team color
 		end
 
-		print("DEBUG: final newMessage=" .. tostring(newMessage))
-		ChangeMessageContents(bf, newMessage)
-		print("=== END DEBUG ===")
-	else
-		print("DEBUG: No cheater status, not modifying message")
+		-- Determine if this is enemy team chat
+		local enemyTag = ""
+		if isTeamMessage then
+			local localPlayer = entities.GetLocalPlayer()
+			local localTeam = localPlayer and localPlayer:GetTeamNumber() or nil
+			if localTeam and playerTeam ~= 0 and playerTeam ~= localTeam then
+				enemyTag = "\x01[Enemy Chat]\x01 "
+			end
+		end
+
+		-- Build message for client chat: [COLORED_TAG] [Enemy Chat?] TeamColoredPlayerName :  message
+		local teamPrefix = isTeamMessage and "(Team) " or ""
+		local statusTag = string.format("\x01[%s%s\x01]\x01 ", colorHex, status)
+		local chatMessage =
+			string.format("%s%s%s%s%s\x01 :  %s", teamPrefix, statusTag, enemyTag, teamColor, playerName, messageText)
+
+		-- Print to chat using client.ChatPrintf (supports full length messages)
+		client.ChatPrintf(chatMessage)
+
+		-- Clear the original message so it doesn't show
+		ChangeMessageContents(bf, "")
 	end
 end
 

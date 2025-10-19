@@ -1,7 +1,7 @@
 -- Source definitions with safer processing options
 
---[[ Imports (None) ]]
--- No direct imports needed
+--[[ Imports ]]
+local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 -- [[ Imported by: Fetcher.lua ]]
 
 --[[ Module Declaration ]]
@@ -108,6 +108,16 @@ function Sources.GetActiveSources()
 		end
 	end
 	return active
+end
+
+-- Get Valve employee list from local database
+function Sources.GetValveEmployees()
+	return ValveEmployees.List
+end
+
+-- Check if SteamID is Valve employee
+function Sources.IsValveEmployee(steamID)
+	return ValveEmployees.IsValveEmployee(steamID)
 end
 
 --[[ Self-Initialization (None) ]]

@@ -67,6 +67,35 @@ local Default_Config = {
 			Console = true,
 		},
 		Chat_notify = true,
+		JoinNotifications = {
+			Enable = true,
+			CheckCheater = true,
+			CheckValve = true,
+			ValveAutoDisconnect = false,
+			-- Default output channels (used if no override)
+			DefaultOutput = {
+				PublicChat = false,
+				PartyChat = true,
+				ClientChat = false,
+				Console = true,
+			},
+			-- Cheater-specific overrides
+			UseCheaterOverride = false,
+			CheaterOverride = {
+				PublicChat = false,
+				PartyChat = true,
+				ClientChat = false,
+				Console = true,
+			},
+			-- Valve employee-specific overrides
+			UseValveOverride = false,
+			ValveOverride = {
+				PublicChat = false,
+				PartyChat = false,
+				ClientChat = true,
+				Console = true,
+			},
+		},
 	},
 }
 
