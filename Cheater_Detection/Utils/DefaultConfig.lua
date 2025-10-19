@@ -43,12 +43,26 @@ local Default_Config = {
 				MyTeam = true,
 				enemyTeam = true,
 			},
+			Output = {
+				PublicChat = false,
+				PartyChat = true,
+				ClientChat = false,
+				Console = true,
+			},
+			-- Backwards compatibility
 			PartyChat = true,
 			Console = true,
 		},
 		Class_Change_Reveal = {
 			Enable = true,
 			EnemyOnly = true,
+			Output = {
+				PublicChat = false,
+				PartyChat = true,
+				ClientChat = false,
+				Console = true,
+			},
+			-- Backwards compatibility
 			PartyChat = true,
 			Console = true,
 		},

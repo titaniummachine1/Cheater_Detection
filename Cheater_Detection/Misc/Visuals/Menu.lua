@@ -153,8 +153,13 @@ local function DrawMenu()
 			-- Initialize if needed
 			if type(Misc.Vote_Reveal.TargetTeam.MyTeam) ~= "boolean" then Misc.Vote_Reveal.TargetTeam.MyTeam = true end
 			if type(Misc.Vote_Reveal.TargetTeam.enemyTeam) ~= "boolean" then Misc.Vote_Reveal.TargetTeam.enemyTeam = true end
-			if type(Misc.Vote_Reveal.PartyChat) ~= "boolean" then Misc.Vote_Reveal.PartyChat = true end
-			if type(Misc.Vote_Reveal.Console) ~= "boolean" then Misc.Vote_Reveal.Console = true end
+			
+			-- Initialize new output options
+			Misc.Vote_Reveal.Output = Misc.Vote_Reveal.Output or {}
+			if type(Misc.Vote_Reveal.Output.PublicChat) ~= "boolean" then Misc.Vote_Reveal.Output.PublicChat = false end
+			if type(Misc.Vote_Reveal.Output.PartyChat) ~= "boolean" then Misc.Vote_Reveal.Output.PartyChat = true end
+			if type(Misc.Vote_Reveal.Output.ClientChat) ~= "boolean" then Misc.Vote_Reveal.Output.ClientChat = false end
+			if type(Misc.Vote_Reveal.Output.Console) ~= "boolean" then Misc.Vote_Reveal.Output.Console = true end
 			
 			local teamOptions = {"My Team", "Enemy Team"}
 			local teamTable = {Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam}
@@ -163,11 +168,22 @@ local function DrawMenu()
 			Misc.Vote_Reveal.TargetTeam.enemyTeam = teamTable[2]
 			TimMenu.NextLine()
 			
-			local outputOptions = {"Party Chat", "Console"}
-			local outputTable = {Misc.Vote_Reveal.PartyChat, Misc.Vote_Reveal.Console}
+			local outputOptions = {"Public Chat", "Party Chat", "Client Chat", "Console"}
+			local outputTable = {
+				Misc.Vote_Reveal.Output.PublicChat,
+				Misc.Vote_Reveal.Output.PartyChat,
+				Misc.Vote_Reveal.Output.ClientChat,
+				Misc.Vote_Reveal.Output.Console
+			}
 			outputTable = TimMenu.Combo("Vote Output", outputTable, outputOptions)
-			Misc.Vote_Reveal.PartyChat = outputTable[1]
-			Misc.Vote_Reveal.Console = outputTable[2]
+			Misc.Vote_Reveal.Output.PublicChat = outputTable[1]
+			Misc.Vote_Reveal.Output.PartyChat = outputTable[2]
+			Misc.Vote_Reveal.Output.ClientChat = outputTable[3]
+			Misc.Vote_Reveal.Output.Console = outputTable[4]
+			
+			-- Maintain backwards compatibility with old PartyChat/Console fields
+			Misc.Vote_Reveal.PartyChat = Misc.Vote_Reveal.Output.PartyChat
+			Misc.Vote_Reveal.Console = Misc.Vote_Reveal.Output.Console
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
@@ -179,17 +195,33 @@ local function DrawMenu()
 		if Misc.Class_Change_Reveal.Enable then
 			-- Initialize if needed
 			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then Misc.Class_Change_Reveal.EnemyOnly = true end
-			if type(Misc.Class_Change_Reveal.PartyChat) ~= "boolean" then Misc.Class_Change_Reveal.PartyChat = true end
-			if type(Misc.Class_Change_Reveal.Console) ~= "boolean" then Misc.Class_Change_Reveal.Console = true end
+			
+			-- Initialize new output options
+			Misc.Class_Change_Reveal.Output = Misc.Class_Change_Reveal.Output or {}
+			if type(Misc.Class_Change_Reveal.Output.PublicChat) ~= "boolean" then Misc.Class_Change_Reveal.Output.PublicChat = false end
+			if type(Misc.Class_Change_Reveal.Output.PartyChat) ~= "boolean" then Misc.Class_Change_Reveal.Output.PartyChat = true end
+			if type(Misc.Class_Change_Reveal.Output.ClientChat) ~= "boolean" then Misc.Class_Change_Reveal.Output.ClientChat = false end
+			if type(Misc.Class_Change_Reveal.Output.Console) ~= "boolean" then Misc.Class_Change_Reveal.Output.Console = true end
 			
 			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly)
 			TimMenu.NextLine()
 			
-			local classOutputOptions = {"Party Chat", "Console"}
-			local classOutputTable = {Misc.Class_Change_Reveal.PartyChat, Misc.Class_Change_Reveal.Console}
+			local classOutputOptions = {"Public Chat", "Party Chat", "Client Chat", "Console"}
+			local classOutputTable = {
+				Misc.Class_Change_Reveal.Output.PublicChat,
+				Misc.Class_Change_Reveal.Output.PartyChat,
+				Misc.Class_Change_Reveal.Output.ClientChat,
+				Misc.Class_Change_Reveal.Output.Console
+			}
 			classOutputTable = TimMenu.Combo("Class Change Output", classOutputTable, classOutputOptions)
-			Misc.Class_Change_Reveal.PartyChat = classOutputTable[1]
-			Misc.Class_Change_Reveal.Console = classOutputTable[2]
+			Misc.Class_Change_Reveal.Output.PublicChat = classOutputTable[1]
+			Misc.Class_Change_Reveal.Output.PartyChat = classOutputTable[2]
+			Misc.Class_Change_Reveal.Output.ClientChat = classOutputTable[3]
+			Misc.Class_Change_Reveal.Output.Console = classOutputTable[4]
+			
+			-- Maintain backwards compatibility with old PartyChat/Console fields
+			Misc.Class_Change_Reveal.PartyChat = Misc.Class_Change_Reveal.Output.PartyChat
+			Misc.Class_Change_Reveal.Console = Misc.Class_Change_Reveal.Output.Console
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
