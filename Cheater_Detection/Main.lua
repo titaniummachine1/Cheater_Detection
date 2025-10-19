@@ -14,16 +14,21 @@ local FastPlayers = require("Cheater_Detection.Utils.FastPlayers") --[[ Imported
 
 require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
 --[[ Import database system ]]
-require("Cheater_Detection.Database.Database") --[[ Imported by: Main.lua ]]
+local Database = require("Cheater_Detection.Database.Database") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Database.Fetcher") --[[ Imported by: Main.lua ]]
+
+--[[ Import evidence system ]]
+local Evidence = require("Cheater_Detection.Core.Evidence_system") --[[ Imported by: Main.lua ]]
 
 --[[ UI components ]]
 require("Cheater_Detection.Misc.Visuals.Menu") --[[ Imported by: Main.lua ]]
 
---[[ Detection modules (uncomment when needed) ]]
---local Detections = require("Cheater_Detection.Detections")
---require("Cheater_Detection.Visuals")
---require("Cheater_Detection.Modules.EventHandler")
+--[[ Detection modules ]]
+local AntiAim = require("Cheater_Detection.Detection Methods.anti_aim")
+local Bhop = require("Cheater_Detection.Detection Methods.bhop")
+local DuckSpeed = require("Cheater_Detection.Detection Methods.Duck_Speed")
+local FakeLag = require("Cheater_Detection.Detection Methods.fake_lag")
+local WarpDT = require("Cheater_Detection.Detection Methods.warp_dt")
 
 --[[ Variables ]]
 local WPlayer, PR = Common.WPlayer, Common.PlayerResource
@@ -49,23 +54,59 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	-- Apply evidence decay (once per second)
+	Evidence.ApplyDecay()
+
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do
+		local steamID = Player:GetSteamID64()
+
+		-- Skip if already confirmed cheater (optimization - database or marked)
+		if Evidence.IsMarkedCheater(steamID) then
+			goto continue
+		end
+
+		-- Push history for detection analysis
 		Common.pushHistory(Player)
 
 		-- Perform detection checks
-		--Detections.CheckAngles(Player, entity)
-		--Detections.CheckDuckSpeed(Player, entity)
-		--Detections.CheckBunnyHop(Player, entity)
+		AntiAim.Check(Player)
+		DuckSpeed.Check(Player)
+		Bhop.Check(Player)
+		FakeLag.Check(Player)
+		WarpDT.Check(Player)
 
-		-- Optionally, print or log the reason for instability
-		--FakeLag_check(wrappedPlayer, entity)
-		--Warp_check(wrappedPlayer, entity)
-		--warp_recharge_check(wrappedPlayer, entity)
-		--triggerbot_check(wrappedPlayer, entity)
-		--smooth_aimbot_check(wrappedPlayer, entity)
+		-- TODO: Implement remaining detection methods
+		--warp_recharge_check(Player)
+		--triggerbot_check(Player)
+		--smooth_aimbot_check(Player)
+		--plain_aimbot_check(Player)
+		--strafe_bot_check(Player)
+		--bot_walk_check(Player)
+
+		::continue::
+	end
+end
+
+--[[ Map Change Handler ]]
+local function OnMapChange()
+	-- Force save database on map change
+	Database.ForceSave()
+	
+	-- Reload database on new map
+	Database.LoadDatabase(false, true)
+	
+	if G.Menu.Advanced.debug then
+		print("[CD] Map changed - Database saved and reloaded")
 	end
 end
 
 --[[ Callbacks ]]
 callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
+callbacks.Register("FireGameEvent", "CD_MapChange", function(event)
+	if event:GetName() == "game_newmap" or 
+	   event:GetName() == "teamplay_round_start" or 
+	   event:GetName() == "cs_round_start" then
+		OnMapChange()
+	end
+end)

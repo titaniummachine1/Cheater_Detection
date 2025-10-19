@@ -2,13 +2,11 @@ David Kolf's JSON module for Lua 5.1 - 5.4
 
 Version 2.6
 
-
 For the documentation see the corresponding readme.txt or visit
 <http://dkolf.de/src/dkjson-lua.fsl/>.
 
 You can contact the author by sending an e-mail to 'david' at the
 domain 'dkolf.de'.
-
 
 Copyright (C) 2010-2021 David Heiko Kolf
 

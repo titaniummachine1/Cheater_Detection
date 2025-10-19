@@ -12,7 +12,8 @@ local Default_Config = {
 	},
 
 	Advanced = {
-		Evicence_Tolerance = 5, --how many evidence more then average legit to mark as cheater
+		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
+		LogLevel = 2, -- 1=Debug, 2=Info, 3=Warning, 4=Error (default: Info)
 		Choke = true, --fakelag
 		Warp = true,
 		Bhop = true,
@@ -26,8 +27,6 @@ local Default_Config = {
 		AntyAim = true,
 		DuckSpeed = true,
 		Strafe_bot = true,
-
-		debug = false,
 	},
 
 	Misc = {

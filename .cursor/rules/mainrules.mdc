@@ -1,71 +1,154 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-**Project Philosophy:**
-This project values simplicity, readability, and consistency above strict adherence to traditional software engineering principles. If a tradeoff must be made, always choose the approach that makes the code easier to read, understand, and maintain—even if it means minor code duplication, more use of globals, or less modularity.
+### Rules 2.0 – the **“maintain-and-understand”** edition
 
-1. **Simplicity First:** Prefer simple solutions over complex ones whenever possible. When in doubt, favor code that is simple, readable, and consistent—even if it means minor violations of DRY, modularity, or other best practices.
-
-2. **DRY Principle:** Avoid duplicating code. Reuse or adapt existing code before writing new functionality. *If following DRY or modularity would require complex data passing, indirection, or abstraction, prefer a small amount of code duplication or a more direct approach for the sake of clarity and maintainability.*
-
-3. **Consistency:** Prefer a consistent style and structure across the codebase, even if it means not always using the "best" or most advanced pattern for a given situation.
-
-4. **Targeted Changes:** Only make changes directly requested or necessary for the request. Avoid speculative changes.
-
-5. **Fix, Then Replace:** Prioritize fixing issues within the existing implementation. If a new approach is needed, remove the old implementation.
-
-6. **Clean & Focused Code:** Strive to keep the codebase clean, well-organized, readable, and modular. Avoid letting individual files grow too large (aim for < 500 lines); refactor large files into smaller, focused modules.
-
-7. **No Production Mocking:** Use mocked/fake data only for testing, never in production code.
-
-8. **Functional Style:** Prefer functional programming patterns. Clearly define function inputs/outputs.
-
-9. **Module Imports & Dependencies:** Place all `require` statements at the top of modules. Below imports, add reverse import comments (e.g., `--[[ Imported by: ModuleA ]]`).
-
-10. **Use Custom `G` Module for Shared Data:** *Actively use* the custom `G` (globals) module to store frequently accessed, shared runtime data (e.g., `G.DataBase`, `G.PlayerData`). This simplifies access across modules and avoids polluting the built-in Lua global table (`_G`). **Do not** store application state directly in `_G`. Add comments in `globals.lua` indicating which modules use each variable in `G`.
-
-11. **Frequent Commits:** Make small, frequent commits with descriptive messages.
-
-12. **Avoid Anonymous Functions:** Use named functions instead of anonymous ones (`function() ... end`). Named functions improve readability, stack traces, and profiling. Only use anonymous functions if there is a *very* compelling reason and it demonstrably improves clarity in that specific context.
-
-13. **Self-Contained Initialization:** Modules managing state/resources (e.g., `Database`, `Config`, `Fetcher`) should handle their own initialization internally (ideally once, either on first `require` or via an `Initialize()` function). Avoid complex setup logic in `Main.lua`.
-
-14. **Avoid `collectgarbage`:** Do not use `collectgarbage()` unless specifically requested. If requested, question the necessity and discuss alternatives first.
-
-15. **Controlled Global Returns:** Avoid returning modules globally from `Main.lua` *unless* they are intended for direct user interaction (e.g., triggering a `Fetcher.Start()` from a menu). For accessing shared *data*, use the `G` module (Rule 10). For accessing another module's *functions*, use `require` directly.
-
-16. **Low Coupling:** Design modules to be as independent as possible, primarily interacting through shared data in `G` or explicit function calls via `require`.
-
-17. **Avoid Over-Engineering:** Do not introduce abstractions, patterns, or indirection unless they provide clear, immediate value for readability or maintainability.
-
-18. **Documentation for Simplicity:** If a simple or "less correct" approach is chosen for clarity, add a brief comment explaining why, so future maintainers understand the reasoning.
-
-19. **Library Requires:** If requiring a library that may not exist (e.g., optional or external dependencies), always use `pcall(require, ...)` and handle errors gracefully. If the file is inside the workspace and should always be present, use a direct `require` without `pcall`.
-
-20. **Code Organization:** Follow this standard order in module files:
-    1. **Imports** (`require` statements)
-    2. **Module Declaration** (`local ModuleName = {}`)
-    3. **Local Variables/Utilities** (constants, helper variables)
-    4. **Helper/Private Functions** (internal utility functions)
-    5. **Public Module Functions** (functions exposed in the module's interface)
-    6. **Self-Initialization** (if the module self-initializes)
-    7. **Callback Registration** (any event handlers or callbacks)
-    8. **Module Return** (`return ModuleName`)
-
-21. Consult Lmaobox Documentation: Before using any function specific to the Lmaobox API (e.g., from client, engine, entities, draw, callbacks, etc.), consult the lmaobox_lua_documentation.md file to verify its usage, parameters, return values, and potential side effects. Do not rely solely on assumptions or examples.
-lmaobox_lua_documentation.md its in root of workspace
-
-22. **Correct Bitwise Flag Checking:** When checking player state flags using raw integers (like `m_fFlags`), **use the bitwise AND operator (`&`) combined with the documented global flag constant**. The correct check is `(flags & FLAG_CONSTANT) ~= 0`. **Do NOT** compare the result to `1` (e.g., `flags & FLAG_CONSTANT == 1`), as this is often incorrect. Ensure the `FLAG_CONSTANT` (e.g., `FL_ONGROUND`, `FL_DUCKING`) is the correct, documented global constant for the flag you are checking (Refer to Rule #21). Using dedicated API functions (e.g., `player:IsOnGround()`) is an acceptable alternative, especially if the flag constant is not readily documented or the function enhances clarity.
+*(Lua code that won’t ambush you six months from now)*
 
 ---
-**Lua Specific Notes:**
-*   **Vector Normalization:** Normalize `Vec` using `Vec / Vec:Length()`.
-*   **`atan` Function:** Use `math.atan(y, x)` instead of the deprecated `atan2`.
-*   **Function Order:** Define functions *before* they are called in the script.
 
-dont use bit.band if you ever encoutner it it is isue as its never used and not allowed in my api
+## I.  Cornerstones
 
-for flags
+1. **Readability > everything else**
+   If you’re torn, choose the version a new dev can grasp in 30 seconds—even if it costs a few CPU cycles or bytes of RAM.
 
+2. **Simple, not simplistic**
+   Minimize the number of concepts a file introduces. If you need to explain “how the magic works,” you probably need to simplify—or give the abstraction a name.
+
+3. **Small steps, frequent commits**
+   Every commit should answer two questions: **what** changed and **why**.
+
+4. **Performance only when it hurts**
+   Don’t “optimize by instinct.” When FPS tanks or GC spikes, fix *that* hotspot—leave the rest alone.
+
+---
+
+## II.  Code conventions
+
+1. ### **Module layout**
+
+   ```lua
+   -- Imports
+   local G = require("globals")  --[[ Imported by: Foo, Bar ]]
+
+   -- Module declaration
+   local PlayerAI = {}
+
+   -- Local constants / utilities --------
+
+   -- Private helpers --------------------
+
+   -- Public API -------------------------
+   function PlayerAI.Initialize() ... end
+
+   -- Self-init (optional) ---------------
+
+   -- Callbacks --------------------------
+
+   return PlayerAI
+   ```
+
+   *Never reorder these blocks.* Muscle memory lowers “code-scanning time.”
+
+2. ### **Naming**
+
+   * **Functions:** `verbNoun` → `processShot`, `reloadConfig`.
+   * **Booleans:** start with `is/has/should/can`.
+   * **Files:** `snake_case`.
+   * **No mystery vars** like `x`, `y`, `z`—unless you’re doing obvious geometry.
+
+3. ### **No anonymous functions**
+
+   Give every function a name; better stack traces and profiling.
+   *Only* acceptable anonymous: a one-liner callback that never leaves the module.
+
+4. ### **`G` over `_G`**
+
+   Shared runtime data lives in `G.PlayerData`, `G.Database`, etc.
+   In `globals.lua`, comment which modules read each key.
+
+5. ### **Guard clauses everywhere**
+
+   ```lua
+   if not player:IsAlive()    then return end
+   if not hasPermission(user) then return end
+   -- happy path ↓
+   ```
+
+   Zero indentation staircases.
+
+6. ### **DRY—*but with brakes***
+
+   * Copy-paste ≤ 2 times? **Wait.**
+   * ≥ 3 times *and* the differences can be parameterized? Extract a function.
+   * If abstraction demands convoluted state-plumbing, scrap it; clarity wins.
+
+7. ### **File size warning**
+
+   When a file hits \~500 lines, split it. If you can’t see “the whole picture,” maintenance suffers.
+
+8. ### **Self-initializing modules**
+
+   A module decides whether it needs `Initialize()` on first `require()` or an explicit call. `Main.lua` is *not* a staging area for setup gymnastics.
+
+9. ### **No `collectgarbage()`**
+
+   Leaks get fixed, not swept under the rug. GC-hammer is a band-aid.
+
+10. ### **Bit-flag checks done right**
+
+    ```lua
+    if (flags & FL_ONGROUND) ~= 0 then ...
+    ```
+
+    *No* `bit.band`, *no* `== 1`, *no* magic numbers.
+    Better: API helpers like `player:IsOnGround()`.
+
+11. ### **Dependency loading**
+
+    * Internal files → plain `require`.
+    * Optional/external →
+
+      ```lua
+      local ok, lib = pcall(require, "foo")
+      if not ok then log("foo missing, degraded mode") end
+      ```
+
+12. ### **No “wet” test stubs in production**
+
+    Fake data only in test folders or behind config flags. Live game talks to the real world.
+
+13. ### **Touch only what’s asked**
+
+    Fix the bug or add the requested feature—no speculative refactors. Avoid ripple effects.
+
+14. ### **Comment conscious rule-breaks**
+
+    Duplicating 20 lines because DI would be a circus? Leave a one-liner *why* so future-you doesn’t curse present-you.
+
+15. ### **Optimize on demand**
+
+    Profile → find 5 % hotspot in `Vector:Normalize()` → speed *that* up.
+    Don’t assume “this will surely be slow” ahead of evidence.
+
+---
+
+## III.  Workflow TL;DR
+
+1. **Pull → small change → in-game test → commit → push.**
+2. Feature branches live days, not weeks.
+3. Code review checks clarity first, numbers second.
+
+---
+
+## IV.  Sanity checklist before PR
+
+| Question                                               | Yes ✅ / No ❌ |
+| ------------------------------------------------------ | ------------ |
+| Can you understand the function without hopping files? |              |
+| Are conditions one-liners *or* named helpers?          |              |
+| Is this duplication actually painful now?              |              |
+| Can you point to a measured hotspot, not a guess?      |              |
+
+If any answer is “No,” fix it—or explain why in a comment.
+
+---
+
+Break these rules and future-you will be the one debugging at 3 AM. Follow them and your Lua code stays sane, readable, and weaponized for rapid change.

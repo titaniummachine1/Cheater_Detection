@@ -22,26 +22,31 @@ local function validatePlayer(player)
 end
 
 --[[ Public Functions ]]
-function Detection.Check(player, entity)
+function Detection.Check(player)
 	-- Skip if detection is disabled in menu
 	if not G.Menu.Advanced[detectionName] then
 		return false
 	end
 
-	-- Validate player
-	if not validatePlayer(entity) then
+	-- Validate player (use WrappedPlayer methods)
+	if not validatePlayer(player) then
 		return false
 	end
 
 	-- Get steamID for tracking
-	local steamID = Common.GetSteamID64(entity)
+	local steamID = player:GetSteamID64()
 	if not steamID then
+		return false
+	end
+
+	-- Skip if already marked as cheater (optimization)
+	if Evidence.IsMarkedCheater(steamID) then
 		return false
 	end
 
 	-- Initialize detection counter if needed
 	if not G.PlayerData[steamID] then
-		G.PlayerData[steamID] = G.DefaultPlayerData
+		G.PlayerData[steamID] = {}
 	end
 
 	if not G.PlayerData[steamID].detections then
@@ -56,7 +61,9 @@ function Detection.Check(player, entity)
 	local detected = false
 
 	-- Example detection logic (replace with actual logic):
-	-- if extraordinary_condition_detected then
+	-- local eyeAngles = player:GetEyeAngles()
+	-- local prevAngles = G.PlayerData[steamID].Current.Angle
+	-- if extraordinary_condition_detected(eyeAngles, prevAngles) then
 	--     detected = true
 	-- end
 

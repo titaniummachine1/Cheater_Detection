@@ -4,7 +4,6 @@
 --
 local Common = {
 	Lib = nil,
-	ImMenu = nil,
 	Json = nil,
 	Log = nil,
 	Notify = nil,
@@ -22,11 +21,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 
 if UnloadLib ~= nil then
 	UnloadLib()
-end
-
--- Unload the module if it's already loaded
-if package.loaded["ImMenu"] then
-	package.loaded["ImMenu"] = nil
 end
 
 --------------------------------------------------------------------------------------
@@ -100,7 +94,6 @@ if not lnxLib then
 end
 
 Common.Lib = lnxLib
-Common.ImMenu = ImMenu
 
 -- Now initialize remaining Common fields using the loaded libraries
 Common.Log = Common.Lib.Utils.Logger.new("Cheater Detection")

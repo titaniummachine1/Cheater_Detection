@@ -208,7 +208,7 @@ function Database.LoadDatabase(silent, force)
 
 	for steamID, value in pairs(G.DataBase) do
 		totalEntries = totalEntries + 1
-		if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^765611%d+$") then
+		if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^7656119%d+$") or #steamID ~= 17 then
 			failedCount = failedCount + 1
 			table.insert(entriesToRemove, steamID)
 		else
@@ -312,6 +312,81 @@ end
 --[[ Self-Initialization ]]
 -- Initial load and setup (silent=true to avoid verbose messages at load time)
 Database.Initialize(true)
+
+--- Upsert a cheater entry into the database (minimal format like fetched data)
+---@param steamID string Player's SteamID64
+---@param data table Cheater data (name, reason)
+function Database.UpsertCheater(steamID, data)
+	if not steamID or type(steamID) ~= "string" then
+		Log(LogLevel.ERROR, "[DB] UpsertCheater: Invalid steamID")
+		return false
+	end
+
+	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
+		Log(LogLevel.ERROR, "[DB] UpsertCheater: Invalid steamID format: " .. steamID)
+		return false
+	end
+
+	-- Ensure G.DataBase exists
+	if type(G.DataBase) ~= "table" then
+		G.DataBase = {}
+	end
+
+	-- Minimal format like fetched databases: just Name and Reason
+	G.DataBase[steamID] = {
+		Name = data.name or "Unknown",
+		Reason = "Cheater", -- Simple reason matching fetched format
+	}
+	
+	-- Mark as dirty for save
+	Database.State.isDirty = true
+	
+	Log(LogLevel.INFO, string.format("[DB] Added cheater: %s (%s)", 
+		data.name or "Unknown", steamID))
+	
+	return true
+end
+
+--- Get a cheater entry from the database
+---@param steamID string Player's SteamID64
+---@return table|nil Cheater data or nil if not found
+function Database.GetCheater(steamID)
+	if not steamID or type(G.DataBase) ~= "table" then
+		return nil
+	end
+	
+	return G.DataBase[steamID]
+end
+
+--- Remove a cheater entry from the database
+---@param steamID string Player's SteamID64
+---@return boolean Success
+function Database.RemoveCheater(steamID)
+	if not steamID or type(G.DataBase) ~= "table" then
+		return false
+	end
+	
+	if G.DataBase[steamID] then
+		G.DataBase[steamID] = nil
+		Database.State.isDirty = true
+		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
+		return true
+	end
+	
+	return false
+end
+
+--- Force save the database (ignores dirty flag)
+---@return boolean Success
+function Database.ForceSave()
+	local wasDirty = Database.State.isDirty
+	Database.State.isDirty = true
+	Database.SaveDatabase()
+	if not wasDirty then
+		Database.State.isDirty = false
+	end
+	return true
+end
 
 --[[ Callback Registration ]]
 callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
