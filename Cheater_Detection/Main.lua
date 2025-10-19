@@ -23,6 +23,9 @@ local Evidence = require("Cheater_Detection.Core.Evidence_system") --[[ Imported
 --[[ UI components ]]
 require("Cheater_Detection.Misc.Visuals.Menu") --[[ Imported by: Main.lua ]]
 
+--[[ Misc features ]]
+require("Cheater_Detection.Misc.ChatPrefix") --[[ Imported by: Main.lua ]]
+
 --[[ Detection modules ]]
 local AntiAim = require("Cheater_Detection.Detection Methods.anti_aim")
 local Bhop = require("Cheater_Detection.Detection Methods.bhop")

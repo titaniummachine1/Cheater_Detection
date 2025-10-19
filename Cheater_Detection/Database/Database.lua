@@ -335,14 +335,14 @@ function Database.UpsertCheater(steamID, data)
 	-- Minimal format like fetched databases: just Name and Reason
 	G.DataBase[steamID] = {
 		Name = data.name or "Unknown",
-		Reason = "Cheater", -- Simple reason matching fetched format
+		Reason = data.reason or "Cheater", -- Use provided reason, fallback to "Cheater" for imported data
 	}
 	
 	-- Mark as dirty for save
 	Database.State.isDirty = true
 	
-	Log(LogLevel.INFO, string.format("[DB] Added cheater: %s (%s)", 
-		data.name or "Unknown", steamID))
+	Log(LogLevel.INFO, string.format("[DB] Added cheater: %s (%s) - Reason: %s", 
+		data.name or "Unknown", steamID, data.reason or "Cheater"))
 	
 	return true
 end
