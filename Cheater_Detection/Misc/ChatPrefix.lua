@@ -149,7 +149,7 @@ local function OnUserMessage(msg)
 	if status then
 		-- Build colored output for ChatPrintf
 		local colorHex = rgbToHex(color[1], color[2], color[3])
-		local tag = string.format("\x01[%s%s]\x01", colorHex, status)
+		local tag = string.format("\x01[%s%s\x01]", colorHex, status)
 		local teamColor = "\x01"
 		local team = player:GetTeamNumber()
 		if team == 2 then
@@ -160,7 +160,9 @@ local function OnUserMessage(msg)
 		local name = string.format("%s%s", teamColor, playerName)
 		local formatted = string.format("%s %s\x01 :  %s", tag, name, messageText)
 
-		client.ChatPrintf(formatted)
+		if not client.ChatPrintf(formatted) then
+			print("[CD] Failed to send chat prefix message")
+		end
 
 		-- Wipe original payload so nothing extra prints
 		ClearBuffer(bf)

@@ -268,7 +268,7 @@ ValveEmployees.List = {
 	["76561199557784411"] = "Valve Employee",
 	["76561199571838040"] = "Valve Employee",
 	["76561199690380138"] = "Valve Employee",
-	["76561198373582219"] = "Valve Employee",
+	["76561198373582219"] = "Valve Employee", --debug eleemnt not valve employe
 }
 
 ---Check if a SteamID64 belongs to a Valve employee

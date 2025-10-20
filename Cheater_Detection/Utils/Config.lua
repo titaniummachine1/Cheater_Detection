@@ -44,14 +44,11 @@ local function migrateConfig(loadedCfg)
 		return false
 	end
 	
-	-- Migrate old debug field to LogLevel boolean table
+	-- Migrate old config format to new format
 	if loadedCfg.Advanced then
-		-- If old config has debug field, remove it and set LogLevel
-		if loadedCfg.Advanced.debug ~= nil then
-			local wasDebug = loadedCfg.Advanced.debug
-			loadedCfg.Advanced.debug = nil
-			-- Set LogLevel: Debug=true if was debug, else Info=true
-			loadedCfg.Advanced.LogLevel = wasDebug and {true, false, false, false} or {false, true, false, false}
+		-- Add debug field if missing (default: false)
+		if loadedCfg.Advanced.debug == nil then
+			loadedCfg.Advanced.debug = false
 		end
 		
 		-- If LogLevel is missing, add default (Info)

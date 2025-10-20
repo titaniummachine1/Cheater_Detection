@@ -80,6 +80,79 @@ local function DatabaseAutoSaveOnUnload()
 end
 
 --[[ Public Module Functions ]]
+-- Robust SetPriority with multiple fallback methods
+-- Tries: entity -> index -> SteamID64 -> SteamID3
+-- For database entries (not in-game), tries: SteamID64 -> SteamID3
+function Database.SetPriority(target, priority, isInGame)
+	if not target then
+		Log(LogLevel.ERROR, "[DB] SetPriority: target is nil")
+		return false
+	end
+
+	local success = false
+	local lastError = nil
+
+	-- Method 1: Try entity (only if in-game)
+	if isInGame ~= false and type(target) == "userdata" then
+		success, lastError = pcall(playerlist.SetPriority, target, priority)
+		if success then
+			Log(LogLevel.DEBUG, string.format("[DB] SetPriority via entity: priority=%d", priority))
+			return true
+		end
+	end
+
+	-- Method 2: Try index (only if in-game)
+	if isInGame ~= false and type(target) == "number" and target < 101 then
+		success, lastError = pcall(playerlist.SetPriority, target, priority)
+		if success then
+			Log(LogLevel.DEBUG, string.format("[DB] SetPriority via index %d: priority=%d", target, priority))
+			return true
+		end
+	end
+
+	-- Method 3: Try SteamID64
+	local steamID64 = nil
+	if type(target) == "string" and #target == 17 then
+		steamID64 = target
+	elseif type(target) == "userdata" then
+		-- Try to get SteamID64 from entity
+		steamID64 = Common.GetSteamID64(target)
+	end
+
+	if steamID64 then
+		success, lastError = pcall(playerlist.SetPriority, steamID64, priority)
+		if success then
+			Log(LogLevel.DEBUG, string.format("[DB] SetPriority via SteamID64 %s: priority=%d", steamID64, priority))
+			return true
+		end
+	end
+
+	-- Method 4: Try SteamID3 conversion
+	if steamID64 then
+		-- Convert SteamID64 to SteamID3 format [U:1:XXXXXXXX]
+		local accountID = tonumber(steamID64) - 76561197960265728
+		if accountID and accountID > 0 then
+			local steamID3 = string.format("[U:1:%d]", accountID)
+			success, lastError = pcall(playerlist.SetPriority, steamID3, priority)
+			if success then
+				Log(LogLevel.DEBUG, string.format("[DB] SetPriority via SteamID3 %s: priority=%d", steamID3, priority))
+				return true
+			end
+		end
+	end
+
+	-- All methods failed
+	Log(
+		LogLevel.ERROR,
+		string.format(
+			"[DB] SetPriority FAILED for target (type=%s): %s",
+			type(target),
+			tostring(lastError or "all methods failed")
+		)
+	)
+	return false
+end
+
 -- Find best path for database storage (saves as JSON now)
 function Database.GetFilePath()
 	-- Ensure base directory exists
@@ -208,7 +281,12 @@ function Database.LoadDatabase(silent, force)
 
 	for steamID, value in pairs(G.DataBase) do
 		totalEntries = totalEntries + 1
-		if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^7656119%d+$") or #steamID ~= 17 then
+		if
+			type(value) ~= "table"
+			or type(steamID) ~= "string"
+			or not steamID:match("^7656119%d+$")
+			or #steamID ~= 17
+		then
 			failedCount = failedCount + 1
 			table.insert(entriesToRemove, steamID)
 		else
@@ -295,24 +373,40 @@ function Database.Initialize(silent)
 
 	-- Removed redundant final count log here, handled in LoadDatabase
 
-	-- Clear local player from cheater list and database (for debugging)
+	-- Always set local player priority to 0 and clear from database
+	-- Debug mode is only a floodgate for detection, not for cleanup
 	local localPlayer = entities.GetLocalPlayer()
 	if localPlayer then
+		-- Get SteamID64 for all operations
 		local mySteamID = Common.GetSteamID64(localPlayer)
 		if mySteamID then
-			-- Always set priority to 0
-			Log(LogLevel.DEBUG, "[DB] Setting local player priority to 0")
-			pcall(playerlist.SetPriority, mySteamID, 0)
-			
-			-- Remove from database if debug mode is on
-			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-				if G.DataBase[mySteamID] then
-					G.DataBase[mySteamID] = nil
-					Database.State.isDirty = true
-					Log(LogLevel.INFO, "[DB] Removed local player from database (debug mode)")
-				end
+			-- Always set priority to 0 using robust method
+			local prioritySet = Database.SetPriority(localPlayer, 0, true)
+			if prioritySet then
+				Log(LogLevel.INFO, string.format("[DB] Set local player priority to 0 (SteamID64: %s)", mySteamID))
+			else
+				Log(
+					LogLevel.WARNING,
+					string.format("[DB] Failed to set local player priority (SteamID64: %s)", mySteamID)
+				)
 			end
+
+			-- Always remove from database (debug mode controls detection, not cleanup)
+			if G.DataBase[mySteamID] then
+				G.DataBase[mySteamID] = nil
+				Database.State.isDirty = true
+				Log(
+					LogLevel.SUCCESS,
+					string.format("[DB] Removed local player from database (SteamID64: %s)", mySteamID)
+				)
+			else
+				Log(LogLevel.DEBUG, "[DB] Local player not in database")
+			end
+		else
+			Log(LogLevel.WARNING, "[DB] Failed to get local player SteamID64")
 		end
+	else
+		Log(LogLevel.WARNING, "[DB] Failed to get local player entity")
 	end
 
 	Log(LogLevel.DEBUG, "[DB] Database initialization complete.") -- Keep DEBUG
@@ -347,13 +441,20 @@ function Database.UpsertCheater(steamID, data)
 		Name = data.name or "Unknown",
 		Reason = data.reason or "Cheater", -- Use provided reason, fallback to "Cheater" for imported data
 	}
-	
+
 	-- Mark as dirty for save
 	Database.State.isDirty = true
-	
-	Log(LogLevel.INFO, string.format("[DB] Added cheater: %s (%s) - Reason: %s", 
-		data.name or "Unknown", steamID, data.reason or "Cheater"))
-	
+
+	Log(
+		LogLevel.INFO,
+		string.format(
+			"[DB] Added cheater: %s (%s) - Reason: %s",
+			data.name or "Unknown",
+			steamID,
+			data.reason or "Cheater"
+		)
+	)
+
 	return true
 end
 
@@ -364,7 +465,7 @@ function Database.GetCheater(steamID)
 	if not steamID or type(G.DataBase) ~= "table" then
 		return nil
 	end
-	
+
 	return G.DataBase[steamID]
 end
 
@@ -375,14 +476,14 @@ function Database.RemoveCheater(steamID)
 	if not steamID or type(G.DataBase) ~= "table" then
 		return false
 	end
-	
+
 	if G.DataBase[steamID] then
 		G.DataBase[steamID] = nil
 		Database.State.isDirty = true
 		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
 		return true
 	end
-	
+
 	return false
 end
 

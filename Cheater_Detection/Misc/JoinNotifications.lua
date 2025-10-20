@@ -4,19 +4,31 @@
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local Sources = require("Cheater_Detection.Database.Sources")
+local Common = require("Cheater_Detection.Utils.Common")
 
 --[[ Module Declaration ]]
 local JoinNotifications = {}
 
+--[[ State ]]
+local hasValidatedOnLoad = false
+
 --[[ Helper Functions ]]
 
 -- Send message to configured output channels
+-- Properly handles all 4 output types
 local function SendToChannels(message, outputConfig)
 	if not outputConfig then
 		return
 	end
 
-	-- Public chat
+	-- Client chat (only visible to you) - like ChatPrefix does
+	if outputConfig.ClientChat then
+		if not client.ChatPrintf(message) then
+			print("[CD] Failed to send client chat message")
+		end
+	end
+
+	-- Public chat (visible to everyone)
 	if outputConfig.PublicChat then
 		client.ChatSay(message)
 	end
@@ -24,11 +36,6 @@ local function SendToChannels(message, outputConfig)
 	-- Party/Team chat
 	if outputConfig.PartyChat then
 		client.ChatTeamSay(message)
-	end
-
-	-- Client chat (only visible to you)
-	if outputConfig.ClientChat then
-		local _ = client.ChatPrintf(message)
 	end
 
 	-- Console
@@ -45,6 +52,63 @@ local function GetEffectiveOutput(defaultOutput, overrideOutput, useOverride)
 	return defaultOutput
 end
 
+-- Check all players currently in the game for Valve employees and cheaters
+-- If Valve found and auto-disconnect enabled, leave server
+local function ValidateAllPlayers()
+	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
+	if not config or not config.Enable then
+		return
+	end
+
+	-- Safety check: ensure ValveAutoDisconnect is a boolean (config loaded)
+	if type(config.ValveAutoDisconnect) ~= "boolean" then
+		return -- Config not fully loaded yet
+	end
+
+	local players = entities.FindByClass("CTFPlayer")
+	for _, player in ipairs(players) do
+		if player and player:IsValid() then
+			local steamID64 = Common.GetSteamID64(player)
+			if steamID64 then
+				-- Check Valve employee first (higher priority)
+				if config.CheckValve and Sources.IsValveEmployee(steamID64) then
+					local output = GetEffectiveOutput(
+						config.DefaultOutput,
+						config.ValveOverride,
+						config.UseValveOverride
+					)
+					
+					-- Show notification
+					if config.ValveAutoDisconnect then
+						local message = string.format("[VALVE EMPLOYEE] %s is in the server - Leaving game", player:GetName())
+						SendToChannels(message, output)
+						-- Leave the game
+						client.Command("disconnect", true)
+						return
+					else
+						local message = string.format("[VALVE EMPLOYEE] %s is in the server", player:GetName())
+						SendToChannels(message, output)
+					end
+				-- Check if cheater in database
+				elseif config.CheckCheater then
+					local cheaterData = Database.GetCheater(steamID64)
+					if cheaterData then
+						local output = GetEffectiveOutput(
+							config.DefaultOutput,
+							config.CheaterOverride,
+							config.UseCheaterOverride
+						)
+
+						local reason = cheaterData.Reason or "Unknown"
+						local message = string.format("[CHEATER] %s is in the server (Suspected of: %s)", player:GetName(), reason)
+						SendToChannels(message, output)
+					end
+				end
+			end
+		end
+	end
+end
+
 --[[ Event Handlers ]]
 
 -- Handle player connect event
@@ -53,16 +117,20 @@ local function OnPlayerConnect(event)
 		return
 	end
 
-	local config = G.Menu.Misc.JoinNotifications
+	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
 	if not config or not config.Enable then
+		return
+	end
+
+	-- Safety check: ensure config is fully loaded
+	if type(config.ValveAutoDisconnect) ~= "boolean" then
 		return
 	end
 
 	-- Get player info from event
 	local name = event:GetString("name")
 	local networkid = event:GetString("networkid")
-	local userid = event:GetInt("userid")
-
+	
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
 	-- Convert to SteamID64: 76561197960265728 + accountID
 	local accountID = networkid:match("%[U:1:(%d+)%]")
@@ -80,15 +148,16 @@ local function OnPlayerConnect(event)
 			config.UseValveOverride
 		)
 
-		local message = string.format("[VALVE EMPLOYEE] %s joined the server", name)
-		SendToChannels(message, output)
-
-		-- Auto-disconnect if enabled
+		-- Show notification and optionally leave
 		if config.ValveAutoDisconnect then
-			client.Command("disconnect")
-			print("[CD] Auto-disconnected due to Valve employee joining")
+			local message = string.format("[VALVE EMPLOYEE] %s joined - Leaving game", name)
+			SendToChannels(message, output)
+			-- Leave the game
+			client.Command("disconnect", true)
+		else
+			local message = string.format("[VALVE EMPLOYEE] %s joined", name)
+			SendToChannels(message, output)
 		end
-
 		return
 	end
 
@@ -103,14 +172,90 @@ local function OnPlayerConnect(event)
 			)
 
 			local reason = cheaterData.Reason or "Unknown"
-			local message = string.format("[CHEATER] %s joined - Reason: %s", name, reason)
+			local message = string.format("[CHEATER] %s joined (Suspected of: %s)", name, reason)
 			SendToChannels(message, output)
+		end
+	end
+end
+
+-- Handle player disconnect event
+local function OnPlayerDisconnect(event)
+	if event:GetName() ~= "player_disconnect" then
+		return
+	end
+
+	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
+	if not config or not config.Enable then
+		return
+	end
+
+	-- Safety check: ensure config is fully loaded
+	if type(config.ValveAutoDisconnect) ~= "boolean" then
+		return
+	end
+
+	-- Get player info from event
+	local name = event:GetString("name")
+	local networkid = event:GetString("networkid")
+	
+	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
+	local accountID = networkid:match("%[U:1:(%d+)%]")
+	if not accountID then
+		return
+	end
+
+	local steamID64 = tostring(76561197960265728 + tonumber(accountID))
+
+	-- Don't show disconnect messages for Valve employees (we left the game)
+	-- Only check cheaters
+	if config.CheckCheater then
+		local cheaterData = Database.GetCheater(steamID64)
+		if cheaterData then
+			local output = GetEffectiveOutput(
+				config.DefaultOutput,
+				config.CheaterOverride,
+				config.UseCheaterOverride
+			)
+
+			local detectionReason = cheaterData.Reason or "Unknown"
+			local message = string.format("[CHEATER] %s left (Suspected of: %s)", name, detectionReason)
+			SendToChannels(message, output)
+		end
+	end
+end
+
+-- Master event handler for both connect and disconnect
+local function OnGameEvent(event)
+	local eventName = event:GetName()
+	
+	if eventName == "player_connect" then
+		OnPlayerConnect(event)
+	elseif eventName == "player_disconnect" then
+		OnPlayerDisconnect(event)
+	end
+end
+
+--[[ CreateMove Callback for Initial Validation ]]
+local function OnCreateMove()
+	-- Run validation once on first tick after config is loaded
+	if not hasValidatedOnLoad then
+		local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
+		-- Check if config is loaded (has boolean ValveAutoDisconnect)
+		if config and type(config.ValveAutoDisconnect) == "boolean" then
+			ValidateAllPlayers()
+			hasValidatedOnLoad = true
+			-- Unregister after first run
+			callbacks.Unregister("CreateMove", "CD_JoinNotifications_Init")
 		end
 	end
 end
 
 --[[ Callback Registration ]]
 callbacks.Unregister("FireGameEvent", "CD_JoinNotifications")
-callbacks.Register("FireGameEvent", "CD_JoinNotifications", OnPlayerConnect)
+callbacks.Register("FireGameEvent", "CD_JoinNotifications", OnGameEvent)
+
+-- Register CreateMove to validate existing players on first tick
+callbacks.Unregister("CreateMove", "CD_JoinNotifications_Init")
+callbacks.Register("CreateMove", "CD_JoinNotifications_Init", OnCreateMove)
 
 return JoinNotifications

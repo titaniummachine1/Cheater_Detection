@@ -23,12 +23,7 @@ local function DrawMenu()
 	end
 
 	-- Debug mode indicator (drawn outside TimMenu window)
-	local debugMode = false
-	if type(G.Menu.Advanced.LogLevel) == "table" and G.Menu.Advanced.LogLevel[1] then
-		debugMode = true
-	end
-
-	if debugMode then
+	if G.Menu.Advanced.debug then
 		draw.Color(255, 0, 0, 255)
 		draw.SetFont(Fonts.Verdana)
 		draw.Text(20, 120, "Debug Mode!!! Some Features Might malfunction")
@@ -138,6 +133,15 @@ local function DrawMenu()
 		local logLevels = { "Debug", "Info", "Warning", "Error" }
 		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
 		TimMenu.Tooltip("Set console output verbosity (Debug = everything, Error = only critical)")
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Debug")
+		if type(Advanced.debug) ~= "boolean" then
+			Advanced.debug = false
+		end
+		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
+		TimMenu.Tooltip("Enables debug features (auto-removes self from database, verbose logging)")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Misc" then
