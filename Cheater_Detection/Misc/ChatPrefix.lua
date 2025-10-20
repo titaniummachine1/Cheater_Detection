@@ -53,16 +53,15 @@ local function rgbToHex(r, g, b)
 	return hexadecimal
 end
 
----Change the message contents in the bit buffer
+---Clear the entire bit buffer
 ---@param bf BitBuffer
----@param text string
-local function ChangeMessageContents(bf, text)
-	if not bf or type(text) ~= "string" then
-		return
+local function ClearBuffer(bf)
+	local len = bf:GetDataBitsLength()
+	bf:SetCurBit(0)
+	for i = 0, len do
+		bf:WriteBit(0)
 	end
-
-	bf:SetCurBit(16)
-	bf:WriteString(text)
+	bf:SetCurBit(0)
 end
 
 ---Get cheater status for a player
@@ -128,10 +127,12 @@ local function OnUserMessage(msg)
 		return
 	end
 
-	bf:SetCurBit(8)
+	bf:SetCurBit(0)
 
-	-- Read chat data
-	local chatType = string.sub(bf:ReadString(256), 2) -- Remove invisible char
+	-- Read chat data (must skip 2 bytes first to avoid invisible char in chatType)
+	local wantsToChat = bf:ReadByte() -- Byte 0-7: wants to chat flag
+	local clientIndex = bf:ReadByte() -- Byte 8-15: client index
+	local chatType = bf:ReadString(256) -- Now clean (no invisible char) - e.g. "TF_Chat_Team"
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)
 
@@ -145,42 +146,39 @@ local function OnUserMessage(msg)
 	local status, color = GetCheaterStatus(player)
 
 	if status then
-		-- Build colored status tag
+		-- Build complete colored string with full control
 		local colorHex = rgbToHex(color[1], color[2], color[3])
 
-		-- Check if team message
-		local isTeamMessage = chatType ~= "TF_Chat_All"
-
-		-- Get player team color
+		-- Get team color
 		local teamColor = "\x01" -- Default white
 		local playerTeam = player:GetTeamNumber()
 		if playerTeam == 2 then
-			teamColor = "\x07FF4040" -- RED team color
+			teamColor = "\x07FF4040" -- RED team
 		elseif playerTeam == 3 then
-			teamColor = "\x0799CCFF" -- BLU team color
+			teamColor = "\x0799CCFF" -- BLU team
 		end
 
-		-- Determine if this is enemy team chat
-		local enemyTag = ""
-		if isTeamMessage then
-			local localPlayer = entities.GetLocalPlayer()
-			local localTeam = localPlayer and localPlayer:GetTeamNumber() or nil
-			if localTeam and playerTeam ~= 0 and playerTeam ~= localTeam then
-				enemyTag = "\x01[Enemy Chat]\x01 "
-			end
+		-- Detect team chat based on chatType
+		local teamPrefix = ""
+		if chatType ~= "TF_Chat_All" and chatType ~= "" then
+			-- Team message - add (Team) prefix
+			-- Note: Can't get exact localized text, but we know it's team chat
+			teamPrefix = "\x01(Team) "
 		end
 
-		-- Build message for client chat: [COLORED_TAG] [Enemy Chat?] TeamColoredPlayerName :  message
-		local teamPrefix = isTeamMessage and "(Team) " or ""
-		local statusTag = string.format("\x01[%s%s\x01]\x01 ", colorHex, status)
-		local chatMessage =
-			string.format("%s%s%s%s%s\x01 :  %s", teamPrefix, statusTag, enemyTag, teamColor, playerName, messageText)
+		-- Build message with colored tag
+		local tag = string.format("\x01[%s%s\x01]", colorHex, status)
+		local chatMessage = string.format("%s%s %s%s\x01 :  %s", teamPrefix, tag, teamColor, playerName, messageText)
 
-		-- Print to chat using client.ChatPrintf (supports full length messages)
+		-- Print to chat and clear original
 		client.ChatPrintf(chatMessage)
 
-		-- Clear the original message so it doesn't show
-		ChangeMessageContents(bf, "")
+		-- Clear original message so it doesn't show
+		ClearBuffer(bf)
+		bf:SetCurBit(0)
+		bf:WriteByte(wantsToChat)
+		bf:WriteByte(clientIndex)
+		bf:WriteString("")
 	end
 end
 

@@ -47,6 +47,7 @@ local function DrawMenu()
 	-- Main Configuration Tab
 	if G.Menu.currentTab == "Main" then
 		local Main = G.Menu.Main
+		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Database & Detection")
 		Main.Fetch_Database = TimMenu.Checkbox("Fetch Database", Main.Fetch_Database)
@@ -63,6 +64,18 @@ local function DrawMenu()
 		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
 		TimMenu.NextLine()
 		Main.JoinWarning = TimMenu.Checkbox("Join Warning", Main.JoinWarning)
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		Misc.JoinNotifications = Misc.JoinNotifications or {}
+		local JNMain = Misc.JoinNotifications
+		if type(JNMain.ValveAutoDisconnect) ~= "boolean" then
+			JNMain.ValveAutoDisconnect = false
+		end
+
+		TimMenu.BeginSector("Valve Safety")
+		JNMain.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave on Valve Join", JNMain.ValveAutoDisconnect)
+		TimMenu.Tooltip("Disconnect automatically when a Valve employee enters the server")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Advanced" then
@@ -124,7 +137,7 @@ local function DrawMenu()
 		TimMenu.BeginSector("Logging")
 		local logLevels = { "Debug", "Info", "Warning", "Error" }
 		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
-		TimMenu.Tooltip("Debug: All details | Info: Detections & saves | Warning: Issues | Error: Critical errors")
+		TimMenu.Tooltip("Set console output verbosity (Debug = everything, Error = only critical)")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Misc" then
@@ -395,10 +408,6 @@ local function DrawMenu()
 				TimMenu.NextLine()
 			end
 
-			-- Auto-disconnect option
-			JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Disconnect on Valve Join", JN.ValveAutoDisconnect)
-			TimMenu.Tooltip("Automatically disconnect when a Valve employee joins the server")
-			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()

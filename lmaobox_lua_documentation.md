@@ -5929,6 +5929,9 @@ Returns the steam name of the player.
 ### GetLastConnectTime()
 
 
+ReIf you skip only one byte before reading `chatType`, the string will contain an invisible leading character (because the first byte is `wantsToChat` and the second is the client index).
+
+
 Returns the last time the player connected to the server as a unix timestamp.
 
 
@@ -7391,7 +7394,7 @@ local function myCoolMessageHook(msg)
     if msg:GetID() == SayText2 then 
         local bf = msg:GetBitBuffer()
 
-        bf:SetCurBit(8)-- skip 1 byte of not useful data
+        bf:SetCurBit(16) -- skip 2 bytes (wantsToChat + client index)
 
         local chatType = bf:ReadString(256)
         local playerName = bf:ReadString(256)
