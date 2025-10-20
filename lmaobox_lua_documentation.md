@@ -7394,7 +7394,7 @@ local function myCoolMessageHook(msg)
     if msg:GetID() == SayText2 then 
         local bf = msg:GetBitBuffer()
 
-        bf:SetCurBit(16) -- skip 2 bytes (wantsToChat + client index)
+        bf:SetCurBit(24) -- skip 3 bytes (wantsToChat + client index + isChat flag)
 
         local chatType = bf:ReadString(256)
         local playerName = bf:ReadString(256)

@@ -129,10 +129,11 @@ local function OnUserMessage(msg)
 
 	bf:SetCurBit(0)
 
-	-- Read chat data (must skip 2 bytes first to avoid invisible char in chatType)
+	-- Read chat data (TF2's actual SayText2 structure)
 	local wantsToChat = bf:ReadByte() -- Byte 0-7: wants to chat flag
 	local clientIndex = bf:ReadByte() -- Byte 8-15: client index
-	local chatType = bf:ReadString(256) -- Now clean (no invisible char) - e.g. "TF_Chat_Team"
+	local isChat = bf:ReadByte() -- Byte 16-23: chat flag (THIS WAS MISSING!)
+	local chatType = bf:ReadString(256) -- Now properly aligned - e.g. "TF_Chat_Team"
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)
 
@@ -146,39 +147,25 @@ local function OnUserMessage(msg)
 	local status, color = GetCheaterStatus(player)
 
 	if status then
-		-- Build complete colored string with full control
+		-- Build colored output for ChatPrintf
 		local colorHex = rgbToHex(color[1], color[2], color[3])
-
-		-- Get team color
-		local teamColor = "\x01" -- Default white
-		local playerTeam = player:GetTeamNumber()
-		if playerTeam == 2 then
-			teamColor = "\x07FF4040" -- RED team
-		elseif playerTeam == 3 then
-			teamColor = "\x0799CCFF" -- BLU team
+		local tag = string.format("\x01[%s%s]\x01", colorHex, status)
+		local teamColor = "\x01"
+		local team = player:GetTeamNumber()
+		if team == 2 then
+			teamColor = "\x07FF4040"
+		elseif team == 3 then
+			teamColor = "\x0799CCFF"
 		end
+		local name = string.format("%s%s", teamColor, playerName)
+		local formatted = string.format("%s %s\x01 :  %s", tag, name, messageText)
 
-		-- Detect team chat based on chatType
-		local teamPrefix = ""
-		if chatType ~= "TF_Chat_All" and chatType ~= "" then
-			-- Team message - add (Team) prefix
-			-- Note: Can't get exact localized text, but we know it's team chat
-			teamPrefix = "\x01(Team) "
-		end
+		client.ChatPrintf(formatted)
 
-		-- Build message with colored tag
-		local tag = string.format("\x01[%s%s\x01]", colorHex, status)
-		local chatMessage = string.format("%s%s %s%s\x01 :  %s", teamPrefix, tag, teamColor, playerName, messageText)
-
-		-- Print to chat and clear original
-		client.ChatPrintf(chatMessage)
-
-		-- Clear original message so it doesn't show
+		-- Wipe original payload so nothing extra prints
 		ClearBuffer(bf)
 		bf:SetCurBit(0)
-		bf:WriteByte(wantsToChat)
-		bf:WriteByte(clientIndex)
-		bf:WriteString("")
+		return
 	end
 end
 
