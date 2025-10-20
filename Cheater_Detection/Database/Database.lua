@@ -295,13 +295,23 @@ function Database.Initialize(silent)
 
 	-- Removed redundant final count log here, handled in LoadDatabase
 
-	-- Clear local player from cheater list (for debugging)
+	-- Clear local player from cheater list and database (for debugging)
 	local localPlayer = entities.GetLocalPlayer()
 	if localPlayer then
 		local mySteamID = Common.GetSteamID64(localPlayer)
 		if mySteamID then
-			Log(LogLevel.DEBUG, "[DB] Clearing local player from cheater list")
-			pcall(playerlist.SetPriority, mySteamID, 0) -- Use pcall for safety
+			-- Always set priority to 0
+			Log(LogLevel.DEBUG, "[DB] Setting local player priority to 0")
+			pcall(playerlist.SetPriority, mySteamID, 0)
+			
+			-- Remove from database if debug mode is on
+			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+				if G.DataBase[mySteamID] then
+					G.DataBase[mySteamID] = nil
+					Database.State.isDirty = true
+					Log(LogLevel.INFO, "[DB] Removed local player from database (debug mode)")
+				end
+			end
 		end
 	end
 
