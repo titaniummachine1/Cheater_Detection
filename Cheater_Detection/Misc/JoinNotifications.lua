@@ -17,31 +17,51 @@ local hasValidatedOnLoad = false
 -- Send message to configured output channels
 -- messageBracketed: includes [CHEATER] or [VALVE EMPLOYEE] prefix
 -- messagePlain: plain text for public/party (no brackets to avoid ChatPrefix interference)
-local function SendToChannels(messageBracketed, messagePlain, outputConfig)
+-- isValveMessage: if true, special handling for Valve employees
+local function SendToChannels(messageBracketed, messagePlain, outputConfig, isValveMessage)
 	if not outputConfig then
 		return
 	end
 
-	-- Client chat (only visible to you) - use bracketed version
-	if outputConfig.ClientChat then
-		if not client.ChatPrintf(messageBracketed) then
+	-- Build colored version with green {CD} prefix
+	local messageColored = messageBracketed
+	if isValveMessage then
+		-- Format: [CD] PlayerName is in the server
+		-- Green [CD]: \x073EFF3E, Team color for name: \x03
+		messageColored = messageBracketed:gsub("%[VALVE EMPLOYEE%] ", "\x073EFF3E[CD]\x01 \x03")
+		-- Reset color after player name (before "is in the server" or other text)
+		messageColored = messageColored:gsub("(%b()) ", "%1\x01 ")
+	else
+		-- Red [CHEATER] for cheaters with green {CD} prefix
+		messageColored = messageBracketed:gsub("%[CHEATER%]", "\x073EFF3E{CD}\x01 \x07FF0000[CHEATER]\x01")
+		-- Team color for player name
+		messageColored = messageColored:gsub("(%{CD%} %[CHEATER%]) (%b())", "%1 \x03%2\x01")
+	end
+
+	-- 1. Console - always use bracketed version (no color codes)
+	if outputConfig.Console then
+		print(messageBracketed)
+	end
+
+	-- 2. Party chat - use plain version, skip for Valve
+	if outputConfig.PartyChat and not isValveMessage then
+		client.ChatTeamSay(messagePlain)
+	end
+
+	-- 3. Public chat takes precedence over local chat (both show in same window)
+	-- Use colored version for both Valve and cheaters to match local chat formatting
+	if outputConfig.PublicChat then
+		client.ChatSay(messageColored) -- Send formatted message with {CD} prefix
+	-- 4. Local chat only if public chat didn't handle it - use colored version
+	elseif outputConfig.ClientChat then
+		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send client chat message")
 		end
 	end
 
-	-- Public chat (visible to everyone) - use plain to avoid ChatPrefix double-prefix
-	if outputConfig.PublicChat then
-		client.ChatSay(messagePlain)
-	end
-
-	-- Party/Team chat - use plain to avoid ChatPrefix double-prefix
-	if outputConfig.PartyChat then
-		client.ChatTeamSay(messagePlain)
-	end
-
-	-- Console - use bracketed version
-	if outputConfig.Console then
-		print(messageBracketed)
+	-- Fallback: ensure messages are shown locally if no output was enabled
+	if not outputConfig.PublicChat and not outputConfig.ClientChat then
+		client.ChatPrintf(messageColored)
 	end
 end
 
@@ -73,39 +93,37 @@ local function ValidateAllPlayers()
 			if steamID64 then
 				-- Check Valve employee first (higher priority)
 				if config.CheckValve and Sources.IsValveEmployee(steamID64) then
-					local output = GetEffectiveOutput(
-						config.DefaultOutput,
-						config.ValveOverride,
-						config.UseValveOverride
-					)
-					
+					local output =
+						GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
+
 					-- Show notification
 					if config.ValveAutoDisconnect then
-						local msgBracket = string.format("[VALVE EMPLOYEE] %s is in the server - Leaving game", player:GetName())
-						local msgPlain = string.format("Valve employee %s is in the server - Leaving game", player:GetName())
-						SendToChannels(msgBracket, msgPlain, output)
+						local msgBracket =
+							string.format("[VALVE EMPLOYEE] %s is in the server - Leaving game", player:GetName())
+						local msgPlain =
+							string.format("Valve employee %s is in the server - Leaving game", player:GetName())
+						SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
 						-- Leave the game
 						client.Command("disconnect", true)
 						return
 					else
 						local msgBracket = string.format("[VALVE EMPLOYEE] %s is in the server", player:GetName())
 						local msgPlain = string.format("Valve employee %s is in the server", player:GetName())
-						SendToChannels(msgBracket, msgPlain, output)
+						SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
 					end
 				-- Check if cheater in database
 				elseif config.CheckCheater then
 					local cheaterData = Database.GetCheater(steamID64)
 					if cheaterData then
-						local output = GetEffectiveOutput(
-							config.DefaultOutput,
-							config.CheaterOverride,
-							config.UseCheaterOverride
-						)
+						local output =
+							GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
 						local reason = cheaterData.Reason or "Unknown"
-						local msgBracket = string.format("[CHEATER] %s is in the server (Suspected of: %s)", player:GetName(), reason)
-						local msgPlain = string.format("Cheater %s is in the server (Suspected of: %s)", player:GetName(), reason)
-						SendToChannels(msgBracket, msgPlain, output)
+						local msgBracket =
+							string.format("[CHEATER] %s is in the server (Suspected of: %s)", player:GetName(), reason)
+						local msgPlain =
+							string.format("Cheater %s is in the server (Suspected of: %s)", player:GetName(), reason)
+						SendToChannels(msgBracket, msgPlain, output, false) -- Not Valve message
 					end
 				end
 			end
@@ -134,7 +152,7 @@ local function OnPlayerConnect(event)
 	-- Get player info from event
 	local name = event:GetString("name")
 	local networkid = event:GetString("networkid")
-	
+
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
 	-- Convert to SteamID64: 76561197960265728 + accountID
 	local accountID = networkid:match("%[U:1:(%d+)%]")
@@ -146,23 +164,19 @@ local function OnPlayerConnect(event)
 
 	-- Check if Valve employee (higher priority)
 	if config.CheckValve and Sources.IsValveEmployee(steamID64) then
-		local output = GetEffectiveOutput(
-			config.DefaultOutput,
-			config.ValveOverride,
-			config.UseValveOverride
-		)
+		local output = GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
 
 		-- Show notification and optionally leave
 		if config.ValveAutoDisconnect then
 			local msgBracket = string.format("[VALVE EMPLOYEE] %s joined - Leaving game", name)
 			local msgPlain = string.format("Valve employee %s joined - Leaving game", name)
-			SendToChannels(msgBracket, msgPlain, output)
+			SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
 			-- Leave the game
 			client.Command("disconnect", true)
 		else
 			local msgBracket = string.format("[VALVE EMPLOYEE] %s joined", name)
 			local msgPlain = string.format("Valve employee %s joined", name)
-			SendToChannels(msgBracket, msgPlain, output)
+			SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
 		end
 		return
 	end
@@ -171,16 +185,12 @@ local function OnPlayerConnect(event)
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
 		if cheaterData then
-			local output = GetEffectiveOutput(
-				config.DefaultOutput,
-				config.CheaterOverride,
-				config.UseCheaterOverride
-			)
+			local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
 			local reason = cheaterData.Reason or "Unknown"
 			local msgBracket = string.format("[CHEATER] %s joined (Suspected of: %s)", name, reason)
 			local msgPlain = string.format("Cheater %s joined (Suspected of: %s)", name, reason)
-			SendToChannels(msgBracket, msgPlain, output)
+			SendToChannels(msgBracket, msgPlain, output, false) -- Not Valve message
 		end
 	end
 end
@@ -204,7 +214,7 @@ local function OnPlayerDisconnect(event)
 	-- Get player info from event
 	local name = event:GetString("name")
 	local networkid = event:GetString("networkid")
-	
+
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
 	local accountID = networkid:match("%[U:1:(%d+)%]")
 	if not accountID then
@@ -218,16 +228,12 @@ local function OnPlayerDisconnect(event)
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
 		if cheaterData then
-			local output = GetEffectiveOutput(
-				config.DefaultOutput,
-				config.CheaterOverride,
-				config.UseCheaterOverride
-			)
+			local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
 			local detectionReason = cheaterData.Reason or "Unknown"
 			local msgBracket = string.format("[CHEATER] %s left (Suspected of: %s)", name, detectionReason)
 			local msgPlain = string.format("Cheater %s left (Suspected of: %s)", name, detectionReason)
-			SendToChannels(msgBracket, msgPlain, output)
+			SendToChannels(msgBracket, msgPlain, output, false) -- Not Valve message
 		end
 	end
 end
@@ -235,7 +241,7 @@ end
 -- Master event handler for both connect and disconnect
 local function OnGameEvent(event)
 	local eventName = event:GetName()
-	
+
 	if eventName == "player_connect" then
 		OnPlayerConnect(event)
 	elseif eventName == "player_disconnect" then

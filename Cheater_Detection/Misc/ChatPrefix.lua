@@ -137,6 +137,19 @@ local function OnUserMessage(msg)
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)
 
+	-- Check if this is a [CD] system message
+	if messageText:match("^%[CD%]") then
+		-- System message - strip player prefix and show clean version
+		if not client.ChatPrintf(messageText) then
+			print("[CD] Failed to send system message")
+		end
+		
+		-- Wipe original payload so player prefix doesn't show
+		ClearBuffer(bf)
+		bf:SetCurBit(0)
+		return
+	end
+
 	-- Get player entity
 	local player = GetPlayerFromName(playerName)
 	if not player then

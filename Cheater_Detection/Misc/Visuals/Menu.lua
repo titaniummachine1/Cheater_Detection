@@ -86,18 +86,14 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Exploit Detection")
 		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke)
-		TimMenu.NextLine()
 		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp)
-		TimMenu.NextLine()
 		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim)
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Movement Detection")
 		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop)
-		TimMenu.NextLine()
 		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed)
-		TimMenu.NextLine()
 		Advanced.Strafe_bot = TimMenu.Checkbox("Strafe Bot Detection", Advanced.Strafe_bot)
 		TimMenu.EndSector()
 		TimMenu.NextLine()
@@ -411,7 +407,6 @@ local function DrawMenu()
 				JN.ValveOverride.Console = valveOutputTable[4]
 				TimMenu.NextLine()
 			end
-
 		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
