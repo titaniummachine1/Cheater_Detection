@@ -110,6 +110,10 @@ Common.Helpers = Common.Lib.TF2.Helpers
 local cachedSteamIDs = {}
 local lastTick = -1
 
+function Common.IsFriend(entity)
+	return (not G.Menu.Main.debug and Common.TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
+end
+
 function Common.GetSteamID64(Player)
 	assert(Player, "Player is nil")
 
@@ -183,10 +187,6 @@ function Common.IsCheater(playerInfo)
 	return isMarkedCheater or inDatabase or priorityCheater
 end
 
-function Common.IsFriend(entity)
-	return (not G.Menu.Main.debug and Common.TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
-end
-
 ---@param entity Entity
 ---@param checkFriend boolean?
 ---@param checkDormant boolean?
@@ -197,7 +197,7 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 		not entity
 		or not entity:IsValid()
 		or not entity:IsAlive()
-		or (checkDormant and entity:IsDormant())
+		or (checkDormant == true and entity:IsDormant() or checkDormant == nil and entity:IsDormant())
 		or entity:GetTeamNumber() == TEAM_SPECTATOR
 		or entity:GetTeamNumber() == TEAM_UNASSIGNED --can be simplified to entity:GetTeamNumber() > 1
 		or (skipEntity and entity == skipEntity)
@@ -205,7 +205,7 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 		return false -- Entity is not a valid player
 	end
 
-	if checkFriend and Common.IsFriend(entity) then
+	if checkFriend and Common.IsFriend(entity) or checkFriend == nil and not Common.IsFriend(entity) then
 		return false -- Entity is a friend, skip
 	end
 
