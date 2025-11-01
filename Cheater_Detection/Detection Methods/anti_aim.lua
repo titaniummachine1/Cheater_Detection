@@ -58,7 +58,6 @@ function AntiAim.Check(player)
 
 	local detected = false
 	local detectionReason = nil
-
 	-- Enhanced detection with cheat fingerprinting
 	if angles.pitch > 89.4 or angles.pitch < -89.4 then
 		-- Specific cheat pattern detection
@@ -81,8 +80,23 @@ function AntiAim.Check(player)
 	-- Add evidence immediately (exploits = instant flag)
 	if detected then
 		Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT)
-		Logger.Info("AntiAim", string.format("%s detected using %s (pitch: %.3f)", 
-			player:GetName(), detectionReason, angles.pitch))
+
+		if G.Menu.Advanced.debug then
+			print(
+				string.format(
+					"[AntiAim] %s - Detected %s (pitch: %.3f) +%.1f evidence",
+					player:GetName(),
+					detectionReason,
+					angles.pitch,
+					EVIDENCE_WEIGHT
+				)
+			)
+		end
+
+		Logger.Info(
+			"AntiAim",
+			string.format("%s detected using %s (pitch: %.3f)", player:GetName(), detectionReason, angles.pitch)
+		)
 		return true
 	end
 

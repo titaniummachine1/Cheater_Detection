@@ -123,12 +123,14 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 		return -- Skip silently (bots return UserID instead of SteamID64)
 	end
 
-	-- Skip local player (prevent self-detection even if debug mode is on)
-	local localPlayer = entities.GetLocalPlayer()
-	if localPlayer then
-		local localSteamID = Common.GetSteamID64(localPlayer)
-		if localSteamID and tostring(localSteamID) == steamID then
-			return -- Skip local player
+	-- Skip local player unless debug mode is enabled
+	if not G.Menu.Advanced.debug then
+		local localPlayer = entities.GetLocalPlayer()
+		if localPlayer then
+			local localSteamID = Common.GetSteamID64(localPlayer)
+			if localSteamID and tostring(localSteamID) == steamID then
+				return -- Skip local player
+			end
 		end
 	end
 
@@ -185,44 +187,60 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 		end
 
 		-- Get primary detection reason (highest weight)
-		local primaryReason = "Cheater"
+		local primaryReason = "Cheater" -- fallback
 		local maxWeight = 0
-		for reasonName, reasonData in pairs(evidence.Reasons) do
+		for detectionName, reasonData in pairs(evidence.Reasons) do
 			if reasonData.Weight > maxWeight then
 				maxWeight = reasonData.Weight
-				-- Convert detection name to readable format
-				if reasonName == "anti_aim" then
-					primaryReason = "Anti-Aim"
-				elseif reasonName == "fake_lag" then
-					primaryReason = "Fake Lag"
-				elseif reasonName == "warp_dt" then
-					primaryReason = "Warp/DT"
-				elseif reasonName == "bhop" then
-					primaryReason = "Bhop"
-				elseif reasonName == "Duck_Speed" then
-					primaryReason = "Duck Speed"
-				else
-					-- Generic conversion: "some_name" -> "Some Name"
-					primaryReason = reasonName:gsub("_", " "):gsub("^%l", string.upper)
+				-- Map detection names to user-friendly reasons
+				local reasonMap = {
+					["anti_aim"] = "Anti-Aim",
+					["bhop"] = "Bhop", 
+					["fake_lag"] = "Fake Lag",
+					["warp_dt"] = "Warp/Doubletap",
+					["Duck_Speed"] = "Duck Speed",
+					["strafe_bot"] = "Strafe Bot",
+					["bot_walk"] = "Bot Walk",
+					["silent_aimbot"] = "Silent Aimbot",
+					["plain_aimbot"] = "Aimbot",
+					["smooth_aimbot"] = "Smooth Aimbot",
+					["triggerbot"] = "Triggerbot"
+				}
+				primaryReason = reasonMap[detectionName] or detectionName
+			end
+		end
+
+		-- Save to database
+		local dbSuccess = Database.UpsertCheater(steamID, {
+			name = playerName,
+			reason = primaryReason, -- Use actual detection reason
+			proof = "Evidence System",
+			evidenceScore = evidence.TotalScore,
+			reasons = evidence.Reasons,
+			firstSeen = os.time(),
+			lastSeen = os.time(),
+		})
+
+		-- Auto mark in lmaobox if enabled
+		if G.Menu.Advanced.AutoMark then
+			for _, player in ipairs(allPlayers) do
+				if tostring(player:GetSteamID64()) == steamID then
+					-- Allow setting priority on local player only in debug mode
+					if not G.Menu.Advanced.debug and player == G.pLocal then
+						break -- Skip local player unless debug mode
+					end
+					playerlist.SetPriority(player, 10)
+					if G.Menu.Advanced.debug then
+						print(string.format("[Evidence] Set priority 10 for %s", player:GetName()))
+					end
+					break
 				end
 			end
 		end
 
-		-- Write to database for persistence (minimal format)
-		local dbSuccess = Database.UpsertCheater(steamID, {
-			name = playerName,
-			reason = primaryReason,
-		})
-
-		if G.Menu.Main.AutoMark then
-			local success = pcall(playerlist.SetPriority, steamID, 10)
-			
-			if dbSuccess then
-				Logger.Info("Detection", string.format("Marked %s as cheater (Reason: %s, Score: %.1f)", 
-					playerName, primaryReason, evidence.TotalScore))
-			else
-				Logger.Error("Detection", string.format("Failed to save %s to database", playerName))
-			end
+		if G.Menu.Advanced.debug then
+			print(string.format("[Evidence] MARKED %s as cheater (Score: %.1f >= %.1f) - Saved to database", 
+				playerName, evidence.TotalScore, threshold))
 		end
 	end
 end
@@ -358,7 +376,7 @@ function Evidence.ApplyDecay()
 	lastDecayTick = currentTick
 
 	-- Get all players and decay their evidence
-	local allPlayers = FastPlayers.GetAll(true) -- Exclude local
+	local allPlayers = FastPlayers.GetAll(true) -- Include dormant players for decay
 
 	for _, player in ipairs(allPlayers) do
 		local steamID = player:GetSteamID64()
@@ -510,6 +528,18 @@ function Evidence.GetDetails(steamID)
 	end
 
 	return G.PlayerData[steamID].Evidence
+end
+
+--- Clean up player data when they leave (centralized black box)
+---@param steamID string Player's SteamID64
+function Evidence.OnPlayerLeave(steamID)
+	-- Clean up evidence data
+	if G.PlayerData[steamID] then
+		G.PlayerData[steamID] = nil
+	end
+	
+	-- Detection module data cleanup is handled by script unload
+	-- Individual modules' local data structures are cleaned up automatically
 end
 
 return Evidence

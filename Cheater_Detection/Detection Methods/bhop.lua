@@ -11,8 +11,7 @@ local Bhop = {}
 --[[ Configuration ]]
 local DETECTION_NAME = "bhop"
 local EVIDENCE_WEIGHT_BASE = 5
-local BHOP_AIR_TICKS_THRESHOLD = 3 -- Number of consecutive air ticks to trigger detection (similar to old Menu.BhopTimes)
-local DECAY_AMOUNT = 3.0 -- Weight to remove on failed bhop
+local DECAY_AMOUNT = 2.0 -- Weight to remove on failed bhop
 
 -- Per-player state tracking
 local playerBhopData = {}
@@ -20,9 +19,8 @@ local playerBhopData = {}
 local function initPlayerData(steamID)
 	if not playerBhopData[steamID] then
 		playerBhopData[steamID] = {
-			bhopCount = 0, -- Count consecutive bhops
 			lastOnGround = true, -- Track last ground state
-			lastTriggeredBhop = false, -- Track if we just triggered detection
+			lastVelocityZ = 0, -- Track last velocity for jump detection
 		}
 	end
 end
@@ -71,7 +69,7 @@ function Bhop.Check(player)
 	local onGround = (flags & FL_ONGROUND) ~= 0
 
 	if onGround then
-		-- Player on ground - apply decay if they were airbone before (landed)
+		-- Player on ground - reset bhop counter and apply decay if they were airborne before
 		if not data.lastOnGround then
 			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, DECAY_AMOUNT)
 
@@ -81,35 +79,29 @@ function Bhop.Check(player)
 		end
 		data.lastOnGround = true
 	else
-		-- Player in air - check if they jumped (exact velocity.z values)
-		if data.lastOnGround and (velocity.z == 271 or velocity.z == 277) then
-			-- Jump detected, increment bhop counter
-			data.bhopCount = data.bhopCount + 1
+		-- Player in air - check if they jumped (velocity increased AND exact jump values)
+		if data.lastOnGround and data.lastVelocityZ < velocity.z and (velocity.z == 271 or velocity.z == 277) then
+			-- Jump detected - add weight immediately
+			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
 
-			-- Check if reached threshold
-			if data.bhopCount >= BHOP_AIR_TICKS_THRESHOLD then
-				-- Bhop detected - add weight
-				Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
-				data.lastTriggeredBhop = true
-				data.bhopCount = 0 -- Reset counter
-
-				if G.Menu.Advanced.debug then
-					print(
-						string.format(
-							"[Bhop] %s - Bhop detected (jumps: %d, vel.z: %.0f) +%.1f evidence",
-							player:GetName(),
-							BHOP_AIR_TICKS_THRESHOLD,
-							velocity.z,
-							EVIDENCE_WEIGHT_BASE
-						)
+			if G.Menu.Advanced.debug then
+				print(
+					string.format(
+						"[Bhop] %s - Bhop detected (vel.z: %.0f) +%.1f evidence",
+						player:GetName(),
+						velocity.z,
+						EVIDENCE_WEIGHT_BASE
 					)
-				end
-
-				return true
+				)
 			end
+
+			return true
 		end
 		data.lastOnGround = false
 	end
+
+	-- Store current velocity for next tick comparison
+	data.lastVelocityZ = velocity.z
 
 	return false
 end

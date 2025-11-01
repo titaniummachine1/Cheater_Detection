@@ -205,8 +205,13 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 		return false -- Entity is not a valid player
 	end
 
-	if checkFriend and Common.IsFriend(entity) or checkFriend == nil and not Common.IsFriend(entity) then
-		return false -- Entity is a friend, skip
+	-- Skip friends unless debug mode is enabled
+	if not G.Menu.Advanced.debug then
+		if checkFriend == true and Common.IsFriend(entity) then
+			return false -- Entity is a friend, skip
+		elseif checkFriend == nil and Common.IsFriend(entity) then
+			return false -- Entity is a friend, skip (default behavior)
+		end
 	end
 
 	return true -- Entity is a valid player

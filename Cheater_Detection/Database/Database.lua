@@ -448,6 +448,9 @@ function Database.UpsertCheater(steamID, data)
 	-- Mark as dirty for save
 	Database.State.isDirty = true
 
+	-- Save immediately to prevent data loss on crashes
+	Database.SaveDatabase()
+
 	Log(
 		LogLevel.INFO,
 		string.format(
@@ -483,6 +486,8 @@ function Database.RemoveCheater(steamID)
 	if G.DataBase[steamID] then
 		G.DataBase[steamID] = nil
 		Database.State.isDirty = true
+		-- Save immediately to maintain database consistency
+		Database.SaveDatabase()
 		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
 		return true
 	end

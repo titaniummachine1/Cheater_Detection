@@ -33,7 +33,8 @@ end
 
 --[[ Public API ]]
 
---- Returns list of valid, non-dormant players once per tick.
+--- Returns list of valid players once per tick.
+---@param excludelocal boolean? Pass true to exclude local player, false to include
 ---@return WrappedPlayer[]
 function FastPlayers.GetAll(excludelocal)
 	if FastPlayers.AllUpdated then
@@ -41,9 +42,12 @@ function FastPlayers.GetAll(excludelocal)
 	end
 	excludelocal = excludelocal and FastPlayers.GetLocal() or nil
 	cachedAllPlayers = {}
-	local debugMode = G.Menu.Advanced.debug
+	
+	-- Use Common.IsValidPlayer as single source of truth
+	-- Pass nil for checkFriend to use debug mode logic internally
+	-- Pass false for checkDormant to include dormant players (we want to track them)
 	for _, ent in pairs(entities.FindByClass("CTFPlayer") or {}) do
-		if Common.IsValidPlayer(ent, debugMode, true, excludelocal) then
+		if Common.IsValidPlayer(ent, nil, false, excludelocal) then
 			local wrapped = WrappedPlayer.FromEntity(ent)
 			if wrapped then
 				cachedAllPlayers[#cachedAllPlayers + 1] = wrapped

@@ -7,6 +7,15 @@
     Alchemist for testing and party callout
 ]]
 
+-- Check and disable anonymous mode if enabled (disrupts player detection)
+if gui.GetValue("ANONYMOUSE MODE") == 1 then
+	gui.SetValue("ANONYMOUSE MODE", 0)
+	-- Send warning to local chat
+	client.ChatPrintf(
+		"\x04[CD]\x01 Anonymous mode disabled - it makes all players appear as bots and breaks detection!"
+	)
+end
+
 --[[ Import core utilities ]]
 local G = require("Cheater_Detection.Utils.Globals") --[[ Imported by: Main.lua ]]
 local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
@@ -44,7 +53,8 @@ local function OnCreateMove(cmd)
 
 	-- Use FastPlayers for optimized player fetching (required directly)
 	local pLocal = FastPlayers.GetLocal() -- Get cached local player (still store in G for now)
-	local allPlayers = FastPlayers.GetAll(true) -- Get cached list of other players (exclude local)
+	G.pLocal = pLocal -- Store for Evidence system to identify local player
+	local allPlayers = FastPlayers.GetAll(not G.Menu.Advanced.debug) -- Exclude local unless debug mode
 
 	if not pLocal then -- Need local player to proceed
 		return
@@ -96,10 +106,10 @@ end
 local function OnMapChange()
 	-- Force save database on map change
 	Database.ForceSave()
-	
+
 	-- Reload database on new map
 	Database.LoadDatabase(false, true)
-	
+
 	if G.Menu.Advanced.debug then
 		print("[CD] Map changed - Database saved and reloaded")
 	end
@@ -108,9 +118,19 @@ end
 --[[ Callbacks ]]
 callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
 callbacks.Register("FireGameEvent", "CD_MapChange", function(event)
-	if event:GetName() == "game_newmap" or 
-	   event:GetName() == "teamplay_round_start" or 
-	   event:GetName() == "cs_round_start" then
+	if
+		event:GetName() == "game_newmap"
+		or event:GetName() == "teamplay_round_start"
+		or event:GetName() == "cs_round_start"
+	then
 		OnMapChange()
+	end
+end)
+
+-- Clean up player data when they leave (centralized through evidence system)
+callbacks.Register("FireGameEvent", "CD_PlayerDisconnect", function(event)
+	if event:GetName() == "player_disconnect" then
+		local steamID = tostring(event:GetInt("userid"))
+		Evidence.OnPlayerLeave(steamID)
 	end
 end)
