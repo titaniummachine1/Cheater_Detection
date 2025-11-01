@@ -99,6 +99,12 @@ end
 
 --[[ Public Functions ]]
 
+--- Get the current evidence threshold from menu
+---@return number Current threshold value
+function Evidence.GetThreshold()
+	return G.Menu.Advanced.Evicence_Tolerance or Evidence.Config.MarkAsCheatThreshold
+end
+
 --- Add evidence weight for a specific detection
 ---@param steamID string Player's SteamID64
 ---@param detectionName string Detection method name
@@ -155,8 +161,14 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 	evidence.TotalScore = total
 	evidence.LastUpdateTick = globals.TickCount()
 
-	-- Check if should mark as cheater (use menu threshold)
-	local threshold = G.Menu.Advanced.Evicence_Tolerance or Evidence.Config.MarkAsCheatThreshold
+	-- Check if should mark as cheater (use global threshold function)
+	local threshold = Evidence.GetThreshold()
+	
+	if G.Menu.Advanced.debug then
+		print(string.format("[Evidence] %s - Total: %.1f, Threshold: %.1f, Marked: %s", 
+			steamID, evidence.TotalScore, threshold, tostring(evidence.MarkedAsCheater)))
+	end
+	
 	if evidence.TotalScore >= threshold and not evidence.MarkedAsCheater then
 		evidence.MarkedAsCheater = true
 		G.PlayerData[steamID].info = G.PlayerData[steamID].info or {}
@@ -422,7 +434,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 
 	-- Apply decay (minimum 0)
 	local oldWeight = evidence.Reasons[detectionName].Weight
-	evidence.Reasons[detectionName].Weight = math.max(Evidence.Config.MinWeightFloor, 
+	evidence.Reasons[detectionName].Weight = math.max(0, 
 		evidence.Reasons[detectionName].Weight - decayAmount)
 
 	-- Recalculate total if changed

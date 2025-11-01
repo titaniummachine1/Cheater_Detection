@@ -30,7 +30,7 @@ local function initPlayerData(steamID)
 			lastOnGround = true,
 			lastVelocityZ = 0,
 			consecutiveGroundTicks = 0,
-			lastDecayTick = 0,
+			lastJumpWasPerfect = false,
 		}
 	end
 end
@@ -85,14 +85,36 @@ function Bhop.Check(player)
 		if data.consecutiveGroundTicks == 1 then
 			-- Perfect jump detected - add weight
 			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
-			
+
 			if G.Menu.Advanced.debug then
-				print(string.format("[Bhop] %s - Perfect jump detected (1 tick on ground) +%.1f evidence", 
-					player:GetName(), EVIDENCE_WEIGHT_BASE))
+				print(
+					string.format(
+						"[Bhop] %s - Perfect jump detected (1 tick on ground) +%.1f evidence",
+						player:GetName(),
+						EVIDENCE_WEIGHT_BASE
+					)
+				)
 			end
-			
+
 			data.lastOnGround = false
+			data.lastJumpWasPerfect = true
 			return true
+		else
+			-- Imperfect jump (on ground for more than 1 tick) - apply decay
+			if data.lastJumpWasPerfect then
+				Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 3.0) -- Decay 3.0 weight for imperfect jump
+				data.lastJumpWasPerfect = false
+
+				if G.Menu.Advanced.debug then
+					print(
+						string.format(
+							"[Bhop] %s - Imperfect jump (on ground for %d ticks) -3.0 evidence",
+							player:GetName(),
+							data.consecutiveGroundTicks
+						)
+					)
+				end
+			end
 		end
 	elseif not onGround then
 		-- Still in air, continue
@@ -100,17 +122,6 @@ function Bhop.Check(player)
 	else
 		-- Still on ground, increment counter
 		data.consecutiveGroundTicks = (data.consecutiveGroundTicks or 0) + 1
-		
-		-- If we've been on ground for more than 1 tick, apply decay to bhop evidence
-		if data.consecutiveGroundTicks > 1 and data.lastDecayTick ~= globals.TickCount() then
-			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 2.0) -- Decay 2.0 weight per tick when not bhopping
-			data.lastDecayTick = globals.TickCount()
-			
-			if G.Menu.Advanced.debug then
-				print(string.format("[Bhop] %s - Not bhopping (on ground for %d ticks) -2.0 evidence", 
-					player:GetName(), data.consecutiveGroundTicks))
-			end
-		end
 	end
 
 	-- Update state for next tick
