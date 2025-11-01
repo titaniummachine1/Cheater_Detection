@@ -11,7 +11,8 @@ local Bhop = {}
 --[[ Configuration ]]
 local DETECTION_NAME = "bhop"
 local EVIDENCE_WEIGHT_BASE = 5
-local EVIDENCE_MULTIPLIER = 1.5
+local BHOP_AIR_TICKS_THRESHOLD = 3  -- Number of consecutive air ticks to trigger detection (similar to old Menu.BhopTimes)
+local DECAY_AMOUNT = 3.0  -- Weight to remove on failed bhop
 
 -- Per-player state tracking
 local playerBhopData = {}
@@ -27,10 +28,8 @@ end
 local function initPlayerData(steamID)
 	if not playerBhopData[steamID] then
 		playerBhopData[steamID] = {
-			lastOnGround = true,
-			lastVelocityZ = 0,
-			consecutiveGroundTicks = 0,
-			lastJumpWasPerfect = false,
+			airTicks = 0,  -- Count consecutive ticks in air
+			lastTriggeredBhop = false,  -- Track if we just triggered detection
 		}
 	end
 end
@@ -68,65 +67,42 @@ function Bhop.Check(player)
 		return false
 	end
 
-	-- Check ground state and velocity
-	local onGround = player:IsOnGround()
-	local velocity = entity:EstimateAbsVelocity()
+	-- Check ground state (matches old CheckBhop logic)
+	local flags = player:GetPropInt("m_fFlags")
+	local onGround = (flags & FL_ONGROUND) ~= 0
 
-	if not velocity then
-		return false
-	end
-
-	-- Tick-based perfect jump detection: airbone -> ground (1 tick) -> airbone
-	if onGround and not data.lastOnGround then
-		-- Just landed, reset counter
-		data.consecutiveGroundTicks = 1
-	elseif not onGround and data.lastOnGround then
-		-- Just jumped, check if we were only on ground for 1 tick
-		if data.consecutiveGroundTicks == 1 then
-			-- Perfect jump detected - add weight
-			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
-
+	if onGround then
+		-- Player on ground - reset air counter and apply decay if we had triggered bhop before
+		if data.lastTriggeredBhop then
+			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, DECAY_AMOUNT)
+			data.lastTriggeredBhop = false
+			
 			if G.Menu.Advanced.debug then
-				print(
-					string.format(
-						"[Bhop] %s - Perfect jump detected (1 tick on ground) +%.1f evidence",
-						player:GetName(),
-						EVIDENCE_WEIGHT_BASE
-					)
-				)
-			end
-
-			data.lastOnGround = false
-			data.lastJumpWasPerfect = true
-			return true
-		else
-			-- Imperfect jump (on ground for more than 1 tick) - apply decay
-			if data.lastJumpWasPerfect then
-				Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 3.0) -- Decay 3.0 weight for imperfect jump
-				data.lastJumpWasPerfect = false
-
-				if G.Menu.Advanced.debug then
-					print(
-						string.format(
-							"[Bhop] %s - Imperfect jump (on ground for %d ticks) -3.0 evidence",
-							player:GetName(),
-							data.consecutiveGroundTicks
-						)
-					)
-				end
+				print(string.format("[Bhop] %s - Landed (not bhopping) -%.1f evidence", 
+					player:GetName(), DECAY_AMOUNT))
 			end
 		end
-	elseif not onGround then
-		-- Still in air, continue
-		data.consecutiveGroundTicks = 0
+		data.airTicks = 0
 	else
-		-- Still on ground, increment counter
-		data.consecutiveGroundTicks = (data.consecutiveGroundTicks or 0) + 1
+		-- Player in air - increment counter
+		data.airTicks = data.airTicks + 1
+		
+		-- Check if reached threshold (consecutive air ticks = bhop)
+		if data.airTicks >= BHOP_AIR_TICKS_THRESHOLD then
+			-- Bhop detected - add weight
+			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
+			data.lastTriggeredBhop = true
+			data.airTicks = 0  -- Reset counter
+			
+			if G.Menu.Advanced.debug then
+				print(string.format("[Bhop] %s - Bhop detected (air ticks: %d) +%.1f evidence", 
+					player:GetName(), BHOP_AIR_TICKS_THRESHOLD, EVIDENCE_WEIGHT_BASE))
+			end
+			
+			return true
+		end
 	end
-
-	-- Update state for next tick
-	data.lastOnGround = onGround
-	data.lastVelocityZ = velocity.z
+	
 	return false
 end
 
