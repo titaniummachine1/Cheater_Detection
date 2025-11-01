@@ -117,6 +117,15 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 		return -- Skip silently (bots return UserID instead of SteamID64)
 	end
 
+	-- Skip local player (prevent self-detection even if debug mode is on)
+	local localPlayer = entities.GetLocalPlayer()
+	if localPlayer then
+		local localSteamID = Common.GetSteamID64(localPlayer)
+		if localSteamID and tostring(localSteamID) == steamID then
+			return -- Skip local player
+		end
+	end
+
 	-- Debug: Log successful evidence add
 	Logger.Debug("Evidence", string.format("Adding %.1f evidence for %s (method: %s)", 
 		weight, steamID, detectionName))
@@ -382,6 +391,55 @@ function Evidence.IsMarkedCheater(steamID)
 	return false
 end
 
+--- Apply decay to a specific detection method for a player
+---@param steamID string Player's SteamID64
+---@param detectionName string Detection method name
+---@param decayAmount number Amount to decay
+function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
+	if not steamID or not detectionName or not decayAmount then
+		return
+	end
+
+	-- Convert to string and validate SteamID64 format
+	steamID = tostring(steamID)
+	
+	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
+		return
+	end
+
+	initPlayerEvidence(steamID)
+
+	local evidence = G.PlayerData[steamID].Evidence
+
+	-- Initialize detection stack if needed
+	if not evidence.Reasons[detectionName] then
+		evidence.Reasons[detectionName] = {
+			Weight = 0,
+			Category = getCategory(detectionName),
+			LastAddedTick = globals.TickCount(),
+		}
+	end
+
+	-- Apply decay (minimum 0)
+	local oldWeight = evidence.Reasons[detectionName].Weight
+	evidence.Reasons[detectionName].Weight = math.max(Evidence.Config.MinWeightFloor, 
+		evidence.Reasons[detectionName].Weight - decayAmount)
+
+	-- Recalculate total if changed
+	if oldWeight ~= evidence.Reasons[detectionName].Weight then
+		local total = 0
+		for _, reason in pairs(evidence.Reasons) do
+			total = total + reason.Weight
+		end
+		evidence.TotalScore = total
+		evidence.LastUpdateTick = globals.TickCount()
+
+		-- Debug: Log decay
+		Logger.Debug("Evidence", string.format("Decayed %.1f evidence for %s (method: %s, old: %.1f, new: %.1f)", 
+			decayAmount, steamID, detectionName, oldWeight, evidence.Reasons[detectionName].Weight))
+	end
+end
+
 --- Get current evidence score for a player
 ---@param steamID string Player's SteamID64
 ---@return number Total evidence score
@@ -398,6 +456,30 @@ function Evidence.GetScore(steamID)
 	end
 
 	return G.PlayerData[steamID].Evidence.TotalScore or 0
+end
+
+--- Get current evidence weight for a specific detection method
+---@param steamID string Player's SteamID64
+---@param detectionName string Detection method name
+---@return number Current weight for this method
+function Evidence.GetMethodWeight(steamID, detectionName)
+	if not steamID or not detectionName then
+		return 0
+	end
+	
+	-- Ensure steamID is a string
+	steamID = tostring(steamID)
+	
+	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence or not G.PlayerData[steamID].Evidence.Reasons then
+		return 0
+	end
+	
+	local methodData = G.PlayerData[steamID].Evidence.Reasons[detectionName]
+	if not methodData then
+		return 0
+	end
+	
+	return methodData.Weight or 0
 end
 
 --- Get detailed evidence breakdown for a player

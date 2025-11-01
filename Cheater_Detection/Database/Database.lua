@@ -399,6 +399,9 @@ function Database.Initialize(silent)
 					LogLevel.SUCCESS,
 					string.format("[DB] Removed local player from database (SteamID64: %s)", mySteamID)
 				)
+				-- Immediately save to persist cleanup
+				Database.SaveDatabase()
+				Log(LogLevel.INFO, "[DB] Database saved after local player cleanup")
 			else
 				Log(LogLevel.DEBUG, "[DB] Local player not in database")
 			end

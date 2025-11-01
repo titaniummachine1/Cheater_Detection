@@ -30,6 +30,7 @@ local function initPlayerData(steamID)
 	if not playerDuckData[steamID] then
 		playerDuckData[steamID] = {
 			violationTicks = 0,
+			lastDecayTick = 0,
 		}
 	end
 end
@@ -75,6 +76,18 @@ function DuckSpeed.Check(player)
 	-- Only check when on ground and ducking
 	if not (onGround and ducking) then
 		data.violationTicks = 0
+		
+		-- Apply decay when not ducking or not on ground (normal behavior)
+		if data.lastDecayTick ~= globals.TickCount() then
+			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 1.5) -- Decay 1.5 weight per tick when normal
+			data.lastDecayTick = globals.TickCount()
+			
+			if G.Menu.Advanced.debug then
+				print(string.format("[DuckSpeed] %s - Normal movement (not ducking/on ground) -1.5 evidence", 
+					player:GetName()))
+			end
+		end
+		
 		return false
 	end
 
@@ -118,6 +131,17 @@ function DuckSpeed.Check(player)
 	else
 		-- Reset if not violating
 		data.violationTicks = 0
+		
+		-- Apply decay when ducking but within speed limits (normal ducking)
+		if data.lastDecayTick ~= globals.TickCount() then
+			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 0.8) -- Slower decay when ducking normally
+			data.lastDecayTick = globals.TickCount()
+			
+			if G.Menu.Advanced.debug then
+				print(string.format("[DuckSpeed] %s - Normal ducking speed -0.8 evidence", 
+					player:GetName()))
+			end
+		end
 	end
 
 	return false

@@ -15,32 +15,33 @@ local hasValidatedOnLoad = false
 --[[ Helper Functions ]]
 
 -- Send message to configured output channels
--- Properly handles all 4 output types
-local function SendToChannels(message, outputConfig)
+-- messageBracketed: includes [CHEATER] or [VALVE EMPLOYEE] prefix
+-- messagePlain: plain text for public/party (no brackets to avoid ChatPrefix interference)
+local function SendToChannels(messageBracketed, messagePlain, outputConfig)
 	if not outputConfig then
 		return
 	end
 
-	-- Client chat (only visible to you) - like ChatPrefix does
+	-- Client chat (only visible to you) - use bracketed version
 	if outputConfig.ClientChat then
-		if not client.ChatPrintf(message) then
+		if not client.ChatPrintf(messageBracketed) then
 			print("[CD] Failed to send client chat message")
 		end
 	end
 
-	-- Public chat (visible to everyone)
+	-- Public chat (visible to everyone) - use plain to avoid ChatPrefix double-prefix
 	if outputConfig.PublicChat then
-		client.ChatSay(message)
+		client.ChatSay(messagePlain)
 	end
 
-	-- Party/Team chat
+	-- Party/Team chat - use plain to avoid ChatPrefix double-prefix
 	if outputConfig.PartyChat then
-		client.ChatTeamSay(message)
+		client.ChatTeamSay(messagePlain)
 	end
 
-	-- Console
+	-- Console - use bracketed version
 	if outputConfig.Console then
-		print(message)
+		print(messageBracketed)
 	end
 end
 
@@ -80,14 +81,16 @@ local function ValidateAllPlayers()
 					
 					-- Show notification
 					if config.ValveAutoDisconnect then
-						local message = string.format("[VALVE EMPLOYEE] %s is in the server - Leaving game", player:GetName())
-						SendToChannels(message, output)
+						local msgBracket = string.format("[VALVE EMPLOYEE] %s is in the server - Leaving game", player:GetName())
+						local msgPlain = string.format("Valve employee %s is in the server - Leaving game", player:GetName())
+						SendToChannels(msgBracket, msgPlain, output)
 						-- Leave the game
 						client.Command("disconnect", true)
 						return
 					else
-						local message = string.format("[VALVE EMPLOYEE] %s is in the server", player:GetName())
-						SendToChannels(message, output)
+						local msgBracket = string.format("[VALVE EMPLOYEE] %s is in the server", player:GetName())
+						local msgPlain = string.format("Valve employee %s is in the server", player:GetName())
+						SendToChannels(msgBracket, msgPlain, output)
 					end
 				-- Check if cheater in database
 				elseif config.CheckCheater then
@@ -100,8 +103,9 @@ local function ValidateAllPlayers()
 						)
 
 						local reason = cheaterData.Reason or "Unknown"
-						local message = string.format("[CHEATER] %s is in the server (Suspected of: %s)", player:GetName(), reason)
-						SendToChannels(message, output)
+						local msgBracket = string.format("[CHEATER] %s is in the server (Suspected of: %s)", player:GetName(), reason)
+						local msgPlain = string.format("Cheater %s is in the server (Suspected of: %s)", player:GetName(), reason)
+						SendToChannels(msgBracket, msgPlain, output)
 					end
 				end
 			end
@@ -150,13 +154,15 @@ local function OnPlayerConnect(event)
 
 		-- Show notification and optionally leave
 		if config.ValveAutoDisconnect then
-			local message = string.format("[VALVE EMPLOYEE] %s joined - Leaving game", name)
-			SendToChannels(message, output)
+			local msgBracket = string.format("[VALVE EMPLOYEE] %s joined - Leaving game", name)
+			local msgPlain = string.format("Valve employee %s joined - Leaving game", name)
+			SendToChannels(msgBracket, msgPlain, output)
 			-- Leave the game
 			client.Command("disconnect", true)
 		else
-			local message = string.format("[VALVE EMPLOYEE] %s joined", name)
-			SendToChannels(message, output)
+			local msgBracket = string.format("[VALVE EMPLOYEE] %s joined", name)
+			local msgPlain = string.format("Valve employee %s joined", name)
+			SendToChannels(msgBracket, msgPlain, output)
 		end
 		return
 	end
@@ -172,8 +178,9 @@ local function OnPlayerConnect(event)
 			)
 
 			local reason = cheaterData.Reason or "Unknown"
-			local message = string.format("[CHEATER] %s joined (Suspected of: %s)", name, reason)
-			SendToChannels(message, output)
+			local msgBracket = string.format("[CHEATER] %s joined (Suspected of: %s)", name, reason)
+			local msgPlain = string.format("Cheater %s joined (Suspected of: %s)", name, reason)
+			SendToChannels(msgBracket, msgPlain, output)
 		end
 	end
 end
@@ -218,8 +225,9 @@ local function OnPlayerDisconnect(event)
 			)
 
 			local detectionReason = cheaterData.Reason or "Unknown"
-			local message = string.format("[CHEATER] %s left (Suspected of: %s)", name, detectionReason)
-			SendToChannels(message, output)
+			local msgBracket = string.format("[CHEATER] %s left (Suspected of: %s)", name, detectionReason)
+			local msgPlain = string.format("Cheater %s left (Suspected of: %s)", name, detectionReason)
+			SendToChannels(msgBracket, msgPlain, output)
 		end
 	end
 end

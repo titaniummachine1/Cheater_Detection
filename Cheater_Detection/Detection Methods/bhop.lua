@@ -29,6 +29,8 @@ local function initPlayerData(steamID)
 		playerBhopData[steamID] = {
 			lastOnGround = true,
 			lastVelocityZ = 0,
+			consecutiveGroundTicks = 0,
+			lastDecayTick = 0,
 		}
 	end
 end
@@ -74,31 +76,40 @@ function Bhop.Check(player)
 		return false
 	end
 
-	-- Simplified bhop detection - detect perfect jump and add evidence
-	-- Perfect bhop: player jumps without touching ground with TF2-specific velocity
-	if not onGround and data.lastOnGround and data.lastVelocityZ < velocity.z then
-		if velocity.z == 271 or velocity.z == 277 then
-			-- Get current evidence for this detection method
-			local currentEvidence = 0
-			if G.PlayerData[steamID] and G.PlayerData[steamID].Evidence and G.PlayerData[steamID].Evidence.Reasons then
-				local reason = G.PlayerData[steamID].Evidence.Reasons[DETECTION_NAME]
-				if reason then
-					currentEvidence = reason.Weight or 0
-				end
-			end
-
-			-- Calculate weight: if 0 set to 5, otherwise multiply by 1.5
-			local weight = currentEvidence == 0 and EVIDENCE_WEIGHT_BASE or (currentEvidence * EVIDENCE_MULTIPLIER - currentEvidence)
+	-- Tick-based perfect jump detection: airbone -> ground (1 tick) -> airbone
+	if onGround and not data.lastOnGround then
+		-- Just landed, reset counter
+		data.consecutiveGroundTicks = 1
+	elseif not onGround and data.lastOnGround then
+		-- Just jumped, check if we were only on ground for 1 tick
+		if data.consecutiveGroundTicks == 1 then
+			-- Perfect jump detected - add weight
+			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
 			
-			Evidence.AddEvidence(steamID, DETECTION_NAME, weight)
-
 			if G.Menu.Advanced.debug then
-				print(string.format("[Bhop] %s - Perfect hop detected (vel.z: %.0f) +%.1f evidence", 
-					player:GetName(), velocity.z, weight))
+				print(string.format("[Bhop] %s - Perfect jump detected (1 tick on ground) +%.1f evidence", 
+					player:GetName(), EVIDENCE_WEIGHT_BASE))
 			end
-
+			
 			data.lastOnGround = false
 			return true
+		end
+	elseif not onGround then
+		-- Still in air, continue
+		data.consecutiveGroundTicks = 0
+	else
+		-- Still on ground, increment counter
+		data.consecutiveGroundTicks = (data.consecutiveGroundTicks or 0) + 1
+		
+		-- If we've been on ground for more than 1 tick, apply decay to bhop evidence
+		if data.consecutiveGroundTicks > 1 and data.lastDecayTick ~= globals.TickCount() then
+			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 2.0) -- Decay 2.0 weight per tick when not bhopping
+			data.lastDecayTick = globals.TickCount()
+			
+			if G.Menu.Advanced.debug then
+				print(string.format("[Bhop] %s - Not bhopping (on ground for %d ticks) -2.0 evidence", 
+					player:GetName(), data.consecutiveGroundTicks))
+			end
 		end
 	end
 
