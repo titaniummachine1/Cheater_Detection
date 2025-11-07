@@ -166,17 +166,47 @@ local function DrawMenu()
 			if type(Misc.intent.bot) ~= "boolean" then
 				Misc.intent.bot = true
 			end
+			if type(Misc.intent.valve) ~= "boolean" then
+				Misc.intent.valve = true
+			end
 			if type(Misc.intent.friend) ~= "boolean" then
 				Misc.intent.friend = false
 			end
+			if type(Misc.AutovoteAutoCast) ~= "boolean" then
+				Misc.AutovoteAutoCast = true
+			end
+			Misc.AutovoteAutoCast = TimMenu.Checkbox("Auto Cast Votes", Misc.AutovoteAutoCast)
+			TimMenu.Tooltip("Continuously initiate votes using the configured target priority.")
+			TimMenu.NextLine()
 
-			local voteTargets = { "Legit Players", "Cheaters", "Bots", "Exclude Friends" }
-			local voteTable = { Misc.intent.legit, Misc.intent.cheater, Misc.intent.bot, Misc.intent.friend }
+			if type(Misc.AutovoteVoteNo) ~= "boolean" then
+				Misc.AutovoteVoteNo = false
+			end
+			Misc.AutovoteVoteNo = TimMenu.Checkbox("Vote NO Instead", Misc.AutovoteVoteNo)
+			TimMenu.Tooltip("Invert automatic responses to vote NO when triggered.")
+			TimMenu.NextLine()
+
+			if type(Misc.AutovoteCastNow) ~= "boolean" then
+				Misc.AutovoteCastNow = false
+			end
+			Misc.AutovoteCastNow = TimMenu.Checkbox("Cast Next Vote Now", Misc.AutovoteCastNow)
+			TimMenu.Tooltip("Queue a one-time vote attempt on the highest priority target.")
+			TimMenu.NextLine()
+
+			local voteTargets = { "Legit Players", "Cheaters", "Bots", "Valve Employees", "Exclude Friends" }
+			local voteTable = {
+				Misc.intent.legit,
+				Misc.intent.cheater,
+				Misc.intent.bot,
+				Misc.intent.valve,
+				Misc.intent.friend,
+			}
 			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
 			Misc.intent.legit = voteTable[1]
 			Misc.intent.cheater = voteTable[2]
 			Misc.intent.bot = voteTable[3]
-			Misc.intent.friend = voteTable[4]
+			Misc.intent.valve = voteTable[4]
+			Misc.intent.friend = voteTable[5]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()

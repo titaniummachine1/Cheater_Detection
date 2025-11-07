@@ -3,14 +3,29 @@ local AutoVote = {}
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
+local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
+local Sources = require("Cheater_Detection.Database.Sources")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
-local Log = Logger("AutoVote")
+local LOG_CATEGORY = "AutoVote"
 
---[[ Constants ]]
-local TEAM_SPECTATOR = 1
+local bitLib = bit or bit32
 
+local function shiftRight(value, bits)
+	if bitLib and bitLib.rshift then
+		return bitLib.rshift(value, bits)
+	end
+	return math.floor(value / (2 ^ bits))
+end
+
+-- User message IDs (TF2 specific)
+local VoteStart = 46
+local VotePass = 47
+local VoteFailed = 48
+local CallVoteFailed = 49
+
+-- Prioritised voting order
 local GROUP_PRIORITY = {
 	"bot",
 	"cheater",
@@ -21,29 +36,37 @@ local GROUP_PRIORITY = {
 local VOTE_OPTION_YES = 1
 local VOTE_OPTION_NO = 2
 
---[[ Module State ]]
+local MIN_SECONDS_BETWEEN_CALLVOTES = 1.5
+
 local State = {
 	currentVoteIdx = nil,
 	currentTarget = nil,
 	lastVoteTime = 0,
-	autoCasting = false,
-	didVoteThisTick = false,
 	lastDecisionTick = 0,
 }
+
+local function logInfo(message)
+	Logger.Info(LOG_CATEGORY, message)
+end
+
+local function logDebug(message)
+	Logger.Debug(LOG_CATEGORY, message)
+end
 
 local function resetVoteState()
 	State.currentVoteIdx = nil
 	State.currentTarget = nil
-	State.didVoteThisTick = false
 end
 
-local function isFriend(player)
-	local raw = player and player:GetRawEntity()
-	return raw and Common.IsFriend(raw) or false
+local function getMenu()
+	return G.Menu and G.Menu.Misc or nil
+end
+
+local function isFriendEntity(entity)
+	return entity and Common.IsFriend(entity) or false
 end
 
 local function isValveEmployee(steamID)
-	local Sources = require("Cheater_Detection.Database.Sources")
 	return Sources.IsValveEmployee and Sources.IsValveEmployee(steamID)
 end
 
@@ -58,56 +81,77 @@ local function getCheaterStatus(steamID)
 end
 
 local function isBot(player, steamID)
-	local raw = player and player:GetBasePlayer()
-	if not raw then
+	local basePlayer = player and player:GetBasePlayer()
+	if not basePlayer then
 		return false
 	end
-	if raw.IsBot and raw:IsBot() then
+	if basePlayer.IsBot and basePlayer:IsBot() then
 		return true
 	end
-	if raw.IsFakeClient and raw:IsFakeClient() then
+	if basePlayer.IsFakeClient and basePlayer:IsFakeClient() then
 		return true
 	end
-	if not steamID then
-		return false
+	if steamID then
+		---@diagnostic disable-next-line: undefined-field
+		local info = client.GetPlayerInfo(player:GetIndex())
+		return info and (info.IsBot or info.IsHLTV) or false
 	end
-	local info = client.GetPlayerInfo(player:GetIndex())
-	return info and (info.IsBot or info.IsHLTV) or false
+	return false
 end
 
 local function getGroupForPlayer(player)
 	if not player then
 		return nil
 	end
-	local steamID = player:GetSteamID64()
-	if steamID and G.Menu.Misc.intent.friend and Common.IsFriend(player:GetRawEntity()) then
+	local config = getMenu()
+	if not config then
 		return nil
 	end
-	if G.Menu.Misc.intent.bot and isBot(player, steamID) then
+
+	local entity = player:GetRawEntity()
+	local steamID = player:GetSteamID64()
+
+	if config.intent and config.intent.friend and isFriendEntity(entity) then
+		return nil
+	end
+
+	if config.intent and config.intent.bot and isBot(player, steamID) then
 		return "bot"
 	end
-	if G.Menu.Misc.intent.cheater and getCheaterStatus(steamID) then
+	if config.intent and config.intent.cheater and getCheaterStatus(steamID) then
 		return "cheater"
 	end
-	if G.Menu.Misc.intent.valve and isValveEmployee(steamID) then
+	if config.intent and config.intent.valve and isValveEmployee(steamID) then
 		return "valve"
 	end
-	if G.Menu.Misc.intent.legit then
+	if config.intent and config.intent.legit then
 		return "legit"
 	end
+
 	return nil
 end
 
+local function getScoreboard()
+	local pr = Common.PR
+	if not pr or type(pr.GetScore) ~= "function" then
+		return nil
+	end
+	return pr.GetScore()
+end
+
 local function collectCandidates()
-	local scoreboard = Common.PR.GetScore()
+	local scoreboard = getScoreboard()
 	local candidates = {}
 	if not scoreboard then
 		return candidates
 	end
+
 	local players = FastPlayers.GetAll(true)
 	local localPlayer = FastPlayers.GetLocal()
 	local localIndex = localPlayer and localPlayer:GetIndex()
+
 	for _, player in ipairs(players) do
+		---@diagnostic disable-next-line: undefined-field
 		local index = player:GetIndex()
 		if index ~= localIndex then
 			local group = getGroupForPlayer(player)
@@ -121,6 +165,7 @@ local function collectCandidates()
 			end
 		end
 	end
+
 	return candidates
 end
 
@@ -129,6 +174,7 @@ local function pickNextTarget()
 	if #candidates == 0 then
 		return nil
 	end
+
 	table.sort(candidates, function(a, b)
 		if a.group == b.group then
 			return a.score > b.score
@@ -147,87 +193,143 @@ local function pickNextTarget()
 		end
 		return aPriority < bPriority
 	end)
+
 	return candidates[1]
+end
+
+local function shouldVoteAutomatically()
+	local menu = getMenu()
+	return menu and menu.Autovote and menu.AutovoteAutoCast ~= false
+end
+
+local function preferredVoteOption()
+	local menu = getMenu()
+	if menu and menu.AutovoteVoteNo then
+		return VOTE_OPTION_NO
+	end
+	return VOTE_OPTION_YES
 end
 
 local function issueVote(target)
 	if not target or not target.player then
 		return false
 	end
+
 	local localPlayer = FastPlayers.GetLocal()
 	if not localPlayer then
 		return false
 	end
-	local targetEntity = target.player:GetRawEntity()
-	if not targetEntity then
+
+	---@diagnostic disable-next-line: undefined-field
+	if target.player:GetTeamNumber() == localPlayer:GetTeamNumber() then
 		return false
 	end
+
+	local targetEntity = target.player:GetRawEntity()
+	if not targetEntity or not targetEntity:IsValid() then
+		return false
+	end
+
 	local userid = targetEntity:GetPropInt("m_iUserID")
 	if not userid or userid == 0 then
 		return false
 	end
-	local voteType = G.Menu.Misc.AutovoteVote or VOTE_OPTION_YES
-	local command = string.format("callvote kick %d", userid)
-	client.Command(command, true)
-	Log:Info(string.format("Called kick vote on %s [%s] (group: %s, score: %d)", target.player:GetName(), target.player:GetSteamID64(), target.group, target.score))
+
+	local voteOption = preferredVoteOption()
+	client.Command(string.format("callvote kick %d", userid), true)
+	logInfo(
+		string.format(
+			"Initiated vote on %s [%s] (group: %s, score: %d)",
+			target.player:GetName(),
+			target.player:GetSteamID64(),
+			target.group,
+			target.score
+		)
+	)
+
 	State.currentTarget = {
 		steamID = target.player:GetSteamID64(),
 		group = target.group,
-		expectedResult = voteType,
+		expectedResult = voteOption,
 	}
-	State.autoCasting = true
 	State.lastVoteTime = globals.RealTime()
 	return true
 end
 
-local function shouldVoteAutomatically()
-	return G.Menu.Misc.Autovote and G.Menu.Misc.AutovoteAutoCast == true
+local function sendVote(voteIdx, option)
+	client.Command(string.format("vote %d option%d", voteIdx, option), true)
 end
 
-function AutoVote.OnCreateMove()
-	State.didVoteThisTick = false
-	if not G.Menu.Misc.Autovote then
-		return
+local function determineVoteOptionForEntity(entity)
+	local menu = getMenu()
+	if not menu or not menu.Autovote then
+		return nil
 	end
-	if globals.TickCount() == State.lastDecisionTick then
-		return
+
+	if not entity or not entity:IsValid() then
+		return nil
 	end
-	State.lastDecisionTick = globals.TickCount()
-	if not shouldVoteAutomatically() then
-		return
+
+	if menu.intent and menu.intent.friend and isFriendEntity(entity) then
+		return VOTE_OPTION_NO
 	end
-	if State.currentVoteIdx then
-		return
+
+	local wrapped = WrappedPlayer.FromEntity(entity)
+	if not wrapped then
+		return nil
 	end
-	local target = pickNextTarget()
-	if target then
-		LocalPlayer = FastPlayers.GetLocal()
-		if LocalPlayer and target.player:GetTeamNumber() ~= LocalPlayer:GetTeamNumber() then
-			issueVote(target)
-		end
-	else
-		State.autoCasting = false
+
+	local group = getGroupForPlayer(wrapped)
+	if not group then
+		return nil
 	end
+
+	return menu.AutovoteVoteNo and VOTE_OPTION_NO or VOTE_OPTION_YES
 end
 
 local function handleVoteStart(msg)
+	local menu = getMenu()
+	local team = msg:ReadByte()
 	local voteIdx = msg:ReadInt(32)
-	msg:ReadByte() -- team
-	msg:ReadByte() -- entidx
-	msg:ReadString(64) -- display
-	msg:ReadString(64) -- details
-	msg:ReadByte() -- target
+	local callerIdx = msg:ReadByte()
+	local dispStr = msg:ReadString(64)
+	local detailsStr = msg:ReadString(64)
+	local targetPacked = msg:ReadByte()
+	local targetIdx = shiftRight(targetPacked, 1)
 
 	State.currentVoteIdx = voteIdx
-	State.didVoteThisTick = true
+
 	if State.currentTarget then
 		local option = State.currentTarget.expectedResult or VOTE_OPTION_YES
-		local cmd = string.format("vote %d option%d", voteIdx, option)
-		client.Command(cmd, true)
-		Log:Info(string.format("Auto voting option %d for vote idx %d", option, voteIdx))
-	else
-		State.autoCasting = false
+		sendVote(voteIdx, option)
+		logInfo(string.format("Voting option %d on vote %d (expected result)", option, voteIdx))
+		return
 	end
+
+	if not menu or not menu.Autovote then
+		return
+	end
+
+	local targetEntity = entities.GetByIndex(targetIdx)
+	local option = determineVoteOptionForEntity(targetEntity)
+	if not option then
+		logDebug("VoteStart received but no eligible automatic response")
+		return
+	end
+
+	sendVote(voteIdx, option)
+	local targetName = targetEntity and targetEntity:GetName() or "<unknown>"
+	local voteType = option == VOTE_OPTION_YES and "YES" or "NO"
+	logInfo(
+		string.format(
+			"Auto voted %s on %s (caller idx %d, team %d, reason %s)",
+			voteType,
+			targetName,
+			callerIdx,
+			team,
+			dispStr
+		)
+	)
 end
 
 local function handleVoteEnd()
@@ -236,14 +338,52 @@ end
 
 local function onVoteEvent(event)
 	local name = event:GetName()
-	if name == "vote_options" then
-		State.didVoteThisTick = true
-	elseif name == "vote_changed" then
-		State.didVoteThisTick = true
-	elseif name == "vote_cast" then
-		State.didVoteThisTick = true
-	elseif name == "round_end" or name == "game_newmap" then
+	if name == "round_end" or name == "game_newmap" then
 		resetVoteState()
+	end
+end
+
+function AutoVote.OnCreateMove()
+	local menu = getMenu()
+	if not menu then
+		return
+	end
+
+	if menu.AutovoteCastNow then
+		local success = AutoVote.ManualCast()
+		menu.AutovoteCastNow = false
+		if success then
+			State.lastDecisionTick = globals.TickCount()
+		end
+	end
+
+	if not shouldVoteAutomatically() then
+		return
+	end
+
+	if State.currentTarget or State.currentVoteIdx then
+		return
+	end
+
+	if globals.RealTime() - State.lastVoteTime < MIN_SECONDS_BETWEEN_CALLVOTES then
+		return
+	end
+
+	if globals.TickCount() == State.lastDecisionTick then
+		return
+	end
+
+	State.lastDecisionTick = globals.TickCount()
+
+	local target = pickNextTarget()
+	if not target then
+		return
+	end
+
+	if issueVote(target) then
+		logDebug("Attempted to initiate vote; awaiting VoteStart message")
+	else
+		logDebug("Failed to initiate vote after selecting candidate")
 	end
 end
 
@@ -251,9 +391,7 @@ function AutoVote.OnDispatchUserMessage(msg)
 	local id = msg:GetID()
 	if id == VoteStart then
 		handleVoteStart(msg)
-	elseif id == VotePass or id == VoteFailed then
-		handleVoteEnd()
-	elseif id == CallVoteFailed then
+	elseif id == VotePass or id == VoteFailed or id == CallVoteFailed then
 		handleVoteEnd()
 	end
 end
@@ -264,17 +402,23 @@ end
 
 function AutoVote.Reset()
 	resetVoteState()
-	State.autoCasting = false
-	State.lastDecisionTick = 0
 	State.lastVoteTime = 0
+	State.lastDecisionTick = 0
 end
 
 function AutoVote.ManualCast()
 	local target = pickNextTarget()
-	if target then
-		return issueVote(target)
+	if not target then
+		logInfo("Manual cast requested but no eligible targets were found")
+		return false
 	end
-	return false
+	local success = issueVote(target)
+	if success then
+		logInfo("Manual cast triggered a kick vote")
+	else
+		logInfo("Manual cast failed to issue a kick vote")
+	end
+	return success
 end
 
 return AutoVote

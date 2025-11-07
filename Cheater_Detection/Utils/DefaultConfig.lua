@@ -31,10 +31,13 @@ local Default_Config = {
 
 	Misc = {
 		Autovote = true,
+		AutovoteAutoCast = false,
+		AutovoteVoteNo = false,
 		intent = {
-			legit = false,
+			legit = true,
 			cheater = true,
 			bot = true,
+			valve = true,
 			friend = false,
 		},
 		Vote_Reveal = {
