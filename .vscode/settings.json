@@ -16,5 +16,6 @@
                 "autoShowOutputPanel": "error"
             }
         ]
-    }
+    },
+    "stylua.targetReleaseVersion": "latest"
 }

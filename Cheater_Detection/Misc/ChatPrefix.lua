@@ -73,7 +73,7 @@ local function GetCheaterStatus(player)
 		return nil, { 255, 255, 255 }
 	end
 
-	local steamID = Common.GetSteamID64(player)
+	local steamID = tostring(Common.GetSteamID64(player))
 	if not steamID then
 		return nil, { 255, 255, 255 }
 	end
@@ -137,19 +137,6 @@ local function OnUserMessage(msg)
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)
 
-	-- Check if this is a [CD] system message
-	if messageText:match("^%[CD%]") then
-		-- System message - strip player prefix and show clean version
-		if not client.ChatPrintf(messageText) then
-			print("[CD] Failed to send system message")
-		end
-		
-		-- Wipe original payload so player prefix doesn't show
-		ClearBuffer(bf)
-		bf:SetCurBit(0)
-		return
-	end
-
 	-- Get player entity
 	local player = GetPlayerFromName(playerName)
 	if not player then
@@ -158,6 +145,19 @@ local function OnUserMessage(msg)
 
 	-- Get cheater status
 	local status, color = GetCheaterStatus(player)
+
+	-- Check if this is a [CD] system message (after getting status to allow override)
+	if messageText:find("%[CD%]") then
+		-- System message - display without prefix
+		if not client.ChatPrintf(messageText) then
+			print("[CD] Failed to send system message")
+		end
+		
+		-- Wipe original payload so nothing extra prints
+		ClearBuffer(bf)
+		bf:SetCurBit(0)
+		return
+	end
 
 	if status then
 		-- Build colored output for ChatPrintf
