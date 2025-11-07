@@ -52,9 +52,6 @@ local Default_Config = {
 				ClientChat = true,
 				Console = true,
 			},
-			-- Backwards compatibility
-			PartyChat = true,
-			Console = true,
 		},
 		Class_Change_Reveal = {
 			Enable = false,
@@ -65,9 +62,6 @@ local Default_Config = {
 				ClientChat = true,
 				Console = true,
 			},
-			-- Backwards compatibility
-			PartyChat = true,
-			Console = true,
 		},
 		Chat_notify = true,
 		JoinNotifications = {

@@ -259,10 +259,6 @@ local function DrawMenu()
 			Misc.Vote_Reveal.Output.PartyChat = outputTable[2]
 			Misc.Vote_Reveal.Output.ClientChat = outputTable[3]
 			Misc.Vote_Reveal.Output.Console = outputTable[4]
-
-			-- Maintain backwards compatibility with old PartyChat/Console fields
-			Misc.Vote_Reveal.PartyChat = Misc.Vote_Reveal.Output.PartyChat
-			Misc.Vote_Reveal.Console = Misc.Vote_Reveal.Output.Console
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
@@ -308,10 +304,6 @@ local function DrawMenu()
 			Misc.Class_Change_Reveal.Output.PartyChat = classOutputTable[2]
 			Misc.Class_Change_Reveal.Output.ClientChat = classOutputTable[3]
 			Misc.Class_Change_Reveal.Output.Console = classOutputTable[4]
-
-			-- Maintain backwards compatibility with old PartyChat/Console fields
-			Misc.Class_Change_Reveal.PartyChat = Misc.Class_Change_Reveal.Output.PartyChat
-			Misc.Class_Change_Reveal.Console = Misc.Class_Change_Reveal.Output.Console
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()

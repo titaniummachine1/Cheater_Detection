@@ -24,50 +24,25 @@ function Config.GetFilePath()
 end
 
 local function checkAllKeysExist(expectedMenu, loadedMenu)
+	if type(expectedMenu) ~= "table" then
+		return true
+	end
+	if type(loadedMenu) ~= "table" then
+		return false
+	end
+
 	for key, value in pairs(expectedMenu) do
-		if loadedMenu[key] == nil then
+		local loadedValue = loadedMenu[key]
+		if loadedValue == nil then
 			return false
 		end
 		if type(value) == "table" then
-			local result = checkAllKeysExist(value, loadedMenu[key])
-			if not result then
+			if not checkAllKeysExist(value, loadedValue) then
 				return false
 			end
 		end
 	end
-	return true
-end
 
--- Migrate old config format to new format
-local function migrateConfig(loadedCfg)
-	if not loadedCfg or type(loadedCfg) ~= "table" then
-		return false
-	end
-	
-	-- Migrate old config format to new format
-	if loadedCfg.Advanced then
-		-- Add debug field if missing (default: false)
-		if loadedCfg.Advanced.debug == nil then
-			loadedCfg.Advanced.debug = false
-		end
-		
-		-- If LogLevel is missing, add default (Info)
-		if not loadedCfg.Advanced.LogLevel then
-			loadedCfg.Advanced.LogLevel = {false, true, false, false}
-		end
-		
-		-- If LogLevel is a number (old format), convert to boolean table
-		if type(loadedCfg.Advanced.LogLevel) == "number" then
-			local level = loadedCfg.Advanced.LogLevel
-			loadedCfg.Advanced.LogLevel = {false, false, false, false}
-			if level >= 1 and level <= 4 then
-				loadedCfg.Advanced.LogLevel[level] = true
-			else
-				loadedCfg.Advanced.LogLevel[2] = true -- Default to Info
-			end
-		end
-	end
-	
 	return true
 end
 
@@ -98,12 +73,7 @@ function Config.LoadCFG()
 		local content = file:read("*a")
 		file:close()
 		local loadedCfg = json.decode(content)
-		
-		-- Migrate old config format to new format
-		if loadedCfg then
-			migrateConfig(loadedCfg)
-		end
-		
+
 		if loadedCfg and checkAllKeysExist(Default_Config, loadedCfg) and not input.IsButtonDown(KEY_LSHIFT) then
 			printc(100, 183, 0, 255, "Success Loading Config: Path: " .. shortFilePath)
 			Common.Notify.Simple("Success! Loaded Config from", shortFilePath, 5)
