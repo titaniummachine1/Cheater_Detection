@@ -44,21 +44,24 @@ local function DrawMenu()
 		local Main = G.Menu.Main
 		local Misc = G.Menu.Misc
 
-		TimMenu.BeginSector("Database & Detection")
+		TimMenu.BeginSector("Detection Automation")
 		Main.Fetch_Database = TimMenu.Checkbox("Fetch Database", Main.Fetch_Database)
+		TimMenu.Tooltip("Download external cheater lists on demand.")
 		TimMenu.NextLine()
 		Main.AutoMark = TimMenu.Checkbox("Auto Mark", Main.AutoMark)
+		TimMenu.Tooltip("Mark players automatically once evidence passes the threshold.")
 		TimMenu.NextLine()
-		Main.partyCallaut = TimMenu.Checkbox("Party Callout", Main.partyCallaut)
+		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
+		TimMenu.Tooltip("Share detections with your party through chat.")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Visual Settings")
+		TimMenu.BeginSector("Visual Feedback")
 		Main.Chat_Prefix = TimMenu.Checkbox("Chat Prefix", Main.Chat_Prefix)
+		TimMenu.Tooltip("Enable colored chat tags for cheaters, suspects, and Valve staff.")
 		TimMenu.NextLine()
 		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
-		TimMenu.NextLine()
-		Main.JoinWarning = TimMenu.Checkbox("Join Warning", Main.JoinWarning)
+		TimMenu.Tooltip("Show floating world labels for confirmed cheaters.")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
@@ -147,10 +150,12 @@ local function DrawMenu()
 	elseif G.Menu.currentTab == "Misc" then
 		local Misc = G.Menu.Misc
 
-		TimMenu.BeginSector("Auto Vote")
-		Misc.Autovote = TimMenu.Checkbox("Enable Auto Vote", Misc.Autovote)
+		TimMenu.BeginSector("Vote Automation")
+		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote)
+		TimMenu.Tooltip("Call votes automatically using your selected targets.")
 		TimMenu.NextLine()
 		if Misc.Autovote then
+			Misc.intent = Misc.intent or {}
 			-- Initialize if needed
 			if type(Misc.intent.legit) ~= "boolean" then
 				Misc.intent.legit = true
@@ -177,8 +182,9 @@ local function DrawMenu()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Vote Reveal")
-		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Enable Vote Reveal", Misc.Vote_Reveal.Enable)
+		TimMenu.BeginSector("Vote Reveal Alerts")
+		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable)
+		TimMenu.Tooltip("Announce teammate votes and their targets across selected channels.")
 		TimMenu.NextLine()
 		if Misc.Vote_Reveal.Enable then
 			-- Initialize if needed
@@ -232,9 +238,9 @@ local function DrawMenu()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Class Change Reveal")
-		Misc.Class_Change_Reveal.Enable =
-			TimMenu.Checkbox("Enable Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		TimMenu.BeginSector("Class Change Alerts")
+		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		TimMenu.Tooltip("Notify when tracked players switch classes.")
 		TimMenu.NextLine()
 		if Misc.Class_Change_Reveal.Enable then
 			-- Initialize if needed
@@ -281,7 +287,7 @@ local function DrawMenu()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Join Notifications")
+		TimMenu.BeginSector("Join Alerts")
 		-- Initialize JoinNotifications if needed
 		Misc.JoinNotifications = Misc.JoinNotifications or {}
 		local JN = Misc.JoinNotifications
@@ -299,7 +305,8 @@ local function DrawMenu()
 			JN.ValveAutoDisconnect = false
 		end
 
-		JN.Enable = TimMenu.Checkbox("Enable Join Notifications", JN.Enable)
+		JN.Enable = TimMenu.Checkbox("Join Alerts", JN.Enable)
+		TimMenu.Tooltip("Warn about cheaters or Valve employees joining the match.")
 		TimMenu.NextLine()
 
 		if JN.Enable then
@@ -344,7 +351,8 @@ local function DrawMenu()
 			if type(JN.UseCheaterOverride) ~= "boolean" then
 				JN.UseCheaterOverride = false
 			end
-			JN.UseCheaterOverride = TimMenu.Checkbox("Override Cheater Output", JN.UseCheaterOverride)
+			JN.UseCheaterOverride = TimMenu.Checkbox("Cheater Output Override", JN.UseCheaterOverride)
+			TimMenu.Tooltip("Send cheater alerts to custom chat channels.")
 			TimMenu.NextLine()
 
 			if JN.UseCheaterOverride then
@@ -380,7 +388,8 @@ local function DrawMenu()
 			if type(JN.UseValveOverride) ~= "boolean" then
 				JN.UseValveOverride = false
 			end
-			JN.UseValveOverride = TimMenu.Checkbox("Override Valve Employee Output", JN.UseValveOverride)
+			JN.UseValveOverride = TimMenu.Checkbox("Valve Output Override", JN.UseValveOverride)
+			TimMenu.Tooltip("Send Valve alerts to custom chat channels.")
 			TimMenu.NextLine()
 
 			if JN.UseValveOverride then

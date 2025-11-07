@@ -8,12 +8,11 @@ local Default_Config = {
 		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,
-		JoinWarning = true,
 	},
 
 	Advanced = {
 		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
-		LogLevel = {false, true, false, false}, -- [Debug, Info, Warning, Error] (default: Info)
+		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false, -- Debug mode (removes self from database, enables verbose logging)
 		Choke = true, --fakelag
 		Warp = true,
@@ -33,7 +32,7 @@ local Default_Config = {
 	Misc = {
 		Autovote = true,
 		intent = {
-			legit = true,
+			legit = false,
 			cheater = true,
 			bot = true,
 			friend = false,
@@ -47,7 +46,7 @@ local Default_Config = {
 			Output = {
 				PublicChat = false,
 				PartyChat = true,
-				ClientChat = false,
+				ClientChat = true,
 				Console = true,
 			},
 			-- Backwards compatibility
@@ -55,12 +54,12 @@ local Default_Config = {
 			Console = true,
 		},
 		Class_Change_Reveal = {
-			Enable = true,
+			Enable = false,
 			EnemyOnly = true,
 			Output = {
 				PublicChat = false,
 				PartyChat = true,
-				ClientChat = false,
+				ClientChat = true,
 				Console = true,
 			},
 			-- Backwards compatibility
@@ -76,8 +75,8 @@ local Default_Config = {
 			-- Default output channels (used if no override)
 			DefaultOutput = {
 				PublicChat = false,
-				PartyChat = true,
-				ClientChat = false,
+				PartyChat = false,
+				ClientChat = true,
 				Console = true,
 			},
 			-- Cheater-specific overrides
@@ -85,14 +84,14 @@ local Default_Config = {
 			CheaterOverride = {
 				PublicChat = false,
 				PartyChat = true,
-				ClientChat = false,
+				ClientChat = true,
 				Console = true,
 			},
 			-- Valve employee-specific overrides
 			UseValveOverride = false,
 			ValveOverride = {
 				PublicChat = false,
-				PartyChat = false,
+				PartyChat = true,
 				ClientChat = true,
 				Console = true,
 			},
