@@ -23,19 +23,19 @@ local function SendToChannels(messageBracketed, messagePlain, outputConfig, isVa
 		return
 	end
 
-	-- Build colored version with green {CD} prefix
+	-- Build colored version with green [CD] prefix and player tags
 	local messageColored = messageBracketed
 	if isValveMessage then
-		-- Format: [CD] PlayerName is in the server
-		-- Green [CD]: \x073EFF3E, Team color for name: \x03
-		messageColored = messageBracketed:gsub("%[VALVE EMPLOYEE%] ", "\x073EFF3E[CD]\x01 \x03")
+		-- Format: [CD] [VALVE] PlayerName is in the server
+		-- Green [CD]: \x073EFF3E, Purple [VALVE]: \x078650AC, Team color for name: \x03
+		messageColored = messageBracketed:gsub("%[VALVE EMPLOYEE%] ", "\x073EFF3E[CD]\x01 \x078650AC[VALVE]\x01 \x03")
 		-- Reset color after player name (before "is in the server" or other text)
 		messageColored = messageColored:gsub("(%b()) ", "%1\x01 ")
 	else
-		-- Red [CHEATER] for cheaters with green {CD} prefix
-		messageColored = messageBracketed:gsub("%[CHEATER%]", "\x073EFF3E{CD}\x01 \x07FF0000[CHEATER]\x01")
+		-- Red [CHEATER] for cheaters with green [CD] prefix
+		messageColored = messageBracketed:gsub("%[CHEATER%]", "\x073EFF3E[CD]\x01 \x07FF0000[CHEATER]\x01")
 		-- Team color for player name
-		messageColored = messageColored:gsub("(%{CD%} %[CHEATER%]) (%b())", "%1 \x03%2\x01")
+		messageColored = messageColored:gsub("(%[CD%] %[CHEATER%]) (%b())", "%1 \x03%2\x01")
 	end
 
 	-- 1. Console - always use bracketed version (no color codes)
@@ -48,12 +48,12 @@ local function SendToChannels(messageBracketed, messagePlain, outputConfig, isVa
 		client.ChatTeamSay(messagePlain)
 	end
 
-	-- 3. Public chat takes precedence over local chat (both show in same window)
-	-- Use colored version for both Valve and cheaters to match local chat formatting
-	if outputConfig.PublicChat then
-		client.ChatSay(messageColored) -- Send formatted message with {CD} prefix
+	-- 3. Public chat - skip for system messages to avoid appearing as user-sent
+	-- if outputConfig.PublicChat then
+	-- 	client.ChatSay(messageColored) -- Send formatted message with [CD] prefix
+	-- end
 	-- 4. Local chat only if public chat didn't handle it - use colored version
-	elseif outputConfig.ClientChat then
+	if outputConfig.ClientChat then
 		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send client chat message")
 		end
@@ -61,7 +61,9 @@ local function SendToChannels(messageBracketed, messagePlain, outputConfig, isVa
 
 	-- Fallback: ensure messages are shown locally if no output was enabled
 	if not outputConfig.PublicChat and not outputConfig.ClientChat then
-		client.ChatPrintf(messageColored)
+		if not client.ChatPrintf(messageColored) then
+			print("[CD] Failed to send fallback client chat message")
+		end
 	end
 end
 

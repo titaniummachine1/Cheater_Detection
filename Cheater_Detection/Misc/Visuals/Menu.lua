@@ -2,7 +2,6 @@ local Menu = {}
 
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
-local AdvancedLayout = require("Cheater_Detection.Utils.AdvancedLayout")
 
 local Lib = Common.Lib
 local Fonts = Lib.UI.Fonts
@@ -37,301 +36,388 @@ local function DrawMenu()
 
 	-- Tabs for different sections
 	local tabs = { "Main", "Advanced", "Misc" }
-	G.Menu.currentTab = AdvancedLayout.CreateTabbedSection(tabs, G.Menu.currentTab, {
-		Main = function()
-			drawMainTab()
-		end,
-		Advanced = function()
-			drawAdvancedTab()
-		end,
-		Misc = function()
-			drawMiscTab()
-		end,
-	})
+	G.Menu.currentTab = TimMenu.TabControl("cd_main_tabs", tabs, G.Menu.currentTab)
+	TimMenu.NextLine()
+
+	-- Main Configuration Tab
+	if G.Menu.currentTab == "Main" then
+		local Main = G.Menu.Main
+		local Misc = G.Menu.Misc
+
+		TimMenu.BeginSector("Database & Detection")
+		Main.Fetch_Database = TimMenu.Checkbox("Fetch Database", Main.Fetch_Database)
+		TimMenu.NextLine()
+		Main.AutoMark = TimMenu.Checkbox("Auto Mark", Main.AutoMark)
+		TimMenu.NextLine()
+		Main.partyCallaut = TimMenu.Checkbox("Party Callout", Main.partyCallaut)
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Visual Settings")
+		Main.Chat_Prefix = TimMenu.Checkbox("Chat Prefix", Main.Chat_Prefix)
+		TimMenu.NextLine()
+		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
+		TimMenu.NextLine()
+		Main.JoinWarning = TimMenu.Checkbox("Join Warning", Main.JoinWarning)
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		Misc.JoinNotifications = Misc.JoinNotifications or {}
+		local JNMain = Misc.JoinNotifications
+		if type(JNMain.ValveAutoDisconnect) ~= "boolean" then
+			JNMain.ValveAutoDisconnect = false
+		end
+
+		TimMenu.BeginSector("Valve Safety")
+		JNMain.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave on Valve Join", JNMain.ValveAutoDisconnect)
+		TimMenu.Tooltip("Disconnect automatically when a Valve employee enters the server")
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+	elseif G.Menu.currentTab == "Advanced" then
+		local Advanced = G.Menu.Advanced
+
+		TimMenu.BeginSector("Evidence System")
+		-- Initialize with default value if nil
+		Advanced.Evicence_Tolerance = Advanced.Evicence_Tolerance or 100
+		Advanced.Evicence_Tolerance = TimMenu.Slider("Evidence Tolerance", Advanced.Evicence_Tolerance, 1, 200, 1)
+		TimMenu.Tooltip("Threshold for marking players as cheaters (higher = more strict)")
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Exploit Detection")
+		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke)
+		TimMenu.NextLine()
+		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp)
+		TimMenu.NextLine()
+		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim)
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Movement Detection")
+		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop)
+		TimMenu.NextLine()
+		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed)
+		TimMenu.NextLine()
+		Advanced.Strafe_bot = TimMenu.Checkbox("Strafe Bot Detection", Advanced.Strafe_bot)
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Aim Detection")
+		Advanced.Aimbot.enable = TimMenu.Checkbox("Enable Aimbot Detection", Advanced.Aimbot.enable)
+		TimMenu.NextLine()
+		if Advanced.Aimbot.enable then
+			-- Initialize if needed
+			if type(Advanced.Aimbot.silent) ~= "boolean" then
+				Advanced.Aimbot.silent = true
+			end
+			if type(Advanced.Aimbot.plain) ~= "boolean" then
+				Advanced.Aimbot.plain = true
+			end
+			if type(Advanced.Aimbot.smooth) ~= "boolean" then
+				Advanced.Aimbot.smooth = true
+			end
+
+			local aimbotTypes = { "Silent Aim", "Plain Aim", "Smooth Aim" }
+			local aimbotTable = { Advanced.Aimbot.silent, Advanced.Aimbot.plain, Advanced.Aimbot.smooth }
+			aimbotTable = TimMenu.Combo("Aimbot Types", aimbotTable, aimbotTypes)
+			Advanced.Aimbot.silent = aimbotTable[1]
+			Advanced.Aimbot.plain = aimbotTable[2]
+			Advanced.Aimbot.smooth = aimbotTable[3]
+			TimMenu.NextLine()
+		end
+		Advanced.triggerbot = TimMenu.Checkbox("Triggerbot Detection", Advanced.triggerbot)
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Logging")
+		local logLevels = { "Debug", "Info", "Warning", "Error" }
+		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
+		TimMenu.Tooltip("Set console output verbosity (Debug = everything, Error = only critical)")
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Debug")
+		if type(Advanced.debug) ~= "boolean" then
+			Advanced.debug = false
+		end
+		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
+		TimMenu.Tooltip("Enables debug features (auto-removes self from database, verbose logging)")
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+	elseif G.Menu.currentTab == "Misc" then
+		local Misc = G.Menu.Misc
+
+		TimMenu.BeginSector("Auto Vote")
+		Misc.Autovote = TimMenu.Checkbox("Enable Auto Vote", Misc.Autovote)
+		TimMenu.NextLine()
+		if Misc.Autovote then
+			-- Initialize if needed
+			if type(Misc.intent.legit) ~= "boolean" then
+				Misc.intent.legit = true
+			end
+			if type(Misc.intent.cheater) ~= "boolean" then
+				Misc.intent.cheater = true
+			end
+			if type(Misc.intent.bot) ~= "boolean" then
+				Misc.intent.bot = true
+			end
+			if type(Misc.intent.friend) ~= "boolean" then
+				Misc.intent.friend = false
+			end
+
+			local voteTargets = { "Legit Players", "Cheaters", "Bots", "Exclude Friends" }
+			local voteTable = { Misc.intent.legit, Misc.intent.cheater, Misc.intent.bot, Misc.intent.friend }
+			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
+			Misc.intent.legit = voteTable[1]
+			Misc.intent.cheater = voteTable[2]
+			Misc.intent.bot = voteTable[3]
+			Misc.intent.friend = voteTable[4]
+			TimMenu.NextLine()
+		end
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Vote Reveal")
+		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Enable Vote Reveal", Misc.Vote_Reveal.Enable)
+		TimMenu.NextLine()
+		if Misc.Vote_Reveal.Enable then
+			-- Initialize if needed
+			if type(Misc.Vote_Reveal.TargetTeam.MyTeam) ~= "boolean" then
+				Misc.Vote_Reveal.TargetTeam.MyTeam = true
+			end
+			if type(Misc.Vote_Reveal.TargetTeam.enemyTeam) ~= "boolean" then
+				Misc.Vote_Reveal.TargetTeam.enemyTeam = true
+			end
+
+			-- Initialize new output options
+			Misc.Vote_Reveal.Output = Misc.Vote_Reveal.Output or {}
+			if type(Misc.Vote_Reveal.Output.PublicChat) ~= "boolean" then
+				Misc.Vote_Reveal.Output.PublicChat = false
+			end
+			if type(Misc.Vote_Reveal.Output.PartyChat) ~= "boolean" then
+				Misc.Vote_Reveal.Output.PartyChat = true
+			end
+			if type(Misc.Vote_Reveal.Output.ClientChat) ~= "boolean" then
+				Misc.Vote_Reveal.Output.ClientChat = false
+			end
+			if type(Misc.Vote_Reveal.Output.Console) ~= "boolean" then
+				Misc.Vote_Reveal.Output.Console = true
+			end
+
+			local teamOptions = { "My Team", "Enemy Team" }
+			local teamTable = { Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam }
+			teamTable = TimMenu.Combo("Target Teams", teamTable, teamOptions)
+			Misc.Vote_Reveal.TargetTeam.MyTeam = teamTable[1]
+			Misc.Vote_Reveal.TargetTeam.enemyTeam = teamTable[2]
+			TimMenu.NextLine()
+
+			local outputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
+			local outputTable = {
+				Misc.Vote_Reveal.Output.PublicChat,
+				Misc.Vote_Reveal.Output.PartyChat,
+				Misc.Vote_Reveal.Output.ClientChat,
+				Misc.Vote_Reveal.Output.Console,
+			}
+			outputTable = TimMenu.Combo("Vote Output", outputTable, outputOptions)
+			Misc.Vote_Reveal.Output.PublicChat = outputTable[1]
+			Misc.Vote_Reveal.Output.PartyChat = outputTable[2]
+			Misc.Vote_Reveal.Output.ClientChat = outputTable[3]
+			Misc.Vote_Reveal.Output.Console = outputTable[4]
+
+			-- Maintain backwards compatibility with old PartyChat/Console fields
+			Misc.Vote_Reveal.PartyChat = Misc.Vote_Reveal.Output.PartyChat
+			Misc.Vote_Reveal.Console = Misc.Vote_Reveal.Output.Console
+			TimMenu.NextLine()
+		end
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Class Change Reveal")
+		Misc.Class_Change_Reveal.Enable =
+			TimMenu.Checkbox("Enable Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		TimMenu.NextLine()
+		if Misc.Class_Change_Reveal.Enable then
+			-- Initialize if needed
+			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then
+				Misc.Class_Change_Reveal.EnemyOnly = true
+			end
+
+			-- Initialize new output options
+			Misc.Class_Change_Reveal.Output = Misc.Class_Change_Reveal.Output or {}
+			if type(Misc.Class_Change_Reveal.Output.PublicChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.PublicChat = false
+			end
+			if type(Misc.Class_Change_Reveal.Output.PartyChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.PartyChat = true
+			end
+			if type(Misc.Class_Change_Reveal.Output.ClientChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.ClientChat = false
+			end
+			if type(Misc.Class_Change_Reveal.Output.Console) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.Console = true
+			end
+
+			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly)
+			TimMenu.NextLine()
+
+			local classOutputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
+			local classOutputTable = {
+				Misc.Class_Change_Reveal.Output.PublicChat,
+				Misc.Class_Change_Reveal.Output.PartyChat,
+				Misc.Class_Change_Reveal.Output.ClientChat,
+				Misc.Class_Change_Reveal.Output.Console,
+			}
+			classOutputTable = TimMenu.Combo("Class Change Output", classOutputTable, classOutputOptions)
+			Misc.Class_Change_Reveal.Output.PublicChat = classOutputTable[1]
+			Misc.Class_Change_Reveal.Output.PartyChat = classOutputTable[2]
+			Misc.Class_Change_Reveal.Output.ClientChat = classOutputTable[3]
+			Misc.Class_Change_Reveal.Output.Console = classOutputTable[4]
+
+			-- Maintain backwards compatibility with old PartyChat/Console fields
+			Misc.Class_Change_Reveal.PartyChat = Misc.Class_Change_Reveal.Output.PartyChat
+			Misc.Class_Change_Reveal.Console = Misc.Class_Change_Reveal.Output.Console
+			TimMenu.NextLine()
+		end
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Join Notifications")
+		-- Initialize JoinNotifications if needed
+		Misc.JoinNotifications = Misc.JoinNotifications or {}
+		local JN = Misc.JoinNotifications
+
+		if type(JN.Enable) ~= "boolean" then
+			JN.Enable = true
+		end
+		if type(JN.CheckCheater) ~= "boolean" then
+			JN.CheckCheater = true
+		end
+		if type(JN.CheckValve) ~= "boolean" then
+			JN.CheckValve = true
+		end
+		if type(JN.ValveAutoDisconnect) ~= "boolean" then
+			JN.ValveAutoDisconnect = false
+		end
+
+		JN.Enable = TimMenu.Checkbox("Enable Join Notifications", JN.Enable)
+		TimMenu.NextLine()
+
+		if JN.Enable then
+			-- Target filters
+			local notifTypes = { "Cheaters", "Valve" }
+			local notifTable = { JN.CheckCheater, JN.CheckValve }
+			notifTable = TimMenu.Combo("Notify For", notifTable, notifTypes)
+			JN.CheckCheater = notifTable[1]
+			JN.CheckValve = notifTable[2]
+			TimMenu.NextLine()
+
+			-- Default output channels
+			JN.DefaultOutput = JN.DefaultOutput or {}
+			if type(JN.DefaultOutput.PublicChat) ~= "boolean" then
+				JN.DefaultOutput.PublicChat = false
+			end
+			if type(JN.DefaultOutput.PartyChat) ~= "boolean" then
+				JN.DefaultOutput.PartyChat = true
+			end
+			if type(JN.DefaultOutput.ClientChat) ~= "boolean" then
+				JN.DefaultOutput.ClientChat = false
+			end
+			if type(JN.DefaultOutput.Console) ~= "boolean" then
+				JN.DefaultOutput.Console = true
+			end
+
+			local defaultOutputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
+			local defaultOutputTable = {
+				JN.DefaultOutput.PublicChat,
+				JN.DefaultOutput.PartyChat,
+				JN.DefaultOutput.ClientChat,
+				JN.DefaultOutput.Console,
+			}
+			defaultOutputTable = TimMenu.Combo("Default Output", defaultOutputTable, defaultOutputOptions)
+			JN.DefaultOutput.PublicChat = defaultOutputTable[1]
+			JN.DefaultOutput.PartyChat = defaultOutputTable[2]
+			JN.DefaultOutput.ClientChat = defaultOutputTable[3]
+			JN.DefaultOutput.Console = defaultOutputTable[4]
+			TimMenu.NextLine()
+
+			-- Cheater override
+			if type(JN.UseCheaterOverride) ~= "boolean" then
+				JN.UseCheaterOverride = false
+			end
+			JN.UseCheaterOverride = TimMenu.Checkbox("Override Cheater Output", JN.UseCheaterOverride)
+			TimMenu.NextLine()
+
+			if JN.UseCheaterOverride then
+				JN.CheaterOverride = JN.CheaterOverride or {}
+				if type(JN.CheaterOverride.PublicChat) ~= "boolean" then
+					JN.CheaterOverride.PublicChat = false
+				end
+				if type(JN.CheaterOverride.PartyChat) ~= "boolean" then
+					JN.CheaterOverride.PartyChat = true
+				end
+				if type(JN.CheaterOverride.ClientChat) ~= "boolean" then
+					JN.CheaterOverride.ClientChat = false
+				end
+				if type(JN.CheaterOverride.Console) ~= "boolean" then
+					JN.CheaterOverride.Console = true
+				end
+
+				local cheaterOutputTable = {
+					JN.CheaterOverride.PublicChat,
+					JN.CheaterOverride.PartyChat,
+					JN.CheaterOverride.ClientChat,
+					JN.CheaterOverride.Console,
+				}
+				cheaterOutputTable = TimMenu.Combo("Cheater Output", cheaterOutputTable, defaultOutputOptions)
+				JN.CheaterOverride.PublicChat = cheaterOutputTable[1]
+				JN.CheaterOverride.PartyChat = cheaterOutputTable[2]
+				JN.CheaterOverride.ClientChat = cheaterOutputTable[3]
+				JN.CheaterOverride.Console = cheaterOutputTable[4]
+				TimMenu.NextLine()
+			end
+
+			-- Valve override
+			if type(JN.UseValveOverride) ~= "boolean" then
+				JN.UseValveOverride = false
+			end
+			JN.UseValveOverride = TimMenu.Checkbox("Override Valve Employee Output", JN.UseValveOverride)
+			TimMenu.NextLine()
+
+			if JN.UseValveOverride then
+				JN.ValveOverride = JN.ValveOverride or {}
+				if type(JN.ValveOverride.PublicChat) ~= "boolean" then
+					JN.ValveOverride.PublicChat = false
+				end
+				if type(JN.ValveOverride.PartyChat) ~= "boolean" then
+					JN.ValveOverride.PartyChat = false
+				end
+				if type(JN.ValveOverride.ClientChat) ~= "boolean" then
+					JN.ValveOverride.ClientChat = true
+				end
+				if type(JN.ValveOverride.Console) ~= "boolean" then
+					JN.ValveOverride.Console = true
+				end
+
+				local valveOutputTable = {
+					JN.ValveOverride.PublicChat,
+					JN.ValveOverride.PartyChat,
+					JN.ValveOverride.ClientChat,
+					JN.ValveOverride.Console,
+				}
+				valveOutputTable = TimMenu.Combo("Valve Output", valveOutputTable, defaultOutputOptions)
+				JN.ValveOverride.PublicChat = valveOutputTable[1]
+				JN.ValveOverride.PartyChat = valveOutputTable[2]
+				JN.ValveOverride.ClientChat = valveOutputTable[3]
+				JN.ValveOverride.Console = valveOutputTable[4]
+				TimMenu.NextLine()
+			end
+		end
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+	end
 
 	-- Always end the menu
 	TimMenu.End()
-end
-
-local function drawMainTab()
-	local Main = G.Menu.Main
-	local Misc = G.Menu.Misc
-
-	-- Create sectors in rows for better organization
-	-- First row: Database & Detection | Visual Settings
-	AdvancedLayout.CreateSectorRow({
-		{
-			title = "Database & Detection",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Fetch Database", Main, "Fetch_Database")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Auto Mark", Main, "AutoMark")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Party Callout", Main, "partyCallaut")
-			end,
-		},
-		{
-			title = "Visual Settings",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Chat Prefix", Main, "Chat_Prefix")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Cheater Tags", Main, "Cheater_Tags")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Join Warning", Main, "JoinWarning")
-			end,
-		},
-	})
-
-	-- Second row: Valve Safety (standalone)
-	Misc.JoinNotifications = Misc.JoinNotifications or {}
-	local JNMain = Misc.JoinNotifications
-	if type(JNMain.ValveAutoDisconnect) ~= "boolean" then
-		JNMain.ValveAutoDisconnect = false
-	end
-
-	AdvancedLayout.BeginSector("Valve Safety")
-	AdvancedLayout.CreateCheckbox(
-		"Auto Leave on Valve Join",
-		JNMain,
-		"ValveAutoDisconnect",
-		"Disconnect automatically when a Valve employee enters the server"
-	)
-	AdvancedLayout.EndSector()
-end
-
-local function drawAdvancedTab()
-	local Advanced = G.Menu.Advanced
-
-	-- Create sectors in rows for better organization
-	-- First row: Evidence System | Exploit Detection
-	AdvancedLayout.CreateSectorRow({
-		{
-			title = "Evidence System",
-			content = function()
-				AdvancedLayout.CreateSlider(
-					"Evidence Tolerance",
-					Advanced,
-					"Evicence_Tolerance",
-					1,
-					200,
-					100,
-					1,
-					"Threshold for marking players as cheaters (higher = more strict)"
-				)
-			end,
-		},
-		{
-			title = "Exploit Detection",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Fake Lag Detection", Advanced, "Choke")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Warp/DT Detection", Advanced, "Warp")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Anti-Aim Detection", Advanced, "AntyAim")
-			end,
-		},
-	})
-
-	-- Second row: Movement Detection | Aim Detection
-	AdvancedLayout.CreateSectorRow({
-		{
-			title = "Movement Detection",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Bhop Detection", Advanced, "Bhop")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Duck Speed Detection", Advanced, "DuckSpeed")
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Strafe Bot Detection", Advanced, "Strafe_bot")
-			end,
-		},
-		{
-			title = "Aim Detection",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Enable Aimbot Detection", Advanced, "Aimbot.enable")
-				if Advanced.Aimbot.enable then
-					AdvancedLayout.StandardizeSpacing()
-
-					-- Initialize aimbot options if needed
-					if type(Advanced.Aimbot.silent) ~= "boolean" then
-						Advanced.Aimbot.silent = true
-					end
-					if type(Advanced.Aimbot.plain) ~= "boolean" then
-						Advanced.Aimbot.plain = true
-					end
-					if type(Advanced.Aimbot.smooth) ~= "boolean" then
-						Advanced.Aimbot.smooth = true
-					end
-
-					local aimbotTypes = { "Silent Aim", "Plain Aim", "Smooth Aim" }
-					AdvancedLayout.CreateMultiCombo("Aimbot Types", aimbotTypes, Advanced, "Aimbot")
-				end
-				AdvancedLayout.StandardizeSpacing()
-				AdvancedLayout.CreateCheckbox("Triggerbot Detection", Advanced, "triggerbot")
-			end,
-		},
-	})
-
-	-- Third row: Logging | Debug
-	AdvancedLayout.CreateSectorRow({
-		{
-			title = "Logging",
-			content = function()
-				local logLevels = { "Debug", "Info", "Warning", "Error" }
-				AdvancedLayout.CreateCombo(
-					"Log Level",
-					logLevels,
-					Advanced,
-					"LogLevel",
-					"Set console output verbosity (Debug = everything, Error = only critical)"
-				)
-			end,
-		},
-		{
-			title = "Debug",
-			content = function()
-				if type(Advanced.debug) ~= "boolean" then
-					Advanced.debug = false
-				end
-				AdvancedLayout.CreateCheckbox(
-					"Debug Mode",
-					Advanced,
-					"debug",
-					"Enables debug features (auto-removes self from database, verbose logging)"
-				)
-			end,
-		},
-	})
-end
-
-local function drawMiscTab()
-	local Misc = G.Menu.Misc
-
-	-- Auto Vote section (standalone - takes full width)
-	AdvancedLayout.BeginSector("Auto Vote")
-	AdvancedLayout.CreateCheckbox("Enable Auto Vote", Misc, "Autovote")
-	if Misc.Autovote then
-		AdvancedLayout.StandardizeSpacing()
-
-		-- Initialize vote intent if needed
-		if type(Misc.intent.legit) ~= "boolean" then
-			Misc.intent.legit = true
-		end
-		if type(Misc.intent.cheater) ~= "boolean" then
-			Misc.intent.cheater = true
-		end
-		if type(Misc.intent.bot) ~= "boolean" then
-			Misc.intent.bot = true
-		end
-		if type(Misc.intent.friend) ~= "boolean" then
-			Misc.intent.friend = false
-		end
-
-		local voteTargets = { "Legit Players", "Cheaters", "Bots", "Exclude Friends" }
-		AdvancedLayout.CreateMultiCombo("Vote Targets", voteTargets, Misc, "intent")
-	end
-	AdvancedLayout.EndSector()
-
-	-- Vote Reveal and Class Change in same row
-	AdvancedLayout.CreateSectorRow({
-		{
-			title = "Vote Reveal",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Enable Vote Reveal", Misc, "Vote_Reveal.Enable")
-				if Misc.Vote_Reveal.Enable then
-					AdvancedLayout.StandardizeSpacing()
-
-					-- Initialize target teams if needed
-					if type(Misc.Vote_Reveal.TargetTeam.MyTeam) ~= "boolean" then
-						Misc.Vote_Reveal.TargetTeam.MyTeam = true
-					end
-					if type(Misc.Vote_Reveal.TargetTeam.enemyTeam) ~= "boolean" then
-						Misc.Vote_Reveal.TargetTeam.enemyTeam = true
-					end
-
-					local teamOptions = { "My Team", "Enemy Team" }
-					AdvancedLayout.CreateMultiCombo("Target Teams", teamOptions, Misc, "Vote_Reveal.TargetTeam")
-
-					-- Output options
-					AdvancedLayout.CreateOutputSection("Vote Output", Misc.Vote_Reveal, "")
-
-					-- Maintain backwards compatibility
-					Misc.Vote_Reveal.PartyChat = Misc.Vote_Reveal.Output.PartyChat
-					Misc.Vote_Reveal.Console = Misc.Vote_Reveal.Output.Console
-				end
-			end,
-		},
-		{
-			title = "Class Change Reveal",
-			content = function()
-				AdvancedLayout.CreateCheckbox("Enable Class Change Reveal", Misc, "Class_Change_Reveal.Enable")
-				if Misc.Class_Change_Reveal.Enable then
-					AdvancedLayout.StandardizeSpacing()
-
-					-- Initialize enemy only setting if needed
-					if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then
-						Misc.Class_Change_Reveal.EnemyOnly = true
-					end
-
-					AdvancedLayout.CreateCheckbox("Enemy Team Only", Misc, "Class_Change_Reveal.EnemyOnly")
-
-					-- Output options
-					AdvancedLayout.CreateOutputSection("Class Change Output", Misc.Class_Change_Reveal, "")
-
-					-- Maintain backwards compatibility
-					Misc.Class_Change_Reveal.PartyChat = Misc.Class_Change_Reveal.Output.PartyChat
-					Misc.Class_Change_Reveal.Console = Misc.Class_Change_Reveal.Output.Console
-				end
-			end,
-		},
-	})
-
-	-- Join Notifications (standalone - complex section)
-	AdvancedLayout.BeginSector("Join Notifications")
-
-	-- Initialize JoinNotifications if needed
-	Misc.JoinNotifications = Misc.JoinNotifications or {}
-	local JN = Misc.JoinNotifications
-
-	if type(JN.Enable) ~= "boolean" then
-		JN.Enable = true
-	end
-	if type(JN.CheckCheater) ~= "boolean" then
-		JN.CheckCheater = true
-	end
-	if type(JN.CheckValve) ~= "boolean" then
-		JN.CheckValve = true
-	end
-	if type(JN.ValveAutoDisconnect) ~= "boolean" then
-		JN.ValveAutoDisconnect = false
-	end
-
-	AdvancedLayout.CreateCheckbox("Enable Join Notifications", JN, "Enable")
-	if JN.Enable then
-		AdvancedLayout.StandardizeSpacing()
-
-		-- Target filters
-		local notifTypes = { "Cheaters", "Valve" }
-		AdvancedLayout.CreateMultiCombo("Notify For", notifTypes, JN, "Check")
-
-		-- Default output channels
-		AdvancedLayout.CreateOutputSection("Default Output", JN, "Default")
-
-		-- Cheater override
-		AdvancedLayout.CreateConditionalSection("Override Cheater Output", JN.UseCheaterOverride, function()
-			AdvancedLayout.CreateOutputSection("Cheater Output", JN, "CheaterOverride")
-		end, true)
-
-		if JN.UseCheaterOverride then
-			AdvancedLayout.StandardizeSpacing()
-		end
-
-		-- Valve override
-		AdvancedLayout.CreateConditionalSection("Override Valve Employee Output", JN.UseValveOverride, function()
-			AdvancedLayout.CreateOutputSection("Valve Output", JN, "ValveOverride")
-		end)
-	end
-
-	AdvancedLayout.EndSector()
 end
 
 --[[ Callbacks ]]
