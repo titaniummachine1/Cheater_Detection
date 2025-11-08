@@ -31,7 +31,7 @@ local Default_Config = {
 
 	Misc = {
 		Autovote = true,
-		AutovoteAutoCast = false,
+		AutovoteAutoCast = true,
 		AutovoteVoteNo = false,
 		intent = {
 			legit = true,
@@ -91,6 +91,20 @@ local Default_Config = {
 				PartyChat = true,
 				ClientChat = true,
 				Console = true,
+			},
+		},
+		SteamHistory = {
+			Enable = true,
+			AutoScan = true,
+			CacheSuspects = true,
+			ApiKey = "",
+			Priority = 7,
+			Keywords = {
+				"%[stac%]",
+				"smac ",
+				"cheat",
+				"hack",
+				"aimbot",
 			},
 		},
 	},

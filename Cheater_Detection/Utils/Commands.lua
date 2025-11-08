@@ -5,6 +5,9 @@
 
 local Commands = {}
 
+local G = require("Cheater_Detection.Utils.Globals")
+local Logger = require("Cheater_Detection.Utils.Logger")
+
 -- Store registered commands
 Commands.registered = {}
 
@@ -24,6 +27,27 @@ function Commands.Register(name, callback, helpText)
 		end
 	end)
 end
+
+Commands.Register(
+	"steamhistory",
+	function(args)
+		local shell = G.Menu and G.Menu.Misc and G.Menu.Misc.SteamHistory
+		if not shell then
+			Logger.Error("Commands", "SteamHistory config not initialised (G.Menu.Misc missing)")
+			return
+		end
+
+		local key = args and args[1] or nil
+		if not key or key == "" then
+			Logger.Warning("Commands", "Usage: steamhistory <api_key>")
+			return
+		end
+
+		shell.ApiKey = key
+		Logger.Info("Commands", "SteamHistory API key updated")
+	end,
+	"Update SteamHistory API key"
+)
 
 -- Unregister a command
 function Commands.Unregister(name)
