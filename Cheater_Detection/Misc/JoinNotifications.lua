@@ -147,6 +147,7 @@ local function ValidateAllPlayers()
 								plainPrefix = "Cheater",
 								name = player:GetName(),
 								tail = tail,
+								allowParty = false,
 							}
 						)
 					end
@@ -228,6 +229,7 @@ local function OnPlayerConnect(event)
 					plainPrefix = "Cheater",
 					name = name,
 					tail = tail,
+					allowParty = false,
 				}
 			)
 		end
