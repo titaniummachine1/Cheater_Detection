@@ -79,7 +79,7 @@ local Default_Config = {
 			UseCheaterOverride = false,
 			CheaterOverride = {
 				PublicChat = false,
-				PartyChat = true,
+				PartyChat = false,
 				ClientChat = true,
 				Console = true,
 			},

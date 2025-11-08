@@ -27,6 +27,17 @@ end
 
 --[[ Helper Functions ]]
 
+local function escapeForCommand(text)
+	return text and text:gsub("\\", "\\\\"):gsub('"', '\\"') or ""
+end
+
+local function SendPartyChatMessage(message)
+	if not message or message == "" then
+		return
+	end
+	client.Command(string.format("say_party \"%s\"", escapeForCommand(message)), true)
+end
+
 -- message configuration table expects:
 -- { label = string, labelColor = string (color code), plainPrefix = string, name = string, tail = string, allowParty = boolean }
 local function SendAlert(outputConfig, messageConfig)
@@ -58,9 +69,13 @@ local function SendAlert(outputConfig, messageConfig)
 	end
 
 	local sentToExternalChannel = false
+	local allowParty = messageConfig.allowParty
+	if allowParty == nil then
+		allowParty = true
+	end
 
 	if allowParty and outputConfig.PartyChat then
-		client.ChatTeamSay(messagePlain)
+		SendPartyChatMessage(messageColored)
 		sentToExternalChannel = true
 	end
 
