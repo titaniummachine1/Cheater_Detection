@@ -34,7 +34,6 @@ local GROUP_PRIORITY = {
 }
 
 local VOTE_OPTION_YES = 1
-local VOTE_OPTION_NO = 2
 
 local MIN_SECONDS_BETWEEN_CALLVOTES = 1.5
 
@@ -202,14 +201,6 @@ local function shouldVoteAutomatically()
 	return menu and menu.Autovote and menu.AutovoteAutoCast ~= false
 end
 
-local function preferredVoteOption()
-	local menu = getMenu()
-	if menu and menu.AutovoteVoteNo then
-		return VOTE_OPTION_NO
-	end
-	return VOTE_OPTION_YES
-end
-
 local function issueVote(target)
 	if not target or not target.player then
 		return false
@@ -235,7 +226,6 @@ local function issueVote(target)
 		return false
 	end
 
-	local voteOption = preferredVoteOption()
 	client.Command(string.format("callvote kick %d", userid), true)
 	logInfo(
 		string.format(
@@ -250,7 +240,7 @@ local function issueVote(target)
 	State.currentTarget = {
 		steamID = target.player:GetSteamID64(),
 		group = target.group,
-		expectedResult = voteOption,
+		expectedResult = VOTE_OPTION_YES,
 	}
 	State.lastVoteTime = globals.RealTime()
 	return true
@@ -271,7 +261,7 @@ local function determineVoteOptionForEntity(entity)
 	end
 
 	if menu.intent and menu.intent.friend and isFriendEntity(entity) then
-		return VOTE_OPTION_NO
+		return nil
 	end
 
 	local wrapped = WrappedPlayer.FromEntity(entity)
@@ -284,7 +274,7 @@ local function determineVoteOptionForEntity(entity)
 		return nil
 	end
 
-	return menu.AutovoteVoteNo and VOTE_OPTION_NO or VOTE_OPTION_YES
+	return VOTE_OPTION_YES
 end
 
 local function handleVoteStart(msg)
@@ -319,7 +309,7 @@ local function handleVoteStart(msg)
 
 	sendVote(voteIdx, option)
 	local targetName = targetEntity and targetEntity:GetName() or "<unknown>"
-	local voteType = option == VOTE_OPTION_YES and "YES" or "NO"
+	local voteType = "YES"
 	logInfo(
 		string.format(
 			"Auto voted %s on %s (caller idx %d, team %d, reason %s)",
@@ -347,14 +337,6 @@ function AutoVote.OnCreateMove()
 	local menu = getMenu()
 	if not menu then
 		return
-	end
-
-	if menu.AutovoteCastNow then
-		local success = AutoVote.ManualCast()
-		menu.AutovoteCastNow = false
-		if success then
-			State.lastDecisionTick = globals.TickCount()
-		end
 	end
 
 	if not shouldVoteAutomatically() then
@@ -404,21 +386,6 @@ function AutoVote.Reset()
 	resetVoteState()
 	State.lastVoteTime = 0
 	State.lastDecisionTick = 0
-end
-
-function AutoVote.ManualCast()
-	local target = pickNextTarget()
-	if not target then
-		logInfo("Manual cast requested but no eligible targets were found")
-		return false
-	end
-	local success = issueVote(target)
-	if success then
-		logInfo("Manual cast triggered a kick vote")
-	else
-		logInfo("Manual cast failed to issue a kick vote")
-	end
-	return success
 end
 
 return AutoVote

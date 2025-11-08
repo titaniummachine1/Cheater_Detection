@@ -6,21 +6,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Lib = Common.Lib
 local Fonts = Lib.UI.Fonts
 
-local function maskKey(key)
-	if not key or key == "" then
-		return "<not set>"
-	end
-
-	local length = #key
-	if length <= 4 then
-		return string.rep("*", length)
-	end
-
-	local prefix = key:sub(1, 2)
-	local suffix = key:sub(-2)
-	return prefix .. string.rep("*", length - 4) .. suffix
-end
-
 -- Try to load TimMenu (assumes it's installed globally in Lmaobox)
 local TimMenu = nil
 local timMenuLoaded, timMenuModule = pcall(require, "TimMenu")
@@ -194,20 +179,6 @@ local function DrawMenu()
 			TimMenu.Tooltip("Continuously initiate votes using the configured target priority.")
 			TimMenu.NextLine()
 
-			if type(Misc.AutovoteVoteNo) ~= "boolean" then
-				Misc.AutovoteVoteNo = false
-			end
-			Misc.AutovoteVoteNo = TimMenu.Checkbox("Vote NO Instead", Misc.AutovoteVoteNo)
-			TimMenu.Tooltip("Invert automatic responses to vote NO when triggered.")
-			TimMenu.NextLine()
-
-			if type(Misc.AutovoteCastNow) ~= "boolean" then
-				Misc.AutovoteCastNow = false
-			end
-			Misc.AutovoteCastNow = TimMenu.Checkbox("Cast Next Vote Now", Misc.AutovoteCastNow)
-			TimMenu.Tooltip("Queue a one-time vote attempt on the highest priority target.")
-			TimMenu.NextLine()
-
 			local voteTargets = { "Legit Players", "Cheaters", "Bots", "Valve Employees", "Exclude Friends" }
 			local voteTable = {
 				Misc.intent.legit,
@@ -327,45 +298,36 @@ local function DrawMenu()
 		TimMenu.BeginSector("SteamHistory")
 		Misc.SteamHistory = Misc.SteamHistory or {}
 		local sh = Misc.SteamHistory
-
-		if type(sh.Enable) ~= "boolean" then
-			sh.Enable = true
-		end
-		if type(sh.AutoScan) ~= "boolean" then
-			sh.AutoScan = true
-		end
-		if type(sh.CacheSuspects) ~= "boolean" then
-			sh.CacheSuspects = true
-		end
-		if type(sh.Priority) ~= "number" then
-			sh.Priority = 7
-		end
 		sh.ApiKey = sh.ApiKey or ""
-
-		local displayedKey = maskKey(sh.ApiKey)
-		local toggleLabel = string.format("Enable SteamHistory (Key: %s)", displayedKey)
-		sh.Enable = TimMenu.Checkbox(toggleLabel, sh.Enable)
-		TimMenu.Tooltip("Toggle SteamHistory ban scans using your stored API key.")
-		TimMenu.NextLine()
-
-		if sh.Enable then
-			sh.AutoScan = TimMenu.Checkbox("Auto Scan Players", sh.AutoScan)
-			TimMenu.Tooltip("Automatically query SteamHistory when players join or lobbies refresh.")
-			TimMenu.NextLine()
-
-			sh.CacheSuspects = TimMenu.Checkbox("Cache Suspects", sh.CacheSuspects)
-			TimMenu.Tooltip("Persist flagged SteamIDs locally to avoid repeat requests.")
-			TimMenu.NextLine()
-
-			sh.Priority = TimMenu.Slider("Suspect Priority", sh.Priority, 1, 10, 1)
-			TimMenu.Tooltip("Playerlist priority to assign to SteamHistory suspects when auto-marking.")
-			TimMenu.NextLine()
-
-			local keyHelp = "Use console command 'steamhistory <key>' to update the API key."
-			TimMenu.Text(keyHelp)
-			TimMenu.NextLine()
+		if type(sh.Enable) ~= "boolean" then
+			sh.Enable = false
+		end
+		if type(sh.ScanOnJoin) ~= "boolean" then
+			sh.ScanOnJoin = true
+		end
+		if type(sh.ScanOnLobby) ~= "boolean" then
+			sh.ScanOnLobby = true
 		end
 
+		local hasKey = sh.ApiKey ~= ""
+		if not hasKey then
+			TimMenu.Text("SteamHistory API key missing.")
+			TimMenu.NextLine()
+			TimMenu.Text("Run: steamhistory <key>")
+			TimMenu.Tooltip("Paste your SteamHistory key in console to unlock scanning controls.")
+		else
+			sh.Enable = TimMenu.Checkbox("Enable SteamHistory Scans", sh.Enable)
+			TimMenu.NextLine()
+			if sh.Enable then
+				sh.ScanOnJoin = TimMenu.Checkbox("Scan when joining a server", sh.ScanOnJoin)
+				TimMenu.Tooltip("Request ban data once when you load into a server.")
+				TimMenu.NextLine()
+				sh.ScanOnLobby = TimMenu.Checkbox("Scan lobby updates", sh.ScanOnLobby)
+				TimMenu.Tooltip("Check newcomers during lobby changes without re-querying everyone.")
+				TimMenu.NextLine()
+				TimMenu.Text("Scans reuse data within this session to preserve API quota.")
+			end
+		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 

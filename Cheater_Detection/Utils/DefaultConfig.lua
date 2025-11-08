@@ -32,7 +32,6 @@ local Default_Config = {
 	Misc = {
 		Autovote = true,
 		AutovoteAutoCast = true,
-		AutovoteVoteNo = false,
 		intent = {
 			legit = true,
 			cheater = true,
@@ -94,18 +93,10 @@ local Default_Config = {
 			},
 		},
 		SteamHistory = {
-			Enable = true,
-			AutoScan = true,
-			CacheSuspects = true,
+			Enable = false,
 			ApiKey = "",
-			Priority = 7,
-			Keywords = {
-				"%[stac%]",
-				"smac ",
-				"cheat",
-				"hack",
-				"aimbot",
-			},
+			ScanOnJoin = true,
+			ScanOnLobby = true,
 		},
 	},
 }
