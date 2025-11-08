@@ -27,53 +27,49 @@ end
 
 --[[ Helper Functions ]]
 
--- Send message to configured output channels
--- messageBracketed: includes [CHEATER] or [VALVE EMPLOYEE] prefix
--- messagePlain: plain text for public/party (no brackets to avoid ChatPrefix interference)
--- isValveMessage: if true, special handling for Valve employees
-local function SendToChannels(messageBracketed, messagePlain, outputConfig, isValveMessage)
-	if not outputConfig then
+-- message configuration table expects:
+-- { label = string, labelColor = string (color code), plainPrefix = string, name = string, tail = string, allowParty = boolean }
+local function SendAlert(outputConfig, messageConfig)
+	if not outputConfig or not messageConfig then
 		return
 	end
 
-	-- Build colored version with green [CD] prefix and player tags
-	local messageColored = messageBracketed
-	if isValveMessage then
-		-- Format: [CD] [VALVE] PlayerName is in the server
-		-- Green [CD]: \x073EFF3E, Purple [VALVE]: \x078650AC, Team color for name: \x03
-		messageColored = messageBracketed:gsub("%[VALVE EMPLOYEE%] ", "\x073EFF3E[CD]\x01 \x078650AC[VALVE]\x01 \x03")
-		-- Reset color after player name (before "is in the server" or other text)
-		messageColored = messageColored:gsub("(%b()) ", "%1\x01 ")
-	else
-		-- Red [CHEATER] for cheaters with green [CD] prefix
-		messageColored = messageBracketed:gsub("%[CHEATER%]", "\x073EFF3E[CD]\x01 \x07FF0000[CHEATER]\x01")
-		-- Team color for player name
-		messageColored = messageColored:gsub("(%[CD%] %[CHEATER%]) (%b())", "%1 \x03%2\x01")
-	end
+	local label = messageConfig.label or "CHEATER"
+	local labelColor = messageConfig.labelColor or "\x07FFFFFF"
+	local plainPrefix = messageConfig.plainPrefix or "Player"
+	local name = messageConfig.name or "Unknown"
+	local tail = messageConfig.tail or ""
+	local allowParty = messageConfig.allowParty ~= false
 
-	-- 1. Console - always use bracketed version (no color codes)
+	local tailText = tail ~= "" and (" " .. tail) or ""
+
+	local messagePlain = string.format("%s %s%s", plainPrefix, name, tailText)
+	local messageBracketed = string.format("[CD] [%s] %s%s", label, name, tailText)
+	local messageColored = string.format(
+		"\x073EFF3E[CD]\x01 %s[%s]\x01 \x03%s\x01%s",
+		labelColor,
+		label,
+		name,
+		tailText
+	)
+
 	if outputConfig.Console then
 		print(messageBracketed)
 	end
 
-	-- 2. Party chat - use plain version, skip for Valve
-	if outputConfig.PartyChat and not isValveMessage then
+	local sentToExternalChannel = false
+
+	if allowParty and outputConfig.PartyChat then
 		client.ChatTeamSay(messagePlain)
+		sentToExternalChannel = true
 	end
 
-	-- 3. Public chat - skip for system messages to avoid appearing as user-sent
-	-- if outputConfig.PublicChat then
-	-- 	client.ChatSay(messageColored) -- Send formatted message with [CD] prefix
-	-- end
-	-- 4. Local chat only if public chat didn't handle it - use colored version
-	if outputConfig.ClientChat then
+	if outputConfig.ClientChat and not sentToExternalChannel then
 		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send client chat message")
 		end
-	end
-
-	-- Fallback: ensure messages are shown locally if no output was enabled
-	if not outputConfig.PublicChat and not outputConfig.ClientChat then
+	elseif not outputConfig.PublicChat and not outputConfig.ClientChat then
+		-- Ensure local feedback even if only console output was requested
 		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send fallback client chat message")
 		end
@@ -111,20 +107,28 @@ local function ValidateAllPlayers()
 					local output =
 						GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
 
-					-- Show notification
+					local tail
 					if config.ValveAutoDisconnect then
-						local msgBracket =
-							string.format("[VALVE EMPLOYEE] %s is in the server - Leaving game", player:GetName())
-						local msgPlain =
-							string.format("Valve employee %s is in the server - Leaving game", player:GetName())
-						SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
-						-- Leave the game
+						tail = "is in the server - Leaving game"
+					else
+						tail = "is in the server"
+					end
+					SendAlert(
+						output,
+						{
+							label = "VALVE",
+							labelColor = "\x078650AC",
+							plainPrefix = "Valve employee",
+							name = player:GetName(),
+							tail = tail,
+							allowParty = false,
+						}
+					)
+
+					-- Leave the game if configured
+					if config.ValveAutoDisconnect then
 						client.Command("disconnect", true)
 						return
-					else
-						local msgBracket = string.format("[VALVE EMPLOYEE] %s is in the server", player:GetName())
-						local msgPlain = string.format("Valve employee %s is in the server", player:GetName())
-						SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
 					end
 				-- Check if cheater in database
 				elseif config.CheckCheater then
@@ -134,11 +138,17 @@ local function ValidateAllPlayers()
 							GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
 						local reason = cheaterData.Reason or "Unknown"
-						local msgBracket =
-							string.format("[CHEATER] %s is in the server (Suspected of: %s)", player:GetName(), reason)
-						local msgPlain =
-							string.format("Cheater %s is in the server (Suspected of: %s)", player:GetName(), reason)
-						SendToChannels(msgBracket, msgPlain, output, false) -- Not Valve message
+						local tail = string.format("is in the server (Suspected of: %s)", reason)
+						SendAlert(
+							output,
+							{
+								label = "CHEATER",
+								labelColor = "\x07FF0000",
+								plainPrefix = "Cheater",
+								name = player:GetName(),
+								tail = tail,
+							}
+						)
 					end
 				end
 			end
@@ -178,17 +188,26 @@ local function OnPlayerConnect(event)
 	if config.CheckValve and Sources.IsValveEmployee(steamID64) then
 		local output = GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
 
-		-- Show notification and optionally leave
+		local tail
 		if config.ValveAutoDisconnect then
-			local msgBracket = string.format("[VALVE EMPLOYEE] %s joined - Leaving game", name)
-			local msgPlain = string.format("Valve employee %s joined - Leaving game", name)
-			SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
-			-- Leave the game
-			client.Command("disconnect", true)
+			tail = "joined - Leaving game"
 		else
-			local msgBracket = string.format("[VALVE EMPLOYEE] %s joined", name)
-			local msgPlain = string.format("Valve employee %s joined", name)
-			SendToChannels(msgBracket, msgPlain, output, true) -- Valve message
+			tail = "joined"
+		end
+		SendAlert(
+			output,
+			{
+				label = "VALVE",
+				labelColor = "\x078650AC",
+				plainPrefix = "Valve employee",
+				name = name,
+				tail = tail,
+				allowParty = false,
+			}
+		)
+		-- Leave the game if configured
+		if config.ValveAutoDisconnect then
+			client.Command("disconnect", true)
 		end
 		return
 	end
@@ -200,9 +219,17 @@ local function OnPlayerConnect(event)
 			local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
 			local reason = cheaterData.Reason or "Unknown"
-			local msgBracket = string.format("[CHEATER] %s joined (Suspected of: %s)", name, reason)
-			local msgPlain = string.format("Cheater %s joined (Suspected of: %s)", name, reason)
-			SendToChannels(msgBracket, msgPlain, output, false) -- Not Valve message
+			local tail = string.format("joined (Suspected of: %s)", reason)
+			SendAlert(
+				output,
+				{
+					label = "CHEATER",
+					labelColor = "\x07FF0000",
+					plainPrefix = "Cheater",
+					name = name,
+					tail = tail,
+				}
+			)
 		end
 	end
 end
@@ -241,9 +268,17 @@ local function OnPlayerDisconnect(event)
 			local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
 			local detectionReason = cheaterData.Reason or "Unknown"
-			local msgBracket = string.format("[CHEATER] %s left (Suspected of: %s)", name, detectionReason)
-			local msgPlain = string.format("Cheater %s left (Suspected of: %s)", name, detectionReason)
-			SendToChannels(msgBracket, msgPlain, output, false) -- Not Valve message
+			local tail = string.format("left (Suspected of: %s)", detectionReason)
+			SendAlert(
+				output,
+				{
+					label = "CHEATER",
+					labelColor = "\x07FF0000",
+					plainPrefix = "Cheater",
+					name = name,
+					tail = tail,
+				}
+			)
 		end
 	end
 end
