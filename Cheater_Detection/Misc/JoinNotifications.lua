@@ -12,6 +12,19 @@ local JoinNotifications = {}
 --[[ State ]]
 local hasValidatedOnLoad = false
 
+local function NormalizeSteamID64(rawID)
+	if not rawID then
+		return nil
+	end
+
+	local steamID = tostring(rawID)
+	if steamID:match("^7656119%d+$") and #steamID == 17 then
+		return steamID
+	end
+
+	return nil
+end
+
 --[[ Helper Functions ]]
 
 -- Send message to configured output channels
@@ -91,7 +104,7 @@ local function ValidateAllPlayers()
 	local players = entities.FindByClass("CTFPlayer")
 	for _, player in ipairs(players) do
 		if player and player:IsValid() then
-			local steamID64 = Common.GetSteamID64(player)
+			local steamID64 = NormalizeSteamID64(Common.GetSteamID64(player))
 			if steamID64 then
 				-- Check Valve employee first (higher priority)
 				if config.CheckValve and Sources.IsValveEmployee(steamID64) then
@@ -156,13 +169,10 @@ local function OnPlayerConnect(event)
 	local networkid = event:GetString("networkid")
 
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
-	-- Convert to SteamID64: 76561197960265728 + accountID
-	local accountID = networkid:match("%[U:1:(%d+)%]")
-	if not accountID then
+	local steamID64 = NormalizeSteamID64(Common.SteamID3ToSteamID64(networkid))
+	if not steamID64 then
 		return
 	end
-
-	local steamID64 = tostring(76561197960265728 + tonumber(accountID))
 
 	-- Check if Valve employee (higher priority)
 	if config.CheckValve and Sources.IsValveEmployee(steamID64) then
@@ -218,12 +228,10 @@ local function OnPlayerDisconnect(event)
 	local networkid = event:GetString("networkid")
 
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
-	local accountID = networkid:match("%[U:1:(%d+)%]")
-	if not accountID then
+	local steamID64 = NormalizeSteamID64(Common.SteamID3ToSteamID64(networkid))
+	if not steamID64 then
 		return
 	end
-
-	local steamID64 = tostring(76561197960265728 + tonumber(accountID))
 
 	-- Don't show disconnect messages for Valve employees (we left the game)
 	-- Only check cheaters

@@ -1,74 +1,54 @@
---[[
-    Simple Commands Utility
-    Provides command registration with automatic overwrite
-]]
-
-local Commands = {}
+--[[ Command bridge ]] 
 
 local G = require("Cheater_Detection.Utils.Globals")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local Common = require("Cheater_Detection.Utils.Common")
 
--- Store registered commands
-Commands.registered = {}
+local lnxCommands = Common.Lib and Common.Lib.Utils and Common.Lib.Utils.Commands
 
--- Register a command (always overwrite existing)
-function Commands.Register(name, callback, helpText)
-	-- Register the command, overriding any existing one
-	Commands.registered[name] = {
-		callback = callback,
-		helpText = helpText or "No description available",
-	}
+local Commands = {}
 
-	-- Register with the engine
-	client.Command_Register(name, function(args)
-		local cmd = Commands.registered[name]
-		if cmd and type(cmd.callback) == "function" then
-			cmd.callback(args)
+local function ensureLnxCommands()
+	if not lnxCommands then
+		lnxCommands = Common.Lib and Common.Lib.Utils and Common.Lib.Utils.Commands
+	end
+	return lnxCommands
+end
+
+local function RegisterSteamHistory()
+	local bridge = ensureLnxCommands()
+	if not bridge or Commands._steamHistoryRegistered then
+		return
+	end
+
+	Commands._steamHistoryRegistered = true
+	bridge.Register("steamhistory", function(args)
+		local shell = G.Menu and G.Menu.Misc and G.Menu.Misc.SteamHistory
+		if not shell then
+			Logger.Error("Commands", "SteamHistory menu state missing; config not initialised")
+			return
 		end
+
+		local key = args and args:popFront() or nil
+		if not key or key == "" then
+			Logger.Warning("Commands", "Usage: steamhistory <api_key>")
+			return
+		end
+
+		shell.ApiKey = key
+		shell.Enable = false
+		Logger.Info("Commands", "SteamHistory API key stored (scanning disabled until toggled)")
 	end)
 end
 
-client.Command_Register("steamhistory", function(args)
-	local shell = G.Menu and G.Menu.Misc and G.Menu.Misc.SteamHistory
-	if not shell then
-		Logger.Error("Commands", "SteamHistory config not initialised (G.Menu.Misc missing)")
-		return
+function Commands.Setup()
+	if ensureLnxCommands() then
+		RegisterSteamHistory()
+	else
+		Logger.Error("Commands", "lnxLib command subsystem unavailable; steam history command skipped")
 	end
-
-	local key = args and args[1] or nil
-	if not key or key == "" then
-		Logger.Warning("Commands", "Usage: steamhistory <api_key>")
-		return
-	end
-
-	shell.ApiKey = key
-	shell.Enable = false
-	Logger.Info("Commands", "SteamHistory API key stored (scanning disabled until toggled)")
-end)
-
--- Unregister a command
-function Commands.Unregister(name)
-	if Commands.registered[name] then
-		client.Command_Unregister(name)
-		Commands.registered[name] = nil
-		return true
-	end
-	return false
 end
 
--- Get help text for a command
-function Commands.GetHelp(name)
-	local cmd = Commands.registered[name]
-	return cmd and cmd.helpText or "Command not found"
-end
-
--- List all registered commands
-function Commands.List()
-	local result = {}
-	for name, _ in pairs(Commands.registered) do
-		table.insert(result, name)
-	end
-	return result
-end
+Commands.Setup()
 
 return Commands

@@ -461,7 +461,6 @@ local function DrawMenu()
 				sh.ScanOnLobby = TimMenu.Checkbox("Scan lobby updates", sh.ScanOnLobby)
 				TimMenu.Tooltip("Check newcomers during lobby changes without re-querying everyone.")
 				TimMenu.NextLine()
-				TimMenu.Text("Scans reuse data within this session to preserve API quota.")
 			end
 		end
 		TimMenu.EndSector()
