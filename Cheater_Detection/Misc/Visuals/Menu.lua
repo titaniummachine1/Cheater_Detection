@@ -196,7 +196,6 @@ local function DrawMenu()
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
-		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Vote Reveal Alerts")
 		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable)
@@ -246,87 +245,6 @@ local function DrawMenu()
 			Misc.Vote_Reveal.Output.ClientChat = outputTable[3]
 			Misc.Vote_Reveal.Output.Console = outputTable[4]
 			TimMenu.NextLine()
-		end
-		TimMenu.EndSector()
-		TimMenu.NextLine()
-
-		TimMenu.BeginSector("Class Change Alerts")
-		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable)
-		TimMenu.Tooltip("Notify when tracked players switch classes.")
-		TimMenu.NextLine()
-		if Misc.Class_Change_Reveal.Enable then
-			-- Initialize if needed
-			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then
-				Misc.Class_Change_Reveal.EnemyOnly = true
-			end
-
-			-- Initialize new output options
-			Misc.Class_Change_Reveal.Output = Misc.Class_Change_Reveal.Output or {}
-			if type(Misc.Class_Change_Reveal.Output.PublicChat) ~= "boolean" then
-				Misc.Class_Change_Reveal.Output.PublicChat = false
-			end
-			if type(Misc.Class_Change_Reveal.Output.PartyChat) ~= "boolean" then
-				Misc.Class_Change_Reveal.Output.PartyChat = true
-			end
-			if type(Misc.Class_Change_Reveal.Output.ClientChat) ~= "boolean" then
-				Misc.Class_Change_Reveal.Output.ClientChat = false
-			end
-			if type(Misc.Class_Change_Reveal.Output.Console) ~= "boolean" then
-				Misc.Class_Change_Reveal.Output.Console = true
-			end
-
-			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly)
-			TimMenu.NextLine()
-
-			local classOutputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
-			local classOutputTable = {
-				Misc.Class_Change_Reveal.Output.PublicChat,
-				Misc.Class_Change_Reveal.Output.PartyChat,
-				Misc.Class_Change_Reveal.Output.ClientChat,
-				Misc.Class_Change_Reveal.Output.Console,
-			}
-			classOutputTable = TimMenu.Combo("Class Change Output", classOutputTable, classOutputOptions)
-			Misc.Class_Change_Reveal.Output.PublicChat = classOutputTable[1]
-			Misc.Class_Change_Reveal.Output.PartyChat = classOutputTable[2]
-			Misc.Class_Change_Reveal.Output.ClientChat = classOutputTable[3]
-			Misc.Class_Change_Reveal.Output.Console = classOutputTable[4]
-			TimMenu.NextLine()
-		end
-		TimMenu.EndSector()
-		TimMenu.NextLine()
-
-		TimMenu.BeginSector("SteamHistory")
-		Misc.SteamHistory = Misc.SteamHistory or {}
-		local sh = Misc.SteamHistory
-		sh.ApiKey = sh.ApiKey or ""
-		if type(sh.Enable) ~= "boolean" then
-			sh.Enable = false
-		end
-		if type(sh.ScanOnJoin) ~= "boolean" then
-			sh.ScanOnJoin = true
-		end
-		if type(sh.ScanOnLobby) ~= "boolean" then
-			sh.ScanOnLobby = true
-		end
-
-		local hasKey = sh.ApiKey ~= ""
-		if not hasKey then
-			TimMenu.Text("SteamHistory API key missing.")
-			TimMenu.NextLine()
-			TimMenu.Text("Run: steamhistory <key>")
-			TimMenu.Tooltip("Paste your SteamHistory key in console to unlock scanning controls.")
-		else
-			sh.Enable = TimMenu.Checkbox("Enable SteamHistory Scans", sh.Enable)
-			TimMenu.NextLine()
-			if sh.Enable then
-				sh.ScanOnJoin = TimMenu.Checkbox("Scan when joining a server", sh.ScanOnJoin)
-				TimMenu.Tooltip("Request ban data once when you load into a server.")
-				TimMenu.NextLine()
-				sh.ScanOnLobby = TimMenu.Checkbox("Scan lobby updates", sh.ScanOnLobby)
-				TimMenu.Tooltip("Check newcomers during lobby changes without re-querying everyone.")
-				TimMenu.NextLine()
-				TimMenu.Text("Scans reuse data within this session to preserve API quota.")
-			end
 		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
@@ -463,6 +381,87 @@ local function DrawMenu()
 				JN.ValveOverride.ClientChat = valveOutputTable[3]
 				JN.ValveOverride.Console = valveOutputTable[4]
 				TimMenu.NextLine()
+			end
+		end
+		TimMenu.EndSector()
+
+		TimMenu.BeginSector("Class Change Alerts")
+		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		TimMenu.Tooltip("Notify when tracked players switch classes.")
+		TimMenu.NextLine()
+		if Misc.Class_Change_Reveal.Enable then
+			-- Initialize if needed
+			if type(Misc.Class_Change_Reveal.EnemyOnly) ~= "boolean" then
+				Misc.Class_Change_Reveal.EnemyOnly = true
+			end
+
+			-- Initialize new output options
+			Misc.Class_Change_Reveal.Output = Misc.Class_Change_Reveal.Output or {}
+			if type(Misc.Class_Change_Reveal.Output.PublicChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.PublicChat = false
+			end
+			if type(Misc.Class_Change_Reveal.Output.PartyChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.PartyChat = true
+			end
+			if type(Misc.Class_Change_Reveal.Output.ClientChat) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.ClientChat = false
+			end
+			if type(Misc.Class_Change_Reveal.Output.Console) ~= "boolean" then
+				Misc.Class_Change_Reveal.Output.Console = true
+			end
+
+			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly)
+			TimMenu.NextLine()
+
+			local classOutputOptions = { "Public Chat", "Party Chat", "Client Chat", "Console" }
+			local classOutputTable = {
+				Misc.Class_Change_Reveal.Output.PublicChat,
+				Misc.Class_Change_Reveal.Output.PartyChat,
+				Misc.Class_Change_Reveal.Output.ClientChat,
+				Misc.Class_Change_Reveal.Output.Console,
+			}
+			classOutputTable = TimMenu.Combo("Class Change Output", classOutputTable, classOutputOptions)
+			Misc.Class_Change_Reveal.Output.PublicChat = classOutputTable[1]
+			Misc.Class_Change_Reveal.Output.PartyChat = classOutputTable[2]
+			Misc.Class_Change_Reveal.Output.ClientChat = classOutputTable[3]
+			Misc.Class_Change_Reveal.Output.Console = classOutputTable[4]
+			TimMenu.NextLine()
+		end
+		TimMenu.EndSector()
+
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("SteamHistory")
+		Misc.SteamHistory = Misc.SteamHistory or {}
+		local sh = Misc.SteamHistory
+		sh.ApiKey = sh.ApiKey or ""
+		if type(sh.Enable) ~= "boolean" then
+			sh.Enable = false
+		end
+		if type(sh.ScanOnJoin) ~= "boolean" then
+			sh.ScanOnJoin = true
+		end
+		if type(sh.ScanOnLobby) ~= "boolean" then
+			sh.ScanOnLobby = true
+		end
+
+		local hasKey = sh.ApiKey ~= ""
+		if not hasKey then
+			TimMenu.Text("SteamHistory API key missing.")
+			TimMenu.NextLine()
+			TimMenu.Text("Run: steamhistory <key>")
+			TimMenu.Tooltip("Paste your SteamHistory key in console to unlock scanning controls.")
+		else
+			sh.Enable = TimMenu.Checkbox("Enable SteamHistory Scans", sh.Enable)
+			TimMenu.NextLine()
+			if sh.Enable then
+				sh.ScanOnJoin = TimMenu.Checkbox("Scan when joining a server", sh.ScanOnJoin)
+				TimMenu.Tooltip("Request ban data once when you load into a server.")
+				TimMenu.NextLine()
+				sh.ScanOnLobby = TimMenu.Checkbox("Scan lobby updates", sh.ScanOnLobby)
+				TimMenu.Tooltip("Check newcomers during lobby changes without re-querying everyone.")
+				TimMenu.NextLine()
+				TimMenu.Text("Scans reuse data within this session to preserve API quota.")
 			end
 		end
 		TimMenu.EndSector()
