@@ -14,6 +14,7 @@ local Default_Config = {
 		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false, -- Debug mode (removes self from database, enables verbose logging)
+		AutoFlagPriorityTen = false,
 		Choke = true, --fakelag
 		Warp = true,
 		Bhop = true,

@@ -144,7 +144,12 @@ local function DrawMenu()
 			Advanced.debug = false
 		end
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
-		TimMenu.Tooltip("Enables debug features (auto-removes self from database, verbose logging)")
+		TimMenu.Tooltip("Enables debug features (auto-removes self from database, enables verbose logging)")
+		Advanced.AutoFlagPriorityTen = Advanced.AutoFlagPriorityTen == true
+		Advanced.AutoFlagPriorityTen = TimMenu.Checkbox("priority Detection", Advanced.AutoFlagPriorityTen)
+		TimMenu.Tooltip(
+			"When enabled, setting player priority to 10 will store them in the database as a known cheater."
+		)
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Misc" then

@@ -123,6 +123,29 @@ function Database.SetPriority(target, priority, isInGame)
 		success, lastError = pcall(playerlist.SetPriority, steamID64, priority)
 		if success then
 			Log(LogLevel.DEBUG, string.format("[DB] SetPriority via SteamID64 %s: priority=%d", steamID64, priority))
+			if priority == 10 then
+				local menuAdvanced = G.Menu and G.Menu.Advanced
+				local autoFlagEnabled = menuAdvanced and menuAdvanced.AutoFlagPriorityTen == true
+				if autoFlagEnabled then
+					local existing = Database.GetCheater(steamID64)
+					if not existing then
+						local name = "Manual Flag"
+						local info = nil
+						if type(target) == "userdata" then
+							info = client.GetPlayerInfo and client.GetPlayerInfo(target:GetIndex())
+						elseif type(target) == "number" and target < 101 then
+							info = client.GetPlayerInfo and client.GetPlayerInfo(target)
+						end
+						if info and info.Name and info.Name ~= "" then
+							name = info.Name
+						end
+						Database.UpsertCheater(steamID64, {
+							name = name,
+							reason = "Manual Priority 10",
+						})
+					end
+				end
+			end
 			return true
 		end
 	end

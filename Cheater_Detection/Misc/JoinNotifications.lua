@@ -35,7 +35,7 @@ local function SendPartyChatMessage(message)
 	if not message or message == "" then
 		return
 	end
-	client.Command(string.format("say_party \"%s\"", escapeForCommand(message)), true)
+	client.Command(string.format('say_party "%s"', escapeForCommand(message)), true)
 end
 
 -- message configuration table expects:
@@ -56,13 +56,8 @@ local function SendAlert(outputConfig, messageConfig)
 
 	local messagePlain = string.format("%s %s%s", plainPrefix, name, tailText)
 	local messageBracketed = string.format("[CD] [%s] %s%s", label, name, tailText)
-	local messageColored = string.format(
-		"\x073EFF3E[CD]\x01 %s[%s]\x01 \x03%s\x01%s",
-		labelColor,
-		label,
-		name,
-		tailText
-	)
+	local messageColored =
+		string.format("\x073EFF3E[CD]\x01 %s[%s]\x01 \x03%s\x01%s", labelColor, label, name, tailText)
 
 	if outputConfig.Console then
 		print(messageBracketed)
@@ -125,17 +120,14 @@ local function DispatchCheaterAlert(config, params)
 
 	local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
 
-	SendAlert(
-		output,
-		{
-			label = "CHEATER",
-			labelColor = "\x07FF0000",
-			plainPrefix = params.plainPrefix or "Cheater",
-			name = params.name or "Unknown",
-			tail = tail,
-			allowParty = allowParty,
-		}
-	)
+	SendAlert(output, {
+		label = "CHEATER",
+		labelColor = "\x07FF0000",
+		plainPrefix = params.plainPrefix or "Cheater",
+		name = params.name or "Unknown",
+		tail = tail,
+		allowParty = allowParty,
+	})
 
 	return true
 end
@@ -152,17 +144,14 @@ local function DispatchValveAlert(config, params)
 	end
 
 	local output = GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
-	SendAlert(
-		output,
-		{
-			label = "VALVE",
-			labelColor = "\x078650AC",
-			plainPrefix = params.plainPrefix or "Valve employee",
-			name = params.name or "Unknown",
-			tail = tail,
-			allowParty = allowParty,
-		}
-	)
+	SendAlert(output, {
+		label = "VALVE",
+		labelColor = "\x078650AC",
+		plainPrefix = params.plainPrefix or "Valve employee",
+		name = params.name or "Unknown",
+		tail = tail,
+		allowParty = allowParty,
+	})
 
 	return true
 end
