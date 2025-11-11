@@ -48,19 +48,48 @@ local function normalizeSteamID64(rawID)
 	end
 
 	local steamID = tostring(rawID)
-	if steamID:match("^7656119%d+$") and #steamID == 17 then
-		return steamID
+	if type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
+		return nil
 	end
 
+	return steamID
+end
+
+local function getScoreboardName(steamID)
+	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
+	for i = 1, maxClients do
+		local info = client.GetPlayerInfo(i)
+		if info and info.SteamID then
+			local infoSteamID = info.SteamID
+			local converted = nil
+			if infoSteamID:match("^7656119%d+$") then
+				converted = normalizeSteamID64(infoSteamID)
+			elseif infoSteamID:match("%[U:1:%d+%]") then
+				converted = normalizeSteamID64(Common.SteamID3ToSteamID64(infoSteamID))
+			end
+			if converted == steamID then
+				return info.Name
+			end
+		end
+	end
 	return nil
 end
 
 local function getPlayerNameBySteamID(steamID)
+	local scoreboardName = getScoreboardName(steamID)
+	if scoreboardName and scoreboardName ~= "" then
+		return scoreboardName
+	end
 	for _, player in ipairs(FastPlayers.GetAll(false)) do
 		local id = normalizeSteamID64(player:GetSteamID64())
 		if id == steamID then
-			local raw = player:GetRawEntity()
-			return raw and raw:IsValid() and raw:GetName() or "Unknown"
+			local raw = player.GetRawEntity and player:GetRawEntity() or nil
+			if raw and raw:IsValid() and raw.GetName then
+				local rawName = raw:GetName()
+				if type(rawName) == "string" and rawName ~= "" then
+					return rawName
+				end
+			end
 		end
 	end
 	return nil
@@ -71,6 +100,10 @@ local function printInfo(color, text)
 end
 
 local function queueSteamID(steamID, context)
+	if not steamID then
+		return false
+	end
+	steamID = normalizeSteamID64(steamID)
 	if not steamID then
 		return false
 	end
@@ -96,11 +129,22 @@ end
 
 local function queueCurrentPlayers()
 	local queued = 0
-	for _, player in ipairs(FastPlayers.GetAll(false)) do
-		local steamID = normalizeSteamID64(player:GetSteamID64())
-		if steamID then
-			if queueSteamID(steamID, { name = player:GetName() }) then
-				queued = queued + 1
+	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
+	for i = 1, maxClients do
+		local info = client.GetPlayerInfo(i)
+		if info and info.SteamID then
+			local steamID64 = nil
+			local steamIDStr = tostring(info.SteamID)
+			if steamIDStr:match("^7656119%d+$") then
+				steamID64 = normalizeSteamID64(steamIDStr)
+			elseif steamIDStr:match("%[U:1:%d+%]") then
+				steamID64 = normalizeSteamID64(Common.SteamID3ToSteamID64(steamIDStr))
+			end
+			if steamID64 then
+				local contextName = info.Name
+				if queueSteamID(steamID64, { name = contextName }) then
+					queued = queued + 1
+				end
 			end
 		end
 	end
@@ -142,7 +186,7 @@ end
 
 local function flagPlayer(steamID, context, entry)
 	local reason = entry.BanReason or "Unknown reason"
-	local name = context.name
+	local name = context and context.name
 		or entry.PersonaName
 		or getPlayerNameBySteamID(steamID)
 		or string.format("Player %s", steamID)
@@ -173,6 +217,9 @@ local function handleBatchResponse(ids, contexts, responseTable)
 
 	local flagged = 0
 	for _, steamID in ipairs(ids) do
+		if type(steamID) ~= "string" then
+			steamID = tostring(steamID)
+		end
 		state.scanned[steamID] = true
 		local entry = responseMap[steamID]
 		local context = contexts[steamID] or {}
@@ -208,8 +255,10 @@ local function requestBatch()
 	if not success or type(body) ~= "string" or body == "" then
 		printInfo({ 255, 100, 100, 255 }, string.format("[SteamHistory] Request failed: %s", tostring(body)))
 		-- Requeue the batch for another attempt later
-		for steamID, ctx in pairs(contexts) do
-			state.pending[steamID] = ctx
+		if contexts then
+			for steamID, ctx in pairs(contexts) do
+				state.pending[steamID] = ctx
+			end
 		end
 		state.scanning = false
 		return
@@ -218,8 +267,10 @@ local function requestBatch()
 	local ok, decoded = pcall(Json.decode, body)
 	if not ok or type(decoded) ~= "table" then
 		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] Failed to decode SteamHistory response")
-		for steamID, ctx in pairs(contexts) do
-			state.pending[steamID] = ctx
+		if contexts then
+			for steamID, ctx in pairs(contexts) do
+				state.pending[steamID] = ctx
+			end
 		end
 		state.scanning = false
 		return
