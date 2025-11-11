@@ -10,6 +10,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local Database = require("Cheater_Detection.Database.Database")
+local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 local Json = Common.Json
 
 --[[ Constants ]]
@@ -192,12 +193,20 @@ local function flagPlayer(steamID, context, entry)
 		or string.format("Player %s", steamID)
 	printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged (%s)", name, reason))
 
+	local formattedReason = string.format("SteamHistory (%s)", reason)
 	-- Update database and player priority for visibility
 	Database.UpsertCheater(steamID, {
 		name = name,
-		reason = string.format("(%s)", reason),
+		reason = formattedReason,
 	})
 	Database.SetPriority(steamID, 10, false)
+
+	JoinNotifications.SendCheaterAlert({
+		name = name,
+		reason = formattedReason,
+		tail = string.format("is in the server (Suspected of: %s)", formattedReason),
+		allowParty = false,
+	})
 end
 
 local function handleBatchResponse(ids, contexts, responseTable)
