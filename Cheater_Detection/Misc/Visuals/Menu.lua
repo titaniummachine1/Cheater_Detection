@@ -439,16 +439,18 @@ local function DrawMenu()
 			sh.Enable = false
 		end
 		local hasKey = sh.ApiKey ~= ""
-		local enableValue = TimMenu.Checkbox("Enable scans", hasKey and sh.Enable)
 		if not hasKey then
 			sh.Enable = false
-			TimMenu.Tooltip("Run steamhistory <key> to store your API key before enabling scans.")
-			TimMenu.NextLine()
-			TimMenu.Text("API key missing. Use steamhistory <key> to unlock scans.")
+			TimMenu.Text("SteamHistory API key missing. Use: steamhistory <key>")
+			TimMenu.Tooltip("Paste your SteamHistory key in the console to unlock scanning.")
 		else
-			sh.Enable = enableValue
-			TimMenu.Tooltip("Batch query SteamHistory for everyone in the match now and whenever new players join.")
+			sh.Enable = TimMenu.Checkbox("Enable SteamHistory scans", sh.Enable)
+			TimMenu.Tooltip("Scan everyone in the server immediately and any newcomers who join after you.")
+			goto steam_history_sector_end
 		end
+		TimMenu.NextLine()
+		TimMenu.Text("Enter your SteamHistory key to unlock automatic scanning.")
+		::steam_history_sector_end::
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()

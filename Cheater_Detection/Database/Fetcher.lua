@@ -407,7 +407,8 @@ end
 local function InitializeFetcher()
 	Log(LogLevel.DEBUG, "[FETCHER] Checking if fetch on load is enabled...") -- Use Log (Updated message)
 	-- Check G.Menu.Main.Fetch_Database instead of G.Config.AutoFetch
-	if type(G) == "table"
+	if
+		type(G) == "table"
 		and type(G.Menu) == "table"
 		and type(G.Menu.Main) == "table"
 		and G.Menu.Main.Fetch_Database == true
