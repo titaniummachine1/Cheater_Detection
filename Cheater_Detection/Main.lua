@@ -36,6 +36,7 @@ require("Cheater_Detection.Misc.Visuals.Menu") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Misc.ChatPrefix") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Misc.JoinNotifications") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Utils.Commands") --[[ Imported by: Main.lua ]]
+require("Cheater_Detection.Misc.SteamHistory") --[[ Imported by: Main.lua ]]
 
 --[[ Detection modules ]]
 local AntiAim = require("Cheater_Detection.Detection Methods.anti_aim")

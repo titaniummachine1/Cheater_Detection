@@ -95,8 +95,6 @@ local Default_Config = {
 		SteamHistory = {
 			Enable = false,
 			ApiKey = "",
-			ScanOnJoin = true,
-			ScanOnLobby = true,
 		},
 	},
 }
