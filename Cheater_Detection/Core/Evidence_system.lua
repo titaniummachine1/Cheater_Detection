@@ -52,6 +52,7 @@ Evidence.Config = {
 			"warp_recharge",
 			"fake_lag",
 			"anti_aim",
+			"manual_priority",
 		},
 		-- Movement detection methods
 		Movement = {
@@ -195,7 +196,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 				-- Map detection names to user-friendly reasons
 				local reasonMap = {
 					["anti_aim"] = "Anti-Aim",
-					["bhop"] = "Bhop", 
+					["bhop"] = "Bhop",
 					["fake_lag"] = "Fake Lag",
 					["warp_dt"] = "Warp/Doubletap",
 					["Duck_Speed"] = "Duck Speed",
@@ -204,7 +205,8 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 					["silent_aimbot"] = "Silent Aimbot",
 					["plain_aimbot"] = "Aimbot",
 					["smooth_aimbot"] = "Smooth Aimbot",
-					["triggerbot"] = "Triggerbot"
+					["triggerbot"] = "Triggerbot",
+					["manual_priority"] = "Manual Priority",
 				}
 				primaryReason = reasonMap[detectionName] or detectionName
 			end

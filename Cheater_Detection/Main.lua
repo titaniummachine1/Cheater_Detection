@@ -44,6 +44,7 @@ local Bhop = require("Cheater_Detection.Detection Methods.bhop")
 local DuckSpeed = require("Cheater_Detection.Detection Methods.Duck_Speed")
 local FakeLag = require("Cheater_Detection.Detection Methods.fake_lag")
 local WarpDT = require("Cheater_Detection.Detection Methods.warp_dt")
+local ManualPriority = require("Cheater_Detection.Detection Methods.manual_priority")
 
 --[[ Variables ]]
 local WPlayer, PR = Common.WPlayer, Common.PlayerResource
@@ -91,6 +92,7 @@ local function OnCreateMove(cmd)
 		Bhop.Check(Player)
 		FakeLag.Check(Player)
 		WarpDT.Check(Player)
+        ManualPriority.Check(Player)
 
 		-- TODO: Implement remaining detection methods
 		--warp_recharge_check(Player)
