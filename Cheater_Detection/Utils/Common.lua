@@ -276,31 +276,34 @@ function Common.pushHistory(player)
 	end
 end
 
-function Common.FromSteamid32To64(steamid32)
-	return "[U:1:" .. steamid32 .. "]"
-end
-
--- More robust SteamID conversion functions
-function Common.SteamID3ToSteamID64(steamID3)
-	if not steamID3 then
+function Common.FromSteamid3To64(steamid3)
+	if not steamid3 then
 		return nil
 	end
 
-	-- Try to extract the numeric part from [U:1:12345]
-	local accountID = steamID3:match("%[U:1:(%d+)%]")
-	if not accountID then
+	local raw = tostring(steamid3)
+	if raw == "" then
 		return nil
 	end
 
-	-- Safe steam API conversion with error handling
-	local success, steamID64 = pcall(steam.ToSteamID64, steamID3)
-	if success and steamID64 and #steamID64 == 17 then
-		return steamID64
+	-- Already SteamID64
+	if raw:match("^7656119%d+$") then
+		return raw
 	end
 
-	-- Fallback manual conversion if steam API fails
-	-- SteamID64 = 76561197960265728 + accountID
-	return tostring(76561197960265728 + tonumber(accountID))
+	-- Handle SteamID2 format (STEAM_X:Y:Z)
+	if raw:match("^STEAM_%d+:%d+:%d+$") then
+		local ok, converted = pcall(steam.ToSteamID64, raw)
+		return ok and tostring(converted) or nil
+	end
+
+	-- Ensure SteamID3 wrapped in brackets
+	if not raw:match("^%[U:1:%d+%]$") then
+		raw = string.format("[U:1:%s]", raw)
+	end
+
+	local ok, converted = pcall(steam.ToSteamID64, raw)
+	return ok and tostring(converted) or nil
 end
 
 -- Helper function to determine if the content is JSON

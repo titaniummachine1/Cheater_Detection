@@ -65,7 +65,7 @@ local function getScoreboardName(steamID)
 			if infoSteamID:match("^7656119%d+$") then
 				converted = normalizeSteamID64(infoSteamID)
 			elseif infoSteamID:match("%[U:1:%d+%]") then
-				converted = normalizeSteamID64(Common.SteamID3ToSteamID64(infoSteamID))
+				converted = normalizeSteamID64(Common.FromSteamid3To64(infoSteamID))
 			end
 			if converted == steamID then
 				return info.Name
@@ -138,7 +138,7 @@ local function queueCurrentPlayers()
 			if steamIDStr:match("^7656119%d+$") then
 				steamID64 = normalizeSteamID64(steamIDStr)
 			elseif steamIDStr:match("%[U:1:%d+%]") then
-				steamID64 = normalizeSteamID64(Common.SteamID3ToSteamID64(steamIDStr))
+				steamID64 = normalizeSteamID64(Common.FromSteamid3To64(steamIDStr))
 			end
 			if steamID64 then
 				local contextName = info.Name
@@ -195,9 +195,9 @@ local function flagPlayer(steamID, context, entry)
 	-- Update database and player priority for visibility
 	Database.UpsertCheater(steamID, {
 		name = name,
-		reason = string.format("SteamHistory (%s)", reason),
+		reason = string.format("(%s)", reason),
 	})
-	Database.SetPriority(steamID, 8, false)
+	Database.SetPriority(steamID, 10, false)
 end
 
 local function handleBatchResponse(ids, contexts, responseTable)
@@ -315,7 +315,7 @@ local function onPlayerConnect(event)
 	end
 
 	local networkid = event:GetString("networkid")
-	local steamID = normalizeSteamID64(Common.SteamID3ToSteamID64(networkid))
+	local steamID = normalizeSteamID64(Common.FromSteamid3To64(networkid))
 	if not steamID then
 		return
 	end

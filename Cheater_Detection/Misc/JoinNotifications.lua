@@ -91,7 +91,6 @@ local function SendAlert(outputConfig, messageConfig)
 	end
 end
 
--- Get effective output config with override support
 local function GetEffectiveOutput(defaultOutput, overrideOutput, useOverride)
 	if useOverride and overrideOutput then
 		return overrideOutput
@@ -99,16 +98,98 @@ local function GetEffectiveOutput(defaultOutput, overrideOutput, useOverride)
 	return defaultOutput
 end
 
+local function GetJoinNotificationsConfig()
+	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
+	if not config or not config.Enable then
+		return nil
+	end
+
+	if type(config.ValveAutoDisconnect) ~= "boolean" then
+		return nil
+	end
+
+	return config
+end
+
+local function DispatchCheaterAlert(config, params)
+	if not config or not config.CheckCheater then
+		return false
+	end
+
+	local reason = params.reason or "Unknown"
+	local tail = params.tail or string.format("is in the server (Suspected of: %s)", reason)
+	local allowParty = params.allowParty
+	if allowParty == nil then
+		allowParty = false
+	end
+
+	local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
+
+	SendAlert(
+		output,
+		{
+			label = "CHEATER",
+			labelColor = "\x07FF0000",
+			plainPrefix = params.plainPrefix or "Cheater",
+			name = params.name or "Unknown",
+			tail = tail,
+			allowParty = allowParty,
+		}
+	)
+
+	return true
+end
+
+local function DispatchValveAlert(config, params)
+	if not config or not config.CheckValve then
+		return false
+	end
+
+	local tail = params.tail or "is in the server"
+	local allowParty = params.allowParty
+	if allowParty == nil then
+		allowParty = false
+	end
+
+	local output = GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
+	SendAlert(
+		output,
+		{
+			label = "VALVE",
+			labelColor = "\x078650AC",
+			plainPrefix = params.plainPrefix or "Valve employee",
+			name = params.name or "Unknown",
+			tail = tail,
+			allowParty = allowParty,
+		}
+	)
+
+	return true
+end
+
+function JoinNotifications.SendCheaterAlert(params)
+	local config = GetJoinNotificationsConfig()
+	if not config then
+		return false
+	end
+
+	return DispatchCheaterAlert(config, params or {})
+end
+
+function JoinNotifications.SendValveAlert(params)
+	local config = GetJoinNotificationsConfig()
+	if not config then
+		return false
+	end
+
+	return DispatchValveAlert(config, params or {})
+end
+
 -- Check all players currently in the game for Valve employees and cheaters
 -- If Valve found and auto-disconnect enabled, leave server
 local function ValidateAllPlayers()
-	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
-	if not config or not config.Enable then
-		return
-	end
-
-	-- Safety check: ensure ValveAutoDisconnect is a boolean (config loaded)
-	if type(config.ValveAutoDisconnect) ~= "boolean" then
+	local config = GetJoinNotificationsConfig()
+	if not config then
 		return -- Config not fully loaded yet
 	end
 
@@ -119,29 +200,12 @@ local function ValidateAllPlayers()
 			if steamID64 then
 				-- Check Valve employee first (higher priority)
 				if config.CheckValve and Sources.IsValveEmployee(steamID64) then
-					local output =
-						GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
-
-					local tail
-					if config.ValveAutoDisconnect then
-						tail = "is in the server - Leaving game"
-					else
-						tail = "is in the server"
-					end
-					SendAlert(
-						output,
-						{
-							label = "VALVE",
-							labelColor = "\x078650AC",
-							plainPrefix = "Valve employee",
-							name = player:GetName(),
-							tail = tail,
-							allowParty = false,
-						}
-					)
-
-					-- Leave the game if configured
-					if config.ValveAutoDisconnect then
+					local alertSent = DispatchValveAlert(config, {
+						name = player:GetName(),
+						tail = config.ValveAutoDisconnect and "is in the server - Leaving game" or "is in the server",
+						allowParty = false,
+					})
+					if alertSent and config.ValveAutoDisconnect then
 						client.Command("disconnect", true)
 						return
 					end
@@ -149,22 +213,11 @@ local function ValidateAllPlayers()
 				elseif config.CheckCheater then
 					local cheaterData = Database.GetCheater(steamID64)
 					if cheaterData then
-						local output =
-							GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
-
-						local reason = cheaterData.Reason or "Unknown"
-						local tail = string.format("is in the server (Suspected of: %s)", reason)
-						SendAlert(
-							output,
-							{
-								label = "CHEATER",
-								labelColor = "\x07FF0000",
-								plainPrefix = "Cheater",
-								name = player:GetName(),
-								tail = tail,
-								allowParty = false,
-							}
-						)
+						DispatchCheaterAlert(config, {
+							name = player:GetName(),
+							reason = cheaterData.Reason,
+							allowParty = false,
+						})
 					end
 				end
 			end
@@ -180,13 +233,8 @@ local function OnPlayerConnect(event)
 		return
 	end
 
-	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
-	if not config or not config.Enable then
-		return
-	end
-
-	-- Safety check: ensure config is fully loaded
-	if type(config.ValveAutoDisconnect) ~= "boolean" then
+	local config = GetJoinNotificationsConfig()
+	if not config then
 		return
 	end
 
@@ -195,34 +243,20 @@ local function OnPlayerConnect(event)
 	local networkid = event:GetString("networkid")
 
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
-	local steamID64 = NormalizeSteamID64(Common.SteamID3ToSteamID64(networkid))
+	local steamID64 = NormalizeSteamID64(Common.FromSteamid3To64(networkid))
 	if not steamID64 then
 		return
 	end
 
 	-- Check if Valve employee (higher priority)
 	if config.CheckValve and Sources.IsValveEmployee(steamID64) then
-		local output = GetEffectiveOutput(config.DefaultOutput, config.ValveOverride, config.UseValveOverride)
-
-		local tail
-		if config.ValveAutoDisconnect then
-			tail = "joined - Leaving game"
-		else
-			tail = "joined"
-		end
-		SendAlert(
-			output,
-			{
-				label = "VALVE",
-				labelColor = "\x078650AC",
-				plainPrefix = "Valve employee",
-				name = name,
-				tail = tail,
-				allowParty = false,
-			}
-		)
-		-- Leave the game if configured
-		if config.ValveAutoDisconnect then
+		local tail = config.ValveAutoDisconnect and "joined - Leaving game" or "joined"
+		local alertSent = DispatchValveAlert(config, {
+			name = name,
+			tail = tail,
+			allowParty = false,
+		})
+		if alertSent and config.ValveAutoDisconnect then
 			client.Command("disconnect", true)
 		end
 		return
@@ -232,21 +266,13 @@ local function OnPlayerConnect(event)
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
 		if cheaterData then
-			local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
-
 			local reason = cheaterData.Reason or "Unknown"
-			local tail = string.format("joined (Suspected of: %s)", reason)
-			SendAlert(
-				output,
-				{
-					label = "CHEATER",
-					labelColor = "\x07FF0000",
-					plainPrefix = "Cheater",
-					name = name,
-					tail = tail,
-					allowParty = false,
-				}
-			)
+			DispatchCheaterAlert(config, {
+				name = name,
+				reason = reason,
+				tail = string.format("joined (Suspected of: %s)", reason),
+				allowParty = false,
+			})
 		end
 	end
 end
@@ -257,13 +283,8 @@ local function OnPlayerDisconnect(event)
 		return
 	end
 
-	local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
-	if not config or not config.Enable then
-		return
-	end
-
-	-- Safety check: ensure config is fully loaded
-	if type(config.ValveAutoDisconnect) ~= "boolean" then
+	local config = GetJoinNotificationsConfig()
+	if not config then
 		return
 	end
 
@@ -272,7 +293,7 @@ local function OnPlayerDisconnect(event)
 	local networkid = event:GetString("networkid")
 
 	-- Extract SteamID64 from networkid (format: [U:1:XXXXXXXX])
-	local steamID64 = NormalizeSteamID64(Common.SteamID3ToSteamID64(networkid))
+	local steamID64 = NormalizeSteamID64(Common.FromSteamid3To64(networkid))
 	if not steamID64 then
 		return
 	end
@@ -282,20 +303,12 @@ local function OnPlayerDisconnect(event)
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
 		if cheaterData then
-			local output = GetEffectiveOutput(config.DefaultOutput, config.CheaterOverride, config.UseCheaterOverride)
-
-			local detectionReason = cheaterData.Reason or "Unknown"
-			local tail = string.format("left (Suspected of: %s)", detectionReason)
-			SendAlert(
-				output,
-				{
-					label = "CHEATER",
-					labelColor = "\x07FF0000",
-					plainPrefix = "Cheater",
-					name = name,
-					tail = tail,
-				}
-			)
+			local reason = cheaterData.Reason or "Unknown"
+			DispatchCheaterAlert(config, {
+				name = name,
+				reason = reason,
+				tail = string.format("left (Suspected of: %s)", reason),
+			})
 		end
 	end
 end
