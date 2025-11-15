@@ -5,6 +5,7 @@ local Default_Config = {
 		Fetch_Database = true,
 		AutoMark = true,
 		AutoFetch = true, -- Automatically fetch database on startup
+		LastFetchTimestamp = 0,
 		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,

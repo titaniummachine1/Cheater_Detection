@@ -101,6 +101,44 @@ local function getOrCreateEvidence(steamID)
 	return state.Evidence, state
 end
 
+local function initPlayerEvidence(steamID)
+	return getOrCreateEvidence(steamID)
+end
+
+local function recalcTotalScore(evidence)
+	local total = 0
+	for _, reason in pairs(evidence.Reasons) do
+		total = total + reason.Weight
+	end
+	evidence.TotalScore = total
+	evidence.LastUpdateTick = globals.TickCount()
+end
+
+local function applyReasonOptions(reason, opts)
+	if not reason or not opts then
+		return
+	end
+	if opts.manualDecay ~= nil then
+		reason.ManualDecay = opts.manualDecay == true
+	end
+	if opts.decayRate then
+		reason.DecayRate = opts.decayRate
+	end
+end
+
+local function getCategoryDecayRate(category)
+	category = category or "Movement"
+	local rates = Evidence.Config.DecayRates
+	if category == "Aim" then
+		return (rates.Aim and rates.Aim.default) or 0
+	elseif category == "Exploit" then
+		return (rates.Exploit and rates.Exploit.default) or 0
+	elseif category == "Movement" then
+		return (rates.Movement and rates.Movement.default) or 0
+	end
+	return 0
+end
+
 --[[ Public Functions ]]
 
 --- Get the current evidence threshold from menu
@@ -113,7 +151,7 @@ end
 ---@param steamID string Player's SteamID64
 ---@param detectionName string Detection method name
 ---@param weight number Weight to add
-function Evidence.AddEvidence(steamID, detectionName, weight)
+function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	if not steamID or not detectionName or not weight then
 		return
 	end
@@ -154,229 +192,152 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 			LastAddedTick = globals.TickCount(),
 		}
 	end
+	applyReasonOptions(evidence.Reasons[detectionName], opts)
 
 	-- Add weight
 	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
 	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
-
-	-- Recalculate total
-	local total = 0
-	for _, reason in pairs(evidence.Reasons) do
-		total = total + reason.Weight
-	end
-	evidence.TotalScore = total
-	evidence.LastUpdateTick = globals.TickCount()
-
-	-- Check if should mark as cheater (use global threshold function)
-	local threshold = Evidence.GetThreshold()
-
-	if G.Menu.Advanced.debug then
-		print(
-			string.format(
-				"[Evidence] %s - Total: %.1f, Threshold: %.1f, Marked: %s",
-				steamID,
-				evidence.TotalScore,
-				threshold,
-				tostring(evidence.MarkedAsCheater)
-			)
-		)
-	end
-
-	if evidence.TotalScore >= threshold and not evidence.MarkedAsCheater then
-		evidence.MarkedAsCheater = true
-		state.info = state.info or {}
-		state.info.IsCheater = true
-
-		-- Get player name for database entry
-		local playerName = (state.info and state.info.Name) or "Unknown"
-		local allPlayers = FastPlayers.GetAll(true)
-		for _, player in ipairs(allPlayers) do
-			if tostring(player:GetSteamID64()) == steamID then
-				local name = player.GetName and player:GetName()
-				if name and name ~= "" then
-					playerName = name
-				end
-				break
-			end
-		end
-
-		-- Get primary detection reason (highest weight)
-		local primaryReason = "Cheater" -- fallback
-		local maxWeight = 0
-		for detectionName, reasonData in pairs(evidence.Reasons) do
-			if reasonData.Weight > maxWeight then
-				maxWeight = reasonData.Weight
-				-- Map detection names to user-friendly reasons
-				local reasonMap = {
-					["anti_aim"] = "Anti-Aim",
-					["bhop"] = "Bhop",
-					["fake_lag"] = "Fake Lag",
-					["warp_dt"] = "Warp/Doubletap",
-					["Duck_Speed"] = "Duck Speed",
-					["strafe_bot"] = "Strafe Bot",
-					["bot_walk"] = "Bot Walk",
-					["silent_aimbot"] = "Silent Aimbot",
-					["plain_aimbot"] = "Aimbot",
-					["smooth_aimbot"] = "Smooth Aimbot",
-					["triggerbot"] = "Triggerbot",
-					["manual_priority"] = "Manual Priority",
-				}
-				primaryReason = reasonMap[detectionName] or detectionName
-			end
-		end
-
-		-- Save to database
-		local dbSuccess = Database.UpsertCheater(steamID, {
-			name = playerName,
-			reason = primaryReason, -- Use actual detection reason
-			proof = "Evidence System",
-			evidenceScore = evidence.TotalScore,
-			reasons = evidence.Reasons,
-			firstSeen = os.time(),
-			lastSeen = os.time(),
-		})
-
-		-- Auto mark in lmaobox if enabled
-		if G.Menu.Advanced.AutoMark then
-			for _, player in ipairs(allPlayers) do
-				if tostring(player:GetSteamID64()) == steamID then
-					local localPlayer = FastPlayers.GetLocal()
-					if not G.Menu.Advanced.debug and localPlayer and player == localPlayer then
-						break
-					end
-					player.SetPriority = player.SetPriority
-						or function(_, level)
-							pcall(playerlist.SetPriority, player:GetRawEntity(), level)
-						end
-					player:SetPriority(10)
-					if G.Menu.Advanced.debug then
-						local pname = player.GetName and player:GetName() or "Unknown"
-						print(string.format("[Evidence] Set priority 10 for %s", pname))
-					end
-					break
-				end
-			end
-		end
-
-		if G.Menu.Advanced.debug then
-			print(
-				string.format(
-					"[Evidence] MARKED %s as cheater (Score: %.1f >= %.1f) - Saved to database",
-					playerName,
-					evidence.TotalScore,
-					threshold
-				)
-			)
-		end
-	end
+	evidence.Dirty = true
 end
 
 --- Calculate aim decay multiplier based on player context
 ---@param player table WrappedPlayer instance
 ---@return number Decay multiplier
-local function calculateAimDecay(player)
-	if not player or not player:IsValid() then
-		return Evidence.Config.DecayRates.Aim.default
+local function tryMarkCheater(steamID, evidence, state)
+	if not evidence or evidence.MarkedAsCheater then
+		return
 	end
 
-	local multiplier = Evidence.Config.DecayRates.Aim.default
-	local eyePos = player:GetEyePos()
-	local eyeAngles = player:GetEyeAngles()
-
-	if not eyePos or not eyeAngles then
-		return multiplier
+	local threshold = Evidence.GetThreshold()
+	if evidence.TotalScore < threshold then
+		return
 	end
 
-	local forward = eyeAngles:Forward()
-	local enemies = FastPlayers.GetEnemies()
+	evidence.MarkedAsCheater = true
+	state = state or select(2, getOrCreateEvidence(steamID)) or {}
+	state.info = state.info or {}
+	state.info.IsCheater = true
 
-	local closestDist = math.huge
-	local isLookingAtEnemy = false
-
-	-- Check if looking at any enemy
-	for _, enemy in ipairs(enemies) do
-		if enemy:IsAlive() and not enemy:IsDormant() then
-			local enemyPos = enemy:GetAbsOrigin()
-			local toEnemy = enemyPos - eyePos
-			local dist = toEnemy:Length()
-
-			if dist < closestDist then
-				closestDist = dist
+	local playerName = (state.info and state.info.Name) or "Unknown"
+	local allPlayers = FastPlayers.GetAll(true)
+	for _, player in ipairs(allPlayers) do
+		if tostring(player:GetSteamID64()) == steamID then
+			local name = player.GetName and player:GetName()
+			if name and name ~= "" then
+				playerName = name
 			end
+			break
+		end
+	end
 
-			-- Normalize toEnemy vector
-			local len = toEnemy:Length()
-			if len > 0 then
-				toEnemy = toEnemy / len
+	local primaryReason = "Cheater"
+	local maxWeight = 0
+	for detectionName, reasonData in pairs(evidence.Reasons) do
+		if reasonData.Weight > maxWeight then
+			maxWeight = reasonData.Weight
+			local reasonMap = {
+				["anti_aim"] = "Anti-Aim",
+				["bhop"] = "Bhop",
+				["fake_lag"] = "Fake Lag",
+				["warp_dt"] = "Warp/Doubletap",
+				["Duck_Speed"] = "Duck Speed",
+				["strafe_bot"] = "Strafe Bot",
+				["bot_walk"] = "Bot Walk",
+				["silent_aimbot"] = "Silent Aimbot",
+				["plain_aimbot"] = "Aimbot",
+				["smooth_aimbot"] = "Smooth Aimbot",
+				["triggerbot"] = "Triggerbot",
+				["manual_priority"] = "Manual Priority",
+			}
+			primaryReason = reasonMap[detectionName] or detectionName
+		end
+	end
 
-				-- Calculate dot product (cos of angle)
-				local dot = forward.x * toEnemy.x + forward.y * toEnemy.y + forward.z * toEnemy.z
+	Database.UpsertCheater(steamID, {
+		name = playerName,
+		reason = primaryReason,
+		proof = "Evidence System",
+		evidenceScore = evidence.TotalScore,
+		reasons = evidence.Reasons,
+		firstSeen = os.time(),
+		lastSeen = os.time(),
+	})
 
-				-- If aiming within ~30 degrees of enemy
-				if dot > 0.86 then -- cos(30°) ≈ 0.86
-					isLookingAtEnemy = true
+	if G.Menu.Advanced.AutoMark then
+		for _, player in ipairs(allPlayers) do
+			if tostring(player:GetSteamID64()) == steamID then
+				local localPlayer = FastPlayers.GetLocal()
+				if not G.Menu.Advanced.debug and localPlayer and player == localPlayer then
+					break
+				end
+				player.SetPriority = player.SetPriority
+					or function(_, level)
+						pcall(playerlist.SetPriority, player:GetRawEntity(), level)
+					end
+				player:SetPriority(10)
+				if G.Menu.Advanced.debug then
+					local pname = player.GetName and player:GetName() or "Unknown"
+					print(string.format("[Evidence] Set priority 10 for %s", pname))
+				end
+				break
+			end
+		end
+	end
 
-					-- Closer aim = more decay
-					if dot > 0.98 then -- cos(11°) ≈ 0.98 (very close aim)
-						multiplier = multiplier + Evidence.Config.DecayRates.Aim.closeAim
+	if G.Menu.Advanced.debug then
+		print(
+			string.format(
+				"[Evidence] MARKED %s as cheater (Score: %.1f >= %.1f) - Saved to database",
+				playerName,
+				evidence.TotalScore,
+				threshold
+			)
+		)
+	end
+end
+
+local function processEvidenceState(steamID, state, deltaTime)
+	if not state or not state.Evidence then
+		return
+	end
+	local evidence = state.Evidence
+	if not evidence.Reasons or next(evidence.Reasons) == nil then
+		evidence.Dirty = false
+		return
+	end
+
+	local changed = false
+	local minFloor = Evidence.Config.MinWeightFloor or 0
+	local toRemove = {}
+
+	if deltaTime > 0 then
+		for detectionName, reason in pairs(evidence.Reasons) do
+			if reason.ManualDecay ~= true and reason.Weight > minFloor then
+				local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
+				if rate > 0 then
+					local newWeight = math.max(minFloor, reason.Weight - rate * deltaTime)
+					if newWeight ~= reason.Weight then
+						reason.Weight = newWeight
+						changed = true
 					end
 				end
 			end
-		end
-	end
 
-	if isLookingAtEnemy then
-		multiplier = multiplier + Evidence.Config.DecayRates.Aim.lookingAtEnemy
-	end
-
-	-- TODO: Add extra decay when dealing damage (requires damage event tracking)
-	-- This would be: multiplier = multiplier + Evidence.Config.DecayRates.Aim.hurtingEnemy
-
-	return multiplier
-end
-
---- Apply decay to a single player's evidence
----@param steamID string Player's SteamID64
----@param player table WrappedPlayer instance
----@param deltaTime number Time elapsed in seconds
-local function decayPlayerEvidence(steamID, player, deltaTime)
-	local evidence = getOrCreateEvidence(steamID)
-	if not evidence then
-		return
-	end
-	local changed = false
-
-	-- Calculate context-specific decay for Aim category
-	local aimDecayRate = calculateAimDecay(player)
-
-	-- Apply decay to each detection reason
-	for detectionName, reason in pairs(evidence.Reasons) do
-		if reason.Weight > Evidence.Config.MinWeightFloor then
-			local decayAmount = 0
-
-			if reason.Category == "Aim" then
-				decayAmount = aimDecayRate * deltaTime
-			elseif reason.Category == "Exploit" then
-				decayAmount = Evidence.Config.DecayRates.Exploit.default * deltaTime
-			elseif reason.Category == "Movement" then
-				decayAmount = Evidence.Config.DecayRates.Movement.default * deltaTime
-			else
-				decayAmount = 1.0 * deltaTime -- Fallback
+			if reason.ManualDecay ~= true and reason.Weight <= minFloor then
+				toRemove[#toRemove + 1] = detectionName
 			end
-
-			reason.Weight = math.max(Evidence.Config.MinWeightFloor, reason.Weight - decayAmount)
-			changed = true
 		end
 	end
 
-	-- Recalculate total if changed
-	if changed then
-		local total = 0
-		for _, reason in pairs(evidence.Reasons) do
-			total = total + reason.Weight
-		end
-		evidence.TotalScore = total
-		evidence.LastUpdateTick = globals.TickCount()
+	for _, detectionName in ipairs(toRemove) do
+		evidence.Reasons[detectionName] = nil
+		changed = true
+	end
+
+	if evidence.Dirty or changed then
+		recalcTotalScore(evidence)
+		evidence.Dirty = false
+		tryMarkCheater(steamID, evidence, state)
 	end
 end
 
@@ -400,18 +361,14 @@ function Evidence.ApplyDecay()
 	local deltaTime = ticksDelta / TICKS_PER_SECOND -- Convert to seconds
 	lastDecayTick = currentTick
 
-	-- Get all players and decay their evidence
-	local allPlayers = FastPlayers.GetAll(true) -- Include dormant players for decay
+	local stateTable = PlayerState and PlayerState.GetTable and PlayerState.GetTable()
+	if not stateTable then
+		return
+	end
 
-	for _, player in ipairs(allPlayers) do
-		local steamID = player:GetSteamID64()
-		if steamID then
-			-- Skip if already marked as cheater and in database (optimization)
-			local skipDecay = G.DataBase[steamID] ~= nil
-
-			if not skipDecay then
-				decayPlayerEvidence(steamID, player, deltaTime)
-			end
+	for steamID, state in pairs(stateTable) do
+		if state and state.Evidence then
+			processEvidenceState(steamID, state, deltaTime)
 		end
 	end
 end
@@ -441,6 +398,13 @@ function Evidence.IsMarkedCheater(steamID)
 	local priority = playerlist.GetPriority(steamID)
 	if priority == 10 then
 		return true
+	end
+
+	if PlayerState then
+		local state = PlayerState.Get(steamID)
+		if state and state.Evidence then
+			return state.Evidence.MarkedAsCheater == true
+		end
 	end
 
 	return false
@@ -474,19 +438,18 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 			LastAddedTick = globals.TickCount(),
 		}
 	end
+	local reason = evidence.Reasons[detectionName]
+	reason.ManualDecay = true
 
 	-- Apply decay (minimum 0)
-	local oldWeight = evidence.Reasons[detectionName].Weight
-	evidence.Reasons[detectionName].Weight = math.max(0, evidence.Reasons[detectionName].Weight - decayAmount)
+	local oldWeight = reason.Weight
+	reason.Weight = math.max(0, reason.Weight - decayAmount)
 
 	-- Recalculate total if changed
-	if oldWeight ~= evidence.Reasons[detectionName].Weight then
-		local total = 0
-		for _, reason in pairs(evidence.Reasons) do
-			total = total + reason.Weight
-		end
-		evidence.TotalScore = total
-		evidence.LastUpdateTick = globals.TickCount()
+	if oldWeight ~= reason.Weight then
+		evidence.Dirty = true
+		recalcTotalScore(evidence)
+		tryMarkCheater(steamID, evidence, select(2, getOrCreateEvidence(steamID)))
 
 		-- Debug: Log decay
 		Logger.Debug(

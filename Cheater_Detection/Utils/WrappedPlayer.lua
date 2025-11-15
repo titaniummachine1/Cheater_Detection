@@ -15,6 +15,41 @@ assert(WPlayer, "WPlayer is nil")
 ---@field _rawEntity Entity Raw entity object
 local WrappedPlayer = {}
 
+local WrapperPool = {}
+
+local function hydrateWrapper(wrapped, entity)
+	local basePlayer = WPlayer.FromEntity(entity)
+	if not basePlayer then
+		return nil
+	end
+
+	wrapped._basePlayer = basePlayer
+	wrapped._rawEntity = entity
+	wrapped._cache = wrapped._cache or {}
+	wrapped._cacheTick = -1
+	wrapped._lastSeenTick = globals.TickCount()
+
+	local steamID = Common.GetSteamID64(basePlayer)
+	if steamID then
+		steamID = tostring(steamID)
+		if wrapped._steamID64 ~= steamID then
+			wrapped._steamID64 = steamID
+			wrapped._steamID3 = nil
+			wrapped._state = nil
+		end
+	else
+		wrapped._steamID64 = nil
+		wrapped._steamID3 = nil
+		wrapped._state = nil
+	end
+
+	if PlayerState and not wrapped._state then
+		wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
+	end
+
+	return wrapped
+end
+
 -- Instance metatable that forwards unknown lookups to the base WPlayer
 local WrappedPlayerMT = {}
 
@@ -75,22 +110,20 @@ function WrappedPlayer.FromEntity(entity)
 		return nil
 	end
 
-	local basePlayer = WPlayer.FromEntity(entity)
-	if not basePlayer then
+	local index = entity:GetIndex()
+	if not index then
 		return nil
 	end
 
-	local wrapped = setmetatable({}, WrappedPlayerMT)
-	wrapped._basePlayer = basePlayer -- Store the lnxLib player wrapper
-	wrapped._rawEntity = entity -- Store the raw entity directly
-	wrapped._cache = {}
-	wrapped._cacheTick = -1
-	wrapped._steamID64 = nil
-	wrapped._steamID3 = nil
-	wrapped._state = nil
+	local wrapped = WrapperPool[index]
+	if not wrapped then
+		wrapped = setmetatable({}, WrappedPlayerMT)
+		WrapperPool[index] = wrapped
+	end
 
-	if PlayerState then
-		wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
+	if not hydrateWrapper(wrapped, entity) then
+		WrapperPool[index] = nil
+		return nil
 	end
 
 	return wrapped
@@ -390,6 +423,21 @@ function WrappedPlayer:MarkCheater(reason)
 	end
 	info.IsCheater = true
 	info.CheaterReason = reason or info.CheaterReason
+end
+
+function WrappedPlayer.PruneInactive(currentTick)
+	currentTick = currentTick or globals.TickCount()
+	for index, wrapped in pairs(WrapperPool) do
+		if not wrapped or wrapped._lastSeenTick ~= currentTick then
+			WrapperPool[index] = nil
+		end
+	end
+end
+
+function WrappedPlayer.ResetPool()
+	for index in pairs(WrapperPool) do
+		WrapperPool[index] = nil
+	end
 end
 
 return WrappedPlayer

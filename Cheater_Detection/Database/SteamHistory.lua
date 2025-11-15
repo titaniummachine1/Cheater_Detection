@@ -197,19 +197,33 @@ local function matchesKeyword(reason)
 	return false
 end
 
+local function resolveName(steamID, context, entry, stateEntry)
+	local contextName = context and context.name
+	if contextName and contextName ~= "" then
+		return contextName
+	end
+	if stateEntry and stateEntry.info and stateEntry.info.Name and stateEntry.info.Name ~= "" then
+		return stateEntry.info.Name
+	end
+	if entry and entry.PersonaName and entry.PersonaName ~= "" then
+		return entry.PersonaName
+	end
+	local scoreboardName = getPlayerNameBySteamID(steamID)
+	if scoreboardName and scoreboardName ~= "" then
+		return scoreboardName
+	end
+	return string.format("Player %s", steamID)
+end
+
 local function flagPlayer(steamID, context, entry)
 	local reason = entry.BanReason or "Unknown reason"
 	local stateEntry = PlayerState and PlayerState.GetOrCreate(steamID)
-	if stateEntry and context and context.name then
+	if stateEntry and context and context.name and context.name ~= "" then
 		stateEntry.info = stateEntry.info or {}
 		stateEntry.info.Name = context.name
 	end
 
-	local name = (context and context.name)
-		or (stateEntry and stateEntry.info and stateEntry.info.Name)
-		or entry.PersonaName
-		or getPlayerNameBySteamID(steamID)
-		or string.format("Player %s", steamID)
+	local name = resolveName(steamID, context, entry, stateEntry)
 
 	printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged (%s)", name, reason))
 

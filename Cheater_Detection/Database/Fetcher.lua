@@ -80,6 +80,22 @@ Fetcher.State = {
 	},
 }
 
+local function isDatabaseEmpty()
+	if type(G) ~= "table" or type(G.DataBase) ~= "table" then
+		return true
+	end
+	return next(G.DataBase) == nil
+end
+
+local function isFetchStale()
+	local menu = G and G.Menu and G.Menu.Main
+	if not menu then
+		return true
+	end
+	local lastFetch = tonumber(menu.LastFetchTimestamp) or 0
+	return (os.time() - lastFetch) >= 3600
+end
+
 -- Helper function to check if all required modules are properly loaded
 local function checkRequirements()
 	Log(LogLevel.DEBUG, "[FETCHER] Checking requirements...") -- Use Log
@@ -410,6 +426,11 @@ function Fetcher.FinishFetch()
 		Log(LogLevel.INFO, "No changes detected, skipping database save")
 	end
 
+	local mainMenu = G and G.Menu and G.Menu.Main
+	if mainMenu then
+		mainMenu.LastFetchTimestamp = os.time()
+	end
+
 	Fetcher.State.isRunning = false
 	Log(LogLevel.DEBUG, "Fetch process finished")
 end
@@ -430,8 +451,13 @@ local function InitializeFetcher()
 		and type(G.Menu.Main) == "table"
 		and G.Menu.Main.Fetch_Database == true
 	then
-		Log(LogLevel.INFO, "[FETCHER] Fetch on load enabled, starting fetch process...") -- Use Log (Updated message)
-		Fetcher.Start()
+		local shouldFetch = isDatabaseEmpty() or isFetchStale()
+		if shouldFetch then
+			Log(LogLevel.INFO, "[FETCHER] Auto-fetch trigger satisfied, starting fetch process...")
+			Fetcher.Start()
+		else
+			Log(LogLevel.INFO, "[FETCHER] Database fresh, skipping auto-fetch this session.")
+		end
 	else
 		Log(LogLevel.INFO, "[FETCHER] Fetch on load disabled or not configured, skipping initial fetch.") -- Use Log (Updated message)
 	end

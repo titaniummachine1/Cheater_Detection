@@ -32,6 +32,9 @@ local function ResetCaches()
 	FastPlayers.AllUpdated = false
 	FastPlayers.TeammatesUpdated = false
 	FastPlayers.EnemiesUpdated = false
+	if WrappedPlayer and WrappedPlayer.PruneInactive then
+		WrappedPlayer.PruneInactive(globals.TickCount())
+	end
 end
 
 --[[ Public API ]]
