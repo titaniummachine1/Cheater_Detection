@@ -5,6 +5,7 @@
 --[[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
+local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 
 --[[ Module Declaration ]]
@@ -15,6 +16,7 @@ local cachedAllPlayers
 local cachedTeammates
 local cachedEnemies
 local cachedLocal
+local activeSteamIDs = {}
 
 FastPlayers.AllUpdated = false
 FastPlayers.TeammatesUpdated = false
@@ -26,6 +28,7 @@ local function ResetCaches()
 	cachedTeammates = nil
 	cachedEnemies = nil
 	cachedLocal = nil
+	activeSteamIDs = {}
 	FastPlayers.AllUpdated = false
 	FastPlayers.TeammatesUpdated = false
 	FastPlayers.EnemiesUpdated = false
@@ -42,7 +45,8 @@ function FastPlayers.GetAll(excludelocal)
 	end
 	excludelocal = excludelocal and FastPlayers.GetLocal() or nil
 	cachedAllPlayers = {}
-	
+	activeSteamIDs = {}
+
 	-- Use Common.IsValidPlayer as single source of truth
 	-- Pass nil for checkFriend to use debug mode logic internally
 	-- Pass false for checkDormant to include dormant players (we want to track them)
@@ -51,8 +55,16 @@ function FastPlayers.GetAll(excludelocal)
 			local wrapped = WrappedPlayer.FromEntity(ent)
 			if wrapped then
 				cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
+				local steamID = wrapped:GetSteamID64()
+				if steamID then
+					activeSteamIDs[steamID] = true
+				end
 			end
 		end
+	end
+
+	if PlayerState and PlayerState.TrimToActive then
+		PlayerState.TrimToActive(activeSteamIDs)
 	end
 	FastPlayers.AllUpdated = true
 	return cachedAllPlayers

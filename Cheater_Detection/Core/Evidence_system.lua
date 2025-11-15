@@ -9,6 +9,7 @@
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
+local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local Database = require("Cheater_Detection.Database.Database")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
@@ -76,26 +77,28 @@ local function getCategory(detectionName)
 		for _, method in ipairs(methods) do
 			if method == detectionName then
 				return category
-			 end
+			end
 		end
 	end
 	return "Movement" -- Default fallback
 end
 
--- Initialize player evidence data if needed
-local function initPlayerEvidence(steamID)
-	if not G.PlayerData[steamID] then
-		G.PlayerData[steamID] = {}
+local function getOrCreateEvidence(steamID)
+	if not PlayerState then
+		return nil, nil
 	end
-
-	if not G.PlayerData[steamID].Evidence then
-		G.PlayerData[steamID].Evidence = {
+	local state = PlayerState.GetOrCreate(steamID)
+	if not state then
+		return nil, nil
+	end
+	state.Evidence = state.Evidence
+		or {
 			TotalScore = 0,
 			LastUpdateTick = globals.TickCount(),
-			Reasons = {}, -- Per-detection weight stacks
+			Reasons = {},
 			MarkedAsCheater = false,
 		}
-	end
+	return state.Evidence, state
 end
 
 --[[ Public Functions ]]
@@ -117,7 +120,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 
 	-- Convert to string and validate SteamID64 format
 	steamID = tostring(steamID)
-	
+
 	-- SteamID64 must be 17 digits starting with 7656119 (valid Steam accounts)
 	-- Silently skip bots/invalid IDs (they won't match this pattern)
 	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
@@ -136,12 +139,12 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 	end
 
 	-- Debug: Log successful evidence add
-	Logger.Debug("Evidence", string.format("Adding %.1f evidence for %s (method: %s)", 
-		weight, steamID, detectionName))
+	Logger.Debug("Evidence", string.format("Adding %.1f evidence for %s (method: %s)", weight, steamID, detectionName))
 
-	initPlayerEvidence(steamID)
-
-	local evidence = G.PlayerData[steamID].Evidence
+	local evidence, state = getOrCreateEvidence(steamID)
+	if not evidence then
+		return
+	end
 
 	-- Initialize detection stack if needed
 	if not evidence.Reasons[detectionName] then
@@ -166,23 +169,33 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 
 	-- Check if should mark as cheater (use global threshold function)
 	local threshold = Evidence.GetThreshold()
-	
+
 	if G.Menu.Advanced.debug then
-		print(string.format("[Evidence] %s - Total: %.1f, Threshold: %.1f, Marked: %s", 
-			steamID, evidence.TotalScore, threshold, tostring(evidence.MarkedAsCheater)))
+		print(
+			string.format(
+				"[Evidence] %s - Total: %.1f, Threshold: %.1f, Marked: %s",
+				steamID,
+				evidence.TotalScore,
+				threshold,
+				tostring(evidence.MarkedAsCheater)
+			)
+		)
 	end
-	
+
 	if evidence.TotalScore >= threshold and not evidence.MarkedAsCheater then
 		evidence.MarkedAsCheater = true
-		G.PlayerData[steamID].info = G.PlayerData[steamID].info or {}
-		G.PlayerData[steamID].info.IsCheater = true
+		state.info = state.info or {}
+		state.info.IsCheater = true
 
 		-- Get player name for database entry
-		local playerName = "Unknown"
+		local playerName = (state.info and state.info.Name) or "Unknown"
 		local allPlayers = FastPlayers.GetAll(true)
 		for _, player in ipairs(allPlayers) do
 			if tostring(player:GetSteamID64()) == steamID then
-				playerName = player:GetName() or "Unknown"
+				local name = player.GetName and player:GetName()
+				if name and name ~= "" then
+					playerName = name
+				end
 				break
 			end
 		end
@@ -227,13 +240,18 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 		if G.Menu.Advanced.AutoMark then
 			for _, player in ipairs(allPlayers) do
 				if tostring(player:GetSteamID64()) == steamID then
-					-- Allow setting priority on local player only in debug mode
-					if not G.Menu.Advanced.debug and player == G.pLocal then
-						break -- Skip local player unless debug mode
+					local localPlayer = FastPlayers.GetLocal()
+					if not G.Menu.Advanced.debug and localPlayer and player == localPlayer then
+						break
 					end
-					playerlist.SetPriority(player, 10)
+					player.SetPriority = player.SetPriority
+						or function(_, level)
+							pcall(playerlist.SetPriority, player:GetRawEntity(), level)
+						end
+					player:SetPriority(10)
 					if G.Menu.Advanced.debug then
-						print(string.format("[Evidence] Set priority 10 for %s", player:GetName()))
+						local pname = player.GetName and player:GetName() or "Unknown"
+						print(string.format("[Evidence] Set priority 10 for %s", pname))
 					end
 					break
 				end
@@ -241,8 +259,14 @@ function Evidence.AddEvidence(steamID, detectionName, weight)
 		end
 
 		if G.Menu.Advanced.debug then
-			print(string.format("[Evidence] MARKED %s as cheater (Score: %.1f >= %.1f) - Saved to database", 
-				playerName, evidence.TotalScore, threshold))
+			print(
+				string.format(
+					"[Evidence] MARKED %s as cheater (Score: %.1f >= %.1f) - Saved to database",
+					playerName,
+					evidence.TotalScore,
+					threshold
+				)
+			)
 		end
 	end
 end
@@ -271,7 +295,7 @@ local function calculateAimDecay(player)
 
 	-- Check if looking at any enemy
 	for _, enemy in ipairs(enemies) do
-		if enemy:IsValid() and enemy:IsAlive() then
+		if enemy:IsAlive() and not enemy:IsDormant() then
 			local enemyPos = enemy:GetAbsOrigin()
 			local toEnemy = enemyPos - eyePos
 			local dist = toEnemy:Length()
@@ -316,11 +340,10 @@ end
 ---@param player table WrappedPlayer instance
 ---@param deltaTime number Time elapsed in seconds
 local function decayPlayerEvidence(steamID, player, deltaTime)
-	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence then
+	local evidence = getOrCreateEvidence(steamID)
+	if not evidence then
 		return
 	end
-
-	local evidence = G.PlayerData[steamID].Evidence
 	local changed = false
 
 	-- Calculate context-specific decay for Aim category
@@ -434,7 +457,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 
 	-- Convert to string and validate SteamID64 format
 	steamID = tostring(steamID)
-	
+
 	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
 		return
 	end
@@ -454,8 +477,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 
 	-- Apply decay (minimum 0)
 	local oldWeight = evidence.Reasons[detectionName].Weight
-	evidence.Reasons[detectionName].Weight = math.max(0, 
-		evidence.Reasons[detectionName].Weight - decayAmount)
+	evidence.Reasons[detectionName].Weight = math.max(0, evidence.Reasons[detectionName].Weight - decayAmount)
 
 	-- Recalculate total if changed
 	if oldWeight ~= evidence.Reasons[detectionName].Weight then
@@ -467,8 +489,17 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 		evidence.LastUpdateTick = globals.TickCount()
 
 		-- Debug: Log decay
-		Logger.Debug("Evidence", string.format("Decayed %.1f evidence for %s (method: %s, old: %.1f, new: %.1f)", 
-			decayAmount, steamID, detectionName, oldWeight, evidence.Reasons[detectionName].Weight))
+		Logger.Debug(
+			"Evidence",
+			string.format(
+				"Decayed %.1f evidence for %s (method: %s, old: %.1f, new: %.1f)",
+				decayAmount,
+				steamID,
+				detectionName,
+				oldWeight,
+				evidence.Reasons[detectionName].Weight
+			)
+		)
 	end
 end
 
@@ -479,10 +510,10 @@ function Evidence.GetScore(steamID)
 	if not steamID then
 		return 0
 	end
-	
+
 	-- Ensure steamID is a string
 	steamID = tostring(steamID)
-	
+
 	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence then
 		return 0
 	end
@@ -498,19 +529,23 @@ function Evidence.GetMethodWeight(steamID, detectionName)
 	if not steamID or not detectionName then
 		return 0
 	end
-	
+
 	-- Ensure steamID is a string
 	steamID = tostring(steamID)
-	
-	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence or not G.PlayerData[steamID].Evidence.Reasons then
+
+	if
+		not G.PlayerData[steamID]
+		or not G.PlayerData[steamID].Evidence
+		or not G.PlayerData[steamID].Evidence.Reasons
+	then
 		return 0
 	end
-	
+
 	local methodData = G.PlayerData[steamID].Evidence.Reasons[detectionName]
 	if not methodData then
 		return 0
 	end
-	
+
 	return methodData.Weight or 0
 end
 
@@ -521,10 +556,10 @@ function Evidence.GetDetails(steamID)
 	if not steamID then
 		return nil
 	end
-	
+
 	-- Ensure steamID is a string
 	steamID = tostring(steamID)
-	
+
 	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence then
 		return nil
 	end
@@ -539,7 +574,7 @@ function Evidence.OnPlayerLeave(steamID)
 	if G.PlayerData[steamID] then
 		G.PlayerData[steamID] = nil
 	end
-	
+
 	-- Detection module data cleanup is handled by script unload
 	-- Individual modules' local data structures are cleaned up automatically
 end

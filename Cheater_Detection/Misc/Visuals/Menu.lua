@@ -88,6 +88,10 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Exploit Detection")
+		Advanced.AutoFlagPriorityTen = TimMenu.Checkbox("priority Detection", Advanced.AutoFlagPriorityTen)
+		TimMenu.Tooltip(
+			"When enabled, setting player priority to 10 will store them in the database as a known cheater."
+		)
 		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke)
 		TimMenu.NextLine()
 		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp)
@@ -145,11 +149,6 @@ local function DrawMenu()
 		end
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
 		TimMenu.Tooltip("Enables debug features (auto-removes self from database, enables verbose logging)")
-		Advanced.AutoFlagPriorityTen = Advanced.AutoFlagPriorityTen == true
-		Advanced.AutoFlagPriorityTen = TimMenu.Checkbox("priority Detection", Advanced.AutoFlagPriorityTen)
-		TimMenu.Tooltip(
-			"When enabled, setting player priority to 10 will store them in the database as a known cheater."
-		)
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Misc" then
