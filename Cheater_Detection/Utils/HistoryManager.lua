@@ -37,10 +37,10 @@ local FIELD_BUILDERS = {
 		return player:GetEyePos()
 	end,
 	[HistoryManager.Fields.HeadHitbox] = function(player)
-		return player:GetHitboxPos and player:GetHitboxPos(1) or nil
+		return player:GetHitboxPos() and player:GetHitboxPos(1) or nil
 	end,
 	[HistoryManager.Fields.BodyHitbox] = function(player)
-		return player:GetHitboxPos and player:GetHitboxPos(4) or nil
+		return player:GetHitboxPos() and player:GetHitboxPos(4) or nil
 	end,
 	[HistoryManager.Fields.SimulationTime] = function(player)
 		return player:GetSimulationTime()
