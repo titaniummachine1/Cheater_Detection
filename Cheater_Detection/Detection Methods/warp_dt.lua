@@ -7,11 +7,11 @@
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
+local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 
 --[[ Module Declaration ]]
 local WarpDT = {}
 
---[[ Configuration ]]
 local DETECTION_NAME = "warp_dt"
 local EVIDENCE_WEIGHT = 30 -- Very high - blatant exploit
 local HISTORY_SIZE = 33 -- Ticks to analyze
@@ -19,7 +19,7 @@ local MIN_DELTA_SAMPLES = 30 -- Minimum samples for statistical analysis
 local WARP_STDDEV_SIGNATURE = -132 -- Specific standard deviation value indicating warp
 local TICK_TOLERANCE = 13 -- Tolerance for tick interval checks
 
--- Per-player state tracking
+-- Minimal per-player state
 local playerWarpData = {}
 
 --[[ Helper Functions ]]
@@ -30,18 +30,49 @@ local function validatePlayer(player)
 	return true
 end
 
-local function initPlayerData(steamID)
-	if not playerWarpData[steamID] then
-		playerWarpData[steamID] = {
-			simTimes = {},
-			stdDevList = {},
+local function getPlayerState(steamID)
+	local state = playerWarpData[steamID]
+	if not state then
+		state = {
 			lastTickCount = nil,
 		}
+		playerWarpData[steamID] = state
 	end
+	return state
 end
 
 local function timeToTicks(time)
 	return Common.Conversion.Time_to_Ticks(time)
+end
+
+local function collectSimTimeTicks(steamID)
+	local state = PlayerState.Get(steamID)
+	if not state or not state.History then
+		return nil
+	end
+
+	local history = state.History
+	local total = #history
+	if total < HISTORY_SIZE then
+		return nil
+	end
+
+	local ticks = {}
+	local startIndex = math.max(1, total - HISTORY_SIZE + 1)
+	for i = startIndex, total do
+		local entry = history[i]
+		local simTime = entry and (entry.sim_time or entry.SimTime)
+		if not simTime then
+			return nil
+		end
+		ticks[#ticks + 1] = timeToTicks(simTime)
+	end
+
+	if #ticks < HISTORY_SIZE then
+		return nil
+	end
+
+	return ticks
 end
 
 --[[ Public Functions ]]
@@ -67,34 +98,16 @@ function WarpDT.Check(player)
 		return false
 	end
 
-	-- Initialize tracking data
-	initPlayerData(steamID)
-	local data = playerWarpData[steamID]
+	local playerState = getPlayerState(steamID)
 
-	-- Get simulation time in ticks
-	local simTime = player:GetSimulationTime()
-	if not simTime then
+	local simTicks = collectSimTimeTicks(steamID)
+	if not simTicks then
 		return false
 	end
 
-	local simTimeTicks = timeToTicks(simTime)
-	table.insert(data.simTimes, simTimeTicks)
-
-	-- Keep history bounded
-	if #data.simTimes > HISTORY_SIZE then
-		table.remove(data.simTimes, 1)
-	end
-
-	-- Need enough data for analysis
-	if #data.simTimes < HISTORY_SIZE then
-		return false
-	end
-
-	-- Calculate tick deltas
 	local deltaTicks = {}
-	for i = 2, #data.simTimes do
-		local delta = data.simTimes[i] - data.simTimes[i - 1]
-		table.insert(deltaTicks, delta)
+	for i = 2, #simTicks do
+		deltaTicks[#deltaTicks + 1] = simTicks[i] - simTicks[i - 1]
 	end
 
 	if #deltaTicks < MIN_DELTA_SAMPLES then
@@ -123,19 +136,19 @@ function WarpDT.Check(player)
 
 	-- Check tick interval consistency (avoid false positives from script lag)
 	local currentTick = globals.TickCount()
-	if not data.lastTickCount then
-		data.lastTickCount = currentTick
+	if not playerState.lastTickCount then
+		playerState.lastTickCount = currentTick
 	else
 		local tickInterval = globals.TickInterval()
-		local expectedInterval = (currentTick - data.lastTickCount) / tickInterval
+		local expectedInterval = (currentTick - playerState.lastTickCount) / tickInterval
 
 		-- If ticks are inconsistent, may be our own lag - skip
-		if math.abs(currentTick - data.lastTickCount) < expectedInterval + TICK_TOLERANCE then
-			data.lastTickCount = currentTick
+		if math.abs(currentTick - playerState.lastTickCount) < expectedInterval + TICK_TOLERANCE then
+			playerState.lastTickCount = currentTick
 			return false
 		end
 
-		data.lastTickCount = currentTick
+		playerState.lastTickCount = currentTick
 	end
 
 	-- Detect warp signature
@@ -147,12 +160,6 @@ function WarpDT.Check(player)
 		end
 
 		return true
-	end
-
-	-- Track standard deviation history
-	table.insert(data.stdDevList, stdDev)
-	if #data.stdDevList > HISTORY_SIZE then
-		table.remove(data.stdDevList, 1)
 	end
 
 	return false
