@@ -15,6 +15,8 @@ local Common = {
 	Helpers = nil,
 }
 
+local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+
 -- Move requires here
 Common.Json = require("Cheater_Detection.Libs.Json")
 local G = require("Cheater_Detection.Utils.Globals")
