@@ -112,35 +112,34 @@ local function checkRequirements()
 end
 
 -- Process a single source and add its entries to the database
-local function processSource(source)
-	Log(LogLevel.INFO, string.format("[FETCHER] Processing source: %s (%s)", source.name, source.url)) -- Use Log
 
-	-- Fetch the URL directly using pcall
-	local fetch_success, response_content_or_error = pcall(http.Get, source.url)
+local function fetchSource(source)
+	Log(LogLevel.INFO, string.format("[FETCHER] Fetching source: %s (%s)", source.name, source.url))
 
+	local fetch_success, response_or_error = pcall(http.Get, source.url)
 	if not fetch_success then
-		Log( -- Use Log
-			LogLevel.WARNING, -- Log as Warning instead of Error, maybe temporary network issue
-			string.format(
-				"[FETCHER] Failed to fetch data from %s: %s",
-				source.name,
-				tostring(response_content_or_error)
-			)
+		Log(
+			LogLevel.WARNING,
+			string.format("[FETCHER] Failed to fetch data from %s: %s", source.name, tostring(response_or_error))
 		)
-		return 0, 0, 1 -- added, updated, errors
+		return nil, "fetch_failed"
 	end
 
-	local response_content = response_content_or_error
-	if type(response_content) ~= "string" or response_content == "" then
-		Log(LogLevel.WARNING, string.format("[FETCHER] Empty or invalid content from %s", source.name)) -- Use Log
-		return 0, 0, 1 -- added, updated, errors
+	if type(response_or_error) ~= "string" or response_or_error == "" then
+		Log(LogLevel.WARNING, string.format("[FETCHER] Empty or invalid content from %s", source.name))
+		return nil, "empty_response"
 	end
 
 	Log(
 		LogLevel.DEBUG,
-		string.format("[FETCHER] Download successful from %s. Size: %d bytes", source.name, #response_content)
-	) -- Use Log (Debug)
+		string.format("[FETCHER] Download successful from %s. Size: %d bytes", source.name, #response_or_error)
+	)
 
+	return response_or_error, nil
+end
+
+local function parseSource(source, response_content)
+	Log(LogLevel.INFO, string.format("[FETCHER] Parsing source: %s", source.name))
 	local sourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 	local added = 0
 	local updated = 0
@@ -293,7 +292,6 @@ local function processSource(source)
 		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: No changes", source.name)) -- Debug level
 	end
 
-	-- response_content = nil -- Commented out to avoid linter type mismatch warning
 	return added, updated, sourceStats.errors
 end
 
@@ -328,10 +326,29 @@ function Fetcher.Start()
 		return
 	end
 
-	-- Process each source synchronously
+	local fetchedResponses = {}
+
 	for i, source in ipairs(active_sources) do
-		Log(LogLevel.DEBUG, string.format("[FETCHER] Processing source %d/%d: %s", i, #active_sources, source.name)) -- Use Log (Debug)
-		local added, updated, errors = processSource(source)
+		Log(
+			LogLevel.DEBUG,
+			string.format("[FETCHER] [Pass 1] Fetching source %d/%d: %s", i, #active_sources, source.name)
+		)
+		local response_content = nil
+		response_content = select(1, fetchSource(source))
+		if response_content then
+			table.insert(fetchedResponses, { source = source, response = response_content })
+		else
+			Fetcher.State.results.errors = Fetcher.State.results.errors + 1
+			Parsers.AddSourceStats(source.name, 0, 0, 0, 1, 0)
+		end
+	end
+
+	for index, payload in ipairs(fetchedResponses) do
+		Log(
+			LogLevel.DEBUG,
+			string.format("[FETCHER] [Pass 2] Parsing source %d/%d: %s", index, #fetchedResponses, payload.source.name)
+		)
+		local added, updated, errors = parseSource(payload.source, payload.response)
 		Fetcher.State.results.total_added = Fetcher.State.results.total_added + added
 		Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + updated
 		Fetcher.State.results.errors = Fetcher.State.results.errors + errors

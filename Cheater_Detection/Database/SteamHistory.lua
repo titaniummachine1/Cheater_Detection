@@ -9,6 +9,7 @@ local SteamHistory = {}
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
+local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local Database = require("Cheater_Detection.Database.Database")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 local Json = Common.Json
@@ -81,11 +82,16 @@ local function getPlayerNameBySteamID(steamID)
 	if scoreboardName and scoreboardName ~= "" then
 		return scoreboardName
 	end
-	for _, player in ipairs(FastPlayers.GetAll(false)) do
+
+	for _, player in ipairs(FastPlayers.GetAll(true)) do
 		local id = normalizeSteamID64(player:GetSteamID64())
 		if id == steamID then
+			local info = player:GetInfo()
+			if info and info.Name and info.Name ~= "" then
+				return info.Name
+			end
 			local raw = player.GetRawEntity and player:GetRawEntity() or nil
-			if raw and raw:IsValid() and raw.GetName then
+			if raw and raw.IsValid and raw:IsValid() and raw.GetName then
 				local rawName = raw:GetName()
 				if type(rawName) == "string" and rawName ~= "" then
 					return rawName
@@ -93,6 +99,12 @@ local function getPlayerNameBySteamID(steamID)
 			end
 		end
 	end
+
+	local stateEntry = PlayerState and PlayerState.Get(steamID)
+	if stateEntry and stateEntry.info and stateEntry.info.Name and stateEntry.info.Name ~= "" then
+		return stateEntry.info.Name
+	end
+
 	return nil
 end
 
@@ -187,14 +199,35 @@ end
 
 local function flagPlayer(steamID, context, entry)
 	local reason = entry.BanReason or "Unknown reason"
-	local name = context and context.name
+	local stateEntry = PlayerState and PlayerState.GetOrCreate(steamID)
+	if stateEntry and context and context.name then
+		stateEntry.info = stateEntry.info or {}
+		stateEntry.info.Name = context.name
+	end
+
+	local name = (context and context.name)
+		or (stateEntry and stateEntry.info and stateEntry.info.Name)
 		or entry.PersonaName
 		or getPlayerNameBySteamID(steamID)
 		or string.format("Player %s", steamID)
+
 	printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged (%s)", name, reason))
 
 	local formattedReason = string.format("SteamHistory (%s)", reason)
-	-- Update database and player priority for visibility
+	if stateEntry then
+		stateEntry.info = stateEntry.info or {}
+		stateEntry.info.LastFlagReason = formattedReason
+		stateEntry.info.LastFlagSource = "SteamHistory"
+		local evidence = stateEntry.Evidence or {}
+		evidence.Reasons = evidence.Reasons or {}
+		evidence.Reasons.SteamHistory = {
+			Weight = (evidence.Reasons.SteamHistory and evidence.Reasons.SteamHistory.Weight) or 0,
+			Category = "Exploit",
+			LastAddedTick = globals.TickCount(),
+		}
+		stateEntry.Evidence = evidence
+	end
+
 	Database.UpsertCheater(steamID, {
 		name = name,
 		reason = formattedReason,

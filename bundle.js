@@ -1,5 +1,6 @@
 import { bundle } from 'luabundle'
 import * as fs from 'fs';
+import * as path from 'path';
 
 const bundledLua = bundle('./Cheater_Detection/Main.lua', {
     metadata: false,
@@ -9,10 +10,17 @@ const bundledLua = bundle('./Cheater_Detection/Main.lua', {
 	}
 });
 
-fs.writeFile('Cheater_Detection.lua', bundledLua, err => {
+const targetDir = path.join(process.env.LOCALAPPDATA || '', 'lua');
+if (!fs.existsSync(targetDir)) {
+	fs.mkdirSync(targetDir, { recursive: true });
+}
+
+const targetPath = path.join(targetDir, 'Cheater_Detection.lua');
+
+fs.writeFile(targetPath, bundledLua, err => {
     if (err) {
         console.error(err);
-    }
+    } else {
+		console.log(`Library bundle created at ${targetPath}`);
+	}
 });
-
-console.log('Library bundle created');
