@@ -10,6 +10,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
+local WorkManager = require("Cheater_Detection.Utils.WorkManager")
 local Database = require("Cheater_Detection.Database.Database")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
@@ -66,8 +67,107 @@ Evidence.Config = {
 }
 
 --[[ Private Variables ]]
-local lastDecayTick = 0
 local TICKS_PER_SECOND = 66 -- TF2 tickrate
+local DECAY_BATCHES_PER_CYCLE = 6
+local DECAY_INTERVAL_TICKS = math.max(1, math.floor(TICKS_PER_SECOND / DECAY_BATCHES_PER_CYCLE))
+local DECAY_SECONDS_PER_BATCH = 1 / DECAY_BATCHES_PER_CYCLE
+local DECAY_WORK_IDENTIFIER = "Evidence.DecayBatch"
+
+local decayQueue = {}
+local decayQueueIndex = {}
+local decayCursor = 1
+local decayQueueDirty = true
+
+local DetectionToggles = {
+	anti_aim = "AntyAim",
+	bhop = "Bhop",
+	fake_lag = "FakeLag",
+	warp_dt = "WarpDT",
+	warp_recharge = "WarpRecharge",
+	Duck_Speed = "DuckSpeed",
+	strafe_bot = "StrafeBot",
+	bot_walk = "BotWalk",
+	manual_priority = "ManualPriority",
+}
+
+local function clearArray(tbl)
+	for i = #tbl, 1, -1 do
+		tbl[i] = nil
+	end
+end
+
+local function clearMap(tbl)
+	for key in pairs(tbl) do
+		tbl[key] = nil
+	end
+end
+
+local function isDetectionEnabled(detectionName)
+	local menu = G.Menu and G.Menu.Advanced
+	if not menu then
+		return true
+	end
+	local key = DetectionToggles[detectionName]
+	if not key then
+		return true
+	end
+	local flag = menu[key]
+	return flag ~= false
+end
+
+local function refreshDecayQueue()
+	clearArray(decayQueue)
+	clearMap(decayQueueIndex)
+	decayCursor = 1
+	decayQueueDirty = false
+
+	if not PlayerState or not PlayerState.GetTable then
+		return
+	end
+
+	for steamID, state in pairs(PlayerState.GetTable()) do
+		if state and state.Evidence and state.Evidence.Reasons and next(state.Evidence.Reasons) ~= nil then
+			decayQueue[#decayQueue + 1] = steamID
+			decayQueueIndex[steamID] = true
+		end
+	end
+end
+
+local function markDecayQueueDirty()
+	decayQueueDirty = true
+end
+
+local function ensureDecayQueue()
+	if decayQueueDirty then
+		refreshDecayQueue()
+	end
+end
+
+local function enqueueForDecay(steamID)
+	if not steamID then
+		return
+	end
+
+	steamID = tostring(steamID)
+	if decayQueueIndex[steamID] then
+		return
+	end
+
+	decayQueue[#decayQueue + 1] = steamID
+	decayQueueIndex[steamID] = true
+end
+
+local function removeFromDecayQueue(steamID)
+	if not steamID then
+		return
+	end
+	steamID = tostring(steamID)
+	if not decayQueueIndex[steamID] then
+		return
+	end
+	decayQueueIndex[steamID] = nil
+	markDecayQueueDirty()
+end
 
 --[[ Helper Functions ]]
 
@@ -198,6 +298,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
 	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
 	evidence.Dirty = true
+	enqueueForDecay(steamID)
 end
 
 --- Calculate aim decay multiplier based on player context
@@ -298,21 +399,23 @@ end
 
 local function processEvidenceState(steamID, state, deltaTime)
 	if not state or not state.Evidence then
-		return
+		return false
 	end
 	local evidence = state.Evidence
 	if not evidence.Reasons or next(evidence.Reasons) == nil then
 		evidence.Dirty = false
-		return
+		return false
 	end
 
 	local changed = false
 	local minFloor = Evidence.Config.MinWeightFloor or 0
 	local toRemove = {}
+	local hasReasons = false
 
 	if deltaTime > 0 then
 		for detectionName, reason in pairs(evidence.Reasons) do
-			if reason.ManualDecay ~= true and reason.Weight > minFloor then
+			local detectionEnabled = isDetectionEnabled(detectionName)
+			if detectionEnabled and reason.ManualDecay ~= true and reason.Weight > minFloor then
 				local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
 				if rate > 0 then
 					local newWeight = math.max(minFloor, reason.Weight - rate * deltaTime)
@@ -325,8 +428,12 @@ local function processEvidenceState(steamID, state, deltaTime)
 
 			if reason.ManualDecay ~= true and reason.Weight <= minFloor then
 				toRemove[#toRemove + 1] = detectionName
+			else
+				hasReasons = true
 			end
 		end
+	else
+		hasReasons = true
 	end
 
 	for _, detectionName in ipairs(toRemove) do
@@ -339,37 +446,50 @@ local function processEvidenceState(steamID, state, deltaTime)
 		evidence.Dirty = false
 		tryMarkCheater(steamID, evidence, state)
 	end
+
+	return hasReasons and next(evidence.Reasons) ~= nil
+end
+
+local function processDecayBatch()
+	ensureDecayQueue()
+	local queueSize = #decayQueue
+	if queueSize == 0 then
+		return
+	end
+
+	local batchSize = math.max(1, math.ceil(queueSize / DECAY_BATCHES_PER_CYCLE))
+	local processed = 0
+
+	while processed < batchSize and queueSize > 0 do
+		if decayCursor > queueSize then
+			decayCursor = 1
+			queueSize = #decayQueue
+			if queueSize == 0 then
+				break
+			end
+		end
+
+		local steamID = decayQueue[decayCursor]
+		decayCursor = decayCursor + 1
+		if steamID then
+			local state = PlayerState and PlayerState.Get and PlayerState.Get(steamID)
+			if state and state.Evidence and state.Evidence.Reasons and next(state.Evidence.Reasons) ~= nil then
+				local hasReasons = processEvidenceState(steamID, state, DECAY_SECONDS_PER_BATCH)
+				if not hasReasons then
+					removeFromDecayQueue(steamID)
+				end
+			else
+				removeFromDecayQueue(steamID)
+			end
+		end
+		processed = processed + 1
+	end
 end
 
 --- Apply decay to all players (called per second)
 function Evidence.ApplyDecay()
-	local currentTick = globals.TickCount()
-
-	-- Calculate time since last decay
-	if lastDecayTick == 0 then
-		lastDecayTick = currentTick
-		return
-	end
-
-	local ticksDelta = currentTick - lastDecayTick
-
-	-- Only decay once per second (66 ticks)
-	if ticksDelta < TICKS_PER_SECOND then
-		return
-	end
-
-	local deltaTime = ticksDelta / TICKS_PER_SECOND -- Convert to seconds
-	lastDecayTick = currentTick
-
-	local stateTable = PlayerState and PlayerState.GetTable and PlayerState.GetTable()
-	if not stateTable then
-		return
-	end
-
-	for steamID, state in pairs(stateTable) do
-		if state and state.Evidence then
-			processEvidenceState(steamID, state, deltaTime)
-		end
+	if WorkManager.attemptWork(DECAY_INTERVAL_TICKS, DECAY_WORK_IDENTIFIER) then
+		processDecayBatch()
 	end
 end
 
@@ -449,6 +569,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 	if oldWeight ~= reason.Weight then
 		evidence.Dirty = true
 		recalcTotalScore(evidence)
+		enqueueForDecay(steamID)
 		tryMarkCheater(steamID, evidence, select(2, getOrCreateEvidence(steamID)))
 
 		-- Debug: Log decay
@@ -537,6 +658,7 @@ function Evidence.OnPlayerLeave(steamID)
 	if G.PlayerData[steamID] then
 		G.PlayerData[steamID] = nil
 	end
+	removeFromDecayQueue(steamID)
 
 	-- Detection module data cleanup is handled by script unload
 	-- Individual modules' local data structures are cleaned up automatically
