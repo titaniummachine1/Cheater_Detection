@@ -37,10 +37,10 @@ local FIELD_BUILDERS = {
 		return player:GetEyePos()
 	end,
 	[HistoryManager.Fields.HeadHitbox] = function(player)
-		return player:GetHitboxPos() and player:GetHitboxPos(1) or nil
+		return player.GetHitboxPos and player:GetHitboxPos(1) or nil
 	end,
 	[HistoryManager.Fields.BodyHitbox] = function(player)
-		return player:GetHitboxPos() and player:GetHitboxPos(4) or nil
+		return player.GetHitboxPos and player:GetHitboxPos(4) or nil
 	end,
 	[HistoryManager.Fields.SimulationTime] = function(player)
 		return player:GetSimulationTime()
@@ -210,17 +210,31 @@ function HistoryManager.GetActiveFields()
 	return copy
 end
 
--- Legacy compatibility: capture the same data the old system used until modules register.
-HistoryManager.RegisterConsumer("__legacy_default", {
-	retentionTicks = DEFAULT_RETENTION_TICKS,
-	fields = {
-		HistoryManager.Fields.Angles,
-		HistoryManager.Fields.EyePosition,
-		HistoryManager.Fields.HeadHitbox,
-		HistoryManager.Fields.BodyHitbox,
-		HistoryManager.Fields.SimulationTime,
-		HistoryManager.Fields.OnGround,
-	},
-})
+local function ensureLegacyConsumer()
+	if activeFields and next(activeFields) then
+		return
+	end
+
+	HistoryManager.RegisterConsumer("__legacy_default", {
+		retentionTicks = DEFAULT_RETENTION_TICKS,
+		fields = {
+			HistoryManager.Fields.Angles,
+			HistoryManager.Fields.EyePosition,
+			HistoryManager.Fields.HeadHitbox,
+			HistoryManager.Fields.BodyHitbox,
+			HistoryManager.Fields.SimulationTime,
+			HistoryManager.Fields.OnGround,
+		},
+	})
+end
+
+ensureLegacyConsumer()
+
+function HistoryManager.RemoveLegacyConsumer()
+	if consumers.__legacy_default then
+		consumers.__legacy_default = nil
+		recomputeRequirements()
+	end
+end
 
 return HistoryManager

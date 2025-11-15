@@ -20,6 +20,7 @@ end
 local G = require("Cheater_Detection.Utils.Globals") --[[ Imported by: Main.lua ]]
 local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers") --[[ Imported by: Main.lua ]]
+require("Cheater_Detection.Utils.HistoryConfig")
 
 require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
 --[[ Import database system ]]
@@ -92,7 +93,7 @@ local function OnCreateMove(cmd)
 		Bhop.Check(Player)
 		FakeLag.Check(Player)
 		WarpDT.Check(Player)
-        ManualPriority.Check(Player)
+		ManualPriority.Check(Player)
 
 		-- TODO: Implement remaining detection methods
 		--warp_recharge_check(Player)

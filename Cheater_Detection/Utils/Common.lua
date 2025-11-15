@@ -254,28 +254,9 @@ function Common.createRecordFromPlayer(player)
 	)
 end
 
--- Push snapshot into player's history and keep size bounded
----@param player Entity|table Wrapped player / entity
+-- Legacy shim; new code should use HistoryManager.Push directly
 function Common.pushHistory(player)
-	local steamid = player:GetSteamID64()
-	if not steamid or not player then
-		return
-	end
-	G.PlayerData[steamid] = G.PlayerData[steamid] or {}
-	local pdata = G.PlayerData[steamid]
-	pdata.History = pdata.History or {}
-
-	local record = Common.createRecordFromPlayer(player)
-	if not record then
-		return
-	end -- skip invalid player
-
-	pdata.Current = record
-	table.insert(pdata.History, record)
-
-	if #pdata.History > Common.MAX_HISTORY then
-		table.remove(pdata.History, 1)
-	end
+	HistoryManager.Push(player)
 end
 
 function Common.FromSteamid3To64(steamid3)
