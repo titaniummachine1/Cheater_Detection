@@ -153,7 +153,12 @@ local function queueCurrentPlayers()
 				isLocal = true
 			end
 
-			if not isLocal or (G.Menu.Advanced and G.Menu.Advanced.debug) then
+			-- Check if player is on a valid team (Red=2, Blue=3)
+			local entity = entities.GetByIndex(i)
+			local teamNum = entity and entity:GetTeamNumber() or 0
+			local isValidTeam = teamNum == 2 or teamNum == 3
+
+			if (isValidTeam and not isLocal) or (G.Menu.Advanced and G.Menu.Advanced.debug) then
 				local steamID64 = nil
 				local steamIDStr = tostring(info.SteamID)
 				if steamIDStr:match("^7656119%d+$") then
@@ -370,8 +375,8 @@ local function refreshEnabled()
 end
 
 --[[ Event Handlers ]]
-local function onPlayerConnect(event)
-	if event:GetName() ~= "player_connect" then
+local function onPlayerTeam(event)
+	if event:GetName() ~= "player_team" then
 		return
 	end
 
@@ -383,19 +388,50 @@ local function onPlayerConnect(event)
 		return
 	end
 
-	local networkid = event:GetString("networkid")
-	local steamID = normalizeSteamID64(Common.FromSteamid3To64(networkid))
-	if not steamID then
+	local team = event:GetInt("team")
+	-- Only scan if joining Red (2) or Blue (3)
+	if team ~= 2 and team ~= 3 then
 		return
 	end
 
-	queueSteamID(steamID, { name = event:GetString("name") })
+	local userid = event:GetInt("userid")
+	local playerEntity = entities.GetByUserID(userid)
+	if not playerEntity then
+		return
+	end
+
+	local playerIndex = playerEntity:GetIndex()
+	local info = client.GetPlayerInfo(playerIndex)
+
+	if not info or info.IsBot or info.IsHLTV then
+		return
+	end
+
+	-- Skip local player
+	local localPlayer = entities.GetLocalPlayer()
+	if localPlayer and localPlayer:GetIndex() == playerIndex then
+		if not (G.Menu.Advanced and G.Menu.Advanced.debug) then
+			return
+		end
+	end
+
+	local steamIDStr = tostring(info.SteamID)
+	local steamID = nil
+	if steamIDStr:match("^7656119%d+$") then
+		steamID = normalizeSteamID64(steamIDStr)
+	elseif steamIDStr:match("%[U:1:%d+%]") then
+		steamID = normalizeSteamID64(Common.FromSteamid3To64(steamIDStr))
+	end
+
+	if steamID then
+		queueSteamID(steamID, { name = info.Name })
+	end
 end
 
 local function onGameEvent(event)
 	local name = event:GetName()
-	if name == "player_connect" then
-		onPlayerConnect(event)
+	if name == "player_team" then
+		onPlayerTeam(event)
 	elseif name == "game_newmap" or name == "teamplay_round_start" then
 		resetState(true)
 	end
