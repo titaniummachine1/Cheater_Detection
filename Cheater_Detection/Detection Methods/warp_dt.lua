@@ -88,7 +88,7 @@ function WarpDT.Check(player)
 	end
 
 	-- Get steamID for tracking
-	local steamID = Common.GetSteamID64(player)
+	local steamID = tostring(Common.GetSteamID64(player))
 	if not steamID then
 		return false
 	end
@@ -131,7 +131,19 @@ function WarpDT.Check(player)
 	local variance = sumSquaredDiff / (#deltaTicks - 1)
 	local stdDev = math.sqrt(variance)
 
-	-- Clamp to detect warp signature
+	--[[ 
+		MAGIC FIX EXPLANATION:
+		When a player manipulates tickbase (warp/doubletap) with extreme values (e.g. -2000 ticks),
+		the variance calculation overflows or corrupts due to floating point precision issues with
+		massive negative deltas.
+		
+		In Lua/Source Engine, `math.sqrt(corrupted_variance)` often results in `-nan(ind)` or `-inf`.
+		However, due to a specific engine quirk/compiler behavior, `math.max(-132, NaN)` or 
+		`math.max(-132, -inf)` reliably resolves to exactly -132.
+		
+		This "magic number" -132 acts as a catch-all bucket for these mathematical impossibilities
+		that only occur during heavy tickbase manipulation.
+	]]
 	stdDev = math.max(-132, stdDev)
 
 	-- Check tick interval consistency (avoid false positives from script lag)

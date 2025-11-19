@@ -20,6 +20,7 @@ end
 local G = require("Cheater_Detection.Utils.Globals") --[[ Imported by: Main.lua ]]
 local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers") --[[ Imported by: Main.lua ]]
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 require("Cheater_Detection.Utils.HistoryConfig")
 
 require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
@@ -53,14 +54,23 @@ local WPlayer, PR = Common.WPlayer, Common.PlayerResource
 --[[ Update the player data every tick ]]
 --
 local function OnCreateMove(cmd)
-	local DebugMode = G.Menu.Main.debug
+	local DebugMode = G.Menu.Advanced and G.Menu.Advanced.debug
+	TickProfiler.SetEnabled(DebugMode)
+	TickProfiler.BeginSection("CreateMove")
+
+	local function profilerEnd()
+		TickProfiler.EndSection("CreateMove")
+	end
 
 	-- Use FastPlayers for optimized player fetching (required directly)
+	TickProfiler.BeginSection("FetchPlayers")
 	local pLocal = FastPlayers.GetLocal() -- Get cached local player (still store in G for now)
 	G.pLocal = pLocal -- Store for Evidence system to identify local player
 	local allPlayers = FastPlayers.GetAll(not G.Menu.Advanced.debug) -- Exclude local unless debug mode
+	TickProfiler.EndSection("FetchPlayers")
 
 	if not pLocal then -- Need local player to proceed
+		profilerEnd()
 		return
 	end
 
@@ -69,11 +79,14 @@ local function OnCreateMove(cmd)
 
 	--if not stable connection then dont do any checks
 	if not ConnectionState.stable then
+		profilerEnd()
 		return
 	end
 
 	-- Apply evidence decay (once per second)
+	TickProfiler.BeginSection("EvidenceDecay")
 	Evidence.ApplyDecay()
+	TickProfiler.EndSection("EvidenceDecay")
 
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do
@@ -85,15 +98,19 @@ local function OnCreateMove(cmd)
 		end
 
 		-- Push history for detection analysis
+		TickProfiler.BeginSection("HistoryPush")
 		Common.pushHistory(Player)
+		TickProfiler.EndSection("HistoryPush")
 
 		-- Perform detection checks
+		TickProfiler.BeginSection("Detections")
 		AntiAim.Check(Player)
 		DuckSpeed.Check(Player)
 		Bhop.Check(Player)
 		FakeLag.Check(Player)
 		WarpDT.Check(Player)
 		ManualPriority.Check(Player)
+		TickProfiler.EndSection("Detections")
 
 		-- TODO: Implement remaining detection methods
 		--warp_recharge_check(Player)
@@ -110,7 +127,8 @@ end
 --[[ Map Change Handler ]]
 local function OnMapChange()
 	-- Force save database on map change
-	Database.ForceSave()
+	-- Save database on map change if dirty
+	Database.SaveDatabase()
 
 	-- Reload database on new map
 	Database.LoadDatabase(false, true)
@@ -137,5 +155,14 @@ callbacks.Register("FireGameEvent", "CD_PlayerDisconnect", function(event)
 	if event:GetName() == "player_disconnect" then
 		local steamID = tostring(event:GetInt("userid"))
 		Evidence.OnPlayerLeave(steamID)
+	elseif event:GetName() == "player_death" then
+		-- Opportunistic save when local player dies (dead time)
+		local localPlayer = entities.GetLocalPlayer()
+		local victimUserID = event:GetInt("userid")
+		local victim = entities.GetByUserID(victimUserID)
+		
+		if localPlayer and victim and localPlayer == victim then
+			Database.SaveDatabase()
+		end
 	end
 end)

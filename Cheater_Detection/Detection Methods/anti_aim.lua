@@ -40,7 +40,7 @@ function AntiAim.Check(player)
 	end
 
 	-- Get steamID for tracking
-	local steamID = Common.GetSteamID64(player)
+	local steamID = tostring(Common.GetSteamID64(player))
 	if not steamID then
 		return false
 	end
@@ -60,21 +60,9 @@ function AntiAim.Check(player)
 	local detectionReason = nil
 	-- Enhanced detection with cheat fingerprinting
 	if angles.pitch > 89.4 or angles.pitch < -89.4 then
-		-- Specific cheat pattern detection
-		if angles.pitch % 3256 == 0 then
-			detected = true
-			detectionReason = "LBOX AA (Center)"
-		elseif angles.pitch % 271 == 0 then
-			detected = true
-			detectionReason = "RIJIN AA"
-		elseif angles.pitch % 90 == 0 then
-			detected = true
-			detectionReason = "AA (Up/Down)"
-		else
-			-- Generic invalid pitch
-			detected = true
-			detectionReason = "Anti-Aim"
-		end
+		-- Simplified detection: Any pitch outside valid bounds is Anti-Aim
+		detected = true
+		detectionReason = "Anti-Aim (OOB Pitch)"
 	end
 
 	-- Add evidence immediately (exploits = instant flag)

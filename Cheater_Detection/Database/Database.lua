@@ -422,9 +422,9 @@ function Database.Initialize(silent)
 					LogLevel.SUCCESS,
 					string.format("[DB] Removed local player from database (SteamID64: %s)", mySteamID)
 				)
-				-- Immediately save to persist cleanup
-				Database.SaveDatabase()
-				Log(LogLevel.INFO, "[DB] Database saved after local player cleanup")
+				-- Removed immediate save
+				-- Database.SaveDatabase()
+				Log(LogLevel.INFO, "[DB] Database cleanup (local player) - marked dirty")
 			else
 				Log(LogLevel.DEBUG, "[DB] Local player not in database")
 			end
@@ -471,8 +471,8 @@ function Database.UpsertCheater(steamID, data)
 	-- Mark as dirty for save
 	Database.State.isDirty = true
 
-	-- Save immediately to prevent data loss on crashes
-	Database.SaveDatabase()
+	-- Removed immediate save to prevent lag spikes
+	-- Database.SaveDatabase()
 
 	Log(
 		LogLevel.INFO,
@@ -509,8 +509,8 @@ function Database.RemoveCheater(steamID)
 	if G.DataBase[steamID] then
 		G.DataBase[steamID] = nil
 		Database.State.isDirty = true
-		-- Save immediately to maintain database consistency
-		Database.SaveDatabase()
+		-- Removed immediate save
+		-- Database.SaveDatabase()
 		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
 		return true
 	end

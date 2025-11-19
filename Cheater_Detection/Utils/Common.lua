@@ -30,66 +30,26 @@ end
 --------------------------------------------------------------------------------------
 
 --Function to download content from a URL
-local function downloadFile(url)
-	local success, body = pcall(http.Get, url)
-	if not success or not body or body == "" then
-		error("Failed to download file from " .. url .. ": " .. tostring(body))
-	end
-	return body
-end
+-- REMOVED: Security risk (Remote Code Execution)
+-- The library must be installed locally.
 
 -- Load and validate library
-local function loadlib(libName, libURL)
-	local lnxLib = nil
-	if libName == "lnxLib" then
-		-- First try to load local LNXlib if it exists
-		local success, localLib = pcall(require, "lnxLib")
-
-		if success and localLib then
-			-- Local version exists and loaded successfully
-			lnxLib = localLib
-			print("Loaded local lnxLib")
-		else
-			-- Local version doesn't exist, download from GitHub
-			print("Local lnxLib not found, downloading from GitHub...")
-			local libContent
-
-			-- Try to download with error handling
-			local downloadSuccess, errorMsg = pcall(function()
-				libContent = downloadFile(libURL)
-				return true
-			end)
-
-			if not downloadSuccess or not libContent then
-				error("Failed to download lnxLib: " .. tostring(errorMsg))
-			end
-
-			-- Execute downloaded code with error handling
-			local executeSuccess, result = pcall(load, libContent)
-			if not executeSuccess or not result then
-				error("Failed to load lnxLib content: " .. tostring(result))
-			end
-
-			-- Execute the loaded code
-			local runSuccess, lib = pcall(result)
-			if not runSuccess or not lib then
-				error("Failed to execute lnxLib: " .. tostring(lib))
-			end
-
-			-- Assign globally
-			lnxLib = lib
-			print("Downloaded and loaded lnxLib from GitHub")
-		end
-
-		return lnxLib
-	else
-		error("Unsupported library: " .. libName)
+local function loadlib()
+	local success, localLib = pcall(require, "lnxLib")
+	if success and localLib then
+		return localLib
 	end
+	
+	-- Fallback: Check if it's in the Libs folder
+	local success2, localLib2 = pcall(require, "Cheater_Detection.Libs.lnxLib")
+	if success2 and localLib2 then
+		return localLib2
+	end
+
+	error("Critical Error: lnxLib not found! Please install it or ensure it is in the Libs folder.")
 end
 
---why is this not working? added dpots tp prevent strign from makign this library link isntead of module in git comands so it doesnt break everything for git pull and stuff
-local latestLNXlib = "https://" .. "github.com/lnx00/Lmaobox-Library/releases/latest/download/lnxLib.lua"
-local lnxLib = loadlib("lnxLib", latestLNXlib)
+local lnxLib = loadlib()
 
 if not lnxLib then
 	error("Failed to load lnxLib")

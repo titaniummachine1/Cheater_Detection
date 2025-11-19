@@ -145,18 +145,27 @@ local function queueCurrentPlayers()
 	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
 	for i = 1, maxClients do
 		local info = client.GetPlayerInfo(i)
-		if info and info.SteamID then
-			local steamID64 = nil
-			local steamIDStr = tostring(info.SteamID)
-			if steamIDStr:match("^7656119%d+$") then
-				steamID64 = normalizeSteamID64(steamIDStr)
-			elseif steamIDStr:match("%[U:1:%d+%]") then
-				steamID64 = normalizeSteamID64(Common.FromSteamid3To64(steamIDStr))
+		if info and info.SteamID and not info.IsBot and not info.IsHLTV then
+			-- Skip local player unless debug mode is enabled
+			local isLocal = false
+			local localPlayer = entities.GetLocalPlayer()
+			if localPlayer and localPlayer:GetIndex() == i then
+				isLocal = true
 			end
-			if steamID64 then
-				local contextName = info.Name
-				if queueSteamID(steamID64, { name = contextName }) then
-					queued = queued + 1
+
+			if not isLocal or (G.Menu.Advanced and G.Menu.Advanced.debug) then
+				local steamID64 = nil
+				local steamIDStr = tostring(info.SteamID)
+				if steamIDStr:match("^7656119%d+$") then
+					steamID64 = normalizeSteamID64(steamIDStr)
+				elseif steamIDStr:match("%[U:1:%d+%]") then
+					steamID64 = normalizeSteamID64(Common.FromSteamid3To64(steamIDStr))
+				end
+				if steamID64 then
+					local contextName = info.Name
+					if queueSteamID(steamID64, { name = contextName }) then
+						queued = queued + 1
+					end
 				end
 			end
 		end
@@ -367,6 +376,10 @@ local function onPlayerConnect(event)
 	end
 
 	if not state.enabled then
+		return
+	end
+
+	if event:GetBool("bot") then
 		return
 	end
 
