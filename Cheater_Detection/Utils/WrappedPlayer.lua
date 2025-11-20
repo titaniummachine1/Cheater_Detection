@@ -32,28 +32,22 @@ local function hydrateWrapper(wrapped, entity)
 		return nil
 	end
 
+	-- Minimal per-instance data (cache created on-demand)
 	wrapped._basePlayer = basePlayer
 	wrapped._rawEntity = entity
-	wrapped._cache = wrapped._cache or {}
 	wrapped._cacheTick = -1
 	wrapped._lastSeenTick = globals.TickCount()
 
+	-- Get and cache SteamID once
 	local steamID = Common.GetSteamID64(basePlayer)
 	if steamID then
 		steamID = tostring(steamID)
-		if wrapped._steamID64 ~= steamID then
-			wrapped._steamID64 = steamID
-			wrapped._steamID3 = nil
-			wrapped._state = nil
-		end
-	else
-		wrapped._steamID64 = nil
-		wrapped._steamID3 = nil
-		wrapped._state = nil
-	end
+		wrapped._steamID64 = steamID
 
-	if PlayerState and not wrapped._state then
-		wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
+		-- Attach PlayerState only if needed
+		if PlayerState then
+			wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
+		end
 	end
 
 	return wrapped
@@ -162,7 +156,9 @@ end
 function WrappedPlayer:Cache()
 	local tick = globals.TickCount()
 	if self._cacheTick ~= tick then
-		self:ResetCache()
+		-- Lazy-init cache (save memory if never used)
+		self._cache = {}
+		self._cacheTick = tick
 	end
 	return self._cache
 end
