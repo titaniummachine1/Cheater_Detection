@@ -388,4 +388,9 @@ function AutoVote.Reset()
 	State.lastDecisionTick = 0
 end
 
+-- Register callbacks to enable auto-voting
+callbacks.Register("CreateMove", "CD_AutoVote_CreateMove", AutoVote.OnCreateMove)
+callbacks.Register("DispatchUserMessage", "CD_AutoVote_UserMsg", AutoVote.OnDispatchUserMessage)
+callbacks.Register("FireGameEvent", "CD_AutoVote_Event", AutoVote.OnFireGameEvent)
+
 return AutoVote
