@@ -13,7 +13,7 @@ local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local WarpDT = {}
 
 local DETECTION_NAME = "warp_dt"
-local EVIDENCE_WEIGHT = 30 -- Very high - blatant exploit
+local EVIDENCE_WEIGHT = 100 -- Instant ban - blatant exploit
 local HISTORY_SIZE = 33 -- Ticks to analyze
 local MIN_DELTA_SAMPLES = 30 -- Minimum samples for statistical analysis
 local WARP_STDDEV_SIGNATURE = -132 -- Specific standard deviation value indicating warp

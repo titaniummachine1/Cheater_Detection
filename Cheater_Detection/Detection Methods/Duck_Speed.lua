@@ -52,6 +52,7 @@ function DuckSpeed.Check(player)
 	if not steamID then
 		return false
 	end
+	steamID = tostring(steamID)
 
 	-- Skip if already marked as cheater
 	if Evidence.IsMarkedCheater(steamID) then
@@ -99,18 +100,23 @@ function DuckSpeed.Check(player)
 
 			-- Require sustained violation (1 second = 66 ticks)
 			if data.violationTicks >= VIOLATION_TICKS_REQUIRED then
-				Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT)
+				-- Check cooldown (1 second)
+				local currentTick = globals.TickCount()
+				if currentTick - data.lastDecayTick >= 66 then
+					Evidence.AddEvidence(steamID, DETECTION_NAME, 25, { manualDecay = true })
+					data.lastDecayTick = currentTick
 
-				if G.Menu.Advanced.debug then
-					print(
-						string.format(
-							"[DuckSpeed] %s - Speed: %.1f / Max: %.1f (%.0f%% over limit)",
-							player:GetName(),
-							currentSpeed,
-							maxDuckSpeed,
-							(currentSpeed / maxDuckSpeed - 1) * 100
+					if G.Menu.Advanced.debug then
+						print(
+							string.format(
+								"[DuckSpeed] %s - Speed: %.1f / Max: %.1f (%.0f%% over limit)",
+								player:GetName(),
+								currentSpeed,
+								maxDuckSpeed,
+								(currentSpeed / maxDuckSpeed - 1) * 100
+							)
 						)
-					)
+					end
 				end
 
 				-- Reset counter
@@ -119,8 +125,15 @@ function DuckSpeed.Check(player)
 			end
 		end
 	else
-		-- Reset if not violating
+		-- Reset violation counter if not violating
 		data.violationTicks = 0
+
+		-- Apply manual decay when obeying speed limit
+		-- Decay 5 points per second (approx) -> 0.075 per tick
+		-- Only decay if we have evidence
+		if Evidence.GetMethodWeight(steamID, DETECTION_NAME) > 0 then
+			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, 0.075)
+		end
 	end
 
 	return false
