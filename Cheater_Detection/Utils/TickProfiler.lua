@@ -1,14 +1,18 @@
 --[[
 	TickProfiler
 	Lightweight internal profiler that measures time spent in labeled sections per tick
-	and renders a top-right overlay while debug mode is enabled.
+	and renders a bottom-left overlay while debug mode is enabled.
 ]]
 
 local TickProfiler = {}
 
 local sections = {}
 local stacks = {}
+local acc = {} -- Accumulator for rolling stats
+local display = {} -- Display entries
 local enabled = false
+local lastSnapshot = 0
+local SNAPSHOT_INTERVAL = 66 -- ~1 second at 66 ticks/sec
 
 local font = draw.CreateFont("Tahoma", 12, 600, FONTFLAG_OUTLINE)
 local overlayPadding = 12
@@ -20,6 +24,8 @@ end
 local function reset()
 	sections = {}
 	stacks = {}
+	acc = {}
+	display = {}
 end
 
 function TickProfiler.SetEnabled(state)
@@ -50,7 +56,10 @@ function TickProfiler.BeginSection(name)
 		stacks[name] = stack
 	end
 
-	stack[#stack + 1] = now()
+	-- Record start time and memory
+	local startTime = now()
+	local startMem = collectgarbage("count") * 1024 -- Convert to bytes
+	stack[#stack + 1] = { time = startTime, mem = startMem }
 end
 
 function TickProfiler.EndSection(name)
@@ -63,26 +72,37 @@ function TickProfiler.EndSection(name)
 		return
 	end
 
-	local startTime = stack[#stack]
+	local startData = stack[#stack]
 	stack[#stack] = nil
 
-	local elapsed = now() - startTime
+	local elapsed = now() - startData.time
 	if elapsed < 0 then
 		elapsed = 0
 	end
 
-	local section = sections[name]
+	-- Calculate memory delta
+	local endMem = collectgarbage("count") * 1024
+	local memDelta = endMem - startData.mem
+
+	-- Initialize accumulator for this section if needed
+	local section = acc[name]
 	if not section then
-		section = { total = 0, samples = 0, average = 0, last = 0, peak = 0 }
-		sections[name] = section
+		section = { total = 0, samples = 0, peak = 0, memTotal = 0, memPeak = 0, last = 0, memLast = 0 }
+		acc[name] = section
 	end
 
+	-- Update accumulator
 	section.last = elapsed
 	section.total = section.total + elapsed
 	section.samples = section.samples + 1
-	section.average = section.total / section.samples
 	if elapsed > section.peak then
 		section.peak = elapsed
+	end
+
+	section.memLast = memDelta
+	section.memTotal = section.memTotal + memDelta
+	if memDelta > section.memPeak then
+		section.memPeak = memDelta
 	end
 end
 
@@ -107,26 +127,75 @@ function TickProfiler.Reset()
 end
 
 function TickProfiler.GetSections()
-	return sections
+	return acc
 end
 
 local function buildEntries()
-	local entries = {}
-	for name, data in pairs(sections) do
-		entries[#entries + 1] = {
-			name = name,
-			average = data.average * 1000000, -- Convert to microseconds
-			last = data.last * 1000000,
-			peak = (data.peak or 0) * 1000000,
-		}
-	end
-	table.sort(entries, function(a, b)
-		if a.average == b.average then
-			return a.name < b.name
+	-- Check if it's time to snapshot (every 1 second)
+	local currentTick = globals.TickCount()
+	if currentTick - lastSnapshot >= SNAPSHOT_INTERVAL then
+		lastSnapshot = currentTick
+		display = {} -- Reset display table
+
+		for name, data in pairs(acc) do
+			local avg = data.samples > 0 and (data.total / data.samples) or 0
+			display[#display + 1] = {
+				name = name,
+				average = avg * 1000000,
+				last = data.last * 1000000,
+				peak = data.peak * 1000000,
+				memLast = data.memLast,
+				memPeak = data.memPeak,
+			}
+
+			-- Reset accumulator for next window, but keep last values for continuity
+			data.total = 0
+			data.samples = 0
+			data.peak = 0
+			data.memTotal = 0
+			data.memPeak = 0
 		end
-		return a.average > b.average
-	end)
-	return entries
+
+		-- Sort by importance: CreateMove first, then subsections, then Draw callbacks
+		local function getSortPriority(name)
+			if name == "CreateMove" then
+				return 1
+			end
+			if name:match("^Detection_") then
+				return 2
+			end
+			if name:match("^History_") then
+				return 3
+			end
+			if name == "HistoryPush" then
+				return 4
+			end
+			if name == "PlayerCleanup" then
+				return 5
+			end
+			if name == "EvidenceDecay" then
+				return 6
+			end
+			if name == "GarbageCollection" then
+				return 7
+			end
+			if name:match("^Draw_") then
+				return 8
+			end
+			return 9
+		end
+
+		table.sort(display, function(a, b)
+			local priorityA = getSortPriority(a.name)
+			local priorityB = getSortPriority(b.name)
+			if priorityA ~= priorityB then
+				return priorityA < priorityB
+			end
+			return a.name < b.name
+		end)
+	end
+
+	return display
 end
 
 local function drawOverlay()
@@ -138,19 +207,19 @@ local function drawOverlay()
 		return
 	end
 
-	if next(sections) == nil then
-		return
-	end
-
 	local entries = buildEntries()
 	if #entries == 0 then
-		return
+		-- If no new entries (between snapshots), use the last display
+		if #display == 0 then
+			return
+		end
+		entries = display
 	end
 
 	draw.SetFont(font)
-	local screenW = select(1, draw.GetScreenSize())
-	local x = screenW - overlayPadding
-	local y = overlayPadding
+	local screenW, screenH = draw.GetScreenSize()
+	local x = overlayPadding
+	local y = screenH - overlayPadding
 
 	-- Helper to format time with proper units
 	local function formatTime(microseconds)
@@ -167,37 +236,54 @@ local function drawOverlay()
 			return string.format("%.2f MB", bytes / (1024 * 1024))
 		elseif bytes >= 1024 then
 			return string.format("%.2f KB", bytes / 1024)
-		else
+		elseif bytes >= 0 then
 			return string.format("%d B", bytes)
+		else
+			return string.format("%d B", bytes) -- Negative means freed
 		end
 	end
+
+	-- Draw from bottom to top
+	for i = #entries, 1, -1 do
+		local entry = entries[i]
+		local avgStr = formatTime(entry.average)
+		local lastStr = formatTime(entry.last)
+		local maxStr = formatTime(entry.peak)
+		local memLastStr = formatMemory(entry.memLast)
+		local memPeakStr = formatMemory(entry.memPeak)
+
+		local text = string.format("%s | %s/%s/%s | %s/%s", entry.name, avgStr, lastStr, maxStr, memLastStr, memPeakStr)
+		local textWidth, textHeight = draw.GetTextSize(text)
+
+		-- Color code by memory usage
+		if entry.memLast > 10240 then -- More than 10KB
+			draw.Color(255, 100, 100, 255) -- Red for high memory
+		elseif entry.memLast > 1024 then -- More than 1KB
+			draw.Color(255, 200, 100, 255) -- Orange for medium
+		else
+			draw.Color(200, 200, 200, 255) -- Gray for low
+		end
+
+		y = y - textHeight
+		draw.Text(x, y, text)
+	end
+
+	-- Draw header above entries
+	local header = "Section | Time (avg/last/max) | Mem (last/peak)"
+	local headerWidth, headerHeight = draw.GetTextSize(header)
+	y = y - headerHeight - 2
+	draw.Color(255, 255, 255, 255)
+	draw.Text(x, y, header)
 
 	-- Get memory usage
 	local memUsed = collectgarbage("count") * 1024 -- Convert KB to bytes
 
-	-- Draw memory header
+	-- Draw memory header above that
 	local memHeader = string.format("Lua Memory: %s", formatMemory(memUsed))
 	local memWidth, memHeight = draw.GetTextSize(memHeader)
+	y = y - memHeight - 4
 	draw.Color(255, 200, 100, 255)
-	draw.Text(x - memWidth, y, memHeader)
-	y = y + memHeight + 4
-
-	local header = "Profiler (avg | last | max)"
-	local headerWidth, headerHeight = draw.GetTextSize(header)
-	draw.Color(255, 255, 255, 255)
-	draw.Text(x - headerWidth, y, header)
-	y = y + headerHeight + 2
-
-	for _, entry in ipairs(entries) do
-		local avgStr = formatTime(entry.average)
-		local lastStr = formatTime(entry.last)
-		local maxStr = formatTime(entry.peak)
-		local text = string.format("%s | %s | %s | %s", entry.name, avgStr, lastStr, maxStr)
-		local textWidth, textHeight = draw.GetTextSize(text)
-		draw.Color(200, 200, 200, 255)
-		draw.Text(x - textWidth, y, text)
-		y = y + textHeight
-	end
+	draw.Text(x, y, memHeader)
 end
 
 callbacks.Unregister("Draw", "CD_TickProfilerOverlay")

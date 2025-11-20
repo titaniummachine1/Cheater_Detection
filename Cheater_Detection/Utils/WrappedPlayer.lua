@@ -18,6 +18,15 @@ local WrappedPlayer = {}
 local WrapperPool = {}
 
 local function hydrateWrapper(wrapped, entity)
+	-- Optimization: Reuse existing WPlayer if it matches the entity index
+	-- We assume 'entity' is valid because it came from FindByClass
+	if wrapped._basePlayer then
+		-- Update the raw entity reference (in case userdata changed)
+		wrapped._rawEntity = entity
+		wrapped._lastSeenTick = globals.TickCount()
+		return wrapped
+	end
+
 	local basePlayer = WPlayer.FromEntity(entity)
 	if not basePlayer then
 		return nil
@@ -431,8 +440,10 @@ end
 
 function WrappedPlayer.PruneInactive(currentTick)
 	currentTick = currentTick or globals.TickCount()
+	-- Allow 1 tick grace period so we don't wipe the pool before updating it
+	local threshold = currentTick - 1
 	for index, wrapped in pairs(WrapperPool) do
-		if not wrapped or wrapped._lastSeenTick ~= currentTick then
+		if not wrapped or wrapped._lastSeenTick < threshold then
 			WrapperPool[index] = nil
 		end
 	end

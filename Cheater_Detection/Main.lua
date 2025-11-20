@@ -19,7 +19,7 @@ end
 --[[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
-local FastPlayers = require("Cheater_Detection.Wrappers.FastPlayers")
+local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
@@ -78,7 +78,9 @@ local function OnCreateMove(cmd)
 	end
 
 	-- Check connection state and store in G
+	TickProfiler.BeginSection("CheckConnection")
 	local ConnectionState = Common.CheckConnectionState()
+	TickProfiler.EndSection("CheckConnection")
 
 	--if not stable connection then dont do any checks
 	if not ConnectionState.stable then
@@ -119,7 +121,11 @@ local function OnCreateMove(cmd)
 		local steamID = Player:GetSteamID64()
 
 		-- Skip if already confirmed cheater (optimization - database or marked)
-		if Evidence.IsMarkedCheater(steamID) then
+		TickProfiler.BeginSection("CheckCheaterStatus")
+		local isMarked = Evidence.IsMarkedCheater(steamID)
+		TickProfiler.EndSection("CheckCheaterStatus")
+
+		if isMarked then
 			goto continue
 		end
 
@@ -173,10 +179,19 @@ local function OnCreateMove(cmd)
 	local memBefore = collectgarbage("count")
 
 	-- Run incremental GC step to prevent automatic full collection spikes
-	-- More aggressive settings to prevent 300MB buildup
-	if memBefore > 100 then -- Start GC when memory exceeds 100KB (was 200)
-		collectgarbage("step", 10) -- Step GC incrementally (10KB per step, was 5)
+	-- Smoother GC: Run small steps always, increase aggression only if very high
+	local stepSize = 20 -- Default small step (20KB) - steady state
+
+	-- Gradual ramp up to avoid "stop the world" spikes
+	if memBefore > 120000 then -- >120MB: High urgency
+		stepSize = 200 -- 200KB steps (was 1000)
+	elseif memBefore > 80000 then -- >80MB: Moderate urgency
+		stepSize = 100 -- 100KB steps (was 200)
+	elseif memBefore > 40000 then -- >40MB: Low urgency
+		stepSize = 50 -- 50KB steps (was 50)
 	end
+
+	collectgarbage("step", stepSize)
 
 	local memAfter = collectgarbage("count")
 	TickProfiler.EndSection("GarbageCollection")

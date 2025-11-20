@@ -7,6 +7,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 --[[ Module Declaration ]]
 local FastPlayers = {}
@@ -17,17 +18,28 @@ local cachedTeammates = {}
 local cachedEnemies = {}
 local cachedLocal
 local activeSteamIDs = {}
+local lastEntityIndices = {} -- Track entity indices from last tick
 
 FastPlayers.AllUpdated = false
 FastPlayers.TeammatesUpdated = false
 FastPlayers.EnemiesUpdated = false
 
+-- Helper to check if entity list changed
+local function entityListChanged(currentIndices)
+	if #currentIndices ~= #lastEntityIndices then
+		return true
+	end
+	for i = 1, #currentIndices do
+		if currentIndices[i] ~= lastEntityIndices[i] then
+			return true
+		end
+	end
+	return false
+end
+
 --[[ Private: Reset per-tick caches ]]
 local function ResetCaches()
-	-- Clear tables instead of niling them to reduce GC
-	for k in pairs(cachedAllPlayers) do
-		cachedAllPlayers[k] = nil
-	end
+	-- Don't clear cachedAllPlayers - we'll only rebuild if entity list changed
 	for k in pairs(cachedTeammates) do
 		cachedTeammates[k] = nil
 	end
@@ -35,9 +47,6 @@ local function ResetCaches()
 		cachedEnemies[k] = nil
 	end
 	cachedLocal = nil
-	for k in pairs(activeSteamIDs) do
-		activeSteamIDs[k] = nil
-	end
 	FastPlayers.AllUpdated = false
 	FastPlayers.TeammatesUpdated = false
 	FastPlayers.EnemiesUpdated = false
@@ -55,29 +64,67 @@ function FastPlayers.GetAll(excludelocal)
 	if FastPlayers.AllUpdated then
 		return cachedAllPlayers
 	end
-	excludelocal = excludelocal and FastPlayers.GetLocal() or nil
-	if FastPlayers.AllUpdated then
-		return cachedAllPlayers
-	end
+
 	local excludePlayer = excludelocal and FastPlayers.GetLocal() or nil
 
-	-- cachedAllPlayers and activeSteamIDs are already cleared in ResetCaches
+	TickProfiler.BeginSection("FP_FindByClass")
+	local entities_list = entities.FindByClass("CTFPlayer") or {}
+	TickProfiler.EndSection("FP_FindByClass")
 
-	-- Use Common.IsValidPlayer as single source of truth
-	-- Pass nil for checkFriend to use debug mode logic internally
-	-- Pass false for checkDormant to include dormant players (we want to track them)
-	for _, ent in pairs(entities.FindByClass("CTFPlayer") or {}) do
+	-- Build current entity indices (sorted for comparison)
+	TickProfiler.BeginSection("FP_BuildIndices")
+	local currentIndices = {}
+	for _, ent in pairs(entities_list) do
 		local excludeEntity = excludePlayer and excludePlayer.GetRawEntity and excludePlayer:GetRawEntity() or nil
 		if Common.IsValidPlayer(ent, nil, false, excludeEntity) then
-			local wrapped = WrappedPlayer.FromEntity(ent)
-			if wrapped then
-				cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
-				local steamID = wrapped:GetSteamID64()
-				if steamID then
-					activeSteamIDs[steamID] = true
+			currentIndices[#currentIndices + 1] = ent:GetIndex()
+		end
+	end
+	table.sort(currentIndices)
+	TickProfiler.EndSection("FP_BuildIndices")
+
+	-- Check if entity list changed
+	TickProfiler.BeginSection("FP_CheckChange")
+	local changed = entityListChanged(currentIndices)
+	TickProfiler.EndSection("FP_CheckChange")
+
+	if not changed and #cachedAllPlayers > 0 then
+		-- Reuse existing wrapped players - just validate they're still good
+		TickProfiler.BeginSection("FP_ValidateCache")
+		for _, wrapped in ipairs(cachedAllPlayers) do
+			local steamID = wrapped:GetSteamID64()
+			if steamID then
+				activeSteamIDs[steamID] = true
+			end
+		end
+		TickProfiler.EndSection("FP_ValidateCache")
+	else
+		-- Rebuild from scratch
+		TickProfiler.BeginSection("FP_Rebuild")
+		for k in pairs(cachedAllPlayers) do
+			cachedAllPlayers[k] = nil
+		end
+		for k in pairs(activeSteamIDs) do
+			activeSteamIDs[k] = nil
+		end
+
+		for _, ent in pairs(entities_list) do
+			local excludeEntity = excludePlayer and excludePlayer.GetRawEntity and excludePlayer:GetRawEntity() or nil
+			if Common.IsValidPlayer(ent, nil, false, excludeEntity) then
+				local wrapped = WrappedPlayer.FromEntity(ent)
+				if wrapped then
+					cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
+					local steamID = wrapped:GetSteamID64()
+					if steamID then
+						activeSteamIDs[steamID] = true
+					end
 				end
 			end
 		end
+
+		-- Update cached indices
+		lastEntityIndices = currentIndices
+		TickProfiler.EndSection("FP_Rebuild")
 	end
 
 	if PlayerState and PlayerState.TrimToActive then
