@@ -82,8 +82,11 @@ function Common.GetSteamID64(Player)
 	local currentTick = globals.TickCount()
 	local playerIndex = Player:GetIndex()
 
-	-- Branchless cache reset
-	cachedSteamIDs, lastTick = (lastTick ~= currentTick and {} or cachedSteamIDs), currentTick
+	-- Reset cache on new tick (simple conditional is better than "branchless")
+	if lastTick ~= currentTick then
+		cachedSteamIDs = {}
+		lastTick = currentTick
+	end
 
 	-- Retrieve cached result or calculate it
 	local result = cachedSteamIDs[playerIndex]
