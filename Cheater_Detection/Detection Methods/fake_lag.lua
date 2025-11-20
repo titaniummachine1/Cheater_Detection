@@ -13,7 +13,7 @@ local FakeLag = {}
 --[[ Configuration ]]
 local DETECTION_NAME = "fake_lag"
 local EVIDENCE_WEIGHT = 22 -- High weight - exploit
-local MAX_TICK_DELTA = 8 -- From old script's MaxTickDelta default
+local MAX_TICK_DELTA = 14 -- Increased to prevent false positives on laggy bots/players
 
 -- Per-player state tracking
 local playerSimTimeData = {}
@@ -56,6 +56,11 @@ function FakeLag.Check(player)
 		return false
 	end
 
+	-- Ignore bots (SteamID64 is always a 17-digit string)
+	if type(steamID) ~= "string" or #steamID ~= 17 then
+		return false
+	end
+
 	-- Skip if already marked as cheater
 	if Evidence.IsMarkedCheater(steamID) then
 		return false
@@ -93,12 +98,14 @@ function FakeLag.Check(player)
 		Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT)
 
 		if G.Menu.Advanced.debug then
-			print(string.format(
-				"[FakeLag] %s - Tick delta: %d (threshold: %d)",
-				player:GetName(),
-				deltaTicks,
-				MAX_TICK_DELTA
-			))
+			print(
+				string.format(
+					"[FakeLag] %s - Tick delta: %d (threshold: %d)",
+					player:GetName(),
+					deltaTicks,
+					MAX_TICK_DELTA
+				)
+			)
 		end
 
 		data.lastSimTime = currentSimTime

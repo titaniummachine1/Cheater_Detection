@@ -441,29 +441,9 @@ function Fetcher.GetStatus()
 	}
 end
 
--- Self-Initialization
-local function InitializeFetcher()
-	Log(LogLevel.DEBUG, "[FETCHER] Checking if fetch on load is enabled...") -- Use Log (Updated message)
-	-- Check G.Menu.Main.Fetch_Database instead of G.Config.AutoFetch
-	if
-		type(G) == "table"
-		and type(G.Menu) == "table"
-		and type(G.Menu.Main) == "table"
-		and G.Menu.Main.Fetch_Database == true
-	then
-		local shouldFetch = isDatabaseEmpty() or isFetchStale()
-		if shouldFetch then
-			Log(LogLevel.INFO, "[FETCHER] Auto-fetch trigger satisfied, starting fetch process...")
-			Fetcher.Start()
-		else
-			Log(LogLevel.INFO, "[FETCHER] Database fresh, skipping auto-fetch this session.")
-		end
-	else
-		Log(LogLevel.INFO, "[FETCHER] Fetch on load disabled or not configured, skipping initial fetch.") -- Use Log (Updated message)
-	end
-end
-
-InitializeFetcher()
+-- InitializeFetcher removed (Manual fetch only)
+-- local function InitializeFetcher() ... end
+-- InitializeFetcher()
 
 Log(LogLevel.DEBUG, "[FETCHER] >>> Module execution finished. Returning Fetcher table.") -- Use Log (Debug)
 return Fetcher

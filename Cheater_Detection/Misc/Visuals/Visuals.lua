@@ -16,7 +16,7 @@ local function DrawVisuals()
 	if not G.Menu or not G.Menu.Main or not G.Menu.Main.Cheater_Tags then
 		return
 	end
-	
+
 	if engine.Con_IsVisible() or engine.IsGameUIVisible() then
 		return
 	end
@@ -29,28 +29,23 @@ local function DrawVisuals()
 		if not valid then
 			goto continue
 		end
-		
+
 		local steamId = Common.GetSteamID64(entity)
 		if not steamId then
 			goto continue
 		end
 
-		-- Check if player is marked as cheater (Evidence system)
-		local isMarkedCheater = Evidence.IsMarkedCheater(steamId)
-		
-		-- Check if player is in database
-		local inDatabase = Database.GetCheater(steamId) ~= nil
-		
+		-- Check if player is marked as cheater (Evidence system checks DB + Runtime)
+		local isCheater = Evidence.IsMarkedCheater(steamId)
+
 		-- Determine if we should show a tag
-		local isCheater = isMarkedCheater or inDatabase
 		local showTag = isCheater
 		local tagText = isCheater and "CHEATER" or "SUSPICIOUS"
 		local tagColor = isCheater and { 255, 0, 0, 255 } or { 255, 255, 0, 255 }
 
 		if showTag then
 			local padding = Vector3(0, 0, 7)
-			local headPos = (entity:GetAbsOrigin() + entity:GetPropVector("localdata", "m_vecViewOffset[0]"))
-				+ padding
+			local headPos = (entity:GetAbsOrigin() + entity:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding
 			headPos = (gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0)
 					and headPos + Vector3(0, 0, 17)
 				or headPos
@@ -69,7 +64,7 @@ local function DrawVisuals()
 				draw.Text(math.floor(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
 			end
 		end
-		
+
 		::continue::
 	end
 end

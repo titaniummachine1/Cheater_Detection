@@ -12,9 +12,9 @@ local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local FastPlayers = {}
 
 --[[ Local Caches ]]
-local cachedAllPlayers
-local cachedTeammates
-local cachedEnemies
+local cachedAllPlayers = {}
+local cachedTeammates = {}
+local cachedEnemies = {}
 local cachedLocal
 local activeSteamIDs = {}
 
@@ -24,11 +24,20 @@ FastPlayers.EnemiesUpdated = false
 
 --[[ Private: Reset per-tick caches ]]
 local function ResetCaches()
-	cachedAllPlayers = nil
-	cachedTeammates = nil
-	cachedEnemies = nil
+	-- Clear tables instead of niling them to reduce GC
+	for k in pairs(cachedAllPlayers) do
+		cachedAllPlayers[k] = nil
+	end
+	for k in pairs(cachedTeammates) do
+		cachedTeammates[k] = nil
+	end
+	for k in pairs(cachedEnemies) do
+		cachedEnemies[k] = nil
+	end
 	cachedLocal = nil
-	activeSteamIDs = {}
+	for k in pairs(activeSteamIDs) do
+		activeSteamIDs[k] = nil
+	end
 	FastPlayers.AllUpdated = false
 	FastPlayers.TeammatesUpdated = false
 	FastPlayers.EnemiesUpdated = false
@@ -47,14 +56,19 @@ function FastPlayers.GetAll(excludelocal)
 		return cachedAllPlayers
 	end
 	excludelocal = excludelocal and FastPlayers.GetLocal() or nil
-	cachedAllPlayers = {}
-	activeSteamIDs = {}
+	if FastPlayers.AllUpdated then
+		return cachedAllPlayers
+	end
+	local excludePlayer = excludelocal and FastPlayers.GetLocal() or nil
+
+	-- cachedAllPlayers and activeSteamIDs are already cleared in ResetCaches
 
 	-- Use Common.IsValidPlayer as single source of truth
 	-- Pass nil for checkFriend to use debug mode logic internally
 	-- Pass false for checkDormant to include dormant players (we want to track them)
 	for _, ent in pairs(entities.FindByClass("CTFPlayer") or {}) do
-		if Common.IsValidPlayer(ent, nil, false, excludelocal) then
+		local excludeEntity = excludePlayer and excludePlayer.GetRawEntity and excludePlayer:GetRawEntity() or nil
+		if Common.IsValidPlayer(ent, nil, false, excludeEntity) then
 			local wrapped = WrappedPlayer.FromEntity(ent)
 			if wrapped then
 				cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
@@ -92,7 +106,11 @@ function FastPlayers.GetTeammates(exclude)
 			FastPlayers.GetAll()
 		end
 
-		cachedTeammates = {}
+		if not FastPlayers.AllUpdated then
+			FastPlayers.GetAll()
+		end
+
+		-- cachedTeammates is already cleared in ResetCaches
 
 		-- Determine which player (if any) to exclude
 		local localPlayer = FastPlayers.GetLocal()
@@ -125,7 +143,10 @@ function FastPlayers.GetEnemies()
 		if not FastPlayers.AllUpdated then
 			FastPlayers.GetAll()
 		end
-		cachedEnemies = {}
+		if not FastPlayers.AllUpdated then
+			FastPlayers.GetAll()
+		end
+		-- cachedEnemies is already cleared in ResetCaches
 		local pLocal = FastPlayers.GetLocal()
 		if pLocal then
 			local myTeam = pLocal:GetTeamNumber()

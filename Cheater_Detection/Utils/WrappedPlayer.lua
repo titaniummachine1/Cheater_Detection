@@ -403,6 +403,10 @@ function WrappedPlayer:GetNextAttack()
 	return self._basePlayer:GetPropFloat("m_flNextAttack")
 end
 
+function WrappedPlayer:GetTeamNumber()
+	return self._basePlayer:GetTeamNumber()
+end
+
 function WrappedPlayer:SetPriority(level)
 	if not level then
 		return false

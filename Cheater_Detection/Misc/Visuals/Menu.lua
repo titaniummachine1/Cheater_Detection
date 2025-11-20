@@ -2,6 +2,7 @@ local Menu = {}
 
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
+local Fetcher = require("Cheater_Detection.Database.Fetcher")
 
 local Lib = Common.Lib
 local Fonts = Lib.UI.Fonts
@@ -45,7 +46,6 @@ local function DrawMenu()
 		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Detection Automation")
-		Main.Fetch_Database = TimMenu.Checkbox("Fetch Database", Main.Fetch_Database)
 		TimMenu.Tooltip("Download external cheater lists on demand.")
 		TimMenu.NextLine()
 		Main.AutoMark = TimMenu.Checkbox("Auto Mark", Main.AutoMark)
@@ -53,6 +53,26 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
 		TimMenu.Tooltip("Share detections with your party through chat.")
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("SteamHistory")
+		G.Menu.Misc.SteamHistory = G.Menu.Misc.SteamHistory or {}
+		local sh = G.Menu.Misc.SteamHistory
+		sh.ApiKey = sh.ApiKey or ""
+		if type(sh.Enable) ~= "boolean" then
+			sh.Enable = false
+		end
+		local hasKey = sh.ApiKey ~= ""
+		if not hasKey then
+			sh.Enable = false
+			TimMenu.Text("API Key Missing!")
+			TimMenu.Text("Get key at: steamhistory.net")
+			TimMenu.Text("Console cmd: steamhistory <key>")
+		else
+			sh.Enable = TimMenu.Checkbox("Enable SteamHistory", sh.Enable)
+			TimMenu.Tooltip("Scan players via SteamHistory API.")
+		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
@@ -433,30 +453,14 @@ local function DrawMenu()
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		if TimMenu.Button("Fetch Database") then
+			Fetcher.Start()
+		end
 
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("SteamHistory")
-		Misc.SteamHistory = Misc.SteamHistory or {}
-		local sh = Misc.SteamHistory
-		sh.ApiKey = sh.ApiKey or ""
-		if type(sh.Enable) ~= "boolean" then
-			sh.Enable = false
-		end
-		local hasKey = sh.ApiKey ~= ""
-		if not hasKey then
-			sh.Enable = false
-			TimMenu.Text("SteamHistory API key missing. Use: steamhistory <key>")
-			TimMenu.Tooltip("Paste your SteamHistory key in the console to unlock scanning.")
-		else
-			sh.Enable = TimMenu.Checkbox("Enable SteamHistory scans", sh.Enable)
-			TimMenu.Tooltip("Scan everyone in the server immediately and any newcomers who join after you.")
-			goto steam_history_sector_end
-		end
-		TimMenu.NextLine()
-		TimMenu.Text("Enter your SteamHistory key to unlock automatic scanning.")
-		::steam_history_sector_end::
-		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	end

@@ -39,7 +39,7 @@ local function loadlib()
 	if success and localLib then
 		return localLib
 	end
-	
+
 	-- Fallback: Check if it's in the Libs folder
 	local success2, localLib2 = pcall(require, "Cheater_Detection.Libs.lnxLib")
 	if success2 and localLib2 then
@@ -87,12 +87,12 @@ function Common.GetSteamID64(Player)
 
 	-- Retrieve cached result or calculate it
 	local result = cachedSteamIDs[playerIndex]
-		or (function()
-			local playerInfo = assert(client.GetPlayerInfo(playerIndex), "Failed to get player info")
-			local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
-			return (playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]") and playerInfo.UserID
-				or assert(steam.ToSteamID64(steamID), "Failed to convert SteamID to SteamID64")
-		end)()
+	if not result then
+		local playerInfo = assert(client.GetPlayerInfo(playerIndex), "Failed to get player info")
+		local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
+		result = (playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]") and playerInfo.UserID
+			or assert(steam.ToSteamID64(steamID), "Failed to convert SteamID to SteamID64")
+	end
 
 	cachedSteamIDs[playerIndex] = result
 	return result
@@ -198,7 +198,7 @@ Common.MAX_HISTORY = 66
 
 -- Convenience: build a record directly from a player wrapper/entity
 ---@param player table|Entity WrappedPlayer or entity implementing required methods
----@return table record
+---@return table|nil record
 function Common.createRecordFromPlayer(player)
 	if not player or type(player.GetEyeAngles) ~= "function" then
 		return nil

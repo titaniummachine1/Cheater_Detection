@@ -115,9 +115,9 @@ local function buildEntries()
 	for name, data in pairs(sections) do
 		entries[#entries + 1] = {
 			name = name,
-			average = data.average * 1000,
-			last = data.last * 1000,
-			peak = (data.peak or 0) * 1000,
+			average = data.average * 1000000, -- Convert to microseconds
+			last = data.last * 1000000,
+			peak = (data.peak or 0) * 1000000,
 		}
 	end
 	table.sort(entries, function(a, b)
@@ -152,14 +152,14 @@ local function drawOverlay()
 	local x = screenW - overlayPadding
 	local y = overlayPadding
 
-	local header = "Profiler (avg | last | max ms)"
+	local header = "Profiler (avg | last | max us)"
 	local headerWidth, headerHeight = draw.GetTextSize(header)
 	draw.Color(255, 255, 255, 255)
 	draw.Text(x - headerWidth, y, header)
 	y = y + headerHeight + 2
 
 	for _, entry in ipairs(entries) do
-		local text = string.format("%s | %.3f | %.3f | %.3f", entry.name, entry.average, entry.last, entry.peak)
+		local text = string.format("%s | %.1f | %.1f | %.1f", entry.name, entry.average, entry.last, entry.peak)
 		local textWidth, textHeight = draw.GetTextSize(text)
 		draw.Color(200, 200, 200, 255)
 		draw.Text(x - textWidth, y, text)

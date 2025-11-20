@@ -57,6 +57,8 @@ local function normalizeSteamID64(rawID)
 	return steamID
 end
 
+local IGNORED_ID = "76561197960265728" -- [U:1:0]
+
 local function getScoreboardName(steamID)
 	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
 	for i = 1, maxClients do
@@ -120,9 +122,21 @@ local function queueSteamID(steamID, context)
 	if not steamID then
 		return false
 	end
+	if steamID == IGNORED_ID then
+		return false
+	end
 	if state.scanned[steamID] or state.pending[steamID] then
 		return false
 	end
+
+	-- Check local database first
+	local existing = Database.GetCheater(steamID)
+	if existing then
+		-- Already known as cheater, skip scanning
+		state.scanned[steamID] = true
+		return false
+	end
+
 	state.pending[steamID] = {
 		name = context and context.name or nil,
 		queuedAt = globals.RealTime(),
@@ -296,6 +310,10 @@ local function handleBatchResponse(ids, contexts, responseTable)
 		if entry and matchesKeyword(entry.BanReason or "") then
 			flagged = flagged + 1
 			flagPlayer(steamID, context, entry)
+		else
+			-- Player is clean or not found in SteamHistory
+			-- Do NOT add to database, just keep in runtime state.scanned
+			-- printInfo({ 0, 255, 0, 255 }, string.format("[SteamHistory] %s is clean", steamID))
 		end
 	end
 
@@ -472,5 +490,15 @@ callbacks.Register("FireGameEvent", "CD_SteamHistory_Events", onGameEvent)
 
 callbacks.Unregister("CreateMove", "CD_SteamHistory_OnCreateMove")
 callbacks.Register("CreateMove", "CD_SteamHistory_OnCreateMove", onCreateMove)
+
+-- Check for API key on load
+local function checkApiKey()
+	local cfg = getConfig()
+	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
+		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] API Key missing! Get one at https://steamhistory.net")
+		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] Set it via console: steamhistory <your_key>")
+	end
+end
+checkApiKey()
 
 return SteamHistory
