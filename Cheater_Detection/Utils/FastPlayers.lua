@@ -40,12 +40,8 @@ end
 --[[ Private: Reset per-tick caches ]]
 local function ResetCaches()
 	-- Don't clear cachedAllPlayers - we'll only rebuild if entity list changed
-	for k in pairs(cachedTeammates) do
-		cachedTeammates[k] = nil
-	end
-	for k in pairs(cachedEnemies) do
-		cachedEnemies[k] = nil
-	end
+	cachedTeammates = {}
+	cachedEnemies = {}
 	cachedLocal = nil
 	FastPlayers.AllUpdated = false
 	FastPlayers.TeammatesUpdated = false
@@ -83,16 +79,10 @@ function FastPlayers.GetAll(excludelocal)
 		-- Full rebuild path
 		TickProfiler.BeginSection("FP_Rebuild")
 
-		-- Clear old data
-		for k in pairs(cachedAllPlayers) do
-			cachedAllPlayers[k] = nil
-		end
-		for k in pairs(activeSteamIDs) do
-			activeSteamIDs[k] = nil
-		end
-		for k in pairs(lastEntityIndices) do
-			lastEntityIndices[k] = nil
-		end
+		-- Clear old data (simple assignment is faster than loops)
+		cachedAllPlayers = {}
+		activeSteamIDs = {}
+		lastEntityIndices = {}
 
 		-- Build new player list and indices
 		for _, ent in pairs(entities_list) do
@@ -115,9 +105,7 @@ function FastPlayers.GetAll(excludelocal)
 	else
 		-- Cache hit - reuse wrapped players
 		TickProfiler.BeginSection("FP_ValidateCache")
-		for k in pairs(activeSteamIDs) do
-			activeSteamIDs[k] = nil
-		end
+		activeSteamIDs = {}
 		for _, wrapped in ipairs(cachedAllPlayers) do
 			local steamID = wrapped:GetSteamID64()
 			if steamID then
