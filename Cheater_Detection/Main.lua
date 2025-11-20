@@ -42,6 +42,7 @@ require("Cheater_Detection.Misc.JoinNotifications") --[[ Imported by: Main.lua ]
 require("Cheater_Detection.Utils.Commands") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Database.SteamHistory") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Misc.Vote_Revel") --[[ Imported by: Main.lua ]]
+require("Cheater_Detection.Misc.Auto_Vote") --[[ Imported by: Main.lua ]]
 
 --[[ Detection modules ]]
 local AntiAim = require("Cheater_Detection.Detection Methods.anti_aim")
