@@ -152,14 +152,47 @@ local function drawOverlay()
 	local x = screenW - overlayPadding
 	local y = overlayPadding
 
-	local header = "Profiler (avg | last | max us)"
+	-- Helper to format time with proper units
+	local function formatTime(microseconds)
+		if microseconds >= 1000 then
+			return string.format("%.2f ms", microseconds / 1000)
+		else
+			return string.format("%.0f µs", microseconds)
+		end
+	end
+
+	-- Helper to format memory
+	local function formatMemory(bytes)
+		if bytes >= 1024 * 1024 then
+			return string.format("%.2f MB", bytes / (1024 * 1024))
+		elseif bytes >= 1024 then
+			return string.format("%.2f KB", bytes / 1024)
+		else
+			return string.format("%d B", bytes)
+		end
+	end
+
+	-- Get memory usage
+	local memUsed = collectgarbage("count") * 1024 -- Convert KB to bytes
+
+	-- Draw memory header
+	local memHeader = string.format("Lua Memory: %s", formatMemory(memUsed))
+	local memWidth, memHeight = draw.GetTextSize(memHeader)
+	draw.Color(255, 200, 100, 255)
+	draw.Text(x - memWidth, y, memHeader)
+	y = y + memHeight + 4
+
+	local header = "Profiler (avg | last | max)"
 	local headerWidth, headerHeight = draw.GetTextSize(header)
 	draw.Color(255, 255, 255, 255)
 	draw.Text(x - headerWidth, y, header)
 	y = y + headerHeight + 2
 
 	for _, entry in ipairs(entries) do
-		local text = string.format("%s | %.1f | %.1f | %.1f", entry.name, entry.average, entry.last, entry.peak)
+		local avgStr = formatTime(entry.average)
+		local lastStr = formatTime(entry.last)
+		local maxStr = formatTime(entry.peak)
+		local text = string.format("%s | %s | %s | %s", entry.name, avgStr, lastStr, maxStr)
 		local textWidth, textHeight = draw.GetTextSize(text)
 		draw.Color(200, 200, 200, 255)
 		draw.Text(x - textWidth, y, text)

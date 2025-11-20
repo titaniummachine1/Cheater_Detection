@@ -249,6 +249,14 @@ function Common.FromSteamid3To64(steamid3)
 	return ok and tostring(converted) or nil
 end
 
+function Common.IsSteamID64(steamID)
+	if not steamID then
+		return false
+	end
+	steamID = tostring(steamID)
+	return steamID:match("^7656119%d+$") and #steamID == 17
+end
+
 -- Helper function to determine if the content is JSON
 function Common.isJson(content)
 	local firstChar = content:sub(1, 1)

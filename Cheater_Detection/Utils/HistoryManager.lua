@@ -7,6 +7,7 @@
 
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 ---@class HistoryManager
 local HistoryManager = {}
@@ -16,7 +17,7 @@ local consumers = {}
 local activeFields = {}
 local maxRetentionTicks = 0
 
-local DEFAULT_RETENTION_TICKS = 66
+local DEFAULT_RETENTION_TICKS = 33 -- Reduced from 66 to save memory
 
 HistoryManager.Fields = {
 	Angles = "angles",
@@ -176,7 +177,10 @@ function HistoryManager.Push(player)
 		return
 	end
 
+	TickProfiler.BeginSection("History_BuildRecord")
 	local record = buildRecord(player)
+	TickProfiler.EndSection("History_BuildRecord")
+
 	if not record then
 		return
 	end
@@ -191,7 +195,9 @@ function HistoryManager.Push(player)
 	state.History[#state.History + 1] = record
 	state.Current = record
 
+	TickProfiler.BeginSection("History_Trim")
 	trimHistory(state.History)
+	TickProfiler.EndSection("History_Trim")
 end
 
 ---Expose current retention tick count (max of all consumers).

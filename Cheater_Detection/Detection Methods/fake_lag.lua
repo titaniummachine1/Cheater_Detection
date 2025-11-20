@@ -20,7 +20,7 @@ local playerSimTimeData = {}
 
 --[[ Helper Functions ]]
 local function validatePlayer(player)
-	if not player or not player:IsValid() or not player:IsAlive() then
+	if not player or not player:IsValid() or not player:IsAlive() or player:IsDormant() then
 		return false
 	end
 	return true
@@ -52,14 +52,10 @@ function FakeLag.Check(player)
 
 	-- Get steamID for tracking
 	local steamID = Common.GetSteamID64(player)
-	if not steamID then
+	if not Common.IsSteamID64(steamID) then
 		return false
 	end
-
-	-- Ignore bots (SteamID64 is always a 17-digit string)
-	if type(steamID) ~= "string" or #steamID ~= 17 then
-		return false
-	end
+	steamID = tostring(steamID)
 
 	-- Skip if already marked as cheater
 	if Evidence.IsMarkedCheater(steamID) then

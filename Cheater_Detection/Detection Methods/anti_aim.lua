@@ -21,7 +21,7 @@ local EXACT_PITCH_SUSPECT = 89.000 -- Common rage AA value
 
 --[[ Helper Functions ]]
 local function validatePlayer(player)
-	if not player or not player:IsValid() or not player:IsAlive() then
+	if not player or not player:IsValid() or not player:IsAlive() or player:IsDormant() then
 		return false
 	end
 	return true
@@ -41,7 +41,7 @@ function AntiAim.Check(player)
 
 	-- Get steamID for tracking
 	local steamID = tostring(Common.GetSteamID64(player))
-	if not steamID then
+	if not Common.IsSteamID64(steamID) then
 		return false
 	end
 

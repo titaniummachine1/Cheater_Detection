@@ -16,11 +16,13 @@ if gui.GetValue("ANONYMOUSE MODE") == 1 then
 	)
 end
 
---[[ Import core utilities ]]
-local G = require("Cheater_Detection.Utils.Globals") --[[ Imported by: Main.lua ]]
-local Common = require("Cheater_Detection.Utils.Common") --[[ Imported by: Main.lua ]]
-local FastPlayers = require("Cheater_Detection.Utils.FastPlayers") --[[ Imported by: Main.lua ]]
+--[[ Imports ]]
+local G = require("Cheater_Detection.Utils.Globals")
+local Common = require("Cheater_Detection.Utils.Common")
+local FastPlayers = require("Cheater_Detection.Wrappers.FastPlayers")
+local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
+local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 require("Cheater_Detection.Utils.HistoryConfig")
 
 require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
@@ -39,6 +41,7 @@ require("Cheater_Detection.Misc.ChatPrefix") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Misc.JoinNotifications") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Utils.Commands") --[[ Imported by: Main.lua ]]
 require("Cheater_Detection.Database.SteamHistory") --[[ Imported by: Main.lua ]]
+require("Cheater_Detection.Misc.Vote_Revel") --[[ Imported by: Main.lua ]]
 
 --[[ Detection modules ]]
 local AntiAim = require("Cheater_Detection.Detection Methods.anti_aim")
@@ -88,6 +91,29 @@ local function OnCreateMove(cmd)
 	Evidence.ApplyDecay()
 	TickProfiler.EndSection("EvidenceDecay")
 
+	-- Cleanup disconnected players to prevent memory leak (once per second)
+	TickProfiler.BeginSection("PlayerCleanup")
+	local currentTick = globals.TickCount()
+	local ticksPerSecond = 66 -- TF2 tick rate
+
+	-- Only run cleanup once per second to avoid overhead
+	if not G.LastCleanupTick or (currentTick - G.LastCleanupTick) >= ticksPerSecond then
+		G.LastCleanupTick = currentTick
+
+		-- Build set of currently active players
+		local activeSet = {}
+		for _, Player in ipairs(allPlayers) do
+			local sid = Player:GetSteamID64()
+			if sid then
+				activeSet[tostring(sid)] = true
+			end
+		end
+
+		-- Trim PlayerState to only active players
+		PlayerState.TrimToActive(activeSet)
+	end
+	TickProfiler.EndSection("PlayerCleanup")
+
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do
 		local steamID = Player:GetSteamID64()
@@ -104,12 +130,31 @@ local function OnCreateMove(cmd)
 
 		-- Perform detection checks
 		TickProfiler.BeginSection("Detections")
+
+		TickProfiler.BeginSection("Detection_AntiAim")
 		AntiAim.Check(Player)
+		TickProfiler.EndSection("Detection_AntiAim")
+
+		TickProfiler.BeginSection("Detection_DuckSpeed")
 		DuckSpeed.Check(Player)
+		TickProfiler.EndSection("Detection_DuckSpeed")
+
+		TickProfiler.BeginSection("Detection_Bhop")
 		Bhop.Check(Player)
+		TickProfiler.EndSection("Detection_Bhop")
+
+		TickProfiler.BeginSection("Detection_FakeLag")
 		FakeLag.Check(Player)
+		TickProfiler.EndSection("Detection_FakeLag")
+
+		TickProfiler.BeginSection("Detection_WarpDT")
 		WarpDT.Check(Player)
+		TickProfiler.EndSection("Detection_WarpDT")
+
+		TickProfiler.BeginSection("Detection_ManualPriority")
 		ManualPriority.Check(Player)
+		TickProfiler.EndSection("Detection_ManualPriority")
+
 		TickProfiler.EndSection("Detections")
 
 		-- TODO: Implement remaining detection methods
@@ -122,6 +167,21 @@ local function OnCreateMove(cmd)
 
 		::continue::
 	end
+
+	-- Incremental garbage collection to prevent lag spikes
+	TickProfiler.BeginSection("GarbageCollection")
+	local memBefore = collectgarbage("count")
+
+	-- Run incremental GC step to prevent automatic full collection spikes
+	-- More aggressive settings to prevent 300MB buildup
+	if memBefore > 100 then -- Start GC when memory exceeds 100KB (was 200)
+		collectgarbage("step", 10) -- Step GC incrementally (10KB per step, was 5)
+	end
+
+	local memAfter = collectgarbage("count")
+	TickProfiler.EndSection("GarbageCollection")
+
+	profilerEnd()
 end
 
 --[[ Map Change Handler ]]

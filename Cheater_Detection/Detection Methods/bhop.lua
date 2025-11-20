@@ -39,9 +39,10 @@ function Bhop.Check(player)
 
 	-- Get steamID for tracking
 	local steamID = Common.GetSteamID64(player)
-	if not steamID then
+	if not Common.IsSteamID64(steamID) then
 		return false
 	end
+	steamID = tostring(steamID)
 
 	-- Skip if already marked as cheater
 	if Evidence.IsMarkedCheater(steamID) then

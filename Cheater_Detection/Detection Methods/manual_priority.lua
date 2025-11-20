@@ -25,7 +25,7 @@ local function shouldRun()
 end
 
 local function validatePlayer(player)
-	if not player or not player:IsValid() or not player:IsAlive() then
+	if not player or not player:IsValid() or not player:IsAlive() or player:IsDormant() then
 		return false
 	end
 	return true
@@ -42,7 +42,7 @@ function ManualPriority.Check(player)
 	end
 
 	local steamID = Common.GetSteamID64(player)
-	if not steamID then
+	if not Common.IsSteamID64(steamID) then
 		return false
 	end
 	steamID = tostring(steamID)

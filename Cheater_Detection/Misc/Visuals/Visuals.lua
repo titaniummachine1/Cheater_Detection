@@ -3,6 +3,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 local Visuals = {}
 
@@ -12,12 +13,16 @@ local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
 
 --[[ Functions ]]
 local function DrawVisuals()
+	TickProfiler.BeginSection("Draw_Visuals")
+
 	-- Check if feature is enabled
 	if not G.Menu or not G.Menu.Main or not G.Menu.Main.Cheater_Tags then
+		TickProfiler.EndSection("Draw_Visuals")
 		return
 	end
 
 	if engine.Con_IsVisible() or engine.IsGameUIVisible() then
+		TickProfiler.EndSection("Draw_Visuals")
 		return
 	end
 
@@ -67,6 +72,8 @@ local function DrawVisuals()
 
 		::continue::
 	end
+
+	TickProfiler.EndSection("Draw_Visuals")
 end
 
 --[[ Callbacks ]]

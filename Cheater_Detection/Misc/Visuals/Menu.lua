@@ -3,6 +3,7 @@ local Menu = {}
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 local Lib = Common.Lib
 local Fonts = Lib.UI.Fonts
@@ -18,6 +19,7 @@ else
 end
 
 local function DrawMenu()
+	TickProfiler.BeginSection("Draw_Menu")
 	-- Only draw when the Lmaobox menu is open
 	if not gui.IsMenuOpen() then
 		return
@@ -467,6 +469,8 @@ local function DrawMenu()
 
 	-- Always end the menu
 	TimMenu.End()
+
+	TickProfiler.EndSection("Draw_Menu")
 end
 
 --[[ Callbacks ]]
