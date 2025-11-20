@@ -157,26 +157,30 @@ end
 ---@param checkDormant boolean?
 ---@param skipEntity Entity? Optional entity to skip (e.g., the local player)
 function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
-	-- Check if the entity is a valid player
-	if
-		not entity
-		or not entity:IsValid()
-		or not entity:IsAlive()
-		or (checkDormant == true and entity:IsDormant() or checkDormant == nil and entity:IsDormant())
-		or entity:GetTeamNumber() == TEAM_SPECTATOR
-		or entity:GetTeamNumber() == TEAM_UNASSIGNED --can be simplified to entity:GetTeamNumber() > 1
-		or (skipEntity and entity == skipEntity)
-	then
-		return false -- Entity is not a valid player
+	-- Simple validation checks
+	if not entity or not entity:IsValid() or not entity:IsAlive() then
+		return false
 	end
 
-	-- Skip friends unless debug mode is enabled
-	if not G.Menu.Advanced.debug then
-		if checkFriend == true and Common.IsFriend(entity) then
-			return false -- Entity is a friend, skip
-		elseif checkFriend == nil and Common.IsFriend(entity) then
-			return false -- Entity is a friend, skip (default behavior)
-		end
+	-- Check dormancy (default is to reject dormant unless explicitly false)
+	if checkDormant ~= false and entity:IsDormant() then
+		return false
+	end
+
+	-- Reject spectators/unassigned
+	local team = entity:GetTeamNumber()
+	if team == TEAM_SPECTATOR or team == TEAM_UNASSIGNED then
+		return false
+	end
+
+	-- Skip specific entity if requested
+	if skipEntity and entity == skipEntity then
+		return false
+	end
+
+	-- Skip friends (default behavior unless debug enabled or explicitly disabled)
+	if not G.Menu.Advanced.debug and checkFriend ~= false and Common.IsFriend(entity) then
+		return false
 	end
 
 	return true -- Entity is a valid player

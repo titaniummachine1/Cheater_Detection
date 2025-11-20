@@ -422,7 +422,7 @@ end
 
 function WrappedPlayer:IsCheater()
 	local info = self:GetInfo()
-	return info and info.IsCheater == true or false
+	return info and info.IsCheater or false
 end
 
 function WrappedPlayer:MarkCheater(reason)
