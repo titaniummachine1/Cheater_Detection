@@ -80,21 +80,21 @@ local function getCheaterStatus(steamID)
 end
 
 local function isBot(player, steamID)
-	local basePlayer = player and player:GetBasePlayer()
-	if not basePlayer then
+	if not player then
 		return false
 	end
-	if basePlayer.IsBot and basePlayer:IsBot() then
+
+	-- Use client.GetPlayerInfo to check for bots (correct method)
+	local info = client.GetPlayerInfo(player:GetIndex())
+	if info and (info.IsBot or info.IsHLTV) then
 		return true
 	end
-	if basePlayer.IsFakeClient and basePlayer:IsFakeClient() then
+
+	-- Check if SteamID is invalid (bots have [U:1:0])
+	if steamID and steamID == "[U:1:0]" then
 		return true
 	end
-	if steamID then
-		---@diagnostic disable-next-line: undefined-field
-		local info = client.GetPlayerInfo(player:GetIndex())
-		return info and (info.IsBot or info.IsHLTV) or false
-	end
+
 	return false
 end
 
