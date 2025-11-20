@@ -129,9 +129,12 @@ local function OnCreateMove(cmd)
 			goto continue
 		end
 
-		-- Push history for detection analysis
+		-- Push history ONLY for non-dormant players (can't detect dormant anyway)
+		-- This saves ~16KB/tick by skipping useless record building
 		TickProfiler.BeginSection("HistoryPush")
-		Common.pushHistory(Player)
+		if not Player:IsDormant() then
+			Common.pushHistory(Player)
+		end
 		TickProfiler.EndSection("HistoryPush")
 
 		-- Perform detection checks
@@ -174,24 +177,12 @@ local function OnCreateMove(cmd)
 		::continue::
 	end
 
-	-- Incremental garbage collection to prevent lag spikes
+	-- Garbage Collection Monitoring (no manual tuning)
 	TickProfiler.BeginSection("GarbageCollection")
 	local memBefore = collectgarbage("count")
 
-	-- Run incremental GC step to prevent automatic full collection spikes
-	-- Smoother GC: Run small steps always, increase aggression only if very high
-	local stepSize = 20 -- Default small step (20KB) - steady state
-
-	-- Gradual ramp up to avoid "stop the world" spikes
-	if memBefore > 120000 then -- >120MB: High urgency
-		stepSize = 200 -- 200KB steps (was 1000)
-	elseif memBefore > 80000 then -- >80MB: Moderate urgency
-		stepSize = 100 -- 100KB steps (was 200)
-	elseif memBefore > 40000 then -- >40MB: Low urgency
-		stepSize = 50 -- 50KB steps (was 50)
-	end
-
-	collectgarbage("step", stepSize)
+	-- Let Lua's automatic GC handle collection
+	-- Manual tuning was causing saw-tooth pattern and unpredictable spikes
 
 	local memAfter = collectgarbage("count")
 	TickProfiler.EndSection("GarbageCollection")
