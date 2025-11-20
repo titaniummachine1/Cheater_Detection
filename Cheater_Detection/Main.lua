@@ -153,14 +153,17 @@ end)
 -- Clean up player data when they leave (centralized through evidence system)
 callbacks.Register("FireGameEvent", "CD_PlayerDisconnect", function(event)
 	if event:GetName() == "player_disconnect" then
-		local steamID = tostring(event:GetInt("userid"))
-		Evidence.OnPlayerLeave(steamID)
+		local networkID = event:GetString("networkid")
+		local steamID = Common.FromSteamid3To64(networkID)
+		if steamID then
+			Evidence.OnPlayerLeave(steamID)
+		end
 	elseif event:GetName() == "player_death" then
 		-- Opportunistic save when local player dies (dead time)
 		local localPlayer = entities.GetLocalPlayer()
 		local victimUserID = event:GetInt("userid")
 		local victim = entities.GetByUserID(victimUserID)
-		
+
 		if localPlayer and victim and localPlayer == victim then
 			Database.SaveDatabase()
 		end
