@@ -46,9 +46,7 @@ local function ResetCaches()
 	FastPlayers.AllUpdated = false
 	FastPlayers.TeammatesUpdated = false
 	FastPlayers.EnemiesUpdated = false
-	if WrappedPlayer and WrappedPlayer.PruneInactive then
-		WrappedPlayer.PruneInactive(globals.TickCount())
-	end
+	-- Note: Don't prune WrappedPlayer pool here - we do it when rebuilding
 end
 
 --[[ Public API ]]
@@ -99,6 +97,11 @@ function FastPlayers.GetAll(excludelocal)
 					end
 				end
 			end
+		end
+
+		-- Clean up disconnected players from wrapper pool
+		if WrappedPlayer and WrappedPlayer.PruneInactive then
+			WrappedPlayer.PruneInactive(globals.TickCount())
 		end
 
 		TickProfiler.EndSection("FP_Rebuild")
