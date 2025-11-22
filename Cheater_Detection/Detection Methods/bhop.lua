@@ -12,6 +12,7 @@ local Bhop = {}
 local DETECTION_NAME = "bhop"
 local EVIDENCE_WEIGHT_BASE = 5
 local DECAY_AMOUNT = 2.0 -- Weight to remove on failed bhop
+local GROUND_TICKS_FOR_DECAY = 2 -- Must be grounded for this many ticks before decay applies
 
 -- Per-player state tracking
 local playerBhopData = {}
@@ -21,6 +22,8 @@ local function initPlayerData(steamID)
 		playerBhopData[steamID] = {
 			lastOnGround = true, -- Track last ground state
 			lastVelocityZ = 0, -- Track last velocity for jump detection
+			groundedTicks = 0, -- Track how long player has been grounded
+			decayApplied = false, -- Track if we already applied decay for this ground period
 		}
 	end
 end
@@ -70,14 +73,27 @@ function Bhop.Check(player)
 	local onGround = (flags & FL_ONGROUND) ~= 0
 
 	if onGround then
-		-- Player on ground - reset bhop counter and apply decay if they were airborne before
-		if not data.lastOnGround then
+		-- Player on ground - increment grounded tick counter
+		data.groundedTicks = data.groundedTicks + 1
+
+		-- Only apply decay if they've been grounded long enough (stopped bhopping)
+		if data.groundedTicks >= GROUND_TICKS_FOR_DECAY and not data.decayApplied then
+			-- They stayed grounded for 2+ ticks - bhop sequence ended
 			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, DECAY_AMOUNT)
 
 			if G.Menu.Advanced.debug then
-				print(string.format("[Bhop] %s - Landed -%.1f evidence", player:GetName(), DECAY_AMOUNT))
+				print(
+					string.format(
+						"[Bhop] %s - Landed (stopped bhopping) -%.1f evidence",
+						player:GetName(),
+						DECAY_AMOUNT
+					)
+				)
 			end
+
+			data.decayApplied = true -- Mark decay as applied for this ground period
 		end
+
 		data.lastOnGround = true
 	else
 		-- Player in air - check if they jumped (velocity increased AND exact jump values)
@@ -98,7 +114,11 @@ function Bhop.Check(player)
 
 			return true
 		end
+
+		-- Reset ground tracking when leaving ground
 		data.lastOnGround = false
+		data.groundedTicks = 0
+		data.decayApplied = false
 	end
 
 	-- Store current velocity for next tick comparison
