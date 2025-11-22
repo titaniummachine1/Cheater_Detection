@@ -43,6 +43,8 @@ local function hydrateWrapper(wrapped, entity)
 	-- Initialize persistent cache tables if missing
 	if not wrapped._cache then
 		wrapped._cache = {}
+	end
+	if not wrapped._cacheTs then
 		wrapped._cacheTs = {}
 	end
 
@@ -70,19 +72,34 @@ local WrappedPlayerMT = {}
 -- This avoids clearing the cache table every tick (saving cycles)
 -- Old values stay in memory (minor leak) but are ignored if outdated
 local function cacheValue(self, key, computeFn)
+	-- Use rawget to bypass metatable and avoid name collisions with basePlayer methods
+	if type(self) ~= "table" then
+		return computeFn()
+	end
+
 	local currentTick = globals.TickCount()
-	local lastTick = self._cacheTs[key]
+
+	-- Access internal cache tables directly (bypassing metatable)
+	local cacheTs = rawget(self, "_cacheTs")
+	if not cacheTs then
+		rawset(self, "_cacheTs", {})
+		rawset(self, "_cache", {})
+		cacheTs = rawget(self, "_cacheTs")
+	end
+
+	local cache = rawget(self, "_cache")
+	local lastTick = cacheTs[key]
 
 	-- Check if valid for this tick
 	if lastTick == currentTick then
-		return self._cache[key]
+		return cache[key]
 	end
 
 	-- Compute and cache
 	local result = computeFn()
 	if result ~= nil then
-		self._cache[key] = result
-		self._cacheTs[key] = currentTick
+		cache[key] = result
+		cacheTs[key] = currentTick
 	end
 	return result
 end

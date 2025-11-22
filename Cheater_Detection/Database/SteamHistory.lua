@@ -39,6 +39,9 @@ local state = {
 	-- Error handling
 	errorCount = 0,
 	nextRetryTime = 0,
+	consecutiveFailures = 0,
+	maxConsecutiveFailures = 5, -- Disable after 5 failures at max cooldown
+	temporarilyDisabled = false,
 }
 
 --[[ Helper Functions ]]
@@ -325,15 +328,52 @@ local function handleBatchResponse(ids, contexts, responseTable)
 		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
 		string.format("[SteamHistory] Batch: %d flagged, %d clean", flagged, passed)
 	)
+
+	-- Success! Reset error count and consecutive failures
+	state.errorCount = 0
+	state.nextRetryTime = 0
+	state.consecutiveFailures = 0
+	state.scanning = false
 end
 
 local function handleError(message, contexts)
 	state.errorCount = state.errorCount + 1
+	state.consecutiveFailures = state.consecutiveFailures + 1
+
 	-- Exponential backoff: 10s, 20s, 40s, capped at 60s
-	local delay = math.min(60, 10 * math.pow(2, state.errorCount - 1))
+	local delay = math.min(60, 10 * (2 ^ (state.errorCount - 1)))
 	state.nextRetryTime = globals.RealTime() + delay
 
-	printInfo({ 255, 100, 100, 255 }, string.format("[SteamHistory] Error: %s. Retrying in %ds...", message, delay))
+	-- If we've hit max cooldown (60s) and failed too many times, disable temporarily
+	if delay >= 60 and state.consecutiveFailures >= state.maxConsecutiveFailures then
+		state.temporarilyDisabled = true
+		printInfo(
+			{ 255, 80, 80, 255 },
+			string.format(
+				"[SteamHistory] API appears to be down (%d consecutive failures). Disabling SteamHistory scanning.",
+				state.consecutiveFailures
+			)
+		)
+		printInfo(
+			{ 255, 120, 120, 255 },
+			"[SteamHistory] Re-enable manually via menu or use console command: steamhistory_rescan"
+		)
+		-- Clear pending queue to avoid wasting memory
+		state.pending = {}
+		state.scanning = false
+		return
+	end
+
+	printInfo(
+		{ 255, 100, 100, 255 },
+		string.format(
+			"[SteamHistory] Error: %s. Retrying in %ds... (%d/%d failures)",
+			message,
+			delay,
+			state.consecutiveFailures,
+			state.maxConsecutiveFailures
+		)
+	)
 
 	-- Requeue items
 	if contexts then
@@ -387,6 +427,7 @@ local function requestBatch()
 	-- Success! Reset error count
 	state.errorCount = 0
 	state.nextRetryTime = 0
+	state.consecutiveFailures = 0
 
 	handleBatchResponse(ids, contexts, decoded)
 	state.scanning = false
@@ -484,6 +525,10 @@ local function onCreateMove()
 		return
 	end
 
+	if state.temporarilyDisabled then
+		return
+	end
+
 	if not state.initialQueued then
 		queueCurrentPlayers()
 		state.initialQueued = true
@@ -511,6 +556,8 @@ end
 
 function SteamHistory.QueueRescan()
 	resetState(true)
+	state.temporarilyDisabled = false
+	printInfo({ 0, 200, 255, 255 }, "[SteamHistory] Re-enabled and queue reset")
 end
 
 --[[ Callback Registration ]]

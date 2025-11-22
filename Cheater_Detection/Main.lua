@@ -28,7 +28,6 @@ require("Cheater_Detection.Utils.HistoryConfig")
 require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
 --[[ Import database system ]]
 local Database = require("Cheater_Detection.Database.Database") --[[ Imported by: Main.lua ]]
-require("Cheater_Detection.Database.Fetcher") --[[ Imported by: Main.lua ]]
 
 --[[ Import evidence system ]]
 local Evidence = require("Cheater_Detection.Core.Evidence_system") --[[ Imported by: Main.lua ]]
