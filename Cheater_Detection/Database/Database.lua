@@ -361,7 +361,7 @@ function Database.LoadDatabase(silent, force)
 			finalCount = finalCount + 1
 		end
 		-- Always print the final count summary using printc in green, regardless of debug mode
-		Log(Database.LogLevel.SUCCESS, string.format("[DB] Database loaded with %d valid entries", finalCount))
+		Log(LogLevel.SUCCESS, string.format("[DB] Database loaded with %d valid entries", finalCount))
 	end
 end
 

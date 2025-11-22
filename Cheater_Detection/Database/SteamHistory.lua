@@ -36,6 +36,9 @@ local state = {
 	lastBatchTime = 0,
 	scanning = false,
 	apiKey = nil,
+	-- Error handling
+	errorCount = 0,
+	nextRetryTime = 0,
 }
 
 --[[ Helper Functions ]]
@@ -152,6 +155,8 @@ local function resetState(clearScanned)
 	state.initialQueued = false
 	state.lastBatchTime = 0
 	state.scanning = false
+	state.errorCount = 0
+	state.nextRetryTime = 0
 end
 
 local function queueCurrentPlayers()
@@ -312,8 +317,6 @@ local function handleBatchResponse(ids, contexts, responseTable)
 			flagPlayer(steamID, context, entry)
 		else
 			-- Player is clean or not found in SteamHistory
-			-- Do NOT add to database, just keep in runtime state.scanned
-			-- printInfo({ 0, 255, 0, 255 }, string.format("[SteamHistory] %s is clean", steamID))
 		end
 	end
 
@@ -322,6 +325,23 @@ local function handleBatchResponse(ids, contexts, responseTable)
 		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
 		string.format("[SteamHistory] Batch: %d flagged, %d clean", flagged, passed)
 	)
+end
+
+local function handleError(message, contexts)
+	state.errorCount = state.errorCount + 1
+	-- Exponential backoff: 10s, 20s, 40s, capped at 60s
+	local delay = math.min(60, 10 * math.pow(2, state.errorCount - 1))
+	state.nextRetryTime = globals.RealTime() + delay
+
+	printInfo({ 255, 100, 100, 255 }, string.format("[SteamHistory] Error: %s. Retrying in %ds...", message, delay))
+
+	-- Requeue items
+	if contexts then
+		for steamID, ctx in pairs(contexts) do
+			state.pending[steamID] = ctx
+		end
+	end
+	state.scanning = false
 end
 
 local function requestBatch()
@@ -340,29 +360,33 @@ local function requestBatch()
 
 	local url = string.format(API_TEMPLATE, cfg.ApiKey, table.concat(ids, ","))
 	local success, body = pcall(http.Get, url)
+
 	if not success or type(body) ~= "string" or body == "" then
-		printInfo({ 255, 100, 100, 255 }, string.format("[SteamHistory] Request failed: %s", tostring(body)))
-		-- Requeue the batch for another attempt later
-		if contexts then
-			for steamID, ctx in pairs(contexts) do
-				state.pending[steamID] = ctx
-			end
-		end
-		state.scanning = false
+		handleError("HTTP Request failed", contexts)
+		return
+	end
+
+	-- Check for HTML/Error responses
+	if
+		body:match("<html>")
+		or body:match("<title>")
+		or body:match("502 Bad Gateway")
+		or body:match("503 Service Unavailable")
+	then
+		handleError("API returned HTML (likely down)", contexts)
 		return
 	end
 
 	local ok, decoded = pcall(Json.decode, body)
 	if not ok or type(decoded) ~= "table" then
-		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] Failed to decode SteamHistory response")
-		if contexts then
-			for steamID, ctx in pairs(contexts) do
-				state.pending[steamID] = ctx
-			end
-		end
-		state.scanning = false
+		local preview = body:sub(1, 50):gsub("\n", " ")
+		handleError(string.format("JSON Decode failed (%s...)", preview), contexts)
 		return
 	end
+
+	-- Success! Reset error count
+	state.errorCount = 0
+	state.nextRetryTime = 0
 
 	handleBatchResponse(ids, contexts, decoded)
 	state.scanning = false
@@ -466,6 +490,11 @@ local function onCreateMove()
 	end
 
 	if state.scanning then
+		return
+	end
+
+	-- Check if we are in cooldown
+	if globals.RealTime() < state.nextRetryTime then
 		return
 	end
 
