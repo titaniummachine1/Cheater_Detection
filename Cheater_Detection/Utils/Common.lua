@@ -121,27 +121,14 @@ function Common.IsCheater(playerInfo)
 				break
 			end
 		end
-
-		-- Check if the target player was found
-		if targetPlayer then
-			steamId = assert(Common.GetSteamID64(targetPlayer), "Failed to get SteamID64 for player")
-		else
-			return false
+	elseif type(playerInfo) == "string" then
+		-- playerInfo is a SteamID64 string
+		steamId = playerInfo
+	elseif type(playerInfo) == "table" then
+		-- playerInfo is a playerInfo table
+		if playerInfo.SteamID then
+			steamId = steam.ToSteamID64(playerInfo.SteamID)
 		end
-	elseif type(playerInfo) == "number" then
-		-- If playerInfo is a number, convert it to a string and check its length
-		local steamIdStr = tostring(playerInfo)
-		if #steamIdStr == 17 then
-			steamId = playerInfo
-		else
-			return false
-		end
-	elseif playerInfo.GetIndex then
-		-- If playerInfo is a player entity, get its SteamID64
-		steamId = assert(Common.GetSteamID64(playerInfo), "Failed to get SteamID64 for player entity")
-	else
-		-- If playerInfo is neither a valid index, a valid SteamID64, nor a player entity, return false
-		return false
 	end
 
 	if not steamId then
@@ -149,8 +136,9 @@ function Common.IsCheater(playerInfo)
 	end
 
 	-- Check if the player is marked as a cheater based on various criteria
-	local strikes = G.PlayerData[steamId] and G.PlayerData[steamId].info.Strikes or 0
-	local isMarkedCheater = G.PlayerData[steamId] and G.PlayerData[steamId].info.isCheater
+	-- Use Evidence system instead of deprecated G.PlayerData.info fields
+	local Evidence = require("Cheater_Detection.Core.Evidence_system")
+	local isMarkedCheater = Evidence.IsMarkedCheater(steamId)
 	local inDatabase = G.DataBase[steamId] ~= nil
 	local priorityCheater = playerlist.GetPriority(steamId) == 10
 

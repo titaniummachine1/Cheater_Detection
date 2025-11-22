@@ -141,14 +141,6 @@ local function OnCreateMove(cmd)
 
 		TickProfiler.EndSection("Detections")
 
-		-- TODO: Implement remaining detection methods
-		--warp_recharge_check(Player)
-		--triggerbot_check(Player)
-		--smooth_aimbot_check(Player)
-		--plain_aimbot_check(Player)
-		--strafe_bot_check(Player)
-		--bot_walk_check(Player)
-
 		::continue::
 	end
 

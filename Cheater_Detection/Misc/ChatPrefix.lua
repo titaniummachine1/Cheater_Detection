@@ -98,12 +98,10 @@ local function GetCheaterStatus(player)
 	end
 
 	-- Check if has some evidence (suspicious)
-	if G.PlayerData[steamID] and G.PlayerData[steamID].Evidence then
-		local evidence = G.PlayerData[steamID].Evidence
-		if evidence.TotalScore and evidence.TotalScore > 0 then
-			-- Yellow for suspicious
-			return "SUSPICIOUS", { 255, 255, 0 }
-		end
+	local evidence = Evidence.GetEvidence(steamID)
+	if evidence and evidence.TotalScore and evidence.TotalScore > 0 then
+		-- Yellow for suspicious (has evidence but not marked yet)
+		return "SUSPICIOUS", { 255, 255, 0 }
 	end
 
 	return nil, { 255, 255, 255 }
@@ -152,7 +150,7 @@ local function OnUserMessage(msg)
 		if not client.ChatPrintf(messageText) then
 			print("[CD] Failed to send system message")
 		end
-		
+
 		-- Wipe original payload so nothing extra prints
 		ClearBuffer(bf)
 		bf:SetCurBit(0)

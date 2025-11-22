@@ -11,6 +11,7 @@ G.AutoVote = {
 
 --[[Shared Variables]]
 
-G.PlayerData = {}
+-- G.PlayerData is initialized by PlayerState.lua (line 14)
+-- It's an alias for PlayerState.ActivePlayers
 
 return G
