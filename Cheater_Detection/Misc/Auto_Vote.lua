@@ -10,12 +10,8 @@ local Logger = require("Cheater_Detection.Utils.Logger")
 
 local LOG_CATEGORY = "AutoVote"
 
-local bitLib = bit or bit32
-
+-- Bit operations fallback (bit library is often nil in Lmaobox)
 local function shiftRight(value, bits)
-	if bitLib and bitLib.rshift then
-		return bitLib.rshift(value, bits)
-	end
 	return math.floor(value / (2 ^ bits))
 end
 
@@ -198,7 +194,18 @@ end
 
 local function shouldVoteAutomatically()
 	local menu = getMenu()
-	return menu and menu.Autovote and menu.AutovoteAutoCast ~= false
+	local result = menu and menu.Autovote and menu.AutovoteAutoCast ~= false
+	if not result then
+		logDebug(
+			string.format(
+				"Auto-cast disabled: menu=%s, Autovote=%s, AutovoteAutoCast=%s",
+				tostring(menu ~= nil),
+				tostring(menu and menu.Autovote),
+				tostring(menu and menu.AutovoteAutoCast)
+			)
+		)
+	end
+	return result
 end
 
 local function issueVote(target)
@@ -301,6 +308,17 @@ local function handleVoteStart(msg)
 	end
 
 	local targetEntity = entities.GetByIndex(targetIdx)
+	logDebug(
+		string.format(
+			"VoteStart: voteIdx=%d, team=%d, callerIdx=%d, targetIdx=%d, disp=%s",
+			voteIdx,
+			team,
+			callerIdx,
+			targetIdx,
+			dispStr
+		)
+	)
+
 	local option = determineVoteOptionForEntity(targetEntity)
 	if not option then
 		logDebug("VoteStart received but no eligible automatic response")
@@ -308,13 +326,11 @@ local function handleVoteStart(msg)
 	end
 
 	sendVote(voteIdx, option)
-	local targetName = targetEntity and targetEntity:GetName() or "<unknown>"
-	local voteType = "YES"
 	logInfo(
 		string.format(
 			"Auto voted %s on %s (caller idx %d, team %d, reason %s)",
-			voteType,
-			targetName,
+			option == VOTE_OPTION_YES and "YES" or "NO",
+			client.GetPlayerNameByIndex(targetIdx) or "Unknown",
 			callerIdx,
 			team,
 			dispStr
@@ -359,8 +375,18 @@ function AutoVote.OnCreateMove()
 
 	local target = pickNextTarget()
 	if not target then
+		-- logDebug("No target to votekick")  -- Too spammy
 		return
 	end
+
+	logDebug(
+		string.format(
+			"Picked target: %s [%s] (group: %s)",
+			target.player:GetName(),
+			target.player:GetSteamID64(),
+			target.group
+		)
+	)
 
 	if issueVote(target) then
 		logDebug("Attempted to initiate vote; awaiting VoteStart message")

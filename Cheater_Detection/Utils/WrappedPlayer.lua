@@ -18,9 +18,11 @@ local WrappedPlayer = {}
 local WrapperPool = {}
 
 local function hydrateWrapper(wrapped, entity)
+	local currentIndex = entity:GetIndex()
+
 	-- Optimization: Reuse existing WPlayer if it matches the entity index
-	-- We assume 'entity' is valid because it came from FindByClass
-	if wrapped._basePlayer then
+	-- We use a cached integer index to avoid function call overhead
+	if wrapped._basePlayer and wrapped._cachedIndex == currentIndex then
 		-- Update the raw entity reference (in case userdata changed)
 		wrapped._rawEntity = entity
 		wrapped._lastSeenTick = globals.TickCount()
@@ -35,18 +37,26 @@ local function hydrateWrapper(wrapped, entity)
 	-- Minimal per-instance data (cache created on-demand)
 	wrapped._basePlayer = basePlayer
 	wrapped._rawEntity = entity
-	wrapped._cacheTick = -1
+	wrapped._cachedIndex = currentIndex -- Cache the index for fast checks
 	wrapped._lastSeenTick = globals.TickCount()
 
-	-- Get and cache SteamID once
-	local steamID = Common.GetSteamID64(basePlayer)
-	if steamID then
-		steamID = tostring(steamID)
-		wrapped._steamID64 = steamID
+	-- Initialize persistent cache tables if missing
+	if not wrapped._cache then
+		wrapped._cache = {}
+		wrapped._cacheTs = {}
+	end
 
-		-- Attach PlayerState only if needed
-		if PlayerState then
-			wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
+	-- Get and cache SteamID once
+	if not wrapped._steamID64 then
+		local steamID = Common.GetSteamID64(basePlayer)
+		if steamID then
+			steamID = tostring(steamID)
+			wrapped._steamID64 = steamID
+
+			-- Attach PlayerState only if needed
+			if PlayerState then
+				wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
+			end
 		end
 	end
 
@@ -56,14 +66,23 @@ end
 -- Instance metatable that forwards unknown lookups to the base WPlayer
 local WrappedPlayerMT = {}
 
-local function cacheValue(cache, key, computeFn)
-	local cached = cache[key]
-	if cached ~= nil then
-		return cached
+-- Optimized cacheValue using per-key timestamps
+-- This avoids clearing the cache table every tick (saving cycles)
+-- Old values stay in memory (minor leak) but are ignored if outdated
+local function cacheValue(self, key, computeFn)
+	local currentTick = globals.TickCount()
+	local lastTick = self._cacheTs[key]
+
+	-- Check if valid for this tick
+	if lastTick == currentTick then
+		return self._cache[key]
 	end
+
+	-- Compute and cache
 	local result = computeFn()
 	if result ~= nil then
-		cache[key] = result
+		self._cache[key] = result
+		self._cacheTs[key] = currentTick
 	end
 	return result
 end
@@ -113,19 +132,18 @@ function WrappedPlayer.FromEntity(entity)
 		return nil
 	end
 
-	local index = entity:GetIndex()
-	if not index then
-		return nil
-	end
+	-- Use SteamID64 as the primary key for caching if available
+	local steamID = Common.GetSteamID64(entity)
+	local key = steamID and tostring(steamID) or entity:GetIndex()
 
-	local wrapped = WrapperPool[index]
+	local wrapped = WrapperPool[key]
 	if not wrapped then
 		wrapped = setmetatable({}, WrappedPlayerMT)
-		WrapperPool[index] = wrapped
+		WrapperPool[key] = wrapped
 	end
 
 	if not hydrateWrapper(wrapped, entity) then
-		WrapperPool[index] = nil
+		WrapperPool[key] = nil
 		return nil
 	end
 
@@ -145,22 +163,9 @@ function WrappedPlayer:GetRawEntity()
 	return self._rawEntity
 end
 
---- Resets per-tick cache (called automatically via Cache())
+--- Resets per-tick cache (No-op now, handled by timestamps)
 function WrappedPlayer:ResetCache()
-	self._cache = {}
-	self._cacheTick = globals.TickCount()
-end
-
---- Retrieve a per-tick cache table unique to this wrapper
----@return table
-function WrappedPlayer:Cache()
-	local tick = globals.TickCount()
-	if self._cacheTick ~= tick then
-		-- Lazy-init cache (save memory if never used)
-		self._cache = {}
-		self._cacheTick = tick
-	end
-	return self._cache
+	-- No-op: We use timestamps now
 end
 
 --- Returns the base WPlayer from lnxLib
@@ -273,8 +278,7 @@ function WrappedPlayer:IsAlive()
 end
 
 function WrappedPlayer:IsDormant()
-	local cache = self:Cache()
-	return cacheValue(cache, "isDormant", function()
+	return cacheValue(self, "isDormant", function()
 		return self._rawEntity and self._rawEntity:IsDormant() or true
 	end)
 end
@@ -294,8 +298,7 @@ end
 --- Returns the view offset from the player's origin as a Vector3
 ---@return Vector3 The player's view offset
 function WrappedPlayer:GetViewOffset()
-	local cache = self:Cache()
-	return cacheValue(cache, "viewOffset", function()
+	return cacheValue(self, "viewOffset", function()
 		return self._basePlayer:GetPropVector("localdata", "m_vecViewOffset[0]")
 	end)
 end
@@ -303,8 +306,7 @@ end
 --- Returns the player's eye position in world coordinates
 ---@return Vector3 The player's eye position
 function WrappedPlayer:GetEyePos()
-	local cache = self:Cache()
-	return cacheValue(cache, "eyePos", function()
+	return cacheValue(self, "eyePos", function()
 		local origin = self:GetAbsOrigin()
 		local offset = self:GetViewOffset()
 		if origin and offset then
@@ -317,8 +319,7 @@ end
 --- Returns the player's eye angles as an EulerAngles object
 ---@return EulerAngles The player's eye angles
 function WrappedPlayer:GetEyeAngles()
-	local cache = self:Cache()
-	return cacheValue(cache, "eyeAngles", function()
+	return cacheValue(self, "eyeAngles", function()
 		local ang = self._basePlayer:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
 		if ang then
 			return EulerAngles(ang.x, ang.y, ang.z)
@@ -328,15 +329,13 @@ function WrappedPlayer:GetEyeAngles()
 end
 
 function WrappedPlayer:GetAbsOrigin()
-	local cache = self:Cache()
-	return cacheValue(cache, "absOrigin", function()
+	return cacheValue(self, "absOrigin", function()
 		return self._basePlayer:GetAbsOrigin()
 	end)
 end
 
 function WrappedPlayer:GetVelocity()
-	local cache = self:Cache()
-	return cacheValue(cache, "velocity", function()
+	return cacheValue(self, "velocity", function()
 		return self._basePlayer:EstimateAbsVelocity()
 	end)
 end
@@ -344,8 +343,7 @@ end
 --- Returns the world position the player is looking at by tracing a ray
 ---@return Vector3|nil The look position or nil if trace failed
 function WrappedPlayer:GetLookPos()
-	local cache = self:Cache()
-	return cacheValue(cache, "lookPos", function()
+	return cacheValue(self, "lookPos", function()
 		local eyePos = self:GetEyePos()
 		local eyeAng = self:GetEyeAngles()
 		if not eyePos or not eyeAng then
@@ -365,8 +363,7 @@ function WrappedPlayer:GetActiveWeapon()
 end
 
 function WrappedPlayer:GetActiveWeaponID()
-	local cache = self:Cache()
-	return cacheValue(cache, "weaponID", function()
+	return cacheValue(self, "weaponID", function()
 		local weapon = self:GetActiveWeapon()
 		if weapon and weapon.GetWeaponID then
 			return weapon:GetWeaponID()
@@ -376,8 +373,7 @@ function WrappedPlayer:GetActiveWeaponID()
 end
 
 function WrappedPlayer:GetWeaponChargeData()
-	local cache = self:Cache()
-	return cacheValue(cache, "weaponCharge", function()
+	return cacheValue(self, "weaponCharge", function()
 		local weapon = self:GetActiveWeapon()
 		if not weapon then
 			return nil

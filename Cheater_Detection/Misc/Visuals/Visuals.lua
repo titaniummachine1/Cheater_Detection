@@ -4,6 +4,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
+local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 
 local Visuals = {}
 
@@ -29,7 +30,8 @@ local function DrawVisuals()
 	draw.Color(255, 255, 255, 255)
 	draw.SetFont(tahoma_bold)
 
-	for _, entity in ipairs(G.players) do
+	local players = FastPlayers.GetAll()
+	for _, entity in ipairs(players) do
 		local valid = entity and entity:IsValid() and not entity:IsDormant() and entity:IsAlive()
 		if not valid then
 			goto continue
