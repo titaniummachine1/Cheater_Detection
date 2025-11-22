@@ -298,6 +298,11 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
 	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
 	evidence.Dirty = true
+
+	-- Recalculate total and check if player should be marked
+	recalcTotalScore(evidence)
+	tryMarkCheater(steamID, evidence, state)
+
 	enqueueForDecay(steamID)
 end
 
