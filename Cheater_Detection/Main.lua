@@ -45,6 +45,7 @@ local DuckSpeed = require("Cheater_Detection.Detection Methods.Duck_Speed")
 local FakeLag = require("Cheater_Detection.Detection Methods.fake_lag")
 local WarpDT = require("Cheater_Detection.Detection Methods.warp_dt")
 local ManualPriority = require("Cheater_Detection.Detection Methods.manual_priority")
+local SilentAimbot = require("Cheater_Detection.Detection Methods.silent_aimbot")
 
 --[[ Variables ]]
 local WPlayer, PR = Common.WPlayer, Common.PlayerResource
@@ -139,6 +140,10 @@ local function OnCreateMove(cmd)
 		ManualPriority.Check(Player)
 		TickProfiler.EndSection("Detection_ManualPriority")
 
+		TickProfiler.BeginSection("Detection_SilentAimbot")
+		SilentAimbot.Check(Player)
+		TickProfiler.EndSection("Detection_SilentAimbot")
+
 		TickProfiler.EndSection("Detections")
 
 		::continue::
@@ -203,6 +208,18 @@ local function onGameOver(event)
 	Database.SaveDatabase()
 end
 
+-- Handler: Silent aimbot shot detection
+local function onPlayerHurt(event)
+	local shooterUserID = event:GetInt("attacker")
+	local victimUserID = event:GetInt("userid")
+	local shooter = entities.GetByUserID(shooterUserID)
+	local victim = entities.GetByUserID(victimUserID)
+
+	if shooter and victim then
+		SilentAimbot.OnPlayerHurt(shooter, victim)
+	end
+end
+
 --[[ Event Registration - Centralized via EventManager ]]
 
 -- Main detection loop
@@ -222,4 +239,5 @@ EventManager.Register("FireGameEvent", "Main_RoundWin", onRoundEnd, "teamplay_ro
 EventManager.Register("FireGameEvent", "Main_RoundStalemate", onRoundEnd, "teamplay_round_stalemate")
 EventManager.Register("FireGameEvent", "Main_GameOver", onGameOver, "teamplay_game_over")
 EventManager.Register("FireGameEvent", "Main_TFGameOver", onGameOver, "tf_game_over")
+EventManager.Register("FireGameEvent", "Main_PlayerHurt", onPlayerHurt, "player_hurt")
 EventManager.Register("FireGameEvent", "Main_ArenaRoundStart", onRoundEnd, "arena_round_start")

@@ -1,46 +1,36 @@
---[[
-    Silent Aimbot Detection using Viewangle Extrapolation
-    Detects silent aim by analyzing if player's aim trajectory "bridges over" aimbot snap
-]]
+--[[ Cheater Detection - Silent Aimbot Detection (Viewangle Extrapolation) ]]
 
+--[[ Imports ]]
+local Common = require("Cheater_Detection.Utils.Common")
+local G = require("Cheater_Detection.Utils.Globals")
+local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Quaternion = require("Cheater_Detection.Utils.Quaternion")
 
+--[[ Module Declaration ]]
 local SilentAimbot = {}
 
--- ============================================================================
--- Configuration
--- ============================================================================
+--[[ Configuration ]]
+local DETECTION_NAME = "silent_aimbot"
+local EVIDENCE_WEIGHT_BASE = 15 -- Moderate-high weight for confirmed detections
+local EVIDENCE_WEIGHT_IMPOSSIBLE = 50 -- Max weight for 90°+ impossible shots
 
 local CONFIG = {
-	MIN_FLICK_DELTA = 0.7, -- Minimum angle change to consider as flick (degrees)
-	PERFECT_AIM_TOLERANCE = 0.2, -- How close to perfect aim to trigger check (degrees)
-	TRAJECTORY_MAINTAINED = 1.0, -- Max FoV delta to consider trajectory maintained (degrees)
-	TRAJECTORY_BROKEN = 5.0, -- Min FoV delta to consider trajectory broken (degrees)
-	MAX_HISTORY_SIZE = 5, -- Only store 5 ticks, check on 6th (current)
-	POS_HISTORY_SIZE = 2, -- Track 2 ticks of hitbox positions
-	EXTRAPOLATE_TICKS = 2, -- How far ahead to extrapolate (ticks ahead from tick 5 to current)
+	MIN_FLICK_DELTA = 0.7, -- Minimum flick to trigger check
+	PERFECT_AIM_TOLERANCE = 0.2, -- How close to perfect aim
+	TRAJECTORY_MAINTAINED = 1.0, -- Max delta for maintained trajectory
+	TRAJECTORY_BROKEN = 5.0, -- Min delta for broken trajectory
+	IMPOSSIBLE_FLICK = 90.0, -- Instant catch for shooting behind
+	MAX_HISTORY_SIZE = 5, -- Track 5 ticks per player
+	POS_HISTORY_SIZE = 2, -- Track 2 ticks of positions
+	EXTRAPOLATE_TICKS = 2, -- Predict 2 ticks ahead
 }
 
--- ============================================================================
--- Data Storage
--- ============================================================================
-
--- Per-player angle history: 5 ticks max
+--[[ Per-Player State ]]
 local playerAngleHistory = {} -- [idx] = {{pitch, yaw, roll, tick, shotFired}, ...}
-
--- Per-player position history: 2 ticks max
 local playerPosHistory = {} -- [idx] = {{headPos, bodyPos, tick}, ...}
+local lastShot = { shooter = nil, victim = nil, tick = 0 }
 
--- Track last shot data
-local lastShot = {
-	shooter = nil,
-	victim = nil,
-	tick = 0,
-}
-
--- ============================================================================
--- Helper Functions
--- ============================================================================
+--[[ Helper Functions ]]
 
 -- Calculate FoV between two angles
 local function angleFoV(from, to)
@@ -76,7 +66,6 @@ local function addAngleHistory(idx, angles, tick, shotFired)
 		shotFired = shotFired or false,
 	})
 
-	-- Keep only last 5
 	while #playerAngleHistory[idx] > CONFIG.MAX_HISTORY_SIZE do
 		table.remove(playerAngleHistory[idx], 1)
 	end
@@ -94,122 +83,143 @@ local function addPosHistory(idx, headPos, bodyPos, tick)
 		tick = tick,
 	})
 
-	-- Keep only last 2
 	while #playerPosHistory[idx] > CONFIG.POS_HISTORY_SIZE do
 		table.remove(playerPosHistory[idx], 1)
 	end
 end
 
--- ============================================================================
--- Detection Logic
--- ============================================================================
-
--- Check if player is using silent aimbot
--- Returns: isAimbot (bool), confidence (0-1), reason (string)
+-- Main detection logic
 local function checkSilentAimbot(shooterIdx, victimIdx, currentAngles)
 	local history = playerAngleHistory[shooterIdx]
 
-	-- Need full history (5 ticks) + current tick
 	if not history or #history < 5 then
 		return false, 0, "Insufficient history"
 	end
 
-	-- Check if last tick (tick 5) was a shot
 	if not history[5].shotFired then
 		return false, 0, "No shot fired last tick"
 	end
 
-	-- Get victim position from history
 	local victimPosData = playerPosHistory[victimIdx]
 	if not victimPosData or #victimPosData < 1 then
 		return false, 0, "No victim position data"
 	end
 
 	local victimHeadPos = victimPosData[#victimPosData].headPos
-	local victimBodyPos = victimPosData[#victimPosData].bodyPos
-
-	-- STEP 1: Flick Detection (tick 4 → tick 5)
 	local tick4Angle = history[4]
-	local tick5Angle = history[5] -- Shot tick
+	local tick5Angle = history[5]
 	local flickDelta = angleFoV(tick4Angle, tick5Angle)
 
-	if flickDelta < CONFIG.MIN_FLICK_DELTA then
-		return false, 0, "Flick too small: " .. string.format("%.2f", flickDelta)
+	-- INSTANT CATCH: Shooting behind (>=90° flick)
+	if flickDelta >= CONFIG.IMPOSSIBLE_FLICK then
+		return true, 1.0, string.format("Impossible shot (%.0f° flick)", flickDelta)
 	end
 
-	-- STEP 2: Perfect Aim Check (did tick 5 aim at victim's head?)
-	local shooterPos = victimPosData[#victimPosData].bodyPos -- Use shooter's recorded position (approximate)
+	if flickDelta < CONFIG.MIN_FLICK_DELTA then
+		return false, 0, nil
+	end
+
+	-- Check perfect aim (simplified - just check head FoV)
+	local shooterPos = victimPosData[#victimPosData].bodyPos
 	local perfectHeadAngle = angleToPosition(shooterPos, victimHeadPos)
 	local aimFoV = angleFoV(tick5Angle, perfectHeadAngle)
 
 	if aimFoV > CONFIG.PERFECT_AIM_TOLERANCE then
-		-- Also check body as fallback
-		local perfectBodyAngle = angleToPosition(shooterPos, victimBodyPos)
-		local bodyFoV = angleFoV(tick5Angle, perfectBodyAngle)
-
-		if bodyFoV > CONFIG.PERFECT_AIM_TOLERANCE then
-			return false,
-				0,
-				"Aim not on target: head=" .. string.format("%.2f", aimFoV) .. "° body=" .. string.format(
-					"%.2f",
-					bodyFoV
-				) .. "°"
-		end
+		return false, 0, nil
 	end
 
-	-- STEP 3: Extrapolate using ticks 1-4
+	-- Extrapolate trajectory
 	local extrapolatedAngle =
 		Quaternion.extrapolateAngle({ history[1], history[2], history[3], history[4] }, CONFIG.EXTRAPOLATE_TICKS)
 
 	if not extrapolatedAngle then
-		return false, 0, "Extrapolation failed"
+		return false, 0, nil
 	end
 
-	-- STEP 4: Compare extrapolation to current angle (tick 6)
 	local trajectoryDelta = angleFoV(extrapolatedAngle, currentAngles)
 
-	-- STEP 5: Determine if trajectory was maintained
-	local trajectoryMaintained = trajectoryDelta < CONFIG.TRAJECTORY_MAINTAINED
-	local trajectoryBroken = trajectoryDelta > CONFIG.TRAJECTORY_BROKEN
-
-	if trajectoryBroken then
-		return false, 0, "Trajectory broken: " .. string.format("%.2f", trajectoryDelta) .. "° (normal flick)"
+	if trajectoryDelta > CONFIG.TRAJECTORY_BROKEN then
+		return false, 0, nil -- Normal flick
 	end
 
-	if not trajectoryMaintained then
-		return false, 0, "Trajectory uncertain: " .. string.format("%.2f", trajectoryDelta) .. "°"
+	if trajectoryDelta >= CONFIG.TRAJECTORY_MAINTAINED then
+		return false, 0, nil -- Uncertain
 	end
 
-	-- STEP 6: Calculate confidence score (exponential weighting)
-	-- Small flicks that return to trajectory = very suspicious
-	-- flickDelta range: 0.7° to 20°
+	-- Calculate confidence
 	local normalizedFlick = (flickDelta - CONFIG.MIN_FLICK_DELTA) / 5.0
 	local flickWeight = math.exp(normalizedFlick)
-
-	-- Trajectory weight: how well did they return to predicted path?
 	local trajectoryWeight = 1.0 - (trajectoryDelta / CONFIG.TRAJECTORY_MAINTAINED)
-
-	-- Combined confidence
 	local confidence = math.min(1.0, (flickWeight * trajectoryWeight) / 10.0)
 
-	local reason = string.format(
-		"Flick: %.2f° | Aim: %.2f° | Trajectory: %.2f° | Confidence: %.1f%%",
-		flickDelta,
-		aimFoV,
-		trajectoryDelta,
-		confidence * 100
-	)
+	if confidence > 0.5 then
+		local reason =
+			string.format("Flick: %.1f° | Aim: %.2f° | Trajectory: %.2f°", flickDelta, aimFoV, trajectoryDelta)
+		return true, confidence, reason
+	end
 
-	-- Flag as aimbot if confidence > 0.5
-	return confidence > 0.5, confidence, reason
+	return false, 0, nil
 end
 
--- ============================================================================
--- Public API
--- ============================================================================
+--[[ Public API ]]
 
--- Called on player_hurt event
-function SilentAimbot.onPlayerHurt(shooterEntity, victimEntity)
+-- Main check function (called every tick from Main.lua)
+function SilentAimbot.Check(player)
+	-- Skip if detection disabled
+	if not G.Menu.Advanced or not G.Menu.Advanced.SilentAimbot then
+		return false
+	end
+
+	-- Validate player
+	if not Common.IsValidPlayer(player, true, false) then
+		return false
+	end
+
+	local steamID = Common.GetSteamID64(player)
+	if not Common.IsSteamID64(steamID) then
+		return false
+	end
+	steamID = tostring(steamID)
+
+	if Evidence.IsMarkedCheater(steamID) then
+		return false
+	end
+
+	local playerIdx = player:GetIndex()
+	local currentTick = globals.TickCount()
+	local eyeAngles = player:GetEyeAngles()
+	local headPos = player:GetHitboxPos(1)
+	local bodyPos = player:GetAbsOrigin()
+
+	-- Update position history
+	addPosHistory(playerIdx, headPos, bodyPos, currentTick)
+
+	-- Check if last tick was a shot
+	local isAimbot, confidence, reason = false, 0, nil
+	if lastShot.shooter == playerIdx and lastShot.tick == (currentTick - 1) then
+		isAimbot, confidence, reason = checkSilentAimbot(playerIdx, lastShot.victim, eyeAngles)
+	end
+
+	-- Add current angle to history
+	addAngleHistory(playerIdx, eyeAngles, currentTick, false)
+
+	-- Add evidence if detected
+	if isAimbot then
+		local weight = (confidence >= 1.0) and EVIDENCE_WEIGHT_IMPOSSIBLE or EVIDENCE_WEIGHT_BASE
+		Evidence.AddEvidence(steamID, DETECTION_NAME, weight * confidence)
+
+		if G.Menu.Advanced.debug then
+			print(string.format("[SilentAim] %s - %s (confidence: %.0f%%)", player:GetName(), reason, confidence * 100))
+		end
+
+		return true
+	end
+
+	return false
+end
+
+-- Event handler for player_hurt (called from Main.lua event handler)
+function SilentAimbot.OnPlayerHurt(shooterEntity, victimEntity)
 	if not shooterEntity or not victimEntity then
 		return
 	end
@@ -221,40 +231,10 @@ function SilentAimbot.onPlayerHurt(shooterEntity, victimEntity)
 	lastShot.victim = victimIdx
 	lastShot.tick = globals.TickCount()
 
-	-- Flag the current last tick in history as a shot
+	-- Flag the last tick in history as a shot
 	if playerAngleHistory[shooterIdx] and #playerAngleHistory[shooterIdx] > 0 then
 		playerAngleHistory[shooterIdx][#playerAngleHistory[shooterIdx]].shotFired = true
 	end
-end
-
--- Called every tick to update history and check for aimbot
--- Returns: isAimbot (bool), confidence (0-1), reason (string)
-function SilentAimbot.onTick(entity, eyeAngles, eyePos, headPos, bodyPos)
-	local idx = entity:GetIndex()
-	local currentTick = globals.TickCount()
-
-	-- Update position history
-	addPosHistory(idx, headPos, bodyPos, currentTick)
-
-	-- Check for aimbot BEFORE adding to history
-	-- This happens on tick 6, using tick 5 as shot tick
-	local isAimbot, confidence, reason = false, 0, ""
-
-	if lastShot.shooter == idx and lastShot.tick == (currentTick - 1) then
-		-- Last tick was a shot, check now
-		isAimbot, confidence, reason = checkSilentAimbot(idx, lastShot.victim, eyeAngles)
-	end
-
-	-- Add current angle to history (will be tick 5 next time)
-	addAngleHistory(idx, eyeAngles, currentTick, false)
-
-	return isAimbot, confidence, reason
-end
-
--- Clear history for a player
-function SilentAimbot.clearPlayer(idx)
-	playerAngleHistory[idx] = nil
-	playerPosHistory[idx] = nil
 end
 
 return SilentAimbot
