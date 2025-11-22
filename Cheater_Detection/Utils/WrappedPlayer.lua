@@ -116,6 +116,7 @@ end
 function WrappedPlayerMT.__index(self, key)
 	-- 1) Custom helpers defined on WrappedPlayer
 	local custom = WrappedPlayer[key]
+
 	if custom ~= nil then
 		return custom
 	end
@@ -202,38 +203,21 @@ end
 --- Get SteamID64 for this player object
 ---@return string|number The player's SteamID64
 function WrappedPlayer:GetSteamID64()
-	if G.Menu.Advanced.debug then
-		print(string.format("[WrappedPlayer] GetSteamID64 called on %s", tostring(self)))
+	-- Use rawget to access the cached value directly
+	-- This is CRITICAL to prevent infinite recursion if self._steamID64 triggers __index
+	local cached = rawget(self, "_steamID64")
+	if cached then
+		return cached
 	end
 
-	if not self._steamID64 then
-		local steamID = Common.GetSteamID64(self._basePlayer)
-		if G.Menu.Advanced.debug then
-			print(
-				string.format(
-					"[WrappedPlayer] Common.GetSteamID64 returned type: %s, value: %s",
-					type(steamID),
-					tostring(steamID)
-				)
-			)
-		end
-
-		if steamID then
-			self._steamID64 = steamID
-		end
+	-- If not in cache (which shouldn't happen often due to hydrateWrapper), try to fetch it
+	local steamID = Common.GetSteamID64(self._basePlayer)
+	if steamID then
+		self._steamID64 = steamID
+		return steamID
 	end
 
-	if G.Menu.Advanced.debug then
-		print(
-			string.format(
-				"[WrappedPlayer] Returning type: %s, value: %s",
-				type(self._steamID64),
-				tostring(self._steamID64)
-			)
-		)
-	end
-
-	return self._steamID64
+	return nil
 end
 
 --- Get SteamID3 for this player object
