@@ -186,6 +186,11 @@ function PlayerState.TrimToActive(activeSet)
 
 	for steamID in pairs(ActivePlayers) do
 		if not activeSet[steamID] then
+			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+				local evidenceScore = (ActivePlayers[steamID].Evidence and ActivePlayers[steamID].Evidence.TotalScore)
+					or 0
+				print(string.format("[PlayerState] TRIMMING %s (Evidence: %.1f)", steamID, evidenceScore))
+			end
 			ActivePlayers[steamID] = nil
 		end
 	end

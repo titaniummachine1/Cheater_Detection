@@ -253,10 +253,17 @@ end
 ---@param state table Player state
 local function tryMarkCheater(steamID, evidence, state)
 	if not evidence or evidence.MarkedAsCheater then
+		if G.Menu.Advanced.debug and evidence and evidence.MarkedAsCheater then
+			print(string.format("[Evidence] %s already marked as cheater", steamID))
+		end
 		return
 	end
 
 	local threshold = Evidence.GetThreshold()
+	if G.Menu.Advanced.debug then
+		print(string.format("[Evidence] tryMarkCheater: %s has %.1f / %.1f", steamID, evidence.TotalScore, threshold))
+	end
+	
 	if evidence.TotalScore < threshold then
 		return
 	end

@@ -104,11 +104,20 @@ local function OnCreateMove(cmd)
 
 		-- Build set of currently active players
 		local activeSet = {}
+		local count = 0
 		for _, Player in ipairs(allPlayers) do
 			local sid = Player:GetSteamID64()
 			if sid then
 				activeSet[tostring(sid)] = true
+				count = count + 1
+				if G.Menu.Advanced.debug then
+					print(string.format("[Main] activeSet includes: %s", tostring(sid)))
+				end
 			end
+		end
+
+		if G.Menu.Advanced.debug then
+			print(string.format("[Main] activeSet has %d players, calling TrimToActive", count))
 		end
 
 		-- Trim PlayerState to only active players
