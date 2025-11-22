@@ -97,15 +97,19 @@ function PlayerState.Get(steamID)
 	if not steamID then
 		return nil
 	end
-	return ActivePlayers[tostring(steamID)]
+	-- steamID = tostring(steamID) -- Use raw key
+	return ActivePlayers[steamID]
 end
 
+---Create or fetch a player's state table
+---@param steamID string
+---@return table|nil
 function PlayerState.GetOrCreate(steamID)
 	if not steamID then
 		return nil
 	end
 
-	steamID = tostring(steamID)
+	-- steamID = tostring(steamID) -- Use raw key
 	local state = ActivePlayers[steamID]
 	if not state then
 		state = createState()

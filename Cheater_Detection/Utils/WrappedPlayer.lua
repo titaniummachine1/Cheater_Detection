@@ -5,6 +5,7 @@
 -- Get required modules
 local Common = require("Cheater_Detection.Utils.Common")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
+local G = require("Cheater_Detection.Utils.Globals")
 
 assert(Common, "Common is nil")
 local WPlayer = Common.WPlayer
@@ -52,7 +53,6 @@ local function hydrateWrapper(wrapped, entity)
 	if not wrapped._steamID64 then
 		local steamID = Common.GetSteamID64(basePlayer)
 		if steamID then
-			steamID = tostring(steamID)
 			wrapped._steamID64 = steamID
 
 			-- Attach PlayerState only if needed
@@ -202,12 +202,37 @@ end
 --- Get SteamID64 for this player object
 ---@return string|number The player's SteamID64
 function WrappedPlayer:GetSteamID64()
+	if G.Menu.Advanced.debug then
+		print(string.format("[WrappedPlayer] GetSteamID64 called on %s", tostring(self)))
+	end
+
 	if not self._steamID64 then
 		local steamID = Common.GetSteamID64(self._basePlayer)
+		if G.Menu.Advanced.debug then
+			print(
+				string.format(
+					"[WrappedPlayer] Common.GetSteamID64 returned type: %s, value: %s",
+					type(steamID),
+					tostring(steamID)
+				)
+			)
+		end
+
 		if steamID then
-			self._steamID64 = tostring(steamID)
+			self._steamID64 = steamID
 		end
 	end
+
+	if G.Menu.Advanced.debug then
+		print(
+			string.format(
+				"[WrappedPlayer] Returning type: %s, value: %s",
+				type(self._steamID64),
+				tostring(self._steamID64)
+			)
+		)
+	end
+
 	return self._steamID64
 end
 

@@ -106,12 +106,22 @@ local function OnCreateMove(cmd)
 		local activeSet = {}
 		local count = 0
 		for _, Player in ipairs(allPlayers) do
+			if G.Menu.Advanced.debug then
+				print(string.format("[Main] Player type: %s", type(Player)))
+			end
+
 			local sid = Player:GetSteamID64()
+
+			if G.Menu.Advanced.debug then
+				print(string.format("[Main] GetSteamID64 returned type: %s, value: %s", type(sid), tostring(sid)))
+			end
+
 			if sid then
-				activeSet[tostring(sid)] = true
+				-- local sidStr = tostring(sid) -- Use raw key
+				activeSet[sid] = true
 				count = count + 1
 				if G.Menu.Advanced.debug then
-					print(string.format("[Main] activeSet includes: %s", tostring(sid)))
+					print(string.format("[Main] activeSet[%s] = true", tostring(sid)))
 				end
 			end
 		end

@@ -93,8 +93,26 @@ function Common.GetSteamID64(Player)
 	if not result then
 		local playerInfo = assert(client.GetPlayerInfo(playerIndex), "Failed to get player info")
 		local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
-		result = (playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]") and playerInfo.UserID
-			or assert(steam.ToSteamID64(steamID), "Failed to convert SteamID to SteamID64")
+
+		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+			print(string.format("[Common] Converting SteamID: %s", tostring(steamID)))
+		end
+
+		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
+			result = playerInfo.UserID
+		else
+			local converted = steam.ToSteamID64(steamID)
+			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+				print(
+					string.format(
+						"[Common] steam.ToSteamID64 returned type: %s, value: %s",
+						type(converted),
+						tostring(converted)
+					)
+				)
+			end
+			result = assert(converted, "Failed to convert SteamID to SteamID64")
+		end
 	end
 
 	cachedSteamIDs[playerIndex] = result

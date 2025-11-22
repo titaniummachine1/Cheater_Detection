@@ -263,7 +263,7 @@ local function tryMarkCheater(steamID, evidence, state)
 	if G.Menu.Advanced.debug then
 		print(string.format("[Evidence] tryMarkCheater: %s has %.1f / %.1f", steamID, evidence.TotalScore, threshold))
 	end
-	
+
 	if evidence.TotalScore < threshold then
 		return
 	end
@@ -544,7 +544,7 @@ function Evidence.IsMarkedCheater(steamID)
 	end
 
 	-- Ensure steamID is a string
-	steamID = tostring(steamID)
+	-- steamID = tostring(steamID) -- Use raw key
 
 	-- Check database first (known cheater lists)
 	if G.DataBase[steamID] then
