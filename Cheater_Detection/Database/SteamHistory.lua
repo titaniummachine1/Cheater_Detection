@@ -467,10 +467,6 @@ local function onPlayerTeam(event)
 		return
 	end
 
-	if event:GetBool("bot") then
-		return
-	end
-
 	local team = event:GetInt("team")
 	-- Only scan if joining Red (2) or Blue (3)
 	if team ~= 2 and team ~= 3 then
@@ -486,6 +482,7 @@ local function onPlayerTeam(event)
 	local playerIndex = playerEntity:GetIndex()
 	local info = client.GetPlayerInfo(playerIndex)
 
+	-- Check if bot via player info (bot field doesn't exist in event)
 	if not info or info.IsBot or info.IsHLTV then
 		return
 	end
