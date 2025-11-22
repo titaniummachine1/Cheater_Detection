@@ -154,6 +154,15 @@ local function DrawMenu()
 			Advanced.Aimbot.smooth = aimbotTable[3]
 			TimMenu.NextLine()
 		end
+
+		-- NEW: Silent aimbot toggle
+		if type(Advanced.SilentAimbot) ~= "boolean" then
+			Advanced.SilentAimbot = true
+		end
+		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot)
+		TimMenu.Tooltip("Detects silent aim using viewangle extrapolation (experimental)")
+		TimMenu.NextLine()
+
 		Advanced.triggerbot = TimMenu.Checkbox("Triggerbot Detection", Advanced.triggerbot)
 		TimMenu.EndSector()
 		TimMenu.NextLine()

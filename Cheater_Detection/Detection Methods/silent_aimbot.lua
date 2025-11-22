@@ -197,6 +197,11 @@ function SilentAimbot.Check(player)
 	-- Check if last tick was a shot
 	local isAimbot, confidence, reason = false, 0, nil
 	if lastShot.shooter == playerIdx and lastShot.tick == (currentTick - 1) then
+		if G.Menu.Advanced.debug then
+			print(
+				string.format("[SilentAim] Checking player %s (idx %d) who shot last tick", player:GetName(), playerIdx)
+			)
+		end
 		isAimbot, confidence, reason = checkSilentAimbot(playerIdx, lastShot.victim, eyeAngles)
 	end
 
@@ -231,9 +236,30 @@ function SilentAimbot.OnPlayerHurt(shooterEntity, victimEntity)
 	lastShot.victim = victimIdx
 	lastShot.tick = globals.TickCount()
 
+	if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+		print(
+			string.format(
+				"[SilentAim] OnPlayerHurt: shooter idx=%d, victim idx=%d, tick=%d",
+				shooterIdx,
+				victimIdx,
+				lastShot.tick
+			)
+		)
+	end
+
 	-- Flag the last tick in history as a shot
 	if playerAngleHistory[shooterIdx] and #playerAngleHistory[shooterIdx] > 0 then
 		playerAngleHistory[shooterIdx][#playerAngleHistory[shooterIdx]].shotFired = true
+		if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+			print(
+				string.format(
+					"[SilentAim] Flagged tick %d as shot for idx %d (history size: %d)",
+					playerAngleHistory[shooterIdx][#playerAngleHistory[shooterIdx]].tick,
+					shooterIdx,
+					#playerAngleHistory[shooterIdx]
+				)
+			)
+		end
 	end
 end
 

@@ -61,6 +61,17 @@ end
 local function DatabaseAutoSaveOnUnload()
 	Log(LogLevel.DEBUG, "[DB] Unloading database, saving data...")
 
+	-- Safety checks
+	if not Database or not Database.Config or not Database.State then
+		print("[DB] Database not properly initialized, skipping save on unload")
+		return
+	end
+
+	if type(G.DataBase) ~= "table" then
+		print("[DB] G.DataBase is not a table, initializing empty before save")
+		G.DataBase = {}
+	end
+
 	-- Always save on unload to prevent data loss
 	if Database.Config.SaveOnExit then
 		-- If not dirty, mark as dirty temporarily to force save
@@ -68,7 +79,12 @@ local function DatabaseAutoSaveOnUnload()
 		Database.State.isDirty = true
 
 		Log(LogLevel.INFO, "[DB] Saving database on exit")
-		Database.SaveDatabase()
+
+		-- Wrap in pcall to prevent crash
+		local success, err = pcall(Database.SaveDatabase)
+		if not success then
+			print("[DB] ERROR saving database on unload: " .. tostring(err))
+		end
 
 		-- Restore original dirty state if it wasn't modified
 		if not wasDirty then
