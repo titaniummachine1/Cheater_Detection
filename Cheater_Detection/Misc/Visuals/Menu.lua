@@ -2,7 +2,6 @@ local Menu = {}
 
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
-local Fetcher = require("Cheater_Detection.Database.Fetcher")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 local Lib = Common.Lib
@@ -458,6 +457,7 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		if TimMenu.Button("Fetch Database") then
+			local Fetcher = require("Cheater_Detection.Database.Fetcher")
 			Fetcher.Start()
 		end
 
