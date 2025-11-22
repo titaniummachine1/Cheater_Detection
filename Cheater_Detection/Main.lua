@@ -93,47 +93,8 @@ local function OnCreateMove(cmd)
 	Evidence.ApplyDecay()
 	TickProfiler.EndSection("EvidenceDecay")
 
-	-- Cleanup disconnected players to prevent memory leak (once per second)
-	TickProfiler.BeginSection("PlayerCleanup")
-	local currentTick = globals.TickCount()
-	local ticksPerSecond = 66 -- TF2 tick rate
-
-	-- Only run cleanup once per second to avoid overhead
-	if not G.LastCleanupTick or (currentTick - G.LastCleanupTick) >= ticksPerSecond then
-		G.LastCleanupTick = currentTick
-
-		-- Build set of currently active players
-		local activeSet = {}
-		local count = 0
-		for _, Player in ipairs(allPlayers) do
-			if G.Menu.Advanced.debug then
-				print(string.format("[Main] Player type: %s", type(Player)))
-			end
-
-			local sid = Player:GetSteamID64()
-
-			if G.Menu.Advanced.debug then
-				print(string.format("[Main] GetSteamID64 returned type: %s, value: %s", type(sid), tostring(sid)))
-			end
-
-			if sid then
-				-- local sidStr = tostring(sid) -- Use raw key
-				activeSet[sid] = true
-				count = count + 1
-				if G.Menu.Advanced.debug then
-					print(string.format("[Main] activeSet[%s] = true", tostring(sid)))
-				end
-			end
-		end
-
-		if G.Menu.Advanced.debug then
-			print(string.format("[Main] activeSet has %d players, calling TrimToActive", count))
-		end
-
-		-- Trim PlayerState to only active players
-		PlayerState.TrimToActive(activeSet)
-	end
-	TickProfiler.EndSection("PlayerCleanup")
+	-- No periodic trimming - on-demand caching only
+	-- PlayerState persists until player disconnect event (player_disconnect)
 
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do

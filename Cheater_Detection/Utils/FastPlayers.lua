@@ -108,9 +108,7 @@ function FastPlayers.GetAll(excludelocal)
 		FastPlayers.TeammatesUpdated = false
 		FastPlayers.EnemiesUpdated = false
 
-		if PlayerState and PlayerState.TrimToActive and not excludelocal then
-			PlayerState.TrimToActive(activeSteamIDs)
-		end
+		-- No periodic trimming - PlayerState persists until player_disconnect event
 	end
 
 	return cachedAllPlayers

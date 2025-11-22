@@ -253,9 +253,6 @@ end
 ---@param state table Player state
 local function tryMarkCheater(steamID, evidence, state)
 	if not evidence or evidence.MarkedAsCheater then
-		if G.Menu.Advanced.debug and evidence and evidence.MarkedAsCheater then
-			print(string.format("[Evidence] %s already marked as cheater", steamID))
-		end
 		return
 	end
 
@@ -273,15 +270,24 @@ local function tryMarkCheater(steamID, evidence, state)
 	state.info = state.info or {}
 	state.info.IsCheater = true
 
+	-- Use name from state.info (already populated by PlayerState.AttachWrappedPlayer)
 	local playerName = (state.info and state.info.Name) or "Unknown"
-	local allPlayers = FastPlayers.GetAll(true)
-	for _, player in ipairs(allPlayers) do
-		if tostring(player:GetSteamID64()) == steamID then
-			local name = player.GetName and player:GetName()
-			if name and name ~= "" then
-				playerName = name
+
+	-- Fallback: search FastPlayers if name not in state (don't exclude local player)
+	if playerName == "Unknown" then
+		local allPlayers = FastPlayers.GetAll(false)
+		for _, player in ipairs(allPlayers) do
+			if tostring(player:GetSteamID64()) == steamID then
+				local name = player.GetName and player:GetName()
+				if name and name ~= "" then
+					playerName = name
+					-- Update state for future use
+					if state.info then
+						state.info.Name = name
+					end
+				end
+				break
 			end
-			break
 		end
 	end
 

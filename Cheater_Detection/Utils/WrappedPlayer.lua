@@ -18,7 +18,7 @@ local WrappedPlayer = {}
 
 local WrapperPool = {}
 
-local function hydrateWrapper(wrapped, entity)
+local function hydrateWrapper(wrapped, entity, cachedSteamID)
 	local currentIndex = entity:GetIndex()
 
 	-- Optimization: Reuse existing WPlayer if it matches the entity index
@@ -49,9 +49,9 @@ local function hydrateWrapper(wrapped, entity)
 		wrapped._cacheTs = {}
 	end
 
-	-- Get and cache SteamID once
+	-- Get and cache SteamID once (reuse passed value to avoid duplicate conversion)
 	if not wrapped._steamID64 then
-		local steamID = Common.GetSteamID64(basePlayer)
+		local steamID = cachedSteamID or Common.GetSteamID64(basePlayer)
 		if steamID then
 			wrapped._steamID64 = steamID
 
@@ -160,7 +160,8 @@ function WrappedPlayer.FromEntity(entity)
 		WrapperPool[key] = wrapped
 	end
 
-	if not hydrateWrapper(wrapped, entity) then
+	-- Pass steamID to avoid duplicate GetSteamID64 call in hydrateWrapper
+	if not hydrateWrapper(wrapped, entity, steamID) then
 		WrapperPool[key] = nil
 		return nil
 	end

@@ -188,14 +188,35 @@ function PlayerState.TrimToActive(activeSet)
 		return
 	end
 
-	for steamID in pairs(ActivePlayers) do
+	for steamID, state in pairs(ActivePlayers) do
 		if not activeSet[steamID] then
-			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-				local evidenceScore = (ActivePlayers[steamID].Evidence and ActivePlayers[steamID].Evidence.TotalScore)
-					or 0
-				print(string.format("[PlayerState] TRIMMING %s (Evidence: %.1f)", steamID, evidenceScore))
+			-- Preserve persistent data (Evidence, info) but clear tick-based data
+			-- This allows Evidence decay to continue even when player is not in current list
+			local hasEvidence = state.Evidence and state.Evidence.TotalScore and state.Evidence.TotalScore > 0
+
+			if hasEvidence then
+				-- Keep persistent data, clear tick-based data only
+				state.Entity = nil
+				state.Current = nil
+				state.History = nil
+				state.LastSeenTick = 0
+
+				if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+					print(
+						string.format(
+							"[PlayerState] Preserved Evidence for inactive player %s (Score: %.1f)",
+							steamID,
+							state.Evidence.TotalScore
+						)
+					)
+				end
+			else
+				-- No evidence, safe to delete entirely
+				if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+					print(string.format("[PlayerState] TRIMMING %s (no evidence)", steamID))
+				end
+				ActivePlayers[steamID] = nil
 			end
-			ActivePlayers[steamID] = nil
 		end
 	end
 end
