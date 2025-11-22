@@ -110,14 +110,6 @@ function PlayerState.GetOrCreate(steamID)
 	if not state then
 		state = createState()
 		ActivePlayers[steamID] = state
-		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-			print(string.format("[PlayerState] Created NEW state for %s", steamID))
-		end
-	else
-		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-			local evidenceScore = (state.Evidence and state.Evidence.TotalScore) or 0
-			print(string.format("[PlayerState] REUSING existing state for %s (Evidence: %.1f)", steamID, evidenceScore))
-		end
 	end
 
 	state.LastSeenTick = globals.TickCount()

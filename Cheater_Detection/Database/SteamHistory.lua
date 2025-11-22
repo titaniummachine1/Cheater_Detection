@@ -412,6 +412,7 @@ local function requestBatch()
 		or body:match("<title>")
 		or body:match("502 Bad Gateway")
 		or body:match("503 Service Unavailable")
+		or body:match("error code:")
 	then
 		handleError("API returned HTML (likely down)", contexts)
 		return
