@@ -24,6 +24,7 @@ local function initPlayerData(steamID)
 			lastVelocityZ = 0, -- Track last velocity for jump detection
 			groundedTicks = 0, -- Track how long player has been grounded
 			decayApplied = false, -- Track if we already applied decay for this ground period
+			hasJumped = false, -- Track if player has ever jumped (prevents initial false positives)
 		}
 	end
 end
@@ -76,8 +77,8 @@ function Bhop.Check(player)
 		-- Player on ground - increment grounded tick counter
 		data.groundedTicks = data.groundedTicks + 1
 
-		-- Only apply decay if they've been grounded long enough (stopped bhopping)
-		if data.groundedTicks >= GROUND_TICKS_FOR_DECAY and not data.decayApplied then
+		-- Only apply decay if they've been grounded long enough AND have jumped before
+		if data.hasJumped and data.groundedTicks >= GROUND_TICKS_FOR_DECAY and not data.decayApplied then
 			-- They stayed grounded for 2+ ticks - bhop sequence ended
 			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, DECAY_AMOUNT)
 
@@ -99,6 +100,7 @@ function Bhop.Check(player)
 		-- Player in air - check if they jumped (velocity increased AND exact jump values)
 		if data.lastOnGround and data.lastVelocityZ < velocity.z and (velocity.z == 271 or velocity.z == 277) then
 			-- Jump detected - add weight immediately
+			data.hasJumped = true -- Mark that this player has jumped
 			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
 
 			if G.Menu.Advanced.debug then

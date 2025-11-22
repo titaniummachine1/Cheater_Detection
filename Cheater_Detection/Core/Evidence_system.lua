@@ -247,68 +247,10 @@ function Evidence.GetThreshold()
 	return G.Menu.Advanced.Evicence_Tolerance or Evidence.Config.MarkAsCheatThreshold
 end
 
---- Add evidence weight for a specific detection
+--- Try to mark player as cheater if threshold is exceeded
 ---@param steamID string Player's SteamID64
----@param detectionName string Detection method name
----@param weight number Weight to add
-function Evidence.AddEvidence(steamID, detectionName, weight, opts)
-	if not steamID or not detectionName or not weight then
-		return
-	end
-
-	-- Convert to string and validate SteamID64 format
-	steamID = tostring(steamID)
-
-	-- SteamID64 must be 17 digits starting with 7656119 (valid Steam accounts)
-	-- Silently skip bots/invalid IDs (they won't match this pattern)
-	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
-		return -- Skip silently (bots return UserID instead of SteamID64)
-	end
-
-	-- Skip local player unless debug mode is enabled
-	if not G.Menu.Advanced.debug then
-		local localPlayer = entities.GetLocalPlayer()
-		if localPlayer then
-			local localSteamID = Common.GetSteamID64(localPlayer)
-			if localSteamID and tostring(localSteamID) == steamID then
-				return -- Skip local player
-			end
-		end
-	end
-
-	-- Debug: Log successful evidence add
-	Logger.Debug("Evidence", string.format("Adding %.1f evidence for %s (method: %s)", weight, steamID, detectionName))
-
-	local evidence, state = getOrCreateEvidence(steamID)
-	if not evidence then
-		return
-	end
-
-	-- Initialize detection stack if needed
-	if not evidence.Reasons[detectionName] then
-		evidence.Reasons[detectionName] = {
-			Weight = 0,
-			Category = getCategory(detectionName),
-			LastAddedTick = globals.TickCount(),
-		}
-	end
-	applyReasonOptions(evidence.Reasons[detectionName], opts)
-
-	-- Add weight
-	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
-	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
-	evidence.Dirty = true
-
-	-- Recalculate total and check if player should be marked
-	recalcTotalScore(evidence)
-	tryMarkCheater(steamID, evidence, state)
-
-	enqueueForDecay(steamID)
-end
-
---- Calculate aim decay multiplier based on player context
----@param player table WrappedPlayer instance
----@return number Decay multiplier
+---@param evidence table Evidence data
+---@param state table Player state
 local function tryMarkCheater(steamID, evidence, state)
 	if not evidence or evidence.MarkedAsCheater then
 		return
@@ -400,6 +342,94 @@ local function tryMarkCheater(steamID, evidence, state)
 			)
 		)
 	end
+end
+
+--- Add evidence weight for a specific detection
+---@param steamID string Player's SteamID64
+---@param detectionName string Detection method name
+---@param weight number Weight to add
+function Evidence.AddEvidence(steamID, detectionName, weight, opts)
+	if not steamID or not detectionName or not weight then
+		return
+	end
+
+	-- Convert to string and validate SteamID64 format
+	steamID = tostring(steamID)
+
+	-- SteamID64 must be 17 digits starting with 7656119 (valid Steam accounts)
+	-- Silently skip bots/invalid IDs (they won't match this pattern)
+	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
+		return -- Skip silently (bots return UserID instead of SteamID64)
+	end
+
+	-- Skip local player unless debug mode is enabled
+	if not G.Menu.Advanced.debug then
+		local localPlayer = entities.GetLocalPlayer()
+		if localPlayer then
+			local localSteamID = Common.GetSteamID64(localPlayer)
+			if localSteamID and tostring(localSteamID) == steamID then
+				return -- Skip local player
+			end
+		end
+	end
+
+	-- Debug: Log successful evidence add
+	Logger.Debug("Evidence", string.format("Adding %.1f evidence for %s (method: %s)", weight, steamID, detectionName))
+
+	local evidence, state = getOrCreateEvidence(steamID)
+	if not evidence then
+		return
+	end
+
+	-- Initialize detection stack if needed
+	if not evidence.Reasons[detectionName] then
+		evidence.Reasons[detectionName] = {
+			Weight = 0,
+			Category = getCategory(detectionName),
+			LastAddedTick = globals.TickCount(),
+		}
+	end
+	applyReasonOptions(evidence.Reasons[detectionName], opts)
+
+	-- Add weight
+	local oldWeight = evidence.Reasons[detectionName].Weight
+	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
+	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
+	evidence.Dirty = true
+
+	-- Debug: Show weight change
+	if G.Menu.Advanced.debug then
+		print(
+			string.format(
+				"[Evidence] Weight for %s: %.1f -> %.1f (added %.1f)",
+				detectionName,
+				oldWeight,
+				evidence.Reasons[detectionName].Weight,
+				weight
+			)
+		)
+	end
+
+	-- Recalculate total and check if player should be marked
+	recalcTotalScore(evidence)
+
+	-- Debug: Show total score after adding evidence
+	if G.Menu.Advanced.debug then
+		print(
+			string.format(
+				"[Evidence] Added %.1f to %s (method: %s) - Total: %.1f / %.1f",
+				weight,
+				steamID,
+				detectionName,
+				evidence.TotalScore,
+				Evidence.GetThreshold()
+			)
+		)
+	end
+
+	tryMarkCheater(steamID, evidence, state)
+
+	enqueueForDecay(steamID)
 end
 
 local function processEvidenceState(steamID, state, deltaTime)
@@ -553,7 +583,10 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 
 	initPlayerEvidence(steamID)
 
-	local evidence = G.PlayerData[steamID].Evidence
+	local evidence, state = getOrCreateEvidence(steamID)
+	if not evidence then
+		return
+	end
 
 	-- Initialize detection stack if needed
 	if not evidence.Reasons[detectionName] then
@@ -575,7 +608,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 		evidence.Dirty = true
 		recalcTotalScore(evidence)
 		enqueueForDecay(steamID)
-		tryMarkCheater(steamID, evidence, select(2, getOrCreateEvidence(steamID)))
+		tryMarkCheater(steamID, evidence, state)
 
 		-- Debug: Log decay
 		Logger.Debug(
