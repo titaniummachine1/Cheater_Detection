@@ -257,9 +257,6 @@ local function tryMarkCheater(steamID, evidence, state)
 	end
 
 	local threshold = Evidence.GetThreshold()
-	if G.Menu.Advanced.debug then
-		print(string.format("[Evidence] tryMarkCheater: %s has %.1f / %.1f", steamID, evidence.TotalScore, threshold))
-	end
 
 	if evidence.TotalScore < threshold then
 		return
@@ -324,7 +321,11 @@ local function tryMarkCheater(steamID, evidence, state)
 		lastSeen = os.time(),
 	})
 
+	-- Immediate save after marking cheater (critical moment, prevents data loss)
+	Database.SaveDatabase()
+
 	if G.Menu.Advanced.AutoMark then
+		local allPlayers = FastPlayers.GetAll(false)
 		for _, player in ipairs(allPlayers) do
 			if tostring(player:GetSteamID64()) == steamID then
 				local localPlayer = FastPlayers.GetLocal()
@@ -405,40 +406,12 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	applyReasonOptions(evidence.Reasons[detectionName], opts)
 
 	-- Add weight
-	local oldWeight = evidence.Reasons[detectionName].Weight
 	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
 	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
 	evidence.Dirty = true
 
-	-- Debug: Show weight change
-	if G.Menu.Advanced.debug then
-		print(
-			string.format(
-				"[Evidence] Weight for %s: %.1f -> %.1f (added %.1f)",
-				detectionName,
-				oldWeight,
-				evidence.Reasons[detectionName].Weight,
-				weight
-			)
-		)
-	end
-
 	-- Recalculate total and check if player should be marked
 	recalcTotalScore(evidence)
-
-	-- Debug: Show total score after adding evidence
-	if G.Menu.Advanced.debug then
-		print(
-			string.format(
-				"[Evidence] Added %.1f to %s (method: %s) - Total: %.1f / %.1f",
-				weight,
-				steamID,
-				detectionName,
-				evidence.TotalScore,
-				Evidence.GetThreshold()
-			)
-		)
-	end
 
 	tryMarkCheater(steamID, evidence, state)
 

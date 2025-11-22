@@ -12,7 +12,7 @@ local Bhop = {}
 local DETECTION_NAME = "bhop"
 local EVIDENCE_WEIGHT_BASE = 5
 local DECAY_AMOUNT = 2.0 -- Weight to remove on failed bhop
-local GROUND_TICKS_FOR_DECAY = 2 -- Must be grounded for this many ticks before decay applies
+local GROUND_TICKS_FOR_DECAY = 5 -- Must be grounded for this many ticks before decay applies
 
 -- Per-player state tracking
 local playerBhopData = {}
@@ -101,7 +101,8 @@ function Bhop.Check(player)
 		if data.lastOnGround and data.lastVelocityZ < velocity.z and (velocity.z == 271 or velocity.z == 277) then
 			-- Jump detected - add weight immediately
 			data.hasJumped = true -- Mark that this player has jumped
-			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE)
+			-- Use manual decay (only decays when landed, not automatic time-based)
+			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE, { manualDecay = true })
 
 			if G.Menu.Advanced.debug then
 				print(

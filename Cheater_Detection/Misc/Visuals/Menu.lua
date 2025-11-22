@@ -46,17 +46,6 @@ local function DrawMenu()
 		local Main = G.Menu.Main
 		local Misc = G.Menu.Misc
 
-		TimMenu.BeginSector("Detection Automation")
-		TimMenu.Tooltip("Download external cheater lists on demand.")
-		TimMenu.NextLine()
-		Main.AutoMark = TimMenu.Checkbox("Auto Mark", Main.AutoMark)
-		TimMenu.Tooltip("Mark players automatically once evidence passes the threshold.")
-		TimMenu.NextLine()
-		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
-		TimMenu.Tooltip("Share detections with your party through chat.")
-		TimMenu.EndSector()
-		TimMenu.NextLine()
-
 		TimMenu.BeginSector("SteamHistory")
 		G.Menu.Misc.SteamHistory = G.Menu.Misc.SteamHistory or {}
 		local sh = G.Menu.Misc.SteamHistory
@@ -74,6 +63,17 @@ local function DrawMenu()
 			sh.Enable = TimMenu.Checkbox("Enable SteamHistory", sh.Enable)
 			TimMenu.Tooltip("Scan players via SteamHistory API.")
 		end
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
+		TimMenu.BeginSector("Detection Automation")
+		TimMenu.Tooltip("Download external cheater lists on demand.")
+		TimMenu.NextLine()
+		Main.AutoMark = TimMenu.Checkbox("Auto Mark", Main.AutoMark)
+		TimMenu.Tooltip("Mark players automatically once evidence passes the threshold.")
+		TimMenu.NextLine()
+		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
+		TimMenu.Tooltip("Share detections with your party through chat.")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 

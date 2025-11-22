@@ -17,20 +17,15 @@ if gui.GetValue("ANONYMOUSE MODE") == 1 then
 end
 
 --[[ Imports ]]
-local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
+local G = require("Cheater_Detection.Utils.Globals")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
-local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
+local Database = require("Cheater_Detection.Database.Database")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
-require("Cheater_Detection.Utils.HistoryConfig")
-
-require("Cheater_Detection.Utils.Config") --[[ Imported by: Main.lua ]]
---[[ Import database system ]]
-local Database = require("Cheater_Detection.Database.Database") --[[ Imported by: Main.lua ]]
-
---[[ Import evidence system ]]
-local Evidence = require("Cheater_Detection.Core.Evidence_system") --[[ Imported by: Main.lua ]]
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
+local WorkManager = require("Cheater_Detection.Utils.WorkManager")
+local EventManager = require("Cheater_Detection.Utils.EventManager")
 
 --[[ UI components ]]
 require("Cheater_Detection.Misc.Visuals.Menu") --[[ Imported by: Main.lua ]]
@@ -184,34 +179,55 @@ local function OnMapChange()
 	end
 end
 
---[[ Callbacks ]]
-callbacks.Register("CreateMove", "Cheater_detection", OnCreateMove)
-callbacks.Register("FireGameEvent", "CD_MapChange", function(event)
-	if
-		event:GetName() == "game_newmap"
-		or event:GetName() == "teamplay_round_start"
-		or event:GetName() == "cs_round_start"
-	then
-		OnMapChange()
-	end
-end)
+--[[ Event Handlers ]]
 
--- Clean up player data when they leave (centralized through evidence system)
-callbacks.Register("FireGameEvent", "CD_PlayerDisconnect", function(event)
-	if event:GetName() == "player_disconnect" then
-		local networkID = event:GetString("networkid")
-		local steamID = Common.FromSteamid3To64(networkID)
-		if steamID then
-			Evidence.OnPlayerLeave(steamID)
-		end
-	elseif event:GetName() == "player_death" then
-		-- Opportunistic save when local player dies (dead time)
-		local localPlayer = entities.GetLocalPlayer()
-		local victimUserID = event:GetInt("userid")
-		local victim = entities.GetByUserID(victimUserID)
-
-		if localPlayer and victim and localPlayer == victim then
-			Database.SaveDatabase()
-		end
+-- Handler: Player disconnect cleanup
+local function onPlayerDisconnect(event)
+	local networkID = event:GetString("networkid")
+	local steamID = Common.FromSteamid3To64(networkID)
+	if steamID then
+		Evidence.OnPlayerLeave(steamID)
 	end
-end)
+end
+
+-- Handler: Auto-save on local player death
+local function onPlayerDeath(event)
+	local localPlayer = entities.GetLocalPlayer()
+	local victimUserID = event:GetInt("userid")
+	local victim = entities.GetByUserID(victimUserID)
+
+	if localPlayer and victim and localPlayer == victim then
+		Database.SaveDatabase()
+	end
+end
+
+-- Handler: Auto-save on round end
+local function onRoundEnd(event)
+	Database.SaveDatabase()
+end
+
+-- Handler: Auto-save on game over
+local function onGameOver(event)
+	Database.SaveDatabase()
+end
+
+--[[ Event Registration - Centralized via EventManager ]]
+
+-- Main detection loop
+EventManager.Register("CreateMove", "Main_Detection", OnCreateMove)
+
+-- Map change events (save and reload database)
+EventManager.Register("FireGameEvent", "Main_MapChange_NewMap", OnMapChange, "game_newmap")
+EventManager.Register("FireGameEvent", "Main_MapChange_RoundStart", OnMapChange, "teamplay_round_start")
+EventManager.Register("FireGameEvent", "Main_MapChange_CSRoundStart", OnMapChange, "cs_round_start")
+
+-- Player lifecycle
+EventManager.Register("FireGameEvent", "Main_PlayerDisconnect", onPlayerDisconnect, "player_disconnect")
+
+-- Auto-save triggers (non-intrusive moments)
+EventManager.Register("FireGameEvent", "Main_PlayerDeath", onPlayerDeath, "player_death")
+EventManager.Register("FireGameEvent", "Main_RoundWin", onRoundEnd, "teamplay_round_win")
+EventManager.Register("FireGameEvent", "Main_RoundStalemate", onRoundEnd, "teamplay_round_stalemate")
+EventManager.Register("FireGameEvent", "Main_GameOver", onGameOver, "teamplay_game_over")
+EventManager.Register("FireGameEvent", "Main_TFGameOver", onGameOver, "tf_game_over")
+EventManager.Register("FireGameEvent", "Main_ArenaRoundStart", onRoundEnd, "arena_round_start")
