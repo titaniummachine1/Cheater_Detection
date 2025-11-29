@@ -24,8 +24,8 @@ local KEYWORDS = {
 }
 
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
-local MAX_BATCH = 25
-local MIN_INTERVAL = 1.5 -- seconds between batches to avoid spamming the API
+local MAX_BATCH = 100
+local MIN_INTERVAL = 2.0 -- Increased interval to avoid rate limits with larger batches
 
 --[[ Internal State ]]
 local state = {
@@ -42,6 +42,9 @@ local state = {
 	consecutiveFailures = 0,
 	maxConsecutiveFailures = 5, -- Disable after 5 failures at max cooldown
 	temporarilyDisabled = false,
+	-- Adaptive batch size
+	currentBatchSize = MAX_BATCH,
+	rateLimitedRecently = false,
 }
 
 --[[ Helper Functions ]]
@@ -209,11 +212,12 @@ end
 local function popBatch()
 	local ids = {}
 	local contexts = {}
+	local batchSize = state.currentBatchSize
 	for steamID, ctx in pairs(state.pending) do
 		ids[#ids + 1] = steamID
 		contexts[steamID] = ctx
 		state.pending[steamID] = nil
-		if #ids >= MAX_BATCH then
+		if #ids >= batchSize then
 			break
 		end
 	end
@@ -292,56 +296,41 @@ local function flagPlayer(steamID, context, entry)
 	})
 end
 
-local function handleBatchResponse(ids, contexts, responseTable)
-	local responseMap = {}
-	if type(responseTable) == "table" then
-		if responseTable.response and type(responseTable.response) == "table" then
-			responseTable = responseTable.response
-		end
-
-		for _, entry in pairs(responseTable) do
-			local steamID = normalizeSteamID64(entry.SteamID or entry.steamid or entry.id)
-			if steamID then
-				responseMap[steamID] = entry
-			end
-		end
-	end
-
-	local flagged = 0
-	for _, steamID in ipairs(ids) do
-		if type(steamID) ~= "string" then
-			steamID = tostring(steamID)
-		end
-		state.scanned[steamID] = true
-		local entry = responseMap[steamID]
-		local context = contexts[steamID] or {}
-		if entry and matchesKeyword(entry.BanReason or "") then
-			flagged = flagged + 1
-			flagPlayer(steamID, context, entry)
-		else
-			-- Player is clean or not found in SteamHistory
-		end
-	end
-
-	local passed = #ids - flagged
-	printInfo(
-		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
-		string.format("[SteamHistory] Batch: %d flagged, %d clean", flagged, passed)
-	)
-
-	-- Success! Reset error count and consecutive failures
-	state.errorCount = 0
-	state.nextRetryTime = 0
-	state.consecutiveFailures = 0
-	state.scanning = false
-end
-
 local function handleError(message, contexts)
 	state.errorCount = state.errorCount + 1
 	state.consecutiveFailures = state.consecutiveFailures + 1
 
-	-- Exponential backoff: 10s, 20s, 40s, capped at 60s
-	local delay = math.min(60, 10 * (2 ^ (state.errorCount - 1)))
+	-- Adaptive backoff based on error type
+	local delay
+	if message:match("Rate limited") or message:match("429") then
+		-- Rate limit: longer backoff, start at 30s
+		delay = math.min(300, 30 * (2 ^ (state.errorCount - 1))) -- Max 5 minutes
+
+		-- Reduce batch size on rate limiting
+		if state.currentBatchSize > 25 then
+			state.currentBatchSize = math.max(25, math.floor(state.currentBatchSize / 2))
+			printInfo(
+				{ 255, 200, 100, 255 },
+				string.format("[SteamHistory] Rate limited - reducing batch size to %d", state.currentBatchSize)
+			)
+		end
+		state.rateLimitedRecently = true
+	elseif message:match("Server error") or message:match("502") or message:match("503") or message:match("504") then
+		-- Server errors: moderate backoff, start at 15s
+		delay = math.min(120, 15 * (2 ^ (state.errorCount - 1))) -- Max 2 minutes
+
+		-- Reduce batch size on server errors
+		if state.currentBatchSize > 25 then
+			state.currentBatchSize = math.max(25, math.floor(state.currentBatchSize * 0.75))
+			printInfo(
+				{ 255, 200, 100, 255 },
+				string.format("[SteamHistory] Server errors - reducing batch size to %d", state.currentBatchSize)
+			)
+		end
+	else
+		-- Other errors: normal backoff, start at 10s
+		delay = math.min(60, 10 * (2 ^ (state.errorCount - 1))) -- Max 1 minute
+	end
 	state.nextRetryTime = globals.RealTime() + delay
 
 	-- If we've hit max cooldown (60s) and failed too many times, disable temporarily
@@ -384,6 +373,99 @@ local function handleError(message, contexts)
 	state.scanning = false
 end
 
+local function handleBatchResponse(ids, contexts, responseTable)
+	local responseMap = {}
+	if type(responseTable) ~= "table" then
+		handleError("Invalid response format (not a table)", contexts)
+		return
+	end
+
+	-- Check for API error messages in response
+	if responseTable.error or responseTable.message or responseTable.status == "error" then
+		local errorMsg = responseTable.error or responseTable.message or "Unknown API error"
+		handleError(string.format("API error: %s", errorMsg), contexts)
+		return
+	end
+
+	-- Extract response array if wrapped
+	if responseTable.response and type(responseTable.response) == "table" then
+		responseTable = responseTable.response
+	elseif not responseTable[1] and not next(responseTable) then
+		-- Empty response
+		local passed = #ids
+		printInfo(
+			{ 0, 200, 255, 255 },
+			string.format("[SteamHistory] Batch: 0 flagged, %d clean (empty response)", passed)
+		)
+		return
+	end
+
+	-- Validate response entries
+	local validEntries = 0
+	for _, entry in pairs(responseTable) do
+		if type(entry) == "table" then
+			local steamID = normalizeSteamID64(entry.SteamID or entry.steamid or entry.id)
+			if steamID then
+				responseMap[steamID] = entry
+				validEntries = validEntries + 1
+			else
+				printInfo({ 255, 150, 100, 255 }, "[SteamHistory] Warning: Invalid SteamID in response entry")
+			end
+		end
+	end
+
+	if validEntries == 0 and #ids > 0 then
+		handleError("No valid entries in response", contexts)
+		return
+	end
+
+	local flagged = 0
+	for _, steamID in ipairs(ids) do
+		if type(steamID) ~= "string" then
+			steamID = tostring(steamID)
+		end
+		state.scanned[steamID] = true
+		local entry = responseMap[steamID]
+		local context = contexts[steamID] or {}
+		if entry and matchesKeyword(entry.BanReason or "") then
+			flagged = flagged + 1
+			flagPlayer(steamID, context, entry)
+		else
+			-- Player is clean or not found in SteamHistory
+		end
+	end
+
+	local passed = #ids - flagged
+	printInfo(
+		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
+		string.format("[SteamHistory] Batch: %d flagged, %d clean", flagged, passed)
+	)
+
+	-- Success! Reset error count and consecutive failures
+	state.errorCount = 0
+	state.nextRetryTime = 0
+	state.consecutiveFailures = 0
+	state.scanning = false
+
+	-- Gradually restore batch size on success
+	if state.currentBatchSize < MAX_BATCH then
+		-- Only increase if we weren't rate limited recently
+		if not state.rateLimitedRecently then
+			state.currentBatchSize = math.min(MAX_BATCH, state.currentBatchSize + 10)
+			if state.currentBatchSize < MAX_BATCH then
+				printInfo(
+					{ 150, 255, 150, 255 },
+					string.format("[SteamHistory] Success - increasing batch size to %d", state.currentBatchSize)
+				)
+			else
+				printInfo({ 150, 255, 150, 255 }, "[SteamHistory] Success - batch size restored to maximum")
+			end
+		else
+			state.rateLimitedRecently = false -- Reset flag after one successful batch
+		end
+	end
+end
+
 local function requestBatch()
 	local cfg = getConfig()
 	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
@@ -399,11 +481,24 @@ local function requestBatch()
 	state.lastBatchTime = globals.RealTime()
 
 	local url = string.format(API_TEMPLATE, cfg.ApiKey, table.concat(ids, ","))
+
+	-- Track request start time for timeout detection
+	local requestStart = globals.RealTime()
 	local success, body = pcall(http.Get, url)
+	local requestDuration = globals.RealTime() - requestStart
 
 	if not success or type(body) ~= "string" or body == "" then
-		handleError("HTTP Request failed", contexts)
+		local errorMsg = "HTTP Request failed"
+		if requestDuration > 10 then
+			errorMsg = string.format("HTTP Request timed out (%.1fs)", requestDuration)
+		end
+		handleError(errorMsg, contexts)
 		return
+	end
+
+	-- Warn about slow responses (potential rate limiting)
+	if requestDuration > 5 then
+		printInfo({ 255, 200, 100, 255 }, string.format("[SteamHistory] Slow response (%.1fs)", requestDuration))
 	end
 
 	-- Check for HTML/Error responses
@@ -412,9 +507,23 @@ local function requestBatch()
 		or body:match("<title>")
 		or body:match("502 Bad Gateway")
 		or body:match("503 Service Unavailable")
+		or body:match("504 Gateway Timeout")
+		or body:match("429 Too Many Requests")
+		or body:match("429 Rate Limited")
+		or body:match("Rate limit exceeded")
 		or body:match("error code:")
+		or body:match("Cloudflare")
+		or body:match("DDoS protection")
 	then
-		handleError("API returned HTML (likely down)", contexts)
+		local errorMsg = "API returned HTML (likely down)"
+		if body:match("429") or body:match("Rate limit") then
+			errorMsg = "Rate limited (429)"
+		elseif body:match("502") or body:match("503") or body:match("504") then
+			errorMsg = "Server error (502/503/504)"
+		elseif body:match("Cloudflare") or body:match("DDoS") then
+			errorMsg = "Cloudflare/DDoS protection"
+		end
+		handleError(errorMsg, contexts)
 		return
 	end
 
@@ -555,7 +664,12 @@ end
 function SteamHistory.QueueRescan()
 	resetState(true)
 	state.temporarilyDisabled = false
-	printInfo({ 0, 200, 255, 255 }, "[SteamHistory] Re-enabled and queue reset")
+	state.currentBatchSize = MAX_BATCH -- Reset to maximum
+	state.rateLimitedRecently = false
+	printInfo(
+		{ 0, 200, 255, 255 },
+		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", MAX_BATCH)
+	)
 end
 
 --[[ Callback Registration ]]
