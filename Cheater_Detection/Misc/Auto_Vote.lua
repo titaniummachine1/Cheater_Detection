@@ -21,12 +21,13 @@ local VotePass = 47
 local VoteFailed = 48
 local CallVoteFailed = 49
 
--- Prioritised voting order
+-- Prioritised voting order (highest to lowest priority)
 local GROUP_PRIORITY = {
-	"bot",
-	"cheater",
-	"valve",
-	"legit",
+	"bot", -- Cheat bots (highest priority)
+	"cheater", -- Known cheaters
+	"valve", -- Valve employees
+	"legit", -- Legit players
+	"friend", -- Friends (lowest priority)
 }
 
 local VOTE_OPTION_YES = 1
@@ -102,27 +103,30 @@ local function getGroupForPlayer(player)
 		return nil
 	end
 	local config = getMenu()
-	if not config then
+	if not config or not config.intent then
 		return nil
 	end
 
 	local entity = player:GetRawEntity()
 	local steamID = player:GetSteamID64()
+	local isFriend = isFriendEntity(entity)
 
-	if config.intent and config.intent.friend and isFriendEntity(entity) then
-		return nil
-	end
-
-	if config.intent and config.intent.bot and isBot(player, steamID) then
+	-- Check groups in priority order
+	if config.intent.bot and isBot(player, steamID) then
 		return "bot"
 	end
-	if config.intent and config.intent.cheater and getCheaterStatus(steamID) then
+	if config.intent.cheater and getCheaterStatus(steamID) then
 		return "cheater"
 	end
-	if config.intent and config.intent.valve and isValveEmployee(steamID) then
+	if config.intent.valve and isValveEmployee(steamID) then
 		return "valve"
 	end
-	if config.intent and config.intent.legit then
+	-- Friends as separate lowest-priority group if enabled
+	if config.intent.friend and isFriend then
+		return "friend"
+	end
+	-- Legit players (non-friends) if enabled
+	if config.intent.legit and not isFriend then
 		return "legit"
 	end
 
@@ -138,11 +142,8 @@ local function getScoreboard()
 end
 
 local function collectCandidates()
-	local scoreboard = getScoreboard()
+	local scoreboard = getScoreboard() or {}
 	local candidates = {}
-	if not scoreboard then
-		return candidates
-	end
 
 	local players = FastPlayers.GetAll(true)
 	local localPlayer = FastPlayers.GetLocal()
@@ -221,8 +222,10 @@ local function issueVote(target)
 		return false
 	end
 
+	-- Can only kick players on YOUR team
 	---@diagnostic disable-next-line: undefined-field
-	if target.player:GetTeamNumber() == localPlayer:GetTeamNumber() then
+	if target.player:GetTeamNumber() ~= localPlayer:GetTeamNumber() then
+		logDebug("Cannot kick - target is on enemy team")
 		return false
 	end
 
@@ -231,12 +234,17 @@ local function issueVote(target)
 		return false
 	end
 
-	local userid = targetEntity:GetPropInt("m_iUserID")
-	if not userid or userid == 0 then
+	local idx = targetEntity:GetIndex()
+	if not idx then
 		return false
 	end
 
-	client.Command(string.format("callvote kick %d", userid), true)
+	local info = client.GetPlayerInfo(idx)
+	if not info or not info.UserID then
+		return false
+	end
+
+	client.Command(string.format("callvote kick %d", info.UserID), true)
 	logInfo(
 		string.format(
 			"Initiated vote on %s [%s] (group: %s, score: %d)",
@@ -352,6 +360,10 @@ local function onVoteEvent(event)
 	end
 end
 
+-- Track last log time to avoid spam
+local lastStatusLog = 0
+local STATUS_LOG_INTERVAL = 5.0
+
 function AutoVote.OnCreateMove()
 	local menu = getMenu()
 	if not menu then
@@ -362,14 +374,18 @@ function AutoVote.OnCreateMove()
 		return
 	end
 
+	-- Vote already in progress
 	if State.currentTarget or State.currentVoteIdx then
 		return
 	end
 
-	if globals.RealTime() - State.lastVoteTime < MIN_SECONDS_BETWEEN_CALLVOTES then
+	-- Cooldown between vote attempts
+	local timeSinceLastVote = globals.RealTime() - State.lastVoteTime
+	if timeSinceLastVote < MIN_SECONDS_BETWEEN_CALLVOTES then
 		return
 	end
 
+	-- Rate limit per tick
 	if globals.TickCount() == State.lastDecisionTick then
 		return
 	end
@@ -378,23 +394,31 @@ function AutoVote.OnCreateMove()
 
 	local target = pickNextTarget()
 	if not target then
-		-- logDebug("No target to votekick")  -- Too spammy
+		-- Log status periodically
+		if globals.RealTime() - lastStatusLog > STATUS_LOG_INTERVAL then
+			lastStatusLog = globals.RealTime()
+			local candidates = collectCandidates()
+			if #candidates == 0 then
+				logInfo("No vote targets on your team (check intent settings)")
+			end
+		end
 		return
 	end
 
-	logDebug(
+	logInfo(
 		string.format(
-			"Picked target: %s [%s] (group: %s)",
+			"Attempting vote on %s [%s] (group: %s, score: %d)",
 			target.player:GetName(),
 			target.player:GetSteamID64(),
-			target.group
+			target.group,
+			target.score
 		)
 	)
 
 	if issueVote(target) then
-		logDebug("Attempted to initiate vote; awaiting VoteStart message")
+		logInfo("Vote command sent - waiting for server response...")
 	else
-		logDebug("Failed to initiate vote after selecting candidate")
+		logInfo("Cannot vote - target may be on enemy team or invalid")
 	end
 end
 

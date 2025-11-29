@@ -286,7 +286,11 @@ local function flagPlayer(steamID, context, entry)
 		name = name,
 		reason = formattedReason,
 	})
-	Database.SetPriority(steamID, 10, false)
+
+	-- Set priority 10 if AutoPriority enabled
+	if G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority then
+		Database.SetPriority(steamID, 10, true)
+	end
 
 	JoinNotifications.SendCheaterAlert({
 		name = name,

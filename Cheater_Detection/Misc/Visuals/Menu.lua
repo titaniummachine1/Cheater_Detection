@@ -69,18 +69,30 @@ local function DrawMenu()
 		TimMenu.BeginSector("Detection Automation")
 		TimMenu.Tooltip("Download external cheater lists on demand.")
 		TimMenu.NextLine()
-		Main.AutoMark = TimMenu.Checkbox("Auto Mark", Main.AutoMark)
-		TimMenu.Tooltip("Mark players automatically once evidence passes the threshold.")
+		if type(Main.AutoPriority) ~= "boolean" then
+			Main.AutoPriority = true
+		end
+		Main.AutoPriority = TimMenu.Checkbox("Auto Priority", Main.AutoPriority)
+		TimMenu.Tooltip("Set priority 10 on detected cheaters (from evidence, database, or SteamHistory)")
 		TimMenu.NextLine()
+		if type(Main.partyCallaut) ~= "boolean" then
+			Main.partyCallaut = true
+		end
 		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
 		TimMenu.Tooltip("Share detections with your party through chat.")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Visual Feedback")
+		if type(Main.Chat_Prefix) ~= "boolean" then
+			Main.Chat_Prefix = true
+		end
 		Main.Chat_Prefix = TimMenu.Checkbox("Chat Prefix", Main.Chat_Prefix)
 		TimMenu.Tooltip("Enable colored chat tags for cheaters, suspects, and Valve staff.")
 		TimMenu.NextLine()
+		if type(Main.Cheater_Tags) ~= "boolean" then
+			Main.Cheater_Tags = true
+		end
 		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
 		TimMenu.Tooltip("Show floating world labels for confirmed cheaters.")
 		TimMenu.EndSector()
@@ -109,16 +121,20 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Exploit Detection")
+		if type(Advanced.Choke) ~= "boolean" then
+			Advanced.Choke = true
+		end
 		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke)
 		TimMenu.NextLine()
+		if type(Advanced.Warp) ~= "boolean" then
+			Advanced.Warp = true
+		end
 		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp)
 		TimMenu.NextLine()
+		if type(Advanced.AntyAim) ~= "boolean" then
+			Advanced.AntyAim = true
+		end
 		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim)
-		TimMenu.NextLine()
-		Advanced.AutoFlagPriorityTen = TimMenu.Checkbox("priority Detection", Advanced.AutoFlagPriorityTen)
-		TimMenu.Tooltip(
-			"When enabled, setting player priority to 10 will store them in the database as a known cheater."
-		)
 		TimMenu.EndSector()
 
 		TimMenu.BeginSector("Aim Detection")
@@ -131,8 +147,14 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Movement Detection")
+		if type(Advanced.Bhop) ~= "boolean" then
+			Advanced.Bhop = true
+		end
 		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop)
 		TimMenu.NextLine()
+		if type(Advanced.DuckSpeed) ~= "boolean" then
+			Advanced.DuckSpeed = true
+		end
 		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed)
 		TimMenu.EndSector()
 
@@ -155,6 +177,9 @@ local function DrawMenu()
 		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Vote Automation")
+		if type(Misc.Autovote) ~= "boolean" then
+			Misc.Autovote = false
+		end
 		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote)
 		TimMenu.Tooltip("Call votes automatically using your selected targets.")
 		TimMenu.NextLine()
@@ -183,25 +208,31 @@ local function DrawMenu()
 			TimMenu.Tooltip("Continuously initiate votes using the configured target priority.")
 			TimMenu.NextLine()
 
-			local voteTargets = { "Legit Players", "Cheaters", "Bots", "Valve Employees", "Exclude Friends" }
+			-- Priority order: Bots > Cheaters > Valve > Legits > Friends
+			local voteTargets = { "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
 			local voteTable = {
-				Misc.intent.legit,
-				Misc.intent.cheater,
 				Misc.intent.bot,
+				Misc.intent.cheater,
 				Misc.intent.valve,
+				Misc.intent.legit,
 				Misc.intent.friend,
 			}
 			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
-			Misc.intent.legit = voteTable[1]
+			Misc.intent.bot = voteTable[1]
 			Misc.intent.cheater = voteTable[2]
-			Misc.intent.bot = voteTable[3]
-			Misc.intent.valve = voteTable[4]
+			Misc.intent.valve = voteTable[3]
+			Misc.intent.legit = voteTable[4]
 			Misc.intent.friend = voteTable[5]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
 
 		TimMenu.BeginSector("Vote Reveal Alerts")
+		Misc.Vote_Reveal = Misc.Vote_Reveal or {}
+		if type(Misc.Vote_Reveal.Enable) ~= "boolean" then
+			Misc.Vote_Reveal.Enable = false
+		end
+		Misc.Vote_Reveal.TargetTeam = Misc.Vote_Reveal.TargetTeam or {}
 		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable)
 		TimMenu.Tooltip("Announce teammate votes and their targets across selected channels.")
 		TimMenu.NextLine()

@@ -310,26 +310,9 @@ local function tryMarkCheater(steamID, evidence, state)
 	-- Immediate save after marking cheater (critical moment, prevents data loss)
 	Database.SaveDatabase()
 
-	if G.Menu.Advanced.AutoMark then
-		local allPlayers = FastPlayers.GetAll(false)
-		for _, player in ipairs(allPlayers) do
-			if tostring(player:GetSteamID64()) == steamID then
-				local localPlayer = FastPlayers.GetLocal()
-				if not G.Menu.Advanced.debug and localPlayer and player == localPlayer then
-					break
-				end
-				player.SetPriority = player.SetPriority
-					or function(_, level)
-						pcall(playerlist.SetPriority, player:GetRawEntity(), level)
-					end
-				player:SetPriority(10)
-				if G.Menu.Advanced.debug then
-					local pname = player.GetName and player:GetName() or "Unknown"
-					print(string.format("[Evidence] Set priority 10 for %s", pname))
-				end
-				break
-			end
-		end
+	-- Set priority 10 if AutoPriority enabled
+	if G.Menu.Main and G.Menu.Main.AutoPriority then
+		Evidence.SetPriorityForSteamID(steamID, 10)
 	end
 
 	if G.Menu.Advanced.debug then
@@ -674,6 +657,35 @@ function Evidence.OnPlayerLeave(steamID)
 
 	-- Detection module data cleanup is handled by script unload
 	-- Individual modules' local data structures are cleaned up automatically
+end
+
+--- Set playerlist priority for a player by SteamID
+---@param steamID string Player's SteamID64
+---@param priority number Priority level to set (10 = cheater)
+function Evidence.SetPriorityForSteamID(steamID, priority)
+	if not steamID then
+		return false
+	end
+	steamID = tostring(steamID)
+
+	local allPlayers = FastPlayers.GetAll(false)
+	for _, player in ipairs(allPlayers) do
+		if tostring(player:GetSteamID64()) == steamID then
+			local entity = player:GetRawEntity()
+			if entity then
+				local success = pcall(playerlist.SetPriority, entity, priority)
+				if success then
+					Logger.Info(
+						"Evidence",
+						string.format("Set priority %d for %s", priority, player:GetName() or steamID)
+					)
+					return true
+				end
+			end
+			break
+		end
+	end
+	return false
 end
 
 return Evidence

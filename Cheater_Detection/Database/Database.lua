@@ -140,8 +140,8 @@ function Database.SetPriority(target, priority, isInGame)
 		if success then
 			Log(LogLevel.DEBUG, string.format("[DB] SetPriority via SteamID64 %s: priority=%d", steamID64, priority))
 			if priority == 10 then
-				local menuAdvanced = G.Menu and G.Menu.Advanced
-				local autoFlagEnabled = menuAdvanced and menuAdvanced.AutoFlagPriorityTen == true
+				local menuMain = G.Menu and G.Menu.Main
+				local autoFlagEnabled = menuMain and menuMain.AutoPriority == true
 				if autoFlagEnabled then
 					local existing = Database.GetCheater(steamID64)
 					if not existing then

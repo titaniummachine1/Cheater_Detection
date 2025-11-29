@@ -230,64 +230,90 @@ local function drawVoteUI()
 	local alpha = math.floor(voteAlpha)
 
 	-- UI dimensions
-	local screenW, screenH = draw.GetScreenSize()
-	local boxW = 350
+	local screenW, _ = draw.GetScreenSize()
+	local boxW = 320
 	local boxX = (screenW - boxW) / 2
 	local boxY = 50
-	local padding = 10
-	local lineHeight = 18
+	local padding = 8
+	local lineHeight = 16
 
-	-- Team color for background
-	local teamColor = TEAM_COLORS[activeVote.team] or TEAM_COLORS[TEAM_UNASSIGNED]
-	local bgR, bgG, bgB = teamColor[1], teamColor[2], teamColor[3]
-
-	-- Calculate height based on voter count (up to 12 per side)
+	-- Calculate height based on voter count (up to 10 per side)
 	local maxVotersPerSide = math.max(#activeVote.votes[1], #activeVote.votes[2])
-	local voterListHeight = math.min(maxVotersPerSide, 12) * lineHeight
-	local boxH = 80 + voterListHeight + padding * 3
+	local voterListHeight = math.min(maxVotersPerSide, 10) * lineHeight
+	local headerHeight = 65 -- Title + caller + YES/NO headers
+	local boxH = headerHeight + voterListHeight + padding * 2
 
-	-- Draw background with team color tint
-	draw.Color(bgR, bgG, bgB, math.floor(alpha * 0.7))
+	-- Dark background
+	draw.Color(20, 20, 25, math.floor(alpha * 0.95))
 	draw.FilledRect(boxX, boxY, boxX + boxW, boxY + boxH)
 
-	-- Draw border
-	draw.Color(255, 255, 255, alpha)
+	-- Subtle border
+	draw.Color(60, 60, 70, alpha)
 	draw.OutlinedRect(boxX, boxY, boxX + boxW, boxY + boxH)
 
-	-- Draw title background
-	draw.Color(30, 30, 30, math.floor(alpha * 0.8))
-	draw.FilledRect(boxX, boxY, boxX + boxW, boxY + 30)
+	-- Title bar background (slightly lighter)
+	draw.Color(35, 35, 40, alpha)
+	draw.FilledRect(boxX + 1, boxY + 1, boxX + boxW - 1, boxY + 24)
 
-	-- Draw vote reason
+	-- Vote type title (VOTE KICK, VOTE MAP, etc)
 	draw.SetFont(font_title)
 	draw.Color(255, 255, 255, alpha)
-	local reasonText = truncateText(activeVote.reason, boxW - padding * 2, font_title)
-	local textW = draw.GetTextSize(reasonText)
-	draw.Text(boxX + (boxW - textW) / 2, boxY + 8, reasonText)
+	local voteType = activeVote.reason:upper()
+	local typeW = draw.GetTextSize(voteType)
+	draw.Text(boxX + (boxW - typeW) / 2, boxY + 4, voteType)
 
-	-- Draw white divider line (vertical center)
-	local dividerX = boxX + boxW / 2
-	draw.Color(255, 255, 255, math.floor(alpha * 0.5))
-	draw.Line(dividerX, boxY + 35, dividerX, boxY + boxH - 25)
-
-	-- Draw Yes/No headers
+	-- Caller info with team color
+	local callerTeamColor = TEAM_COLORS[activeVote.team] or TEAM_COLORS[TEAM_UNASSIGNED]
 	draw.SetFont(font_body)
-	draw.Color(100, 255, 100, alpha)
-	local yesW = draw.GetTextSize("YES")
-	draw.Text(boxX + (boxW / 4) - yesW / 2, boxY + 38, "YES")
+	draw.Color(150, 150, 150, alpha)
+	local callerLabel = "Called by: "
+	local labelW = draw.GetTextSize(callerLabel)
+	draw.Text(boxX + padding, boxY + 28, callerLabel)
 
-	draw.Color(255, 100, 100, alpha)
-	local noW = draw.GetTextSize("NO")
-	draw.Text(boxX + (boxW * 3 / 4) - noW / 2, boxY + 38, "NO")
+	draw.Color(callerTeamColor[1], callerTeamColor[2], callerTeamColor[3], alpha)
+	local callerName = truncateText(activeVote.caller, boxW - labelW - padding * 2, font_body)
+	draw.Text(boxX + padding + labelW, boxY + 28, callerName)
 
-	-- Draw voter lists (sorted by score, highest first)
+	-- Target info (if kick vote)
+	if activeVote.targetName and #activeVote.targetName > 0 then
+		draw.Color(150, 150, 150, alpha)
+		local targetLabel = "Target: "
+		local tLabelW = draw.GetTextSize(targetLabel)
+		draw.Text(boxX + padding, boxY + 44, targetLabel)
+
+		draw.Color(255, 180, 80, alpha)
+		local targetName = truncateText(activeVote.targetName, boxW - tLabelW - padding * 2, font_body)
+		draw.Text(boxX + padding + tLabelW, boxY + 44, targetName)
+	end
+
+	-- Divider line
+	local dividerY = boxY + headerHeight - 18
+	draw.Color(50, 50, 60, alpha)
+	draw.Line(boxX + padding, dividerY, boxX + boxW - padding, dividerY)
+
+	-- YES / NO column headers
+	local colWidth = (boxW - padding * 3) / 2
+	local yesColX = boxX + padding
+	local noColX = boxX + padding * 2 + colWidth
+
+	draw.SetFont(font_body)
+	draw.Color(80, 200, 80, alpha)
+	draw.Text(yesColX, dividerY + 4, "YES")
+
+	draw.Color(200, 80, 80, alpha)
+	draw.Text(noColX, dividerY + 4, "NO")
+
+	-- Vertical divider between columns
+	local vertDivX = boxX + boxW / 2
+	draw.Color(50, 50, 60, math.floor(alpha * 0.7))
+	draw.Line(vertDivX, dividerY + 20, vertDivX, boxY + boxH - padding)
+
+	-- Draw voter lists
 	draw.SetFont(font_small)
-	local yesX = boxX + padding
-	local noX = dividerX + padding
-	local listY = boxY + 60
-	local maxWidth = (boxW / 2) - padding * 2
+	local listY = dividerY + 22
+	local maxNameWidth = colWidth - 4
 
-	-- Sort and draw Yes voters
+	-- Sort Yes voters by score
 	local sortedYes = {}
 	for i, v in ipairs(activeVote.votes[1]) do
 		sortedYes[i] = v
@@ -296,15 +322,15 @@ local function drawVoteUI()
 		return a.score > b.score
 	end)
 
-	for i = 1, math.min(#sortedYes, 12) do
+	for i = 1, math.min(#sortedYes, 10) do
 		local voter = sortedYes[i]
 		local voterTeamColor = TEAM_COLORS[voter.team]
 		draw.Color(voterTeamColor[1], voterTeamColor[2], voterTeamColor[3], alpha)
-		local nameText = truncateText(voter.name, maxWidth, font_small)
-		draw.Text(yesX, listY + (i - 1) * lineHeight, nameText)
+		local nameText = truncateText(voter.name, maxNameWidth, font_small)
+		draw.Text(yesColX, listY + (i - 1) * lineHeight, nameText)
 	end
 
-	-- Sort and draw No voters
+	-- Sort No voters by score
 	local sortedNo = {}
 	for i, v in ipairs(activeVote.votes[2]) do
 		sortedNo[i] = v
@@ -313,29 +339,20 @@ local function drawVoteUI()
 		return a.score > b.score
 	end)
 
-	for i = 1, math.min(#sortedNo, 12) do
+	for i = 1, math.min(#sortedNo, 10) do
 		local voter = sortedNo[i]
 		local voterTeamColor = TEAM_COLORS[voter.team]
 		draw.Color(voterTeamColor[1], voterTeamColor[2], voterTeamColor[3], alpha)
-		local nameText = truncateText(voter.name, maxWidth, font_small)
-		draw.Text(noX, listY + (i - 1) * lineHeight, nameText)
+		local nameText = truncateText(voter.name, maxNameWidth, font_small)
+		draw.Text(noColX, listY + (i - 1) * lineHeight, nameText)
 	end
 
-	-- Draw target name at bottom (if kick vote)
-	if activeVote.targetName and #activeVote.targetName > 0 then
-		draw.SetFont(font_body)
-		draw.Color(255, 200, 100, alpha)
-		local targetText = truncateText("Target: " .. activeVote.targetName, boxW - padding * 2, font_body)
-		local targetW = draw.GetTextSize(targetText)
-		draw.Text(boxX + (boxW - targetW) / 2, boxY + boxH - 20, targetText)
-	end
-
-	-- Draw vote counts
+	-- Vote count at bottom right
 	draw.SetFont(font_small)
-	draw.Color(255, 255, 255, math.floor(alpha * 0.8))
-	local countText = string.format("[%d/%d]", activeVote.counts[1] or 0, activeVote.counts[2] or 0)
+	draw.Color(120, 120, 130, alpha)
+	local countText = string.format("%d / %d", activeVote.counts[1] or 0, activeVote.counts[2] or 0)
 	local countW = draw.GetTextSize(countText)
-	draw.Text(boxX + (boxW - countW) / 2, boxY + boxH - 38, countText)
+	draw.Text(boxX + boxW - countW - padding, boxY + boxH - lineHeight, countText)
 end
 
 --[[ Event Handlers ]]
@@ -350,13 +367,13 @@ local function handleUserMessage(msg)
 		local dispStr = msg:ReadString(64)
 		local detailsStr = msg:ReadString(64)
 		local targetPacked = msg:ReadByte()
-		local targetIdx = bit.rshift(targetPacked, 1) or 0
+		local targetIdx = math.floor(targetPacked / 2) -- bit shift right by 1
 
 		startVote(team, voteidx, callerIdx, dispStr, detailsStr, targetIdx)
 	elseif id == VotePass then
 		local team = msg:ReadByte()
 		local voteidx = msg:ReadInt(32)
-		local dispStr = msg.ReadString(256)
+		local dispStr = msg:ReadString(256)
 		local detailsStr = msg:ReadString(256)
 
 		local reason = localize(dispStr, detailsStr)

@@ -3,7 +3,7 @@ local Default_Config = {
 
 	Main = {
 		Fetch_Database = true,
-		AutoMark = true,
+		AutoPriority = true, -- Auto set priority 10 on detected cheaters
 		AutoFetch = true, -- Automatically fetch database on startup
 		LastFetchTimestamp = 0,
 		partyCallaut = true,
@@ -15,7 +15,6 @@ local Default_Config = {
 		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false, -- Debug mode (removes self from database, enables verbose logging)
-		AutoFlagPriorityTen = false,
 		-- Detection toggles (only for implemented detections)
 		Choke = true, -- Fake Lag detection
 		Warp = true, -- Warp/DT detection
