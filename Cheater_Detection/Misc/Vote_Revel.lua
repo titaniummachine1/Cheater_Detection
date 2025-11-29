@@ -245,10 +245,10 @@ local function drawVoteUI()
 
 	local alpha = math.floor(voteAlpha)
 
-	-- UI dimensions
+	-- UI dimensions (floor all to avoid sub-pixel rendering)
 	local screenW, _ = draw.GetScreenSize()
 	local boxW = 280
-	local boxX = (screenW - boxW) / 2
+	local boxX = math.floor((screenW - boxW) / 2)
 	local boxY = 55
 	local pad = 12
 	local lineH = 18
@@ -277,7 +277,7 @@ local function drawVoteUI()
 	draw.Color(255, 255, 255, alpha)
 	local voteType = getVoteTypeText(activeVote.reason)
 	local typeW = draw.GetTextSize(voteType)
-	draw.Text(boxX + (boxW - typeW) / 2, boxY + 5, voteType)
+	draw.Text(math.floor(boxX + (boxW - typeW) / 2), boxY + 5, voteType)
 
 	-- Caller line
 	local callerY = boxY + 32
@@ -304,8 +304,8 @@ local function drawVoteUI()
 	draw.Color(45, 45, 55, alpha)
 	draw.Line(boxX + pad, contentY, boxX + boxW - pad, contentY)
 
-	-- Column setup
-	local colW = (boxW - pad * 2) / 2
+	-- Column setup (floor to avoid sub-pixel)
+	local colW = math.floor((boxW - pad * 2) / 2)
 	local yesX = boxX + pad
 	local noX = boxX + pad + colW
 
@@ -318,7 +318,7 @@ local function drawVoteUI()
 	draw.Text(noX, contentY, "NO")
 
 	-- Vertical divider
-	local divX = boxX + boxW / 2
+	local divX = math.floor(boxX + boxW / 2)
 	draw.Color(45, 45, 55, math.floor(alpha * 0.6))
 	draw.Line(divX, contentY + 18, divX, boxY + boxH - pad - 14)
 
@@ -433,6 +433,42 @@ local function onDraw()
 
 	lerpAlpha(dt)
 	drawVoteUI()
+end
+
+--[[ Public API ]]
+
+--- Get the current active vote data (for retaliation tracking)
+function VoteReveal.GetActiveVote()
+	return activeVote
+end
+
+--- Get who voted No on the current/last vote
+--- Returns list of {idx, name, steamID} or empty table
+function VoteReveal.GetNoVoters()
+	if not activeVote or not activeVote.votes or not activeVote.votes[2] then
+		return {}
+	end
+
+	local noVoters = {}
+	for _, voter in ipairs(activeVote.votes[2]) do
+		local steamID = nil
+		if voter.idx then
+			local info = client.GetPlayerInfo(voter.idx)
+			if info and info.SteamID then
+				-- Convert SteamID3 to SteamID64
+				local accountID = tonumber(info.SteamID:match("%[U:1:(%d+)%]"))
+				if accountID then
+					steamID = tostring(76561197960265728 + accountID)
+				end
+			end
+		end
+		table.insert(noVoters, {
+			idx = voter.idx,
+			name = voter.name,
+			steamID = steamID,
+		})
+	end
+	return noVoters
 end
 
 --[[ Registration ]]

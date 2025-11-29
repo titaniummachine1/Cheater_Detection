@@ -7,6 +7,7 @@ local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Sources = require("Cheater_Detection.Database.Sources")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local VoteReveal = require("Cheater_Detection.Misc.Vote_Revel")
 
 local LOG_CATEGORY = "AutoVote"
 
@@ -23,7 +24,8 @@ local CallVoteFailed = 49
 
 -- Prioritised voting order (highest to lowest priority)
 local GROUP_PRIORITY = {
-	"bot", -- Cheat bots (highest priority)
+	"retaliation", -- Players who voted NO on my votes (highest priority)
+	"bot", -- Cheat bots
 	"cheater", -- Known cheaters
 	"valve", -- Valve employees
 	"legit", -- Legit players
@@ -31,8 +33,12 @@ local GROUP_PRIORITY = {
 }
 
 local VOTE_OPTION_YES = 1
+local VOTE_OPTION_NO = 2
 
 local MIN_SECONDS_BETWEEN_CALLVOTES = 1.5
+
+-- Track players who voted against us: steamID -> {count, score}
+local RetaliationTargets = {}
 
 local State = {
 	currentVoteIdx = nil,
@@ -41,10 +47,11 @@ local State = {
 	lastDecisionTick = 0,
 	serverCooldownUntil = 0, -- Server-reported cooldown end time
 	lastCooldownLog = 0,
-	-- Exponential backoff for non-cooldown failures
-	failureBackoff = 2, -- Start at 2 seconds
+	-- Exponential backoff for guessed cooldowns
+	failureBackoff = 60, -- Start at 60 seconds (1 min)
+	maxBackoff = 120, -- Max 2 minutes
 	backoffUntil = 0,
-	permanentlyDisabled = false, -- Disabled until reload
+	iCalledThisVote = false, -- Track if WE initiated the current vote
 }
 
 local function logInfo(message)
@@ -55,9 +62,35 @@ local function logDebug(message)
 	Logger.Debug(LOG_CATEGORY, message)
 end
 
+--- Record players who voted NO on our vote for retaliation
+local function recordRetaliationTargets()
+	if not State.iCalledThisVote then
+		return
+	end
+
+	local noVoters = VoteReveal.GetNoVoters()
+	for _, voter in ipairs(noVoters) do
+		if voter.steamID then
+			if not RetaliationTargets[voter.steamID] then
+				RetaliationTargets[voter.steamID] = { count = 0, score = 0 }
+			end
+			RetaliationTargets[voter.steamID].count = RetaliationTargets[voter.steamID].count + 1
+			RetaliationTargets[voter.steamID].score = RetaliationTargets[voter.steamID].score + 100
+			logInfo(
+				string.format(
+					"RETALIATION: %s voted NO (+100 score, total: %d)",
+					voter.name,
+					RetaliationTargets[voter.steamID].score
+				)
+			)
+		end
+	end
+end
+
 local function resetVoteState()
 	State.currentVoteIdx = nil
 	State.currentTarget = nil
+	State.iCalledThisVote = false
 end
 
 local function getMenu()
@@ -117,6 +150,11 @@ local function getGroupForPlayer(player)
 	local steamID = player:GetSteamID64()
 	local isFriend = isFriendEntity(entity)
 
+	-- HIGHEST PRIORITY: Retaliation targets (players who voted NO on our votes)
+	if steamID and RetaliationTargets[steamID] then
+		return "retaliation"
+	end
+
 	-- Check groups in priority order
 	if config.intent.bot and isBot(player, steamID) then
 		return "bot"
@@ -174,6 +212,13 @@ local function collectCandidates()
 			local group = getGroupForPlayer(player)
 			if group then
 				local score = scoreboard[index + 1] or 0
+
+				-- Add retaliation bonus score (+100 per vote against us)
+				local steamID = player:GetSteamID64()
+				if steamID and RetaliationTargets[steamID] then
+					score = score + RetaliationTargets[steamID].score
+				end
+
 				candidates[#candidates + 1] = {
 					player = player,
 					score = score,
@@ -268,6 +313,7 @@ local function issueVote(target)
 		expectedResult = VOTE_OPTION_YES,
 	}
 	State.lastVoteTime = globals.RealTime()
+	State.iCalledThisVote = true -- Track that WE initiated this vote
 	return true
 end
 
@@ -360,6 +406,24 @@ local function handleVoteEnd()
 	resetVoteState()
 end
 
+--- Handle vote failure with retaliation tracking and cooldown
+local function handleVoteFailed()
+	-- Record who voted NO if this was our vote
+	recordRetaliationTargets()
+
+	-- Assume 60s cooldown if we don't have explicit cooldown
+	local now = globals.RealTime()
+	if State.serverCooldownUntil < now then
+		State.serverCooldownUntil = now + State.failureBackoff
+		logInfo(string.format("Vote failed - cooldown %ds (backoff)", State.failureBackoff))
+
+		-- Exponential backoff: increase for next time, max 2 minutes
+		State.failureBackoff = math.min(State.failureBackoff * 2, State.maxBackoff)
+	end
+
+	resetVoteState()
+end
+
 local function onVoteEvent(event)
 	local name = event:GetName()
 
@@ -368,34 +432,34 @@ local function onVoteEvent(event)
 		return
 	end
 
-	-- Vote started successfully
+	-- Vote started successfully - reset backoff
 	if name == "vote_started" then
 		local issue = event:GetString("issue")
 		local param1 = event:GetString("param1")
 		local initiator = event:GetInt("initiator")
 		logInfo(string.format("Vote started: %s (%s) by entity %d", issue or "?", param1 or "?", initiator or -1))
-		-- Reset backoff on successful vote start
-		State.failureBackoff = 2
+		State.failureBackoff = 60 -- Reset backoff on success
 		return
 	end
 
-	-- Vote passed
+	-- Vote passed - success, reset backoff
 	if name == "vote_passed" then
 		local details = event:GetString("details")
 		local param1 = event:GetString("param1")
 		logInfo(string.format("Vote passed: %s (%s)", details or "?", param1 or "?"))
+		State.failureBackoff = 60 -- Reset backoff on success
 		resetVoteState()
 		return
 	end
 
-	-- Vote failed (client-side event)
+	-- Vote failed (not enough votes) - record retaliation
 	if name == "vote_failed" then
-		logInfo("Vote failed (not enough votes or cancelled)")
-		resetVoteState()
+		logInfo("Vote failed (not enough votes)")
+		handleVoteFailed()
 		return
 	end
 
-	-- Vote ended
+	-- Vote ended (generic)
 	if name == "vote_ended" then
 		resetVoteState()
 		return
@@ -416,11 +480,6 @@ function AutoVote.OnCreateMove()
 		return
 	end
 
-	-- Permanently disabled due to too many failures
-	if State.permanentlyDisabled then
-		return
-	end
-
 	-- Vote already in progress
 	if State.currentTarget or State.currentVoteIdx then
 		return
@@ -428,25 +487,13 @@ function AutoVote.OnCreateMove()
 
 	local now = globals.RealTime()
 
-	-- Check exponential backoff from non-cooldown failures
-	if State.backoffUntil > now then
-		local remaining = math.ceil(State.backoffUntil - now)
-		if now - State.lastCooldownLog > 10 then
-			State.lastCooldownLog = now
-			logInfo(
-				string.format("Backoff active: %d seconds left (next backoff: %ds)", remaining, State.failureBackoff)
-			)
-		end
-		return
-	end
-
-	-- Check server-reported cooldown
+	-- Check cooldown (either server-reported or backoff-estimated)
 	if State.serverCooldownUntil > now then
 		local remaining = math.ceil(State.serverCooldownUntil - now)
 		-- Log cooldown every 10 seconds
 		if now - State.lastCooldownLog > 10 then
 			State.lastCooldownLog = now
-			logInfo(string.format("Waiting for vote cooldown: %d seconds left", remaining))
+			logInfo(string.format("Cooldown: %d seconds left (next backoff: %ds)", remaining, State.failureBackoff))
 		end
 		return
 	end
@@ -498,32 +545,36 @@ function AutoVote.OnDispatchUserMessage(msg)
 	local id = msg:GetID()
 	if id == VoteStart then
 		handleVoteStart(msg)
-	elseif id == VotePass or id == VoteFailed then
+	elseif id == VotePass then
+		-- Vote passed - reset backoff
+		State.failureBackoff = 60
 		handleVoteEnd()
+	elseif id == VoteFailed then
+		-- Vote failed (not enough YES votes) - record retaliation
+		logInfo("VoteFailed user message received")
+		handleVoteFailed()
 	elseif id == CallVoteFailed then
-		-- Parse cooldown from server response
+		-- Parse ALL data from message for debugging
 		local reason = msg:ReadByte()
-		local cooldownSeconds = msg:ReadInt(16)
-		if cooldownSeconds and cooldownSeconds > 0 then
-			-- Server reported cooldown - use it directly, reset backoff
-			State.serverCooldownUntil = globals.RealTime() + cooldownSeconds
-			State.failureBackoff = 2 -- Reset backoff on successful cooldown info
-			logInfo(string.format("Vote on cooldown: %d seconds remaining", cooldownSeconds))
+		local timeSeconds = msg:ReadInt(16)
+
+		-- Print raw data for debugging
+		logInfo(string.format("CallVoteFailed RAW: reason=%d, time=%d", reason or -1, timeSeconds or -1))
+
+		if timeSeconds and timeSeconds > 0 then
+			-- Server explicitly told us cooldown time
+			State.serverCooldownUntil = globals.RealTime() + timeSeconds
+			State.failureBackoff = 60 -- Reset backoff since we got real data
+			logInfo(string.format("Vote cooldown: %d seconds (server reported)", timeSeconds))
 		else
-			-- Non-cooldown failure - apply exponential backoff
-			State.backoffUntil = globals.RealTime() + State.failureBackoff
+			-- No cooldown data - use backoff
+			State.serverCooldownUntil = globals.RealTime() + State.failureBackoff
 			logInfo(
-				string.format("Vote failed (reason %d) - backing off %d seconds", reason or 0, State.failureBackoff)
+				string.format("Vote rejected (reason %d) - cooldown %ds (backoff)", reason or 0, State.failureBackoff)
 			)
 
-			-- Double the backoff for next time (exponential)
-			State.failureBackoff = math.min(State.failureBackoff * 2, 300)
-
-			-- If backoff reaches 5 minutes (300s), disable permanently
-			if State.failureBackoff >= 300 then
-				State.permanentlyDisabled = true
-				logInfo("AutoVote disabled - too many failures. Re-enable in menu or reload script.")
-			end
+			-- Exponential backoff: increase for next time, max 2 minutes
+			State.failureBackoff = math.min(State.failureBackoff * 2, State.maxBackoff)
 		end
 		handleVoteEnd()
 	end
@@ -539,10 +590,14 @@ function AutoVote.Reset()
 	State.lastDecisionTick = 0
 	State.serverCooldownUntil = 0
 	State.lastCooldownLog = 0
-	State.failureBackoff = 2
-	State.backoffUntil = 0
-	State.permanentlyDisabled = false
-	logInfo("AutoVote reset - backoff cleared")
+	State.failureBackoff = 60 -- Reset to 60s
+	-- Don't clear RetaliationTargets - they persist for the session
+	logInfo("AutoVote reset - cooldown cleared")
+end
+
+--- Get current retaliation targets (for debugging)
+function AutoVote.GetRetaliationTargets()
+	return RetaliationTargets
 end
 
 -- Register callbacks to enable auto-voting
