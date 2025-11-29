@@ -39,6 +39,12 @@ local State = {
 	currentTarget = nil,
 	lastVoteTime = 0,
 	lastDecisionTick = 0,
+	serverCooldownUntil = 0, -- Server-reported cooldown end time
+	lastCooldownLog = 0,
+	-- Exponential backoff for non-cooldown failures
+	failureBackoff = 2, -- Start at 2 seconds
+	backoffUntil = 0,
+	permanentlyDisabled = false, -- Disabled until reload
 }
 
 local function logInfo(message)
@@ -147,12 +153,24 @@ local function collectCandidates()
 
 	local players = FastPlayers.GetAll(true)
 	local localPlayer = FastPlayers.GetLocal()
-	local localIndex = localPlayer and localPlayer:GetIndex()
+	if not localPlayer then
+		return candidates
+	end
+
+	local localIndex = localPlayer:GetIndex()
+	local localTeam = localPlayer:GetTeamNumber()
+
+	-- Can only vote kick players on YOUR team
+	if not localTeam or localTeam < 2 then
+		return candidates -- Not on a valid team (spec/unassigned)
+	end
 
 	for _, player in ipairs(players) do
-		---@diagnostic disable-next-line: undefined-field
 		local index = player:GetIndex()
-		if index ~= localIndex then
+		local playerTeam = player:GetTeamNumber()
+
+		-- Skip self, skip players not on our team
+		if index ~= localIndex and playerTeam == localTeam then
 			local group = getGroupForPlayer(player)
 			if group then
 				local score = scoreboard[index + 1] or 0
@@ -217,18 +235,7 @@ local function issueVote(target)
 		return false
 	end
 
-	local localPlayer = FastPlayers.GetLocal()
-	if not localPlayer then
-		return false
-	end
-
-	-- Can only kick players on YOUR team
-	---@diagnostic disable-next-line: undefined-field
-	if target.player:GetTeamNumber() ~= localPlayer:GetTeamNumber() then
-		logDebug("Cannot kick - target is on enemy team")
-		return false
-	end
-
+	-- Team check already done in collectCandidates
 	local targetEntity = target.player:GetRawEntity()
 	if not targetEntity or not targetEntity:IsValid() then
 		return false
@@ -355,8 +362,43 @@ end
 
 local function onVoteEvent(event)
 	local name = event:GetName()
+
 	if name == "round_end" or name == "game_newmap" then
 		resetVoteState()
+		return
+	end
+
+	-- Vote started successfully
+	if name == "vote_started" then
+		local issue = event:GetString("issue")
+		local param1 = event:GetString("param1")
+		local initiator = event:GetInt("initiator")
+		logInfo(string.format("Vote started: %s (%s) by entity %d", issue or "?", param1 or "?", initiator or -1))
+		-- Reset backoff on successful vote start
+		State.failureBackoff = 2
+		return
+	end
+
+	-- Vote passed
+	if name == "vote_passed" then
+		local details = event:GetString("details")
+		local param1 = event:GetString("param1")
+		logInfo(string.format("Vote passed: %s (%s)", details or "?", param1 or "?"))
+		resetVoteState()
+		return
+	end
+
+	-- Vote failed (client-side event)
+	if name == "vote_failed" then
+		logInfo("Vote failed (not enough votes or cancelled)")
+		resetVoteState()
+		return
+	end
+
+	-- Vote ended
+	if name == "vote_ended" then
+		resetVoteState()
+		return
 	end
 end
 
@@ -374,13 +416,43 @@ function AutoVote.OnCreateMove()
 		return
 	end
 
+	-- Permanently disabled due to too many failures
+	if State.permanentlyDisabled then
+		return
+	end
+
 	-- Vote already in progress
 	if State.currentTarget or State.currentVoteIdx then
 		return
 	end
 
-	-- Cooldown between vote attempts
-	local timeSinceLastVote = globals.RealTime() - State.lastVoteTime
+	local now = globals.RealTime()
+
+	-- Check exponential backoff from non-cooldown failures
+	if State.backoffUntil > now then
+		local remaining = math.ceil(State.backoffUntil - now)
+		if now - State.lastCooldownLog > 10 then
+			State.lastCooldownLog = now
+			logInfo(
+				string.format("Backoff active: %d seconds left (next backoff: %ds)", remaining, State.failureBackoff)
+			)
+		end
+		return
+	end
+
+	-- Check server-reported cooldown
+	if State.serverCooldownUntil > now then
+		local remaining = math.ceil(State.serverCooldownUntil - now)
+		-- Log cooldown every 10 seconds
+		if now - State.lastCooldownLog > 10 then
+			State.lastCooldownLog = now
+			logInfo(string.format("Waiting for vote cooldown: %d seconds left", remaining))
+		end
+		return
+	end
+
+	-- Local cooldown between vote attempts
+	local timeSinceLastVote = now - State.lastVoteTime
 	if timeSinceLastVote < MIN_SECONDS_BETWEEN_CALLVOTES then
 		return
 	end
@@ -426,7 +498,33 @@ function AutoVote.OnDispatchUserMessage(msg)
 	local id = msg:GetID()
 	if id == VoteStart then
 		handleVoteStart(msg)
-	elseif id == VotePass or id == VoteFailed or id == CallVoteFailed then
+	elseif id == VotePass or id == VoteFailed then
+		handleVoteEnd()
+	elseif id == CallVoteFailed then
+		-- Parse cooldown from server response
+		local reason = msg:ReadByte()
+		local cooldownSeconds = msg:ReadInt(16)
+		if cooldownSeconds and cooldownSeconds > 0 then
+			-- Server reported cooldown - use it directly, reset backoff
+			State.serverCooldownUntil = globals.RealTime() + cooldownSeconds
+			State.failureBackoff = 2 -- Reset backoff on successful cooldown info
+			logInfo(string.format("Vote on cooldown: %d seconds remaining", cooldownSeconds))
+		else
+			-- Non-cooldown failure - apply exponential backoff
+			State.backoffUntil = globals.RealTime() + State.failureBackoff
+			logInfo(
+				string.format("Vote failed (reason %d) - backing off %d seconds", reason or 0, State.failureBackoff)
+			)
+
+			-- Double the backoff for next time (exponential)
+			State.failureBackoff = math.min(State.failureBackoff * 2, 300)
+
+			-- If backoff reaches 5 minutes (300s), disable permanently
+			if State.failureBackoff >= 300 then
+				State.permanentlyDisabled = true
+				logInfo("AutoVote disabled - too many failures. Re-enable in menu or reload script.")
+			end
+		end
 		handleVoteEnd()
 	end
 end
@@ -439,6 +537,12 @@ function AutoVote.Reset()
 	resetVoteState()
 	State.lastVoteTime = 0
 	State.lastDecisionTick = 0
+	State.serverCooldownUntil = 0
+	State.lastCooldownLog = 0
+	State.failureBackoff = 2
+	State.backoffUntil = 0
+	State.permanentlyDisabled = false
+	logInfo("AutoVote reset - backoff cleared")
 end
 
 -- Register callbacks to enable auto-voting
