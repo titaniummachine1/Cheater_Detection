@@ -37,8 +37,13 @@ local VOTE_OPTION_NO = 2
 
 local MIN_SECONDS_BETWEEN_CALLVOTES = 1.5
 
--- Track players who voted against us: steamID -> {count, score}
-local RetaliationTargets = {}
+-- Track players who CALLED a vote against us: steamID -> true
+-- These players go into "retaliation" group
+local RetaliationCallers = {}
+
+-- Track score penalties for players who voted against our interests: steamID -> score
+-- Does NOT put them in retaliation group, just adds to their kick priority score
+local ScorePenalties = {}
 
 local State = {
 	currentVoteIdx = nil,
@@ -64,25 +69,73 @@ local function logDebug(message)
 	Logger.Debug(LOG_CATEGORY, message)
 end
 
---- Record players who voted NO on our vote for retaliation
-local function recordRetaliationTargets()
-	if not State.iCalledThisVote then
+--- Record the CALLER of a vote against us (goes into retaliation GROUP)
+local function recordRetaliationCaller(callerSteamID, callerName)
+	if not callerSteamID then
+		return
+	end
+	RetaliationCallers[callerSteamID] = true
+	logInfo(
+		string.format("RETALIATION: %s CALLED a vote against us - added to retaliation group", callerName or "Unknown")
+	)
+end
+
+--- Record score penalties for players who voted against our interests
+--- Does NOT add them to retaliation group, just increases kick priority score
+local function recordScorePenalties()
+	local activeVote = VoteReveal.GetActiveVote()
+	if not activeVote then
 		return
 	end
 
-	local noVoters = VoteReveal.GetNoVoters()
-	for _, voter in ipairs(noVoters) do
-		if voter.steamID then
-			if not RetaliationTargets[voter.steamID] then
-				RetaliationTargets[voter.steamID] = { count = 0, score = 0 }
+	-- Determine what WE would have voted
+	local ourVoteOption = nil
+	if State.iCalledThisVote then
+		-- We initiated this vote, we want YES
+		ourVoteOption = 1
+	elseif State.currentTarget then
+		-- We're voting on someone else's vote
+		ourVoteOption = State.currentTarget.expectedResult
+	else
+		-- Check if we or our friends are the target
+		local localPlayer = FastPlayers.GetLocal()
+		local localSteamID = localPlayer and localPlayer:GetSteamID64()
+
+		-- Check if target is us or our friend
+		if activeVote.targetIdx then
+			local targetEntity = entities.GetByIndex(activeVote.targetIdx)
+			if targetEntity and targetEntity:IsValid() then
+				local targetSteamID = targetEntity:GetSteamID64()
+				if targetSteamID == localSteamID or isFriendEntity(targetEntity) then
+					-- They're voting against us/friend - we want NO
+					ourVoteOption = 2
+				end
 			end
-			RetaliationTargets[voter.steamID].count = RetaliationTargets[voter.steamID].count + 1
-			RetaliationTargets[voter.steamID].score = RetaliationTargets[voter.steamID].score + 10
+		end
+	end
+
+	if not ourVoteOption then
+		return -- Not our concern
+	end
+
+	-- Get players who voted against our interest
+	local againstVoters = {}
+	if ourVoteOption == 1 then
+		-- We wanted YES, track NO voters
+		againstVoters = VoteReveal.GetNoVoters()
+	else
+		-- We wanted NO, track YES voters
+		againstVoters = VoteReveal.GetYesVoters()
+	end
+
+	for _, voter in ipairs(againstVoters) do
+		if voter.steamID then
+			ScorePenalties[voter.steamID] = (ScorePenalties[voter.steamID] or 0) + 10
 			logInfo(
 				string.format(
-					"RETALIATION: %s voted NO on our vote (+10 score, total: %d)",
+					"PENALTY: %s voted against our interest (+10 score, total: %d)",
 					voter.name,
-					RetaliationTargets[voter.steamID].score
+					ScorePenalties[voter.steamID]
 				)
 			)
 		end
@@ -153,8 +206,8 @@ local function getGroupForPlayer(player)
 	local steamID = player:GetSteamID64()
 	local isFriend = isFriendEntity(entity)
 
-	-- HIGHEST PRIORITY: Retaliation targets (players who voted NO on our votes)
-	if steamID and RetaliationTargets[steamID] then
+	-- HIGHEST PRIORITY: Retaliation - players who CALLED a vote against us
+	if steamID and RetaliationCallers[steamID] then
 		return "retaliation"
 	end
 
@@ -216,10 +269,10 @@ local function collectCandidates()
 			if group then
 				local score = scoreboard[index + 1] or 0
 
-				-- Add retaliation bonus score (+100 per vote against us)
+				-- Add score penalty for players who voted against our interests
 				local steamID = player:GetSteamID64()
-				if steamID and RetaliationTargets[steamID] then
-					score = score + RetaliationTargets[steamID].score
+				if steamID and ScorePenalties[steamID] then
+					score = score + ScorePenalties[steamID]
 				end
 
 				candidates[#candidates + 1] = {
@@ -364,6 +417,34 @@ local function handleVoteStart(msg)
 
 	State.currentVoteIdx = voteIdx
 
+	-- Check if someone is CALLING a vote against US or our FRIEND
+	local localPlayer = FastPlayers.GetLocal()
+	local localIndex = localPlayer and localPlayer:GetIndex() or -1
+	local localSteamID = localPlayer and localPlayer:GetSteamID64()
+
+	local voteTargetEntity = entities.GetByIndex(targetIdx)
+	if voteTargetEntity and voteTargetEntity:IsValid() and callerIdx ~= localIndex then
+		local voteTargetSteamID = voteTargetEntity:GetSteamID64()
+		-- Is this a vote against US?
+		if voteTargetSteamID == localSteamID then
+			-- Get caller info and add to retaliation group
+			local callerEntity = entities.GetByIndex(callerIdx)
+			if callerEntity and callerEntity:IsValid() then
+				local callerSteamID = callerEntity:GetSteamID64()
+				local callerName = client.GetPlayerNameByIndex(callerIdx)
+				recordRetaliationCaller(callerSteamID, callerName)
+			end
+		-- Is this a vote against our FRIEND?
+		elseif isFriendEntity(voteTargetEntity) then
+			local callerEntity = entities.GetByIndex(callerIdx)
+			if callerEntity and callerEntity:IsValid() then
+				local callerSteamID = callerEntity:GetSteamID64()
+				local callerName = client.GetPlayerNameByIndex(callerIdx)
+				recordRetaliationCaller(callerSteamID, callerName)
+			end
+		end
+	end
+
 	-- Check if this is the vote WE initiated
 	if State.currentTarget and State.voteSentTime > 0 then
 		local localPlayer = FastPlayers.GetLocal()
@@ -429,8 +510,8 @@ end
 
 --- Handle vote failure with retaliation tracking and cooldown
 local function handleVoteFailed()
-	-- Record who voted NO if this was our vote
-	recordRetaliationTargets()
+	-- Record score penalties for players who voted against our interests
+	recordScorePenalties()
 
 	-- Assume 60s cooldown if we don't have explicit cooldown
 	local now = globals.RealTime()
@@ -663,13 +744,16 @@ function AutoVote.Reset()
 	State.lastCooldownLog = 0
 	State.failureBackoff = 60 -- Reset to 60s
 	State.voteSentTime = 0 -- Clear timeout
-	-- Don't clear RetaliationTargets - they persist for the session
+	-- Don't clear RetaliationCallers/ScorePenalties - they persist for the session
 	logInfo("AutoVote reset - cooldown cleared")
 end
 
---- Get current retaliation targets (for debugging)
-function AutoVote.GetRetaliationTargets()
-	return RetaliationTargets
+--- Get current retaliation data (for debugging)
+function AutoVote.GetRetaliationData()
+	return {
+		callers = RetaliationCallers,
+		penalties = ScorePenalties,
+	}
 end
 
 -- Register callbacks to enable auto-voting

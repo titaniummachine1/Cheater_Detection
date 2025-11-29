@@ -471,6 +471,35 @@ function VoteReveal.GetNoVoters()
 	return noVoters
 end
 
+--- Get who voted Yes on the current/last vote
+--- Returns list of {idx, name, steamID} or empty table
+function VoteReveal.GetYesVoters()
+	if not activeVote or not activeVote.votes or not activeVote.votes[1] then
+		return {}
+	end
+
+	local yesVoters = {}
+	for _, voter in ipairs(activeVote.votes[1]) do
+		local steamID = nil
+		if voter.idx then
+			local info = client.GetPlayerInfo(voter.idx)
+			if info and info.SteamID then
+				-- Convert SteamID3 to SteamID64
+				local accountID = tonumber(info.SteamID:match("%[U:1:(%d+)%]"))
+				if accountID then
+					steamID = tostring(76561197960265728 + accountID)
+				end
+			end
+		end
+		table.insert(yesVoters, {
+			idx = voter.idx,
+			name = voter.name,
+			steamID = steamID,
+		})
+	end
+	return yesVoters
+end
+
 --[[ Registration ]]
 
 callbacks.Unregister("DispatchUserMessage", "CD_VoteReveal_UserMsg")
