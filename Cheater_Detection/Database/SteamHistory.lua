@@ -390,34 +390,19 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	-- Extract response array if wrapped
 	if responseTable.response and type(responseTable.response) == "table" then
 		responseTable = responseTable.response
-	elseif not responseTable[1] and not next(responseTable) then
-		-- Empty response
-		local passed = #ids
-		printInfo(
-			{ 0, 200, 255, 255 },
-			string.format("[SteamHistory] Batch: 0 flagged, %d clean (empty response)", passed)
-		)
-		return
 	end
 
-	-- Validate response entries
-	local validEntries = 0
+	-- Build response map from entries (empty array = all players clean, which is valid)
 	for _, entry in pairs(responseTable) do
 		if type(entry) == "table" then
 			local steamID = normalizeSteamID64(entry.SteamID or entry.steamid or entry.id)
 			if steamID then
 				responseMap[steamID] = entry
-				validEntries = validEntries + 1
-			else
-				printInfo({ 255, 150, 100, 255 }, "[SteamHistory] Warning: Invalid SteamID in response entry")
 			end
 		end
 	end
 
-	if validEntries == 0 and #ids > 0 then
-		handleError("No valid entries in response", contexts)
-		return
-	end
+	-- Empty response is valid - means no bans found for queried players
 
 	local flagged = 0
 	for _, steamID in ipairs(ids) do
@@ -614,7 +599,12 @@ local function onPlayerTeam(event)
 	end
 
 	if steamID then
-		queueSteamID(steamID, { name = info.Name })
+		if queueSteamID(steamID, { name = info.Name }) then
+			printInfo(
+				{ 0, 200, 255, 255 },
+				string.format("[SteamHistory] New player joined: %s - queued for scan", info.Name or steamID)
+			)
+		end
 	end
 end
 

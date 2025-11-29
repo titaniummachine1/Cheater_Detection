@@ -87,6 +87,93 @@ local function addPosHistory(idx, headPos, bodyPos, tick)
 		table.remove(playerPosHistory[idx], 1)
 	end
 end
+
+-- Check for silent aimbot using angle extrapolation
+local function checkSilentAimbot(shooterIdx, victimIdx, currentAngles)
+	local history = playerAngleHistory[shooterIdx]
+	if not history or #history < 3 then
+		return false, 0, nil -- Not enough history
+	end
+
+	local victimPosHistory = playerPosHistory[victimIdx]
+	if not victimPosHistory or #victimPosHistory == 0 then
+		return false, 0, nil -- No victim position data
+	end
+
+	-- Get victim position (head preferred)
+	local victimPos = victimPosHistory[#victimPosHistory].headPos or victimPosHistory[#victimPosHistory].bodyPos
+	if not victimPos then
+		return false, 0, nil
+	end
+
+	-- Find the tick when shot was fired
+	local shotIdx = nil
+	for i = #history, 1, -1 do
+		if history[i].shotFired then
+			shotIdx = i
+			break
+		end
+	end
+
+	if not shotIdx or shotIdx < 2 then
+		return false, 0, nil -- No shot found or not enough pre-shot history
+	end
+
+	-- Use quaternion extrapolation to predict where they SHOULD be looking
+	local predicted = Quaternion.extrapolateAngle(history, CONFIG.EXTRAPOLATE_TICKS)
+	if not predicted then
+		return false, 0, nil
+	end
+
+	-- Calculate angle to victim
+	local shooterPos = playerPosHistory[shooterIdx]
+		and playerPosHistory[shooterIdx][#playerPosHistory[shooterIdx]]
+		and playerPosHistory[shooterIdx][#playerPosHistory[shooterIdx]].headPos
+	if not shooterPos then
+		return false, 0, nil
+	end
+
+	local angleToVictim = angleToPosition(shooterPos, victimPos)
+
+	-- Check how close their view was to victim when they shot
+	local shotAngles = history[shotIdx]
+	local fovToVictim = angleFoV(shotAngles, angleToVictim)
+
+	-- Check deviation from predicted trajectory
+	local fovFromPredicted = angleFoV(shotAngles, predicted)
+
+	-- Detection logic:
+	-- 1. IMPOSSIBLE: Shot at target behind them (90°+ from predicted trajectory)
+	if fovFromPredicted >= CONFIG.IMPOSSIBLE_FLICK then
+		return true, 1.0, "Impossible flick (shot behind)"
+	end
+
+	-- 2. SILENT AIM: Perfect aim but trajectory was broken
+	if fovToVictim < CONFIG.PERFECT_AIM_TOLERANCE and fovFromPredicted > CONFIG.TRAJECTORY_BROKEN then
+		local confidence = math.min(1.0, fovFromPredicted / CONFIG.IMPOSSIBLE_FLICK)
+		return true,
+			confidence,
+			string.format("Silent aim (%.1f° snap, %.1f° from predicted)", fovToVictim, fovFromPredicted)
+	end
+
+	-- 3. FLICK CHECK: Big flick to target that instantly returns
+	local postShotIdx = shotIdx + 1
+	if postShotIdx <= #history then
+		local postShotAngles = history[postShotIdx]
+		local postFov = angleFoV(shotAngles, postShotAngles)
+
+		-- Shot was accurate AND instantly returned to trajectory
+		if fovToVictim < CONFIG.PERFECT_AIM_TOLERANCE and postFov > CONFIG.MIN_FLICK_DELTA then
+			local confidence = math.min(1.0, postFov / CONFIG.TRAJECTORY_BROKEN)
+			return true,
+				confidence * 0.7,
+				string.format("Snap-back (%.1f° accuracy, %.1f° return)", fovToVictim, postFov)
+		end
+	end
+
+	return false, 0, nil
+end
+
 function SilentAimbot.Check(player)
 	-- Skip if detection disabled
 	if not G.Menu.Advanced or not G.Menu.Advanced.SilentAimbot then

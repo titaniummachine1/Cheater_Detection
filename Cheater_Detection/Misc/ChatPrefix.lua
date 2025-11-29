@@ -98,7 +98,7 @@ local function GetCheaterStatus(player)
 	end
 
 	-- Check if has some evidence (suspicious)
-	local evidence = Evidence.GetEvidence(steamID)
+	local evidence = Evidence.GetDetails(steamID)
 	if evidence and evidence.TotalScore and evidence.TotalScore > 0 then
 		-- Yellow for suspicious (has evidence but not marked yet)
 		return "SUSPICIOUS", { 255, 255, 0 }

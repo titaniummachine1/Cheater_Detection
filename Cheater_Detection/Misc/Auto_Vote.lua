@@ -81,9 +81,12 @@ local function isBot(player, steamID)
 	end
 
 	-- Use client.GetPlayerInfo to check for bots (correct method)
-	local info = client.GetPlayerInfo(player:GetIndex())
-	if info and (info.IsBot or info.IsHLTV) then
-		return true
+	local idx = player:GetIndex()
+	if idx then
+		local info = client.GetPlayerInfo(idx)
+		if info and (info.IsBot or info.IsHLTV) then
+			return true
+		end
 	end
 
 	-- Check if SteamID is invalid (bots have [U:1:0])
