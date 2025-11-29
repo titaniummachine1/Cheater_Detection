@@ -186,6 +186,9 @@ local function DrawMenu()
 		if Misc.Autovote then
 			Misc.intent = Misc.intent or {}
 			-- Initialize if needed
+			if type(Misc.intent.retaliation) ~= "boolean" then
+				Misc.intent.retaliation = true
+			end
 			if type(Misc.intent.legit) ~= "boolean" then
 				Misc.intent.legit = true
 			end
@@ -208,9 +211,11 @@ local function DrawMenu()
 			TimMenu.Tooltip("Continuously initiate votes using the configured target priority.")
 			TimMenu.NextLine()
 
-			-- Priority order: Bots > Cheaters > Valve > Legits > Friends
-			local voteTargets = { "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
+			-- Priority order: Retaliation > Bots > Cheaters > Valve > Legits > Friends
+			local voteTargets =
+				{ "Retaliation", "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
 			local voteTable = {
+				Misc.intent.retaliation,
 				Misc.intent.bot,
 				Misc.intent.cheater,
 				Misc.intent.valve,
@@ -218,11 +223,12 @@ local function DrawMenu()
 				Misc.intent.friend,
 			}
 			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
-			Misc.intent.bot = voteTable[1]
-			Misc.intent.cheater = voteTable[2]
-			Misc.intent.valve = voteTable[3]
-			Misc.intent.legit = voteTable[4]
-			Misc.intent.friend = voteTable[5]
+			Misc.intent.retaliation = voteTable[1]
+			Misc.intent.bot = voteTable[2]
+			Misc.intent.cheater = voteTable[3]
+			Misc.intent.valve = voteTable[4]
+			Misc.intent.legit = voteTable[5]
+			Misc.intent.friend = voteTable[6]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()

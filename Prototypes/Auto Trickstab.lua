@@ -13,10 +13,7 @@ end
 assert(libLoaded, "lnxLib not found, please install it!")
 assert(lnxLib.GetVersion() >= 1.00, "lnxLib version is too old, please update it!")
 
--- Unload the module if it's already loaded
-if package.loaded["TimMenu"] then
-	package.loaded["TimMenu"] = nil
-end
+-- TimMenu should not be unloaded as other scripts may be using it
 
 local menuLoaded, TimMenu = pcall(require, "TimMenu")
 if not menuLoaded then
@@ -26,6 +23,10 @@ if not menuLoaded then
 end
 
 assert(menuLoaded, "TimMenu not found, please install it!")
+
+-- Safety check for lnxLib modules
+assert(lnxLib.Utils, "lnxLib.Utils not found!")
+assert(lnxLib.TF2, "lnxLib.TF2 not found!")
 
 local Math, Conversion = lnxLib.Utils.Math, lnxLib.Utils.Conversion
 local WPlayer, WWeapon = lnxLib.TF2.WPlayer, lnxLib.TF2.WWeapon
@@ -466,6 +467,7 @@ local function UpdateTarget()
 		if
 			player:IsAlive()
 			and not player:IsDormant()
+			and pLocal
 			and player:GetTeamNumber() ~= pLocal:GetTeamNumber()
 			and (ignoreinvisible == 1 and not player:InCond(4))
 		then

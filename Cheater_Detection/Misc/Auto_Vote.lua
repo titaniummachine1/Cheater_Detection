@@ -327,8 +327,17 @@ local function shouldVoteAutomatically()
 				tostring(menu and menu.AutovoteAutoCast)
 			)
 		)
+		return false
 	end
-	return result
+
+	-- Check if we're in a casual game mode
+	local isCasual = party.IsMatchTypeCasual()
+	if not isCasual then
+		logDebug("Auto-vote disabled: not in casual game mode")
+		return false
+	end
+
+	return true
 end
 
 local function issueVote(target)
@@ -406,6 +415,13 @@ local function determineVoteOptionForEntity(entity)
 end
 
 local function handleVoteStart(msg)
+	-- Check if we're in a casual game mode before processing votes
+	local isCasual = party.IsMatchTypeCasual()
+	if not isCasual then
+		logDebug("Vote handling disabled: not in casual game mode")
+		return
+	end
+
 	local menu = getMenu()
 	local team = msg:ReadByte()
 	local voteIdx = msg:ReadInt(32)
