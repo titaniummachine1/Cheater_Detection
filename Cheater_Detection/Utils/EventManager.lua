@@ -115,14 +115,8 @@ function EventManager.GetHandlerCount(eventType)
 	end
 end
 
---- Cleanup on script unload
-local function cleanup()
-	for eventType, callbackName in pairs(registeredCallbacks) do
-		callbacks.Unregister(eventType, callbackName)
-	end
-end
-
--- Self-register cleanup
-EventManager.Register("Unload", "EventManager_Cleanup", cleanup)
+-- NOTE: No cleanup needed on Unload.
+-- Lmaobox automatically cleans up all callbacks when the script unloads.
+-- Calling callbacks.Unregister() during Unload causes crashes.
 
 return EventManager
