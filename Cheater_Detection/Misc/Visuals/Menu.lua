@@ -120,58 +120,22 @@ local function DrawMenu()
 			"When enabled, setting player priority to 10 will store them in the database as a known cheater."
 		)
 		TimMenu.EndSector()
+
+		TimMenu.BeginSector("Aim Detection")
+		if type(Advanced.SilentAimbot) ~= "boolean" then
+			Advanced.SilentAimbot = true
+		end
+		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot)
+		TimMenu.Tooltip("Detects silent aim using viewangle extrapolation (experimental)")
+		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Movement Detection")
 		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop)
 		TimMenu.NextLine()
 		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed)
-		TimMenu.NextLine()
-		Advanced.Strafe_bot = TimMenu.Checkbox("Strafe Bot Detection", Advanced.Strafe_bot)
 		TimMenu.EndSector()
-		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Aim Detection")
-		Advanced.Aimbot.enable = TimMenu.Checkbox("Enable Aimbot Detection", Advanced.Aimbot.enable)
-		TimMenu.NextLine()
-		if Advanced.Aimbot.enable then
-			-- Initialize if needed
-			if type(Advanced.Aimbot.silent) ~= "boolean" then
-				Advanced.Aimbot.silent = true
-			end
-			if type(Advanced.Aimbot.plain) ~= "boolean" then
-				Advanced.Aimbot.plain = true
-			end
-			if type(Advanced.Aimbot.smooth) ~= "boolean" then
-				Advanced.Aimbot.smooth = true
-			end
-
-			local aimbotTypes = { "Silent Aim", "Plain Aim", "Smooth Aim" }
-			local aimbotTable = { Advanced.Aimbot.silent, Advanced.Aimbot.plain, Advanced.Aimbot.smooth }
-			aimbotTable = TimMenu.Combo("Aimbot Types", aimbotTable, aimbotTypes)
-			Advanced.Aimbot.silent = aimbotTable[1]
-			Advanced.Aimbot.plain = aimbotTable[2]
-			Advanced.Aimbot.smooth = aimbotTable[3]
-			TimMenu.NextLine()
-		end
-
-		-- NEW: Silent aimbot toggle
-		if type(Advanced.SilentAimbot) ~= "boolean" then
-			Advanced.SilentAimbot = true
-		end
-		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot)
-		TimMenu.Tooltip("Detects silent aim using viewangle extrapolation (experimental)")
-		TimMenu.NextLine()
-
-		Advanced.triggerbot = TimMenu.Checkbox("Triggerbot Detection", Advanced.triggerbot)
-		TimMenu.EndSector()
-		TimMenu.NextLine()
-
-		TimMenu.BeginSector("Logging")
-		local logLevels = { "Debug", "Info", "Warning", "Error" }
-		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
-		TimMenu.Tooltip("Set console output verbosity (Debug = everything, Error = only critical)")
-		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Debug")
@@ -180,6 +144,11 @@ local function DrawMenu()
 		end
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
 		TimMenu.Tooltip("Enables debug features (auto-removes self from database, enables verbose logging)")
+
+		local logLevels = { "Debug", "Info", "Warning", "Error" }
+		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
+		TimMenu.Tooltip("Set console output verbosity (Debug = everything, Error = only critical)")
+
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Misc" then

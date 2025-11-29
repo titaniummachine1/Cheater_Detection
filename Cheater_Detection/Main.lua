@@ -25,12 +25,7 @@ local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
-local WorkManager = require("Cheater_Detection.Utils.WorkManager")
 local EventManager = require("Cheater_Detection.Utils.EventManager")
-
--- Config & history setup (side-effect: registers history consumers)
-require("Cheater_Detection.Utils.Config")
-require("Cheater_Detection.Utils.HistoryConfig")
 
 --[[ UI components ]]
 require("Cheater_Detection.Misc.Visuals.Menu") --[[ Imported by: Main.lua ]]

@@ -18,7 +18,7 @@ function WorkManager.addWork(func, args, delay, identifier)
 	args = args or {}
 
 	local work = WorkManager.works[identifier]
-	
+
 	-- Check if the work already exists
 	if work then
 		-- Update existing work details (function, delay, args)

@@ -5,7 +5,6 @@
 ]]
 
 local G = require("Cheater_Detection.Utils.Globals")
-local DefaultPlayerData = require("Cheater_Detection.Utils.DefaultPlayerData")
 
 local PlayerState = {}
 

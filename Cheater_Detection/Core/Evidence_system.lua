@@ -10,7 +10,6 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
-local WorkManager = require("Cheater_Detection.Utils.WorkManager")
 local Database = require("Cheater_Detection.Database.Database")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
@@ -39,19 +38,15 @@ Evidence.Config = {
 	MarkAsCheatThreshold = 100, -- Total weight to mark as cheater
 	MinWeightFloor = 0, -- Cannot decay below this
 
-	-- Category mappings
+	-- Category mappings (only implemented detections)
 	Categories = {
 		-- Aim detection methods
 		Aim = {
 			"silent_aimbot",
-			"plain_aimbot",
-			"smooth_aimbot",
-			"triggerbot",
 		},
 		-- Exploit detection methods
 		Exploit = {
 			"warp_dt",
-			"warp_recharge",
 			"fake_lag",
 			"anti_aim",
 			"manual_priority",
@@ -59,9 +54,7 @@ Evidence.Config = {
 		-- Movement detection methods
 		Movement = {
 			"bhop",
-			"strafe_bot",
 			"Duck_Speed",
-			"bot_walk",
 		},
 	},
 }
@@ -71,7 +64,7 @@ local TICKS_PER_SECOND = 66 -- TF2 tickrate
 local DECAY_BATCHES_PER_CYCLE = 6
 local DECAY_INTERVAL_TICKS = math.max(1, math.floor(TICKS_PER_SECOND / DECAY_BATCHES_PER_CYCLE))
 local DECAY_SECONDS_PER_BATCH = 1 / DECAY_BATCHES_PER_CYCLE
-local DECAY_WORK_IDENTIFIER = "Evidence.DecayBatch"
+local lastDecayTick = 0 -- Simple tick-based rate limiting
 
 local decayQueue = {}
 local decayQueueIndex = {}
@@ -81,13 +74,11 @@ local decayQueueDirty = true
 local DetectionToggles = {
 	anti_aim = "AntyAim",
 	bhop = "Bhop",
-	fake_lag = "FakeLag",
-	warp_dt = "WarpDT",
-	warp_recharge = "WarpRecharge",
+	fake_lag = "Choke", -- Choke = Fake Lag in config
+	warp_dt = "Warp",
 	Duck_Speed = "DuckSpeed",
-	strafe_bot = "StrafeBot",
-	bot_walk = "BotWalk",
-	manual_priority = "ManualPriority",
+	silent_aimbot = "SilentAimbot",
+	manual_priority = "AutoFlagPriorityTen",
 }
 
 local function clearArray(tbl)
@@ -299,12 +290,7 @@ local function tryMarkCheater(steamID, evidence, state)
 				["fake_lag"] = "Fake Lag",
 				["warp_dt"] = "Warp/Doubletap",
 				["Duck_Speed"] = "Duck Speed",
-				["strafe_bot"] = "Strafe Bot",
-				["bot_walk"] = "Bot Walk",
 				["silent_aimbot"] = "Silent Aimbot",
-				["plain_aimbot"] = "Aimbot",
-				["smooth_aimbot"] = "Smooth Aimbot",
-				["triggerbot"] = "Triggerbot",
 				["manual_priority"] = "Manual Priority",
 			}
 			primaryReason = reasonMap[detectionName] or detectionName
@@ -507,9 +493,11 @@ local function processDecayBatch()
 	end
 end
 
---- Apply decay to all players (called per second)
+--- Apply decay to all players (called per tick, internally rate-limited)
 function Evidence.ApplyDecay()
-	if WorkManager.attemptWork(DECAY_INTERVAL_TICKS, DECAY_WORK_IDENTIFIER) then
+	local currentTick = globals.TickCount()
+	if currentTick - lastDecayTick >= DECAY_INTERVAL_TICKS then
+		lastDecayTick = currentTick
 		processDecayBatch()
 	end
 end

@@ -16,19 +16,13 @@ local Default_Config = {
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false, -- Debug mode (removes self from database, enables verbose logging)
 		AutoFlagPriorityTen = false,
-		Choke = true, --fakelag
-		Warp = true,
-		Bhop = true,
-		Aimbot = {
-			enable = true,
-			silent = true,
-			plain = true,
-			smooth = true,
-		},
-		triggerbot = true,
-		AntyAim = true,
-		DuckSpeed = true,
-		Strafe_bot = true,
+		-- Detection toggles (only for implemented detections)
+		Choke = true, -- Fake Lag detection
+		Warp = true, -- Warp/DT detection
+		Bhop = true, -- Bunny hop detection
+		DuckSpeed = true, -- Duck speed detection
+		AntyAim = true, -- Anti-aim detection
+		SilentAimbot = true, -- Silent aimbot (extrapolation) detection
 	},
 
 	Misc = {
