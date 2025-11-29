@@ -19,6 +19,7 @@ end
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
+local Config = require("Cheater_Detection.Utils.Config") -- Load config early
 local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")

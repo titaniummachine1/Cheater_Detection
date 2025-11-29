@@ -320,8 +320,10 @@ end
 --[[ Registrations and final actions ]]
 --
 local function OnUnload() -- Called when the script is unloaded
-	UnloadLib() --unloading lualib
-	engine.PlaySound("hl1/fvox/deactivated.wav") --deactivated
+	if UnloadLib then
+		pcall(UnloadLib) --unloading lualib safely
+	end
+	pcall(engine.PlaySound, "hl1/fvox/deactivated.wav") --deactivated safely
 end
 
 -- Unregister previous callbacks

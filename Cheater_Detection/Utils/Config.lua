@@ -50,18 +50,29 @@ end
 function Config.CreateCFG(cfgTable)
 	cfgTable = cfgTable or Default_Config
 	local filepath = Config.GetFilePath()
+	local shortFilePath = filepath:match(".*\\(.*.*)$")
+
+	-- Try to encode config
+	local success, serializedConfig = pcall(json.encode, cfgTable)
+	if not success then
+		local errorMessage = "Failed to encode config: " .. tostring(serializedConfig)
+		printc(255, 0, 0, 255, errorMessage)
+		print("[CONFIG] Error details: " .. tostring(serializedConfig))
+		return false
+	end
+
 	local file = io.open(filepath, "w")
-	local shortFilePath = filepath:match(".*\\(.*\\.*)$")
 	if file then
-		local serializedConfig = json.encode(cfgTable)
 		file:write(serializedConfig)
 		file:close()
 		printc(100, 183, 0, 255, "Success Saving Config: Path: " .. shortFilePath)
 		Common.Notify.Simple("Success! Saved Config to:", shortFilePath, 5)
+		return true
 	else
 		local errorMessage = "Failed to open: " .. shortFilePath
 		printc(255, 0, 0, 255, errorMessage)
 		Common.Notify.Simple("Error", errorMessage, 5)
+		return false
 	end
 end
 
@@ -104,13 +115,101 @@ Config.LoadCFG()
 
 -- Save configuration automatically when the script unloads
 local function ConfigAutoSaveOnUnload()
+	-- Use only basic print, no printc or other functions that might be GC'd
 	print("[CONFIG] Unloading script, saving configuration...")
 
-	-- Save the current configuration state
-	if G.Menu then
-		Config.CreateCFG(G.Menu)
+	-- Create a localized, self-contained JSON encoder to avoid GC issues
+	local function safeJsonEncode(tbl, indent)
+		indent = indent or ""
+		local result = "{\n"
+		local first = true
+
+		for key, value in pairs(tbl) do
+			if not first then
+				result = result .. ",\n"
+			end
+			first = false
+
+			-- Key
+			if type(key) == "string" then
+				result = result .. indent .. '  "' .. key .. '": '
+			else
+				result = result .. indent .. "  [" .. tostring(key) .. "]: "
+			end
+
+			-- Value
+			if type(value) == "table" then
+				result = result .. safeJsonEncode(value, indent .. "  ")
+			elseif type(value) == "string" then
+				result = result .. '"' .. value .. '"'
+			elseif type(value) == "boolean" then
+				result = result .. (value and "true" or "false")
+			elseif type(value) == "number" then
+				result = result .. tostring(value)
+			else
+				result = result .. "null"
+			end
+		end
+
+		result = result .. "\n" .. indent .. "}"
+		return result
+	end
+
+	-- Safety checks - use only basic Lua, no external modules
+	if not G or not G.Menu then
+		print("[CONFIG] Warning: G.Menu is nil, cannot save config")
+		return
+	end
+
+	-- Get filepath using only filesystem (should still be available)
+	local success, fullPath = pcall(filesystem.CreateDirectory, folder_name)
+
+	-- If CreateDirectory fails, we assume the directory already exists (since we created it on load)
+	-- and try to construct the path manually if fullPath is missing.
+	-- filesystem.CreateDirectory returns (success, path) or (false/nil)
+
+	local filepath
+	if fullPath then
+		filepath = fullPath .. "/config.cfg"
 	else
-		printc(255, 0, 0, 255, "[CONFIG] Warning: Unable to save config, G.Menu is nil")
+		-- Fallback: try to construct path if we can't get it from CreateDirectory
+		-- This might fail if folder_name is not absolute, but it's worth a try or we just skip
+		-- Better approach: If we can't get the path, we can't save.
+		-- But wait, the error "Cannot create directory" implies it failed.
+		-- Let's try to use the relative path if fullPath is nil?
+		-- io.open works with relative paths usually relative to the game folder or lua folder.
+		-- But Lmaobox filesystem is sandboxed.
+
+		-- If we failed to create/get directory, we probably can't save.
+		-- But let's try one more thing: check if we have a cached path from load?
+		-- We don't have access to Config.GetFilePath() result easily here without calling it.
+		-- Let's just try to use the folder_name directly?
+		-- actually, filesystem.CreateDirectory returns the absolute path.
+
+		print("[CONFIG] Warning: Could not verify directory, attempting to save anyway...")
+		-- We can't easily guess the absolute path if CreateDirectory failed to return it.
+		-- However, we can try to use the folder_name relative path if io.open supports it.
+		filepath = folder_name .. "/config.cfg"
+	end
+
+	-- Try to encode and save
+	success, result = pcall(function()
+		local encoded = safeJsonEncode(G.Menu)
+		local file = io.open(filepath, "w")
+		if file then
+			file:write(encoded)
+			file:close()
+			print("[CONFIG] Config saved successfully to: " .. filepath)
+			return true
+		else
+			print("[CONFIG] ERROR: Cannot open file for writing: " .. tostring(filepath))
+			return false
+		end
+	end)
+
+	if not success then
+		print("[CONFIG] ERROR during save: " .. tostring(result))
+		print("[CONFIG] Config NOT saved, but script unloading safely")
 	end
 end
 
