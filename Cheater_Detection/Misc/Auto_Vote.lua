@@ -52,6 +52,8 @@ local State = {
 	maxBackoff = 120, -- Max 2 minutes
 	backoffUntil = 0,
 	iCalledThisVote = false, -- Track if WE initiated the current vote
+	voteSentTime = 0, -- When we sent the vote command
+	voteTimeout = 3.0, -- Seconds to wait for server response
 }
 
 local function logInfo(message)
@@ -75,10 +77,10 @@ local function recordRetaliationTargets()
 				RetaliationTargets[voter.steamID] = { count = 0, score = 0 }
 			end
 			RetaliationTargets[voter.steamID].count = RetaliationTargets[voter.steamID].count + 1
-			RetaliationTargets[voter.steamID].score = RetaliationTargets[voter.steamID].score + 100
+			RetaliationTargets[voter.steamID].score = RetaliationTargets[voter.steamID].score + 10
 			logInfo(
 				string.format(
-					"RETALIATION: %s voted NO (+100 score, total: %d)",
+					"RETALIATION: %s voted NO on our vote (+10 score, total: %d)",
 					voter.name,
 					RetaliationTargets[voter.steamID].score
 				)
@@ -91,6 +93,7 @@ local function resetVoteState()
 	State.currentVoteIdx = nil
 	State.currentTarget = nil
 	State.iCalledThisVote = false
+	State.voteSentTime = 0 -- Clear timeout tracking
 end
 
 local function getMenu()
@@ -314,6 +317,7 @@ local function issueVote(target)
 	}
 	State.lastVoteTime = globals.RealTime()
 	State.iCalledThisVote = true -- Track that WE initiated this vote
+	State.voteSentTime = globals.RealTime() -- Track when we sent the command
 	return true
 end
 
@@ -360,11 +364,28 @@ local function handleVoteStart(msg)
 
 	State.currentVoteIdx = voteIdx
 
-	if State.currentTarget then
-		local option = State.currentTarget.expectedResult or VOTE_OPTION_YES
-		sendVote(voteIdx, option)
-		logInfo(string.format("Voting option %d on vote %d (expected result)", option, voteIdx))
-		return
+	-- Check if this is the vote WE initiated
+	if State.currentTarget and State.voteSentTime > 0 then
+		local localPlayer = FastPlayers.GetLocal()
+		local localIndex = localPlayer and localPlayer:GetIndex() or -1
+
+		-- Check if we're the caller AND it matches our target
+		if callerIdx == localIndex then
+			local targetEntity = entities.GetByIndex(targetIdx)
+			if targetEntity and targetEntity:IsValid() then
+				local targetSteamID = targetEntity:GetSteamID64()
+				if targetSteamID == State.currentTarget.steamID then
+					-- This is DEFINITELY our vote! Clear timeout and proceed
+					State.voteSentTime = 0
+					local option = State.currentTarget.expectedResult or VOTE_OPTION_YES
+					sendVote(voteIdx, option)
+					logInfo(string.format("OUR vote started - Voting option %d on vote %d", option, voteIdx))
+					return
+				end
+			end
+		end
+		-- Not our vote - someone else started a vote
+		logDebug(string.format("Vote started by player %d while we were waiting", callerIdx))
 	end
 
 	if not menu or not menu.Autovote then
@@ -480,6 +501,24 @@ function AutoVote.OnCreateMove()
 		return
 	end
 
+	-- Check for timeout on vote we sent
+	if State.voteSentTime > 0 then
+		local now = globals.RealTime()
+		if now - State.voteSentTime > State.voteTimeout then
+			-- Server didn't respond within timeout - assume silent rejection
+			logInfo(string.format("Vote timeout after %.1fs - server silently rejected", State.voteTimeout))
+			State.serverCooldownUntil = now + State.failureBackoff
+			logInfo(string.format("Cooldown: %ds (estimated from timeout)", State.failureBackoff))
+
+			-- Exponential backoff
+			State.failureBackoff = math.min(State.failureBackoff * 2, State.maxBackoff)
+
+			-- Reset vote state
+			resetVoteState()
+			return
+		end
+	end
+
 	-- Vote already in progress
 	if State.currentTarget or State.currentVoteIdx then
 		return
@@ -554,28 +593,60 @@ function AutoVote.OnDispatchUserMessage(msg)
 		logInfo("VoteFailed user message received")
 		handleVoteFailed()
 	elseif id == CallVoteFailed then
-		-- Parse ALL data from message for debugging
-		local reason = msg:ReadByte()
-		local timeSeconds = msg:ReadInt(16)
+		-- Try ALL possible data formats from TF2 server
+		local cooldownFound = false
+		local cooldownTime = 0
+		local reason = -1
 
-		-- Print raw data for debugging
-		logInfo(string.format("CallVoteFailed RAW: reason=%d, time=%d", reason or -1, timeSeconds or -1))
+		-- Method 1: Standard TF2 format (reason:byte, time:short)
+		reason = msg:ReadByte()
+		local time1 = msg:ReadInt(16)
+		logInfo(string.format("CallVoteFailed FORMAT1: reason=%d, time=%d", reason or -1, time1 or -1))
 
-		if timeSeconds and timeSeconds > 0 then
-			-- Server explicitly told us cooldown time
-			State.serverCooldownUntil = globals.RealTime() + timeSeconds
+		if time1 and time1 > 0 and time1 <= 300 then
+			cooldownFound = true
+			cooldownTime = time1
+			logInfo(string.format("VALID COOLDOWN: %d seconds (format1)", cooldownTime))
+		end
+
+		-- Method 2: Try reading as float (some servers might use float)
+		-- Note: Can't reset message position, so this is just for reference
+		-- We would need separate message handlers for different formats
+
+		-- Method 3: Check if reason itself might be the cooldown (some servers)
+		if not cooldownFound and reason and reason > 0 and reason <= 300 then
+			cooldownFound = true
+			cooldownTime = reason
+			logInfo(string.format("VALID COOLDOWN: %d seconds (reason-as-time)", cooldownTime))
+		end
+
+		-- Additional debug info
+		logInfo(
+			string.format(
+				"CallVoteFailed SUMMARY: id=%d, reason=%d, time=%d, valid=%s",
+				id,
+				reason or -1,
+				time1 or -1,
+				tostring(cooldownFound)
+			)
+		)
+
+		-- Apply cooldown if found, otherwise use backoff
+		if cooldownFound and cooldownTime > 0 then
+			State.serverCooldownUntil = globals.RealTime() + cooldownTime
 			State.failureBackoff = 60 -- Reset backoff since we got real data
-			logInfo(string.format("Vote cooldown: %d seconds (server reported)", timeSeconds))
+			logInfo(string.format("Vote cooldown: %d seconds (server confirmed)", cooldownTime))
 		else
-			-- No cooldown data - use backoff
+			-- No valid cooldown - use backoff
 			State.serverCooldownUntil = globals.RealTime() + State.failureBackoff
 			logInfo(
-				string.format("Vote rejected (reason %d) - cooldown %ds (backoff)", reason or 0, State.failureBackoff)
+				string.format("Vote rejected (reason %d) - cooldown %ds (estimated)", reason or 0, State.failureBackoff)
 			)
 
 			-- Exponential backoff: increase for next time, max 2 minutes
 			State.failureBackoff = math.min(State.failureBackoff * 2, State.maxBackoff)
 		end
+
 		handleVoteEnd()
 	end
 end
@@ -591,6 +662,7 @@ function AutoVote.Reset()
 	State.serverCooldownUntil = 0
 	State.lastCooldownLog = 0
 	State.failureBackoff = 60 -- Reset to 60s
+	State.voteSentTime = 0 -- Clear timeout
 	-- Don't clear RetaliationTargets - they persist for the session
 	logInfo("AutoVote reset - cooldown cleared")
 end
