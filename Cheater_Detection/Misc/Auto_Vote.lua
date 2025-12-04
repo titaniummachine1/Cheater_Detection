@@ -331,7 +331,7 @@ local function shouldVoteAutomatically()
 	end
 
 	-- Check if we're in a casual game mode
-	local isCasual = party.IsMatchTypeCasual()
+	local isCasual = gamerules.IsMatchTypeCasual()
 	if not isCasual then
 		logDebug("Auto-vote disabled: not in casual game mode")
 		return false
@@ -416,7 +416,7 @@ end
 
 local function handleVoteStart(msg)
 	-- Check if we're in a casual game mode before processing votes
-	local isCasual = party.IsMatchTypeCasual()
+	local isCasual = gamerules.IsMatchTypeCasual()
 	if not isCasual then
 		logDebug("Vote handling disabled: not in casual game mode")
 		return
@@ -464,12 +464,14 @@ local function handleVoteStart(msg)
 	-- Check if this is the vote WE initiated
 	if State.currentTarget and State.voteSentTime > 0 then
 		local localPlayer = FastPlayers.GetLocal()
+		-- GetIndex() is forwarded to WPlayer via metatable (lint warning is false positive)
 		local localIndex = localPlayer and localPlayer:GetIndex() or -1
 
 		-- Check if we're the caller AND it matches our target
 		if callerIdx == localIndex then
 			local targetEntity = entities.GetByIndex(targetIdx)
 			if targetEntity and targetEntity:IsValid() then
+				-- GetSteamID64() is forwarded to WPlayer via metatable (lint warning is false positive)
 				local targetSteamID = targetEntity:GetSteamID64()
 				if targetSteamID == State.currentTarget.steamID then
 					-- This is DEFINITELY our vote! Clear timeout and proceed

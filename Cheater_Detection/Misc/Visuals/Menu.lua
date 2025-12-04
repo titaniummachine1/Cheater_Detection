@@ -19,10 +19,6 @@ end
 
 local function DrawMenu()
 	TickProfiler.BeginSection("Draw_Menu")
-	-- Only draw when the Lmaobox menu is open
-	if not gui.IsMenuOpen() then
-		return
-	end
 
 	-- Debug mode indicator (drawn outside TimMenu window)
 	if G.Menu.Advanced.debug then
@@ -31,8 +27,8 @@ local function DrawMenu()
 		draw.Text(20, 120, "Debug Mode!!! Some Features Might malfunction")
 	end
 
-	-- Begin the menu and store the result
-	if not TimMenu.Begin("Cheater Detection") then
+	-- Begin the menu - visibility directly tied to Lmaobox menu state
+	if not TimMenu.Begin("Cheater Detection", gui.IsMenuOpen()) then
 		return
 	end
 

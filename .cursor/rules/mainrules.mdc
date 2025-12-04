@@ -1,26 +1,8 @@
-### Rules 2.0 – the **“maintain-and-understand”** edition
-
-*(Lua code that won’t ambush you six months from now)*
-
+---
+alwaysApply: false
 ---
 
-## I.  Cornerstones
-
-1. **Readability > everything else**
-   If you’re torn, choose the version a new dev can grasp in 30 seconds—even if it costs a few CPU cycles or bytes of RAM.
-
-2. **Simple, not simplistic**
-   Minimize the number of concepts a file introduces. If you need to explain “how the magic works,” you probably need to simplify—or give the abstraction a name.
-
-3. **Small steps, frequent commits**
-   Every commit should answer two questions: **what** changed and **why**.
-
-4. **Performance only when it hurts**
-   Don’t “optimize by instinct.” When FPS tanks or GC spikes, fix *that* hotspot—leave the rest alone.
-
----
-
-## II.  Code conventions
+## II. Code conventions
 
 1. ### **Module layout**
 
@@ -45,19 +27,19 @@
    return PlayerAI
    ```
 
-   *Never reorder these blocks.* Muscle memory lowers “code-scanning time.”
+   _Never reorder these blocks._ Muscle memory lowers “code-scanning time.”
 
 2. ### **Naming**
 
-   * **Functions:** `verbNoun` → `processShot`, `reloadConfig`.
-   * **Booleans:** start with `is/has/should/can`.
-   * **Files:** `snake_case`.
-   * **No mystery vars** like `x`, `y`, `z`—unless you’re doing obvious geometry.
+   - **Functions:** `verbNoun` → `processShot`, `reloadConfig`.
+   - **Booleans:** start with `is/has/should/can`.
+   - **Files:** `snake_case`.
+   - **No mystery vars** like `x`, `y`, `z`—unless you’re doing obvious geometry.
 
 3. ### **No anonymous functions**
 
    Give every function a name; better stack traces and profiling.
-   *Only* acceptable anonymous: a one-liner callback that never leaves the module.
+   _Only_ acceptable anonymous: a one-liner callback that never leaves the module.
 
 4. ### **`G` over `_G`**
 
@@ -74,11 +56,11 @@
 
    Zero indentation staircases.
 
-6. ### **DRY—*but with brakes***
+6. ### **DRY—_but with brakes_**
 
-   * Copy-paste ≤ 2 times? **Wait.**
-   * ≥ 3 times *and* the differences can be parameterized? Extract a function.
-   * If abstraction demands convoluted state-plumbing, scrap it; clarity wins.
+   - Copy-paste ≤ 2 times? **Wait.**
+   - ≥ 3 times _and_ the differences can be parameterized? Extract a function.
+   - If abstraction demands convoluted state-plumbing, scrap it; clarity wins.
 
 7. ### **File size warning**
 
@@ -86,7 +68,7 @@
 
 8. ### **Self-initializing modules**
 
-   A module decides whether it needs `Initialize()` on first `require()` or an explicit call. `Main.lua` is *not* a staging area for setup gymnastics.
+   A module decides whether it needs `Initialize()` on first `require()` or an explicit call. `Main.lua` is _not_ a staging area for setup gymnastics.
 
 9. ### **No `collectgarbage()`**
 
@@ -98,13 +80,13 @@
     if (flags & FL_ONGROUND) ~= 0 then ...
     ```
 
-    *No* `bit.band`, *no* `== 1`, *no* magic numbers.
+    _No_ `bit.band`, _no_ `== 1`, _no_ magic numbers.
     Better: API helpers like `player:IsOnGround()`.
 
 11. ### **Dependency loading**
 
-    * Internal files → plain `require`.
-    * Optional/external →
+    - Internal files → plain `require`.
+    - Optional/external →
 
       ```lua
       local ok, lib = pcall(require, "foo")
@@ -121,16 +103,16 @@
 
 14. ### **Comment conscious rule-breaks**
 
-    Duplicating 20 lines because DI would be a circus? Leave a one-liner *why* so future-you doesn’t curse present-you.
+    Duplicating 20 lines because DI would be a circus? Leave a one-liner _why_ so future-you doesn’t curse present-you.
 
 15. ### **Optimize on demand**
 
-    Profile → find 5 % hotspot in `Vector:Normalize()` → speed *that* up.
+    Profile → find 5 % hotspot in `Vector:Normalize()` → speed _that_ up.
     Don’t assume “this will surely be slow” ahead of evidence.
 
 ---
 
-## III.  Workflow TL;DR
+## III. Workflow TL;DR
 
 1. **Pull → small change → in-game test → commit → push.**
 2. Feature branches live days, not weeks.
@@ -138,14 +120,14 @@
 
 ---
 
-## IV.  Sanity checklist before PR
+## IV. Sanity checklist before PR
 
 | Question                                               | Yes ✅ / No ❌ |
-| ------------------------------------------------------ | ------------ |
-| Can you understand the function without hopping files? |              |
-| Are conditions one-liners *or* named helpers?          |              |
-| Is this duplication actually painful now?              |              |
-| Can you point to a measured hotspot, not a guess?      |              |
+| ------------------------------------------------------ | -------------- |
+| Can you understand the function without hopping files? |                |
+| Are conditions one-liners _or_ named helpers?          |                |
+| Is this duplication actually painful now?              |                |
+| Can you point to a measured hotspot, not a guess?      |                |
 
 If any answer is “No,” fix it—or explain why in a comment.
 

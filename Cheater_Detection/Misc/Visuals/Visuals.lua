@@ -45,10 +45,23 @@ local function DrawVisuals()
 		-- Check if player is marked as cheater (Evidence system checks DB + Runtime)
 		local isCheater = Evidence.IsMarkedCheater(steamId)
 
-		-- Determine if we should show a tag
-		local showTag = isCheater
-		local tagText = isCheater and "CHEATER" or "SUSPICIOUS"
-		local tagColor = isCheater and { 255, 0, 0, 255 } or { 255, 255, 0, 255 }
+		-- Check if player has suspicious evidence (at half threshold)
+		local evidenceScore = Evidence.GetEvidenceScore(steamId)
+		local threshold = G.Menu and G.Menu.Advanced and G.Menu.Advanced.Evicence_Tolerance or 100
+		local isSuspicious = evidenceScore and evidenceScore >= math.floor(threshold / 2)
+
+		-- Determine if we should show a tag and what type
+		local showTag = isCheater or isSuspicious
+		local tagText, tagColor
+		if isCheater then
+			tagText = "CHEATER"
+			tagColor = { 255, 0, 0, 255 }
+		elseif isSuspicious then
+			tagText = "SUSPICIOUS"
+			tagColor = { 255, 255, 0, 255 }
+		else
+			goto continue
+		end
 
 		if showTag then
 			local padding = Vector3(0, 0, 7)
