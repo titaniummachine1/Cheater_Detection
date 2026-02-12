@@ -11,11 +11,6 @@ local VoteReveal = require("Cheater_Detection.Misc.Vote_Revel")
 
 local LOG_CATEGORY = "AutoVote"
 
--- Bit operations fallback (bit library is often nil in Lmaobox)
-local function shiftRight(value, bits)
-	return math.floor(value / (2 ^ bits))
-end
-
 -- User message IDs (TF2 specific)
 local VoteStart = 46
 local VotePass = 47
@@ -429,7 +424,7 @@ local function handleVoteStart(msg)
 	local dispStr = msg:ReadString(64)
 	local detailsStr = msg:ReadString(64)
 	local targetPacked = msg:ReadByte()
-	local targetIdx = shiftRight(targetPacked, 1)
+	local targetIdx = targetPacked >> 1
 
 	State.currentVoteIdx = voteIdx
 
