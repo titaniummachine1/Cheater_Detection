@@ -155,19 +155,18 @@ function PlayerState.AttachWrappedPlayer(wrapped)
 	if not state then
 		return nil
 	end
-	state.Entity = wrapped:GetRawEntity()
+	local rawEntity = wrapped:GetRawEntity()
+	state.Entity = rawEntity
 
 	state.info = state.info or createInfo()
 
-	if wrapped.GetName then
-		local name = wrapped:GetName()
-		if name and name ~= "" then
-			state.info.Name = name
+	local idx = rawEntity and rawEntity:GetIndex()
+	if idx then
+		local playerInfo = client.GetPlayerInfo(idx)
+		if playerInfo and playerInfo.Name and playerInfo.Name ~= "" then
+			state.info.Name = playerInfo.Name
 		end
-	end
-
-	if wrapped.GetTeamNumber then
-		state.info.Team = wrapped:GetTeamNumber()
+		state.info.Team = rawEntity:GetTeamNumber()
 	end
 
 	return state
