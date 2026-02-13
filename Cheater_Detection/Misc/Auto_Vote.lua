@@ -75,6 +75,10 @@ local function recordRetaliationCaller(callerSteamID, callerName)
 	)
 end
 
+local function isFriendEntity(entity)
+	return entity and Common.IsFriend(entity) or false
+end
+
 --- Record score penalties for players who voted against our interests
 --- Does NOT add them to retaliation group, just increases kick priority score
 local function recordScorePenalties()
@@ -146,10 +150,6 @@ end
 
 local function getMenu()
 	return G.Menu and G.Menu.Misc or nil
-end
-
-local function isFriendEntity(entity)
-	return entity and Common.IsFriend(entity) or false
 end
 
 local function isValveEmployee(steamID)

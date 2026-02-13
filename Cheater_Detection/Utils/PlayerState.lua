@@ -78,7 +78,7 @@ local function createState()
 		info = createInfo(),
 		Evidence = createEvidence(),
 		Current = createCurrent(),
-		History = { createHistoryRecord() },
+		History = nil,
 		LastSeenTick = 0,
 	}
 end
@@ -124,7 +124,6 @@ function PlayerState.GetHistory(steamID)
 	if not state then
 		return nil
 	end
-	state.History = state.History or { createHistoryRecord() }
 	return state.History
 end
 
@@ -136,13 +135,7 @@ function PlayerState.PushHistory(steamID, record, maxHistory)
 	if not state then
 		return
 	end
-	state.History = state.History or {}
-	state.History[#state.History + 1] = record
 	state.Current = record
-	local limit = maxHistory or 66
-	if #state.History > limit then
-		table.remove(state.History, 1)
-	end
 end
 
 ---Attach runtime info from a WrappedPlayer to its state table
@@ -197,7 +190,12 @@ function PlayerState.TrimToActive(activeSet)
 				-- Keep persistent data, clear tick-based data only
 				state.Entity = nil
 				state.Current = nil
-				state.History = nil
+				local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+				if state.History and HistoryManager.IsRing(state.History) then
+					HistoryManager.ClearRing(state.History)
+				else
+					state.History = nil
+				end
 				state.LastSeenTick = 0
 
 				if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then

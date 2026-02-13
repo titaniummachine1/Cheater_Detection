@@ -1,6 +1,4 @@
--- fastplayers.lua ─────────────────────────────────────────────────────────
--- FastPlayers: Simplified per-tick cached player lists.
--- Caches self-manage on demand to minimize overhead.
+--[[ FastPlayers — event-driven player cache with per-tick validation ]]
 
 --[[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
@@ -8,184 +6,278 @@ local Common = require("Cheater_Detection.Utils.Common")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
+local EventManager = require("Cheater_Detection.Utils.EventManager")
 
---[[ Module Declaration ]]
 local FastPlayers = {}
 
---[[ Local Caches ]]
-local cachedAllPlayers = {}
-local cachedTeammates = {}
-local cachedEnemies = {}
-local cachedLocal
-local activeSteamIDs = {}
-local lastEntityIndices = {} -- Track entity indices from last tick
+--[[ Primary store: SteamID64 → WrappedPlayer ]]
+local playersBySteam = {}
+local friendsBySteam = {}
 
--- Cache State
-local lastUpdateTick = -1
-local cachedExcludeLocal = nil
+--[[ Derived arrays — rebuilt lazily from playersBySteam ]]
+local arrayAll = {}
+local arrayAllNoLocal = {}
+local arrayTeammates = {}
+local arrayEnemies = {}
 
-FastPlayers.TeammatesUpdated = false
-FastPlayers.EnemiesUpdated = false
+local cachedLocal = nil
+local cachedLocalSteam = nil
+local cachedLocalTeam = nil
 
---[[ Public API ]]
+local dirty = true
+local derivedDirty = true
+local validateTick = -1
 
---- Returns list of valid players, updating cache if necessary.
----@param excludelocal boolean? Pass true to exclude local player, false to include
----@return WrappedPlayer[]
-function FastPlayers.GetAll(excludelocal)
-	local currentTick = globals.TickCount()
+local function markDirty()
+	dirty = true
+	derivedDirty = true
+end
 
-	-- Check if cache is outdated or if the exclusion criteria changed
-	if currentTick > lastUpdateTick or cachedExcludeLocal ~= excludelocal then
-		local excludePlayer = excludelocal and FastPlayers.GetLocal() or nil
+local function isEntityPlayable(ent)
+	return ent and ent:IsValid() and ent:IsAlive() and not ent:IsDormant()
+end
 
-		TickProfiler.BeginSection("FP_FindByClass")
-		local entities_list = entities.FindByClass("CTFPlayer") or {}
-		local entityCount = #entities_list
-		TickProfiler.EndSection("FP_FindByClass")
+local function refreshLocal()
+	local raw = entities.GetLocalPlayer()
+	if not raw or not raw:IsValid() then
+		cachedLocal = nil
+		cachedLocalSteam = nil
+		cachedLocalTeam = nil
+		return
+	end
 
-		-- Fast path: If entity count matches and we have cache (and exclusion mode didn't change), assume no change
-		-- Note: We only use fast path if exclusion mode matches, otherwise we MUST rebuild
-		TickProfiler.BeginSection("FP_CheckChange")
-		local lastCount = #lastEntityIndices
-		-- We force rebuild if exclusion mode changed because the list content is different
-		local exclusionChanged = (cachedExcludeLocal ~= excludelocal)
-		local needsRebuild = exclusionChanged
-			or (entityCount ~= lastCount)
-			or (#cachedAllPlayers == 0)
-			or (currentTick > lastUpdateTick)
-		TickProfiler.EndSection("FP_CheckChange")
+	if cachedLocal and cachedLocal._rawEntity == raw then
+		cachedLocalTeam = raw:GetTeamNumber()
+		return
+	end
 
-		-- Actually, the logic above is slightly redundant.
-		-- If currentTick > lastUpdateTick, we are here.
-		-- We should check if we can reuse the PREVIOUS tick's data?
-		-- The user wants to avoid "cycling code".
-		-- But if it's a new tick, we MUST validate the entities.
-		-- However, we can optimize the wrapping part.
+	cachedLocal = WrappedPlayer.FromEntity(raw)
+	if cachedLocal then
+		cachedLocalSteam = cachedLocal:GetSteamID64()
+		cachedLocalTeam = raw:GetTeamNumber()
+	else
+		cachedLocalSteam = nil
+		cachedLocalTeam = nil
+	end
+end
 
-		-- Let's simplify: If we are here, we ARE rebuilding the list for this tick.
-		-- But we can optimize by checking if the entity list actually changed from the last time we built it.
-		-- But since we don't run every tick, "last time" might be 10 ticks ago.
+local function fullRebuild()
+	TickProfiler.BeginSection("FP_FullRebuild")
 
-		TickProfiler.BeginSection("FP_Rebuild")
+	refreshLocal()
 
-		-- Clear old data
-		cachedAllPlayers = {}
-		activeSteamIDs = {}
-		lastEntityIndices = {}
+	local oldPlayers = playersBySteam
+	playersBySteam = {}
+	friendsBySteam = {}
 
-		-- Build new player list and indices
-		for _, ent in pairs(entities_list) do
-			local excludeEntity = excludePlayer and excludePlayer.GetRawEntity and excludePlayer:GetRawEntity() or nil
-			if Common.IsValidPlayer(ent, nil, false, excludeEntity) then
-				local wrapped = WrappedPlayer.FromEntity(ent)
+	local entList = entities.FindByClass("CTFPlayer") or {}
+	for _, ent in pairs(entList) do
+		if ent and ent:IsValid() and not ent:IsDormant() then
+			local steamID = Common.GetSteamID64(ent)
+			if steamID and Common.IsSteamID64(steamID) then
+				local steamStr = tostring(steamID)
+				local wrapped = oldPlayers[steamStr]
 				if wrapped then
-					cachedAllPlayers[#cachedAllPlayers + 1] = wrapped
-					lastEntityIndices[#lastEntityIndices + 1] = ent:GetIndex()
+					wrapped._rawEntity = ent
+					wrapped._lastSeenTick = globals.TickCount()
+				else
+					wrapped = WrappedPlayer.FromEntity(ent)
+				end
 
-					local steamID = wrapped:GetSteamID64()
-					if steamID then
-						activeSteamIDs[steamID] = true
+				if wrapped then
+					playersBySteam[steamStr] = wrapped
+					PlayerState.AttachWrappedPlayer(wrapped)
+
+					local isFriend = Common.TF2.IsFriend(ent:GetIndex(), true)
+					if isFriend then
+						friendsBySteam[steamStr] = true
 					end
 				end
 			end
 		end
-
-		-- Clean up disconnected players from wrapper pool
-		if WrappedPlayer and WrappedPlayer.PruneInactive then
-			WrappedPlayer.PruneInactive(currentTick)
-		end
-
-		TickProfiler.EndSection("FP_Rebuild")
-
-		-- Update state
-		lastUpdateTick = currentTick
-		cachedExcludeLocal = excludelocal
-
-		-- Invalidate derived caches
-		cachedTeammates = {}
-		cachedEnemies = {}
-		FastPlayers.TeammatesUpdated = false
-		FastPlayers.EnemiesUpdated = false
-
-		-- No periodic trimming - PlayerState persists until player_disconnect event
 	end
 
-	return cachedAllPlayers
+	WrappedPlayer.PruneInactive(globals.TickCount())
+
+	dirty = false
+	derivedDirty = true
+	TickProfiler.EndSection("FP_FullRebuild")
 end
 
---- Returns the local player as a WrappedPlayer instance.
----@return WrappedPlayer?
-function FastPlayers.GetLocal()
-	-- Always check validity, but reuse wrapper if possible
-	if not cachedLocal or not cachedLocal:IsValid() then
-		local rawLocal = entities.GetLocalPlayer()
-		cachedLocal = rawLocal and WrappedPlayer.FromEntity(rawLocal) or nil
-	else
-		-- Ensure the wrapper is up to date for this tick (handled by WrappedPlayer internally usually, but good to be safe)
-		-- WrappedPlayer.FromEntity will just return the existing wrapper if valid
-		local rawLocal = entities.GetLocalPlayer()
-		if rawLocal and rawLocal:GetIndex() ~= cachedLocal:GetIndex() then
-			cachedLocal = WrappedPlayer.FromEntity(rawLocal)
+local function validateExisting()
+	local currentTick = globals.TickCount()
+	if validateTick == currentTick then
+		return
+	end
+	validateTick = currentTick
+
+	TickProfiler.BeginSection("FP_Validate")
+
+	refreshLocal()
+
+	local removals = nil
+	for steamStr, wrapped in pairs(playersBySteam) do
+		local ent = wrapped._rawEntity
+		if not isEntityPlayable(ent) then
+			if not removals then
+				removals = {}
+			end
+			removals[#removals + 1] = steamStr
 		end
 	end
+
+	if removals then
+		for i = 1, #removals do
+			playersBySteam[removals[i]] = nil
+			friendsBySteam[removals[i]] = nil
+		end
+		derivedDirty = true
+	end
+
+	TickProfiler.EndSection("FP_Validate")
+end
+
+local function rebuildDerived()
+	if not derivedDirty then
+		return
+	end
+
+	TickProfiler.BeginSection("FP_RebuildDerived")
+
+	local allIdx = 0
+	local allNoLocalIdx = 0
+	local teamIdx = 0
+	local enemyIdx = 0
+
+	for steamStr, wrapped in pairs(playersBySteam) do
+		allIdx = allIdx + 1
+		arrayAll[allIdx] = wrapped
+
+		if steamStr ~= tostring(cachedLocalSteam) then
+			allNoLocalIdx = allNoLocalIdx + 1
+			arrayAllNoLocal[allNoLocalIdx] = wrapped
+		end
+
+		if cachedLocalTeam then
+			local ent = wrapped._rawEntity
+			if ent and ent:IsValid() then
+				local team = ent:GetTeamNumber()
+				if team == cachedLocalTeam then
+					teamIdx = teamIdx + 1
+					arrayTeammates[teamIdx] = wrapped
+				else
+					enemyIdx = enemyIdx + 1
+					arrayEnemies[enemyIdx] = wrapped
+				end
+			end
+		end
+	end
+
+	for i = allIdx + 1, #arrayAll do
+		arrayAll[i] = nil
+	end
+	for i = allNoLocalIdx + 1, #arrayAllNoLocal do
+		arrayAllNoLocal[i] = nil
+	end
+	for i = teamIdx + 1, #arrayTeammates do
+		arrayTeammates[i] = nil
+	end
+	for i = enemyIdx + 1, #arrayEnemies do
+		arrayEnemies[i] = nil
+	end
+
+	derivedDirty = false
+	TickProfiler.EndSection("FP_RebuildDerived")
+end
+
+local function ensureValid()
+	if dirty then
+		fullRebuild()
+	end
+	validateExisting()
+	rebuildDerived()
+end
+
+---@param excludelocal boolean?
+---@return WrappedPlayer[]
+function FastPlayers.GetAll(excludelocal)
+	ensureValid()
+	if excludelocal then
+		return arrayAllNoLocal
+	end
+	return arrayAll
+end
+
+---@return WrappedPlayer?
+function FastPlayers.GetLocal()
+	refreshLocal()
 	return cachedLocal
 end
 
---- Returns list of teammates, optionally excluding a player (or the local player).
----@param exclude boolean|WrappedPlayer? Pass `true` to exclude the local player, or a WrappedPlayer instance to exclude that specific teammate. Omit/nil to include everyone.
+---@param exclude boolean|WrappedPlayer?
 ---@return WrappedPlayer[]
 function FastPlayers.GetTeammates(exclude)
-	-- Ensure main list is up to date
-	FastPlayers.GetAll()
+	ensureValid()
 
-	if not FastPlayers.TeammatesUpdated then
-		-- cachedTeammates is already cleared in GetAll rebuild
-
-		-- Determine which player (if any) to exclude
-		local localPlayer = FastPlayers.GetLocal()
-		local excludePlayer = nil
-		if exclude == true then
-			excludePlayer = localPlayer -- explicitly exclude self
-		elseif type(exclude) == "table" then
-			excludePlayer = exclude
-		end
-
-		-- Use local player's team for filtering
-		local myTeam = localPlayer and localPlayer:GetTeamNumber() or nil
-		if myTeam then
-			for _, wp in ipairs(cachedAllPlayers) do
-				if wp:GetTeamNumber() == myTeam and wp ~= excludePlayer then
-					cachedTeammates[#cachedTeammates + 1] = wp
-				end
+	if exclude == true and cachedLocal then
+		local filtered = {}
+		local n = 0
+		for i = 1, #arrayTeammates do
+			if arrayTeammates[i] ~= cachedLocal then
+				n = n + 1
+				filtered[n] = arrayTeammates[i]
 			end
 		end
-
-		FastPlayers.TeammatesUpdated = true
+		return filtered
+	elseif type(exclude) == "table" then
+		local filtered = {}
+		local n = 0
+		for i = 1, #arrayTeammates do
+			if arrayTeammates[i] ~= exclude then
+				n = n + 1
+				filtered[n] = arrayTeammates[i]
+			end
+		end
+		return filtered
 	end
-	return cachedTeammates
+
+	return arrayTeammates
 end
 
---- Returns list of enemies (players on a different team).
 ---@return WrappedPlayer[]
 function FastPlayers.GetEnemies()
-	-- Ensure main list is up to date
-	FastPlayers.GetAll()
-
-	if not FastPlayers.EnemiesUpdated then
-		-- cachedEnemies is already cleared in GetAll rebuild
-		local pLocal = FastPlayers.GetLocal()
-		if pLocal then
-			local myTeam = pLocal:GetTeamNumber()
-			for _, wp in ipairs(cachedAllPlayers) do
-				if wp:GetTeamNumber() ~= myTeam then
-					cachedEnemies[#cachedEnemies + 1] = wp
-				end
-			end
-		end
-		FastPlayers.EnemiesUpdated = true
-	end
-	return cachedEnemies
+	ensureValid()
+	return arrayEnemies
 end
+
+---@param steamID string
+---@return WrappedPlayer?
+function FastPlayers.GetBySteamID(steamID)
+	return playersBySteam[tostring(steamID)]
+end
+
+---@param steamID string
+---@return boolean
+function FastPlayers.IsFriend(steamID)
+	return friendsBySteam[tostring(steamID)] == true
+end
+
+function FastPlayers.ForceRebuild()
+	markDirty()
+end
+
+--[[ Event handlers — only these trigger full rebuilds ]]
+
+local function onPlayerLifecycleEvent(event)
+	markDirty()
+end
+
+EventManager.Register("FireGameEvent", "FP_PlayerConnect", onPlayerLifecycleEvent, "player_connect_client")
+EventManager.Register("FireGameEvent", "FP_PlayerDisconnect", onPlayerLifecycleEvent, "player_disconnect")
+EventManager.Register("FireGameEvent", "FP_PlayerTeam", onPlayerLifecycleEvent, "player_team")
+EventManager.Register("FireGameEvent", "FP_PlayerSpawn", onPlayerLifecycleEvent, "player_spawn")
+EventManager.Register("FireGameEvent", "FP_PlayerDeath", onPlayerLifecycleEvent, "player_death")
+EventManager.Register("FireGameEvent", "FP_NewMap", onPlayerLifecycleEvent, "game_newmap")
+EventManager.Register("FireGameEvent", "FP_RoundStart", onPlayerLifecycleEvent, "teamplay_round_start")
 
 return FastPlayers

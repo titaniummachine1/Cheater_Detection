@@ -72,8 +72,11 @@ Common.Helpers = Common.Lib.TF2.Helpers
 local cachedSteamIDs = {}
 local lastTick = -1
 
-function Common.IsFriend(entity)
-	return (not G.Menu.Main.debug and Common.TF2.IsFriend(entity:GetIndex(), true)) -- Entity is a freind and party member
+function Common.IsFriend(entity, includeParty)
+	if includeParty == nil then
+		includeParty = true
+	end
+	return Common.TF2.IsFriend(entity:GetIndex(), includeParty)
 end
 
 function Common.GetSteamID64(Player)
@@ -328,9 +331,6 @@ end
 
 -- Vector normalization with safety check
 function Common.normalize(vec)
-	if not vec or vec:Length() < 0.001 then
-		return Vector3(0, 0, 0)
-	end
 	return vectorDivide(vec, vectorLength(vec))
 end
 

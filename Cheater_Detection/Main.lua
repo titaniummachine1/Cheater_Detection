@@ -149,16 +149,6 @@ local function OnCreateMove(cmd)
 		::continue::
 	end
 
-	-- Garbage Collection Monitoring (no manual tuning)
-	TickProfiler.BeginSection("GarbageCollection")
-	local memBefore = collectgarbage("count")
-
-	-- Let Lua's automatic GC handle collection
-	-- Manual tuning was causing saw-tooth pattern and unpredictable spikes
-
-	local memAfter = collectgarbage("count")
-	TickProfiler.EndSection("GarbageCollection")
-
 	profilerEnd()
 end
 

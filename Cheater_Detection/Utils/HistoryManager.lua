@@ -1,23 +1,21 @@
 --[[ HistoryManager.lua
-     Centralized history sampling orchestrator.
-     Detections declare how many ticks of history they need and which fields.
-     The manager captures only the required data, trims old entries, and reuses
-     record tables to minimize garbage churn.
+     Circular-buffer history for per-player snapshots.
+     Detections register how many ticks they need; capacity = max of all consumers.
+     Records are preallocated and overwritten in-place — zero per-tick allocation.
+     Exposes array-like read access via metatable so consumers iterate normally.
 ]]
 
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
----@class HistoryManager
 local HistoryManager = {}
 
-local recordPool = {}
 local consumers = {}
 local activeFields = {}
 local maxRetentionTicks = 0
 
-local DEFAULT_RETENTION_TICKS = 33 -- Reduced from 66 to save memory
+local DEFAULT_RETENTION_TICKS = 33
 
 HistoryManager.Fields = {
 	Angles = "angles",
@@ -57,20 +55,75 @@ local FIELD_BUILDERS = {
 	end,
 }
 
-local function acquireRecord()
-	local record = recordPool[#recordPool]
-	if record then
-		recordPool[#recordPool] = nil
-		return record
-	end
-	return {}
+--[[ Ring buffer with array-compatible read access ]]
+
+local RingMT = {}
+
+function RingMT.__len(self)
+	return rawget(self, "_count")
 end
 
-local function recycleRecord(record)
-	for key in pairs(record) do
-		record[key] = nil
+function RingMT.__index(self, key)
+	if type(key) ~= "number" then
+		return nil
 	end
-	recordPool[#recordPool + 1] = record
+	local count = rawget(self, "_count")
+	if key < 1 or key > count then
+		return nil
+	end
+	local capacity = rawget(self, "_capacity")
+	local head = rawget(self, "_head")
+	local oldestSlot = (head - count) % capacity
+	local slot = (oldestSlot + key - 1) % capacity + 1
+	return rawget(self, "_buf")[slot]
+end
+
+function RingMT.__newindex(self, key, value)
+	if type(key) == "string" and key:sub(1, 1) == "_" then
+		rawset(self, key, value)
+		return
+	end
+end
+
+local function createRing(capacity)
+	local buf = {}
+	for i = 1, capacity do
+		buf[i] = {}
+	end
+	local ring = setmetatable({}, RingMT)
+	rawset(ring, "_buf", buf)
+	rawset(ring, "_head", 0)
+	rawset(ring, "_count", 0)
+	rawset(ring, "_capacity", capacity)
+	return ring
+end
+
+local function ringPush(ring)
+	local capacity = rawget(ring, "_capacity")
+	local head = rawget(ring, "_head")
+	local count = rawget(ring, "_count")
+
+	local nextHead = head % capacity + 1
+	rawset(ring, "_head", nextHead)
+
+	if count < capacity then
+		rawset(ring, "_count", count + 1)
+	end
+
+	return rawget(ring, "_buf")[nextHead]
+end
+
+local function ringClear(ring)
+	rawset(ring, "_head", 0)
+	rawset(ring, "_count", 0)
+end
+
+local function isRing(t)
+	return type(t) == "table" and rawget(t, "_buf") ~= nil
+end
+
+local function getCapacity()
+	return (maxRetentionTicks > 0 and maxRetentionTicks) or DEFAULT_RETENTION_TICKS
 end
 
 local function recomputeRequirements()
@@ -88,33 +141,69 @@ local function recomputeRequirements()
 	activeFields = newFields
 end
 
-local function buildRecord(player)
-	local record = acquireRecord()
+local function writeRecord(record, player)
 	local hasData = false
 	for field in pairs(activeFields) do
 		local builder = FIELD_BUILDERS[field]
 		if builder then
 			local value = builder(player)
+			record[field] = value
 			if value ~= nil then
-				record[field] = value
 				hasData = true
-			else
-				record[field] = nil
 			end
 		end
 	end
 	record.tick = globals.TickCount()
-	return hasData and record or nil
+	return hasData
 end
 
-local function trimHistory(history)
-	local limit = (maxRetentionTicks > 0 and maxRetentionTicks) or DEFAULT_RETENTION_TICKS
-	while #history > limit do
-		recycleRecord(table.remove(history, 1))
+local function ensureRing(state)
+	local cap = getCapacity()
+	local history = state.History
+
+	if isRing(history) then
+		local existingCap = rawget(history, "_capacity")
+		if existingCap == cap then
+			return history
+		end
+		local newRing = createRing(cap)
+		local oldCount = rawget(history, "_count")
+		local copyCount = (oldCount < cap) and oldCount or cap
+		local startIdx = oldCount - copyCount + 1
+		for i = startIdx, oldCount do
+			local src = history[i]
+			if src then
+				local dst = ringPush(newRing)
+				for k, v in pairs(src) do
+					dst[k] = v
+				end
+			end
+		end
+		state.History = newRing
+		return newRing
 	end
+
+	local newRing = createRing(cap)
+
+	if type(history) == "table" then
+		local total = #history
+		local copyCount = (total < cap) and total or cap
+		local startIdx = total - copyCount + 1
+		for i = startIdx, total do
+			local src = history[i]
+			if src then
+				local dst = ringPush(newRing)
+				for k, v in pairs(src) do
+					dst[k] = v
+				end
+			end
+		end
+	end
+
+	state.History = newRing
+	return newRing
 end
 
----Register a detection/module that needs history data.
 ---@param name string
 ---@param spec { retentionTicks:number, fields:string[] }
 function HistoryManager.RegisterConsumer(name, spec)
@@ -152,7 +241,6 @@ function HistoryManager.RegisterConsumer(name, spec)
 	recomputeRequirements()
 end
 
----Unregister a consumer (e.g., when detection unloads).
 ---@param name string
 function HistoryManager.UnregisterConsumer(name)
 	if not consumers[name] then
@@ -162,7 +250,6 @@ function HistoryManager.UnregisterConsumer(name)
 	recomputeRequirements()
 end
 
----Push a snapshot for the given player if any fields are active.
 ---@param player table
 function HistoryManager.Push(player)
 	if not next(activeFields) then
@@ -177,36 +264,28 @@ function HistoryManager.Push(player)
 		return
 	end
 
-	TickProfiler.BeginSection("History_BuildRecord")
-	local record = buildRecord(player)
-	TickProfiler.EndSection("History_BuildRecord")
-
-	if not record then
-		return
-	end
-
 	local state = PlayerState.GetOrCreate(steamID)
 	if not state then
-		recycleRecord(record)
 		return
 	end
 
-	state.History = state.History or {}
-	state.History[#state.History + 1] = record
-	state.Current = record
+	local ring = ensureRing(state)
 
-	TickProfiler.BeginSection("History_Trim")
-	trimHistory(state.History)
-	TickProfiler.EndSection("History_Trim")
+	TickProfiler.BeginSection("History_Write")
+	local record = ringPush(ring)
+	local hasData = writeRecord(record, player)
+	TickProfiler.EndSection("History_Write")
+
+	if hasData then
+		state.Current = record
+	end
 end
 
----Expose current retention tick count (max of all consumers).
 ---@return integer
 function HistoryManager.GetRetentionTicks()
-	return (maxRetentionTicks > 0 and maxRetentionTicks) or DEFAULT_RETENTION_TICKS
+	return getCapacity()
 end
 
----Expose currently active field set (copy).
 ---@return table<string, boolean>
 function HistoryManager.GetActiveFields()
 	local copy = {}
@@ -214,6 +293,16 @@ function HistoryManager.GetActiveFields()
 		copy[field] = true
 	end
 	return copy
+end
+
+function HistoryManager.IsRing(t)
+	return isRing(t)
+end
+
+function HistoryManager.ClearRing(ring)
+	if isRing(ring) then
+		ringClear(ring)
+	end
 end
 
 local function ensureLegacyConsumer()
