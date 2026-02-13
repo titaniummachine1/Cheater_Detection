@@ -385,6 +385,16 @@ function Common.TraceHit(result)
 	return result.fraction ~= 1
 end
 
+local lastFrameTick = 0
+local FRAME_GAP_THRESHOLD = 6
+
+function Common.IsFrameGap()
+	local currentTick = globals.TickCount()
+	local gap = currentTick - lastFrameTick
+	lastFrameTick = currentTick
+	return gap > FRAME_GAP_THRESHOLD
+end
+
 local E_Flows = { FLOW_OUTGOING = 0, FLOW_INCOMING = 1, MAX_FLOWS = 2 }
 
 function Common.CheckConnectionState()

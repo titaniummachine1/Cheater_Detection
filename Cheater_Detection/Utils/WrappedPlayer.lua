@@ -153,6 +153,17 @@ function WrappedPlayer.FromIndex(index)
 	return entity and WrappedPlayer.FromEntity(entity) or nil
 end
 
+--- Returns the player's display name via client.GetPlayerInfo
+---@return string|nil
+function WrappedPlayer:GetName()
+	local idx = self._rawEntity and self._rawEntity:GetIndex()
+	if not idx then
+		return nil
+	end
+	local info = client.GetPlayerInfo(idx)
+	return info and info.Name or nil
+end
+
 --- Returns the underlying raw entity
 function WrappedPlayer:GetRawEntity()
 	return self._rawEntity
