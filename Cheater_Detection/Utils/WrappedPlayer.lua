@@ -161,11 +161,19 @@ function WrappedPlayer:IsValid()
 end
 
 function WrappedPlayer:GetSimulationTime()
-	return self._rawEntity:GetSimulationTime()
+	return self._rawEntity:GetPropFloat("m_flSimulationTime")
 end
 
 function WrappedPlayer:GetHitboxPos(hitboxIndex)
-	return self._rawEntity:GetHitboxPos(hitboxIndex)
+	local hitboxes = self._rawEntity:GetHitboxes()
+	if not hitboxes then
+		return nil
+	end
+	local hb = hitboxes[hitboxIndex]
+	if not hb then
+		return nil
+	end
+	return (hb[1] + hb[2]) * 0.5
 end
 
 function WrappedPlayer:GetPropInt(...)

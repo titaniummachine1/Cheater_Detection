@@ -1,4 +1,9 @@
 --[[ Cheater Detection - Bunny Hop Detection ]]
+--
+-- Detects scripted bunnyhops by counting consecutive frame-perfect jumps.
+-- A "perfect jump" = leaving ground within 2 ticks of landing.
+-- Normal players rarely chain more than 2-3 perfect jumps.
+-- Scripted bhop consistently chains 4+ perfect jumps every time.
 
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Utils.Common")
@@ -10,23 +15,23 @@ local Bhop = {}
 
 --[[ Configuration ]]
 local DETECTION_NAME = "bhop"
-local EVIDENCE_WEIGHT_BASE = 5
-local DECAY_AMOUNT = 2.0 -- Weight to remove on failed bhop
-local GROUND_TICKS_FOR_DECAY = 5 -- Must be grounded for this many ticks before decay applies
+local EVIDENCE_WEIGHT = 15
+local PERFECT_JUMP_WINDOW = 2
+local MIN_CONSECUTIVE_HOPS = 4
 
--- Per-player state tracking
 local playerBhopData = {}
 
-local function initPlayerData(steamID)
-	if not playerBhopData[steamID] then
-		playerBhopData[steamID] = {
-			lastOnGround = true, -- Track last ground state
-			lastVelocityZ = 0, -- Track last velocity for jump detection
-			groundedTicks = 0, -- Track how long player has been grounded
-			decayApplied = false, -- Track if we already applied decay for this ground period
-			hasJumped = false, -- Track if player has ever jumped (prevents initial false positives)
+local function getPlayerData(steamID)
+	local data = playerBhopData[steamID]
+	if not data then
+		data = {
+			wasOnGround = false,
+			groundTicks = 0,
+			consecutivePerfectJumps = 0,
 		}
+		playerBhopData[steamID] = data
 	end
+	return data
 end
 
 --[[ Public Functions ]]
@@ -43,79 +48,44 @@ function Bhop.Check(player, steamID)
 		steamID = tostring(Common.GetSteamID64(player))
 	end
 
-	-- Initialize tracking data
-	initPlayerData(steamID)
-	local data = playerBhopData[steamID]
+	local data = getPlayerData(steamID)
 
-	-- Get raw entity for velocity access
-	local entity = player:GetRawEntity()
-	if not entity then
-		return false
-	end
-
-	-- Get velocity for jump detection
-	local velocity = entity:EstimateAbsVelocity()
-	if not velocity then
-		return false
-	end
-
-	-- Check ground state (matches old CheckBhop logic)
 	local flags = player:GetPropInt("m_fFlags")
 	local onGround = (flags & FL_ONGROUND) ~= 0
 
 	if onGround then
-		-- Player on ground - increment grounded tick counter
-		data.groundedTicks = data.groundedTicks + 1
+		data.groundTicks = data.groundTicks + 1
+		data.wasOnGround = true
+		return false
+	end
 
-		-- Only apply decay if they've been grounded long enough AND have jumped before
-		if data.hasJumped and data.groundedTicks >= GROUND_TICKS_FOR_DECAY and not data.decayApplied then
-			-- They stayed grounded for 2+ ticks - bhop sequence ended
-			Evidence.ApplyDecayForMethod(steamID, DETECTION_NAME, DECAY_AMOUNT)
-
-			if G.Menu.Advanced.debug then
-				print(
-					string.format(
-						"[Bhop] %s - Landed (stopped bhopping) -%.1f evidence",
-						player:GetName(),
-						DECAY_AMOUNT
-					)
-				)
-			end
-
-			data.decayApplied = true -- Mark decay as applied for this ground period
+	-- Transitioned from ground to air this tick
+	if data.wasOnGround then
+		if data.groundTicks <= PERFECT_JUMP_WINDOW and data.groundTicks > 0 then
+			data.consecutivePerfectJumps = data.consecutivePerfectJumps + 1
+		else
+			data.consecutivePerfectJumps = 1
 		end
 
-		data.lastOnGround = true
-	else
-		-- Player in air - check if they jumped (velocity increased AND exact jump values)
-		if data.lastOnGround and data.lastVelocityZ < velocity.z and (velocity.z == 271 or velocity.z == 277) then
-			-- Jump detected - add weight immediately
-			data.hasJumped = true -- Mark that this player has jumped
-			-- Use manual decay (only decays when landed, not automatic time-based)
-			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT_BASE, { manualDecay = true })
+		data.wasOnGround = false
+		data.groundTicks = 0
+
+		if data.consecutivePerfectJumps >= MIN_CONSECUTIVE_HOPS then
+			Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT)
 
 			if G.Menu.Advanced.debug then
 				print(
 					string.format(
-						"[Bhop] %s - Bhop detected (vel.z: %.0f) +%.1f evidence",
+						"[Bhop] %s - %d consecutive perfect jumps",
 						player:GetName(),
-						velocity.z,
-						EVIDENCE_WEIGHT_BASE
+						data.consecutivePerfectJumps
 					)
 				)
 			end
 
 			return true
 		end
-
-		-- Reset ground tracking when leaving ground
-		data.lastOnGround = false
-		data.groundedTicks = 0
-		data.decayApplied = false
 	end
-
-	-- Store current velocity for next tick comparison
-	data.lastVelocityZ = velocity.z
 
 	return false
 end
