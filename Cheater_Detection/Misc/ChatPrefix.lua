@@ -16,9 +16,11 @@ local SayText2 = 4
 ---@param playerName string
 ---@return Entity?
 local function GetPlayerFromName(playerName)
-	for _, player in pairs(entities.FindByClass("CTFPlayer")) do
-		if player:GetName() == playerName then
-			return player
+	local maxClients = globals.MaxClients()
+	for i = 1, maxClients do
+		local info = client.GetPlayerInfo(i)
+		if info and info.Name == playerName then
+			return entities.GetByIndex(i)
 		end
 	end
 	return nil

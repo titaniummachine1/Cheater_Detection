@@ -74,9 +74,10 @@ local function OnCreateMove(cmd)
 
 	TickProfiler.BeginSection("CheckConnection")
 	local isStable = Common.CheckConnectionState()
+	local isFrameGap = Common.IsFrameGap()
 	TickProfiler.EndSection("CheckConnection")
 
-	if not isStable then
+	if not isStable or isFrameGap then
 		profilerEnd()
 		return
 	end
@@ -85,9 +86,6 @@ local function OnCreateMove(cmd)
 	TickProfiler.BeginSection("EvidenceDecay")
 	Evidence.ApplyDecay()
 	TickProfiler.EndSection("EvidenceDecay")
-
-	-- No periodic trimming - on-demand caching only
-	-- PlayerState persists until player disconnect event (player_disconnect)
 
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do

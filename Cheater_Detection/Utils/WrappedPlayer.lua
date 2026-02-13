@@ -1,13 +1,12 @@
 --[[ WrappedPlayer.lua ]]
 --
--- A proper wrapper for player entities that extends lnxLib's WPlayer
+-- Player entity wrapper with cached property access
 
 local Common = require("Cheater_Detection.Utils.Common")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local G = require("Cheater_Detection.Utils.Globals")
 
 ---@class WrappedPlayer
----@field _basePlayer table Base WPlayer from lnxLib
 ---@field _rawEntity Entity Raw entity object
 local WrappedPlayer = {}
 
@@ -89,33 +88,8 @@ local function cacheValue(self, key, computeFn)
 	return result
 end
 
-local function wrapCall(target, method)
-	if type(method) ~= "function" then
-		return method
-	end
-	return function(_, ...)
-		return method(target, ...)
-	end
-end
-
 function WrappedPlayerMT.__index(self, key)
-	-- 1) Custom helpers defined on WrappedPlayer
-	local custom = WrappedPlayer[key]
-
-	if custom ~= nil then
-		return custom
-	end
-
-	-- 2) Proxy to raw entity
-	local rawEntity = rawget(self, "_rawEntity")
-	if rawEntity then
-		local rawValue = rawEntity[key]
-		if rawValue ~= nil then
-			return wrapCall(rawEntity, rawValue)
-		end
-	end
-
-	return nil
+	return WrappedPlayer[key]
 end
 
 --- Creates a new WrappedPlayer from a TF2 entity
@@ -176,6 +150,54 @@ end
 
 function WrappedPlayer:GetBasePlayer()
 	return self._rawEntity
+end
+
+function WrappedPlayer:GetIndex()
+	return self._rawEntity:GetIndex()
+end
+
+function WrappedPlayer:IsValid()
+	return self._rawEntity and self._rawEntity:IsValid() or false
+end
+
+function WrappedPlayer:GetSimulationTime()
+	return self._rawEntity:GetSimulationTime()
+end
+
+function WrappedPlayer:GetHitboxPos(hitboxIndex)
+	return self._rawEntity:GetHitboxPos(hitboxIndex)
+end
+
+function WrappedPlayer:GetPropInt(...)
+	return self._rawEntity:GetPropInt(...)
+end
+
+function WrappedPlayer:GetPropFloat(...)
+	return self._rawEntity:GetPropFloat(...)
+end
+
+function WrappedPlayer:GetPropVector(...)
+	return self._rawEntity:GetPropVector(...)
+end
+
+function WrappedPlayer:GetPropBool(...)
+	return self._rawEntity:GetPropBool(...)
+end
+
+function WrappedPlayer:GetPropEntity(...)
+	return self._rawEntity:GetPropEntity(...)
+end
+
+function WrappedPlayer:GetClass()
+	return self._rawEntity:GetClass()
+end
+
+function WrappedPlayer:GetMins()
+	return self._rawEntity:GetMins()
+end
+
+function WrappedPlayer:GetMaxs()
+	return self._rawEntity:GetMaxs()
 end
 
 --- Checks if a given entity is valid

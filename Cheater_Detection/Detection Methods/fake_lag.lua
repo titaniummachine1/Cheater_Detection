@@ -71,8 +71,9 @@ function FakeLag.Check(player, steamID)
 	-- Calculate delta
 	local delta = currentSimTime - data.lastSimTime
 
-	-- Skip if rewinding (demo playback or local player lag compensation)
-	if delta == 0 then
+	-- Skip if rewinding or frozen (respawn, demo playback, lag compensation)
+	if delta <= 0 then
+		data.lastSimTime = currentSimTime
 		return false
 	end
 

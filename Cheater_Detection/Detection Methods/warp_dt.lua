@@ -18,28 +18,12 @@ local EVIDENCE_WEIGHT = 100 -- Instant ban - blatant exploit
 local HISTORY_SIZE = 33 -- Ticks to analyze
 local MIN_DELTA_SAMPLES = 30 -- Minimum samples for statistical analysis
 local WARP_STDDEV_SIGNATURE = -132 -- Specific standard deviation value indicating warp
-local TICK_TOLERANCE = 13 -- Tolerance for tick interval checks
-
--- Minimal per-player state
-local playerWarpData = {}
-
 --[[ Helper Functions ]]
 local function validatePlayer(player)
 	if not player or not player:IsValid() or not player:IsAlive() or player:IsDormant() then
 		return false
 	end
 	return true
-end
-
-local function getPlayerState(steamID)
-	local state = playerWarpData[steamID]
-	if not state then
-		state = {
-			lastTickCount = nil,
-		}
-		playerWarpData[steamID] = state
-	end
-	return state
 end
 
 local function timeToTicks(time)
@@ -108,8 +92,6 @@ function WarpDT.Check(player, steamID)
 		steamID = tostring(Common.GetSteamID64(player))
 	end
 
-	local playerState = getPlayerState(steamID)
-
 	local simTicks = collectSimTimeTicks(steamID)
 	if not simTicks then
 		return false
@@ -155,23 +137,6 @@ function WarpDT.Check(player, steamID)
 		that only occur during heavy tickbase manipulation.
 	]]
 	stdDev = math.max(-132, stdDev)
-
-	-- Check tick interval consistency (avoid false positives from script lag)
-	local currentTick = globals.TickCount()
-	if not playerState.lastTickCount then
-		playerState.lastTickCount = currentTick
-	else
-		local tickInterval = globals.TickInterval()
-		local expectedInterval = (currentTick - playerState.lastTickCount) / tickInterval
-
-		-- If ticks are inconsistent, may be our own lag - skip
-		if math.abs(currentTick - playerState.lastTickCount) < expectedInterval + TICK_TOLERANCE then
-			playerState.lastTickCount = currentTick
-			return false
-		end
-
-		playerState.lastTickCount = currentTick
-	end
 
 	-- Detect warp signature
 	if stdDev == WARP_STDDEV_SIGNATURE then

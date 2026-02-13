@@ -101,12 +101,9 @@ local function getPlayerNameBySteamID(steamID)
 			if info and info.Name and info.Name ~= "" then
 				return info.Name
 			end
-			local raw = player.GetRawEntity and player:GetRawEntity() or nil
-			if raw and raw.IsValid and raw:IsValid() and raw.GetName then
-				local rawName = raw:GetName()
-				if type(rawName) == "string" and rawName ~= "" then
-					return rawName
-				end
+			local name = player:GetName()
+			if name and name ~= "" then
+				return name
 			end
 		end
 	end
