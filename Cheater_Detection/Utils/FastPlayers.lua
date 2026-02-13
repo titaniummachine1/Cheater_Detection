@@ -88,7 +88,7 @@ local function fullRebuild()
 					playersBySteam[steamStr] = wrapped
 					PlayerState.AttachWrappedPlayer(wrapped)
 
-					local isFriend = Common.TF2.IsFriend(ent:GetIndex(), true)
+					local isFriend = Common.IsFriend(ent, true)
 					if isFriend then
 						friendsBySteam[steamStr] = true
 					end

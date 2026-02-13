@@ -36,7 +36,7 @@ local function hydrateWrapper(wrapped, entity, cachedSteamID)
 
 	-- Get and cache SteamID once (reuse passed value to avoid duplicate conversion)
 	if not wrapped._steamID64 then
-		local steamID = cachedSteamID or Common.GetSteamID64(basePlayer)
+		local steamID = cachedSteamID or Common.GetSteamID64(entity)
 		if steamID then
 			wrapped._steamID64 = steamID
 

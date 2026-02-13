@@ -8,8 +8,6 @@ local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 
 local Visuals = {}
 
-local Lib = Common.Lib
-local Fonts = Lib.UI.Fonts
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
 
 --[[ Functions ]]

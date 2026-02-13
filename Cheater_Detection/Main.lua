@@ -48,7 +48,6 @@ local ManualPriority = require("Cheater_Detection.Detection Methods.manual_prior
 local SilentAimbot = require("Cheater_Detection.Detection Methods.silent_aimbot")
 
 --[[ Variables ]]
-local WPlayer, PR = Common.WPlayer, Common.PlayerResource
 
 --[[ Update the player data every tick ]]
 --

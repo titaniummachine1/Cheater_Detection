@@ -3,80 +3,96 @@
 --[[ Imports ]]
 --
 local Common = {
-	Lib = nil,
 	Json = nil,
-	Log = nil,
-	Notify = nil,
-	TF2 = nil,
-	Math = nil,
-	Conversion = nil,
-	WPlayer = nil,
 	PR = nil,
-	Helpers = nil,
 }
 
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 
--- Move requires here
 Common.Json = require("Cheater_Detection.Libs.Json")
 local G = require("Cheater_Detection.Utils.Globals")
 
-if UnloadLib ~= nil then
-	UnloadLib()
+--[[ Inlined PlayerResource (from lnxLib/TF2/PlayerResource.lua) ]]
+local PlayerResource = {}
+
+function PlayerResource.GetScore()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iScore")
 end
 
---------------------------------------------------------------------------------------
---Library loading--
---------------------------------------------------------------------------------------
-
---Function to download content from a URL
--- REMOVED: Security risk (Remote Code Execution)
--- The library must be installed locally.
-
--- Load and validate library
-local function loadlib()
-	local success, localLib = pcall(require, "lnxLib")
-	if success and localLib then
-		return localLib
-	end
-
-	-- Fallback: Check if it's in the Libs folder
-	local success2, localLib2 = pcall(require, "Cheater_Detection.Libs.lnxLib")
-	if success2 and localLib2 then
-		return localLib2
-	end
-
-	error("Critical Error: lnxLib not found! Please install it or ensure it is in the Libs folder.")
+function PlayerResource.GetDeaths()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iDeaths")
 end
 
-local lnxLib = loadlib()
-
-if not lnxLib then
-	error("Failed to load lnxLib")
+function PlayerResource.GetConnected()
+	return entities.GetPlayerResources():GetPropDataTableBool("m_bConnected")
 end
 
-Common.Lib = lnxLib
+function PlayerResource.GetTeam()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iTeam")
+end
 
--- Now initialize remaining Common fields using the loaded libraries
-Common.Log = Common.Lib.Utils.Logger.new("Cheater Detection")
-Common.Notify = Common.Lib.UI.Notify
-Common.TF2 = Common.Lib.TF2
-Common.Math = Common.Lib.Utils.Math
-Common.Conversion = Common.Lib.Utils.Conversion
-Common.WPlayer = Common.TF2.WPlayer
-Common.PR = Common.Lib.TF2.PlayerResource
-Common.Helpers = Common.Lib.TF2.Helpers
+function PlayerResource.GetAlive()
+	return entities.GetPlayerResources():GetPropDataTableBool("m_bAlive")
+end
 
--- Now using WrappedPlayer module instead of monkey patching
+function PlayerResource.GetHealth()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iHealth")
+end
+
+function PlayerResource.GetPlayerClass()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iPlayerClass")
+end
+
+function PlayerResource.GetTotalScore()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iTotalScore")
+end
+
+function PlayerResource.GetMaxHealth()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iMaxHealth")
+end
+
+function PlayerResource.GetDamage()
+	return entities.GetPlayerResources():GetPropDataTableInt("m_iDamage")
+end
+
+Common.PR = PlayerResource
 
 local cachedSteamIDs = {}
 local lastTick = -1
 
+--[[ Inlined IsFriend (from lnxLib/TF2/TF2.lua) ]]
 function Common.IsFriend(entity, includeParty)
 	if includeParty == nil then
 		includeParty = true
 	end
-	return Common.TF2.IsFriend(entity:GetIndex(), includeParty)
+	local idx = entity:GetIndex()
+	if idx == client.GetLocalPlayerIndex() then
+		return true
+	end
+
+	local playerInfo = client.GetPlayerInfo(idx)
+	if not playerInfo then
+		return false
+	end
+	if steam.IsFriend(playerInfo.SteamID) then
+		return true
+	end
+	if playerlist.GetPriority(playerInfo.UserID) < 0 then
+		return true
+	end
+
+	if includeParty then
+		local partyMembers = party.GetMembers()
+		if partyMembers then
+			for _, member in ipairs(partyMembers) do
+				if member == playerInfo.SteamID then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
 end
 
 function Common.GetSteamID64(Player)
@@ -306,7 +322,7 @@ function Common.velocityToAngles(vel)
 
 	-- Fixed pitch calculation for proper velocity-to-angle conversion
 	local pitch = -math.deg(math.asin(vel.z / speed))
-	local yaw = math.deg(math.atan2(vel.y, vel.x))
+	local yaw = math.deg(math.atan(vel.y, vel.x))
 
 	return EulerAngles(pitch, yaw, 0)
 end
@@ -404,11 +420,8 @@ end
 
 --[[ Registrations and final actions ]]
 --
-local function OnUnload() -- Called when the script is unloaded
-	if UnloadLib then
-		pcall(UnloadLib) --unloading lualib safely
-	end
-	pcall(engine.PlaySound, "hl1/fvox/deactivated.wav") --deactivated safely
+local function OnUnload()
+	pcall(engine.PlaySound, "hl1/fvox/deactivated.wav")
 end
 
 -- Unregister previous callbacks

@@ -4,8 +4,9 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
-local Lib = Common.Lib
-local Fonts = Lib.UI.Fonts
+local Fonts = {
+	Verdana = draw.CreateFont("Verdana", 14, 510),
+}
 
 -- Try to load TimMenu (assumes it's installed globally in Lmaobox)
 local TimMenu = nil
