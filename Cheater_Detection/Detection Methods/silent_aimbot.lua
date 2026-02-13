@@ -174,25 +174,17 @@ local function checkSilentAimbot(shooterIdx, victimIdx, currentAngles)
 	return false, 0, nil
 end
 
-function SilentAimbot.Check(player)
-	-- Skip if detection disabled
+function SilentAimbot.Check(player, steamID)
 	if not G.Menu.Advanced or not G.Menu.Advanced.SilentAimbot then
 		return false
 	end
 
-	-- Validate player
 	if not Common.IsValidPlayer(player, true, false) then
 		return false
 	end
 
-	local steamID = Common.GetSteamID64(player)
-	if not Common.IsSteamID64(steamID) then
-		return false
-	end
-	steamID = tostring(steamID)
-
-	if Evidence.IsMarkedCheater(steamID) then
-		return false
+	if not steamID then
+		steamID = tostring(Common.GetSteamID64(player))
 	end
 
 	local playerIdx = player:GetIndex()

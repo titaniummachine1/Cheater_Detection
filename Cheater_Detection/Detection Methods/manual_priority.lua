@@ -32,7 +32,7 @@ local function validatePlayer(player)
 end
 
 --[[ Public Functions ]]
-function ManualPriority.Check(player)
+function ManualPriority.Check(player, steamID)
 	if not shouldRun() then
 		return false
 	end
@@ -41,14 +41,8 @@ function ManualPriority.Check(player)
 		return false
 	end
 
-	local steamID = Common.GetSteamID64(player)
-	if not Common.IsSteamID64(steamID) then
-		return false
-	end
-	steamID = tostring(steamID)
-
-	if Evidence.IsMarkedCheater(steamID) then
-		return false
+	if not steamID then
+		steamID = tostring(Common.GetSteamID64(player))
 	end
 
 	local priority = playerlist.GetPriority(steamID)

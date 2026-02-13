@@ -28,26 +28,17 @@ local function validatePlayer(player)
 end
 
 --[[ Public Functions ]]
-function AntiAim.Check(player)
-	-- Skip if detection disabled in menu
+function AntiAim.Check(player, steamID)
 	if not G.Menu.Advanced.AntyAim then
 		return false
 	end
 
-	-- Validate player
 	if not validatePlayer(player) then
 		return false
 	end
 
-	-- Get steamID for tracking
-	local steamID = tostring(Common.GetSteamID64(player))
-	if not Common.IsSteamID64(steamID) then
-		return false
-	end
-
-	-- Skip if already marked as cheater
-	if Evidence.IsMarkedCheater(steamID) then
-		return false
+	if not steamID then
+		steamID = tostring(Common.GetSteamID64(player))
 	end
 
 	-- Get eye angles

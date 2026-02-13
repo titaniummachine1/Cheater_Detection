@@ -374,35 +374,32 @@ local E_Flows = { FLOW_OUTGOING = 0, FLOW_INCOMING = 1, MAX_FLOWS = 2 }
 function Common.CheckConnectionState()
 	local netChannel = clientstate.GetNetChannel()
 	if not netChannel then
-		return { stable = false, reason = "No NetChannel" }
+		return false, "No NetChannel"
 	end
 
-	-- Check for timeout
 	if netChannel:IsTimingOut() then
-		return { stable = false, reason = "Timing out" }
+		return false, "Timing out"
 	end
 
-	-- If we're just playing a demo, consider connection perfectly stable and skip further checks
 	if netChannel:IsPlayback() then
-		return { stable = true, reason = "Demo" }
+		return true, "Demo"
 	end
 
-	-- Check latency, choke, and loss (incoming) — only for real servers
 	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
 	local choke = netChannel:GetAvgChoke(E_Flows.FLOW_INCOMING)
 	local loss = netChannel:GetAvgLoss(E_Flows.FLOW_INCOMING)
-	-- Thresholds: adjust as needed
+
 	if latency > 0.5 then
-		return { stable = false, reason = string.format("High latency: %.2f", latency) }
+		return false
 	end
 	if choke > 0.2 then
-		return { stable = false, reason = string.format("High choke: %.2f", choke) }
+		return false
 	end
 	if loss > 0.1 then
-		return { stable = false, reason = string.format("High loss: %.2f", loss) }
+		return false
 	end
 
-	return { stable = true }
+	return true
 end
 
 --[[ Registrations and final actions ]]

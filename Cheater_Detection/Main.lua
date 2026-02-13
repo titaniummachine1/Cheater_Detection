@@ -73,13 +73,11 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	-- Check connection state and store in G
 	TickProfiler.BeginSection("CheckConnection")
-	local ConnectionState = Common.CheckConnectionState()
+	local isStable = Common.CheckConnectionState()
 	TickProfiler.EndSection("CheckConnection")
 
-	--if not stable connection then dont do any checks
-	if not ConnectionState.stable then
+	if not isStable then
 		profilerEnd()
 		return
 	end
@@ -116,32 +114,34 @@ local function OnCreateMove(cmd)
 		-- Perform detection checks
 		TickProfiler.BeginSection("Detections")
 
+		local steamStr = tostring(steamID)
+
 		TickProfiler.BeginSection("Detection_AntiAim")
-		AntiAim.Check(Player)
+		AntiAim.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_AntiAim")
 
 		TickProfiler.BeginSection("Detection_DuckSpeed")
-		DuckSpeed.Check(Player)
+		DuckSpeed.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_DuckSpeed")
 
 		TickProfiler.BeginSection("Detection_Bhop")
-		Bhop.Check(Player)
+		Bhop.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_Bhop")
 
 		TickProfiler.BeginSection("Detection_FakeLag")
-		FakeLag.Check(Player)
+		FakeLag.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_FakeLag")
 
 		TickProfiler.BeginSection("Detection_WarpDT")
-		WarpDT.Check(Player)
+		WarpDT.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_WarpDT")
 
 		TickProfiler.BeginSection("Detection_ManualPriority")
-		ManualPriority.Check(Player)
+		ManualPriority.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_ManualPriority")
 
 		TickProfiler.BeginSection("Detection_SilentAimbot")
-		SilentAimbot.Check(Player)
+		SilentAimbot.Check(Player, steamStr)
 		TickProfiler.EndSection("Detection_SilentAimbot")
 
 		TickProfiler.EndSection("Detections")

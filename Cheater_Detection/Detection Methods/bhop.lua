@@ -30,27 +30,17 @@ local function initPlayerData(steamID)
 end
 
 --[[ Public Functions ]]
-function Bhop.Check(player)
-	-- Skip if detection disabled in menu
+function Bhop.Check(player, steamID)
 	if not G.Menu.Advanced.Bhop then
 		return false
 	end
 
-	-- Validate player
 	if not Common.IsValidPlayer(player, true, false) then
 		return false
 	end
 
-	-- Get steamID for tracking
-	local steamID = Common.GetSteamID64(player)
-	if not Common.IsSteamID64(steamID) then
-		return false
-	end
-	steamID = tostring(steamID)
-
-	-- Skip if already marked as cheater
-	if Evidence.IsMarkedCheater(steamID) then
-		return false
+	if not steamID then
+		steamID = tostring(Common.GetSteamID64(player))
 	end
 
 	-- Initialize tracking data

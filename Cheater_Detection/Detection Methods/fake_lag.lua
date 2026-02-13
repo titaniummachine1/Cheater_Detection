@@ -39,27 +39,17 @@ local function timeToTicks(time)
 end
 
 --[[ Public Functions ]]
-function FakeLag.Check(player)
-	-- Skip if detection disabled in menu
+function FakeLag.Check(player, steamID)
 	if not G.Menu.Advanced.Choke then
 		return false
 	end
 
-	-- Validate player
 	if not validatePlayer(player) then
 		return false
 	end
 
-	-- Get steamID for tracking
-	local steamID = Common.GetSteamID64(player)
-	if not Common.IsSteamID64(steamID) then
-		return false
-	end
-	steamID = tostring(steamID)
-
-	-- Skip if already marked as cheater
-	if Evidence.IsMarkedCheater(steamID) then
-		return false
+	if not steamID then
+		steamID = tostring(Common.GetSteamID64(player))
 	end
 
 	-- Initialize tracking data

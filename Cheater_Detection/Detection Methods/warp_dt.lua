@@ -8,6 +8,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
+local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 
 --[[ Module Declaration ]]
 local WarpDT = {}
@@ -42,7 +43,19 @@ local function getPlayerState(steamID)
 end
 
 local function timeToTicks(time)
-	return Common.Conversion.Time_to_Ticks(time)
+	return math.floor(0.5 + time / globals.TickInterval())
+end
+
+local registeredConsumer = false
+local function ensureConsumer()
+	if registeredConsumer then
+		return
+	end
+	HistoryManager.RegisterConsumer(DETECTION_NAME, {
+		retentionTicks = HISTORY_SIZE,
+		fields = { HistoryManager.Fields.SimulationTime },
+	})
+	registeredConsumer = true
 end
 
 local function collectSimTimeTicks(steamID)
@@ -76,26 +89,23 @@ local function collectSimTimeTicks(steamID)
 end
 
 --[[ Public Functions ]]
-function WarpDT.Check(player)
-	-- Skip if detection disabled in menu
+function WarpDT.Check(player, steamID)
 	if not G.Menu.Advanced.Warp then
+		if registeredConsumer then
+			HistoryManager.UnregisterConsumer(DETECTION_NAME)
+			registeredConsumer = false
+		end
 		return false
 	end
 
-	-- Validate player
+	ensureConsumer()
+
 	if not validatePlayer(player) then
 		return false
 	end
 
-	-- Get steamID for tracking
-	local steamID = tostring(Common.GetSteamID64(player))
-	if not Common.IsSteamID64(steamID) then
-		return false
-	end
-
-	-- Skip if already marked as cheater
-	if Evidence.IsMarkedCheater(steamID) then
-		return false
+	if not steamID then
+		steamID = tostring(Common.GetSteamID64(player))
 	end
 
 	local playerState = getPlayerState(steamID)

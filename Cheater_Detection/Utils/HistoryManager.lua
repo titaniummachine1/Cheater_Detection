@@ -305,31 +305,4 @@ function HistoryManager.ClearRing(ring)
 	end
 end
 
-local function ensureLegacyConsumer()
-	if activeFields and next(activeFields) then
-		return
-	end
-
-	HistoryManager.RegisterConsumer("__legacy_default", {
-		retentionTicks = DEFAULT_RETENTION_TICKS,
-		fields = {
-			HistoryManager.Fields.Angles,
-			HistoryManager.Fields.EyePosition,
-			HistoryManager.Fields.HeadHitbox,
-			HistoryManager.Fields.BodyHitbox,
-			HistoryManager.Fields.SimulationTime,
-			HistoryManager.Fields.OnGround,
-		},
-	})
-end
-
-ensureLegacyConsumer()
-
-function HistoryManager.RemoveLegacyConsumer()
-	if consumers.__legacy_default then
-		consumers.__legacy_default = nil
-		recomputeRequirements()
-	end
-end
-
 return HistoryManager

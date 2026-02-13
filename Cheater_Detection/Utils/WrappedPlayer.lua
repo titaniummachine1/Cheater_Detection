@@ -2,14 +2,9 @@
 --
 -- A proper wrapper for player entities that extends lnxLib's WPlayer
 
--- Get required modules
 local Common = require("Cheater_Detection.Utils.Common")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local G = require("Cheater_Detection.Utils.Globals")
-
-assert(Common, "Common is nil")
-local WPlayer = Common.WPlayer
-assert(WPlayer, "WPlayer is nil")
 
 ---@class WrappedPlayer
 ---@field _basePlayer table Base WPlayer from lnxLib
@@ -21,24 +16,14 @@ local WrapperPool = {}
 local function hydrateWrapper(wrapped, entity, cachedSteamID)
 	local currentIndex = entity:GetIndex()
 
-	-- Optimization: Reuse existing WPlayer if it matches the entity index
-	-- We use a cached integer index to avoid function call overhead
-	if wrapped._basePlayer and wrapped._cachedIndex == currentIndex then
-		-- Update the raw entity reference (in case userdata changed)
+	if wrapped._rawEntity and wrapped._cachedIndex == currentIndex then
 		wrapped._rawEntity = entity
 		wrapped._lastSeenTick = globals.TickCount()
 		return wrapped
 	end
 
-	local basePlayer = WPlayer.FromEntity(entity)
-	if not basePlayer then
-		return nil
-	end
-
-	-- Minimal per-instance data (cache created on-demand)
-	wrapped._basePlayer = basePlayer
 	wrapped._rawEntity = entity
-	wrapped._cachedIndex = currentIndex -- Cache the index for fast checks
+	wrapped._cachedIndex = currentIndex
 	wrapped._lastSeenTick = globals.TickCount()
 
 	-- Initialize persistent cache tables if missing
@@ -121,16 +106,7 @@ function WrappedPlayerMT.__index(self, key)
 		return custom
 	end
 
-	-- 2) Fallback to lnxLib WPlayer (already proxies to raw entity)
-	local basePlayer = rawget(self, "_basePlayer")
-	if basePlayer then
-		local value = basePlayer[key]
-		if value ~= nil then
-			return wrapCall(basePlayer, value)
-		end
-	end
-
-	-- 3) Expose raw entity fields as a last resort
+	-- 2) Proxy to raw entity
 	local rawEntity = rawget(self, "_rawEntity")
 	if rawEntity then
 		local rawValue = rawEntity[key]
@@ -187,9 +163,8 @@ function WrappedPlayer:ResetCache()
 	-- No-op: We use timestamps now
 end
 
---- Returns the base WPlayer from lnxLib
 function WrappedPlayer:GetBasePlayer()
-	return self._basePlayer
+	return self._rawEntity
 end
 
 --- Checks if a given entity is valid
@@ -212,7 +187,7 @@ function WrappedPlayer:GetSteamID64()
 	end
 
 	-- If not in cache (which shouldn't happen often due to hydrateWrapper), try to fetch it
-	local steamID = Common.GetSteamID64(self._basePlayer)
+	local steamID = Common.GetSteamID64(self._rawEntity)
 	if steamID then
 		self._steamID64 = steamID
 		return steamID
@@ -296,7 +271,7 @@ end
 --- Check if player is on the ground via m_fFlags
 ---@return boolean Whether the player is on the ground
 function WrappedPlayer:IsOnGround()
-	local flags = self._basePlayer:GetPropInt("m_fFlags")
+	local flags = self._rawEntity:GetPropInt("m_fFlags")
 	return (flags & FL_ONGROUND) ~= 0
 end
 
@@ -326,7 +301,7 @@ end
 ---@return Vector3 The player's view offset
 function WrappedPlayer:GetViewOffset()
 	return cacheValue(self, "viewOffset", function()
-		return self._basePlayer:GetPropVector("localdata", "m_vecViewOffset[0]")
+		return self._rawEntity:GetPropVector("localdata", "m_vecViewOffset[0]")
 	end)
 end
 
@@ -347,7 +322,7 @@ end
 ---@return EulerAngles The player's eye angles
 function WrappedPlayer:GetEyeAngles()
 	return cacheValue(self, "eyeAngles", function()
-		local ang = self._basePlayer:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+		local ang = self._rawEntity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
 		if ang then
 			return EulerAngles(ang.x, ang.y, ang.z)
 		end
@@ -357,13 +332,13 @@ end
 
 function WrappedPlayer:GetAbsOrigin()
 	return cacheValue(self, "absOrigin", function()
-		return self._basePlayer:GetAbsOrigin()
+		return self._rawEntity:GetAbsOrigin()
 	end)
 end
 
 function WrappedPlayer:GetVelocity()
 	return cacheValue(self, "velocity", function()
-		return self._basePlayer:EstimateAbsVelocity()
+		return self._rawEntity:EstimateAbsVelocity()
 	end)
 end
 
@@ -385,8 +360,7 @@ end
 --- Returns the currently active weapon wrapper
 ---@return table|nil The active weapon wrapper or nil
 function WrappedPlayer:GetActiveWeapon()
-	local w = self._basePlayer:GetPropEntity("m_hActiveWeapon")
-	return w and Common.WWeapon.FromEntity(w) or nil
+	return self._rawEntity:GetPropEntity("m_hActiveWeapon")
 end
 
 function WrappedPlayer:GetActiveWeaponID()
@@ -415,31 +389,31 @@ end
 --- Returns the player's observer mode
 ---@return number The observer mode
 function WrappedPlayer:GetObserverMode()
-	return self._basePlayer:GetPropInt("m_iObserverMode")
+	return self._rawEntity:GetPropInt("m_iObserverMode")
 end
 
 --- Returns the player's observer target wrapper
 ---@return WrappedPlayer|nil The observer target or nil
 function WrappedPlayer:GetObserverTarget()
-	local target = self._basePlayer:GetPropEntity("m_hObserverTarget")
+	local target = self._rawEntity:GetPropEntity("m_hObserverTarget")
 	return target and WrappedPlayer.FromEntity(target) or nil
 end
 
 --- Returns the next attack time
 ---@return number The next attack time
 function WrappedPlayer:GetNextAttack()
-	return self._basePlayer:GetPropFloat("m_flNextAttack")
+	return self._rawEntity:GetPropFloat("m_flNextAttack")
 end
 
 function WrappedPlayer:GetTeamNumber()
-	return self._basePlayer:GetTeamNumber()
+	return self._rawEntity:GetTeamNumber()
 end
 
 function WrappedPlayer:SetPriority(level)
 	if not level then
 		return false
 	end
-	local success = pcall(playerlist.SetPriority, self._rawEntity or self._basePlayer, level)
+	local success = pcall(playerlist.SetPriority, self._rawEntity, level)
 	return success
 end
 
