@@ -40,8 +40,8 @@ function WarpDT.ProcessPlayer(playerState)
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
 
-    -- Skip bots
-    if Common.IsBot(entity) then return end
+    -- Skip bots and local player
+    if Common.IsBot(entity) or entity == entities.GetLocalPlayer() then return end
 
     local id = playerState.id
     if not playerStats[id] then
@@ -81,7 +81,9 @@ function WarpDT.ProcessPlayer(playerState)
     -- Look for a "Burst" event (large simulation time shift)
     local burstAmount = 0
     for _, d in ipairs(deltaTicks) do
-        if d > 12 and d < 64 then -- 12+ ticks in one frame is a significant burst
+        -- Exploits like DT/Warp usually burst 18-24+ ticks to be effective.
+        -- Standard fakelag is usually 14-15.
+        if d > 18 and d < 64 then 
             burstAmount = d
             break
         end

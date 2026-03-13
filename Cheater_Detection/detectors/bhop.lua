@@ -19,6 +19,9 @@ function Bhop.ProcessPlayer(playerState)
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
 
+    -- Skip local player
+    if entity == entities.GetLocalPlayer() then return end
+
     local id = playerState.id
     if not playerData[id] then
         playerData[id] = {

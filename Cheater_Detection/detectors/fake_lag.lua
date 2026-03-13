@@ -9,7 +9,7 @@ local EventBus = require("Cheater_Detection.core.event_bus")
 local FakeLag = {}
 
 -- Constant threshold for fake lag (usually 14-15 on TF2)
-local MAX_TICK_DELTA = 22 --max fakelag value is 22
+local MAX_TICK_DELTA = 15 -- Standard fakelag is ~14-15
 
 -- Per-player tracking
 -- Per-player tracking
@@ -31,8 +31,8 @@ function FakeLag.ProcessPlayer(playerState)
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
 
-    -- Skip bots
-    if Common.IsBot(entity) then return end
+    -- Skip bots and local player
+    if Common.IsBot(entity) or entity == entities.GetLocalPlayer() then return end
 
     local id = playerState.id
     if not playerStats[id] then
