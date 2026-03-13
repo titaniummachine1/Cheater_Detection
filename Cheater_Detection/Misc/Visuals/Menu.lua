@@ -77,6 +77,27 @@ local function DrawMenu()
 		end
 		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
 		TimMenu.Tooltip("Share detections with your party through chat.")
+		TimMenu.NextLine()
+
+		-- Fetch button: triggers the async database update on demand
+		local fetcherState = ""
+		local okFetcher, fetcherMod = pcall(require, "Cheater_Detection.Database.Fetcher")
+		if okFetcher and fetcherMod then
+			if fetcherMod.State and fetcherMod.State.isRunning then
+				fetcherState = " (Running...)"
+			end
+		end
+		if TimMenu.Button("Fetch Databases" .. fetcherState) then
+			if okFetcher and fetcherMod then
+				-- Reset stale timestamp so it actually runs
+				local mainMenu = G and G.Menu and G.Menu.Main
+				if mainMenu then mainMenu.LastFetchTimestamp = 0 end
+				fetcherMod.Start()
+			end
+		end
+		TimMenu.Tooltip("Download and merge the latest cheater lists from online sources.")
+		TimMenu.NextLine()
+
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
@@ -422,13 +443,6 @@ local function DrawMenu()
 			DrawChannelCombo("Class Change Output", co)
 		end
 		TimMenu.EndSector()
-		TimMenu.NextLine()
-
-		if TimMenu.Button("Fetch Database") then
-			local Fetcher = require("Cheater_Detection.Database.Fetcher")
-			Fetcher.Start()
-		end
-
 		TimMenu.NextLine()
 
 		TimMenu.EndSector()

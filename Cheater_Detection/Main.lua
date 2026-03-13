@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global
 --[[ Main.lua
      New Core Entry Point for Cheater Detection Service.
 ]]
@@ -40,10 +41,7 @@ local function Init()
 	if not G.Menu then
 		require("Cheater_Detection.Utils.Config").LoadCFG()
 	end
-	
-	-- Require the Menu at the end of initialization
-	require("Cheater_Detection.Misc.Visuals.Menu")
-	
+
 	print("[CD] System initialized.")
 end
 
@@ -55,11 +53,8 @@ local function OnCreateMove(cmd)
 		return 
 	end
 	
-	-- Only start fetching the Valve group members once per server session
-	if not hasSearchedGroup then
-		hasSearchedGroup = true
-		SteamLookup.RefreshValveGroup()
-	end
+	-- Auto-fetching is disabled per user request.
+    -- Use the menu to manually refresh sources if needed.
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
@@ -97,16 +92,50 @@ local function OnFireGameEvent(event)
 			EventBus.Publish("OnPlayerDisconnect", id)
 			PlayerCache.Remove(id)
 		end
+    elseif name == "player_team" then
+        local uid = event:GetInt("userid")
+        local team = event:GetInt("team")
+        -- Only trigger entry logic if joining active teams (Red: 2, Blue: 3)
+        if team == 2 or team == 3 then
+            local ent = entities.GetByUserID(uid)
+            if ent then
+                local id = tostring(Common.GetSteamID64(ent))
+                if id and id:match("^7656119%d+$") then
+                    EventBus.Publish("OnPlayerJoinTeam", id, ent)
+                end
+            end
+        end
+    elseif name == "player_death" then
+        local attacker_uid = event:GetInt("attacker")
+        if attacker_uid ~= 0 then
+            local attacker_ent = entities.GetByUserID(attacker_uid)
+            if attacker_ent then
+                local id = tostring(Common.GetSteamID64(attacker_ent))
+                if id and id:match("^7656119%d+$") then
+                    PlayerCache.DecayPlayer(id)
+                end
+            end
+        end
+    elseif name == "game_newmap" or name == "teamplay_round_start" then
+        -- Reset all "checked" states on map change so we re-verify everyone
+        PlayerCache.ResetCheckedState()
+        PlayerCache.Cleanup()
 	end
+end
+
+local function OnUnload()
+    print("[CD] System shutdown.")
 end
 
 -- Re-register
 callbacks.Unregister("CreateMove", "CD_CreateMove")
 callbacks.Unregister("FireGameEvent", "CD_Events")
 callbacks.Unregister("Draw", "CD_Draw")
+callbacks.Unregister("Unload", "CD_Unload")
 
 callbacks.Register("CreateMove", "CD_CreateMove", OnCreateMove)
 callbacks.Register("FireGameEvent", "CD_Events", OnFireGameEvent)
 callbacks.Register("Draw", "CD_Draw", OnDraw)
+callbacks.Register("Unload", "CD_Unload", OnUnload)
 
 Init()

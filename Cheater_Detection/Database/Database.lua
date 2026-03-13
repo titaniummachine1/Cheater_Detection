@@ -370,8 +370,17 @@ local function syncPlayerListOnLoad()
 	end
 end
 
--- Self-init
-Database.Initialize(true)
-syncPlayerListOnLoad()
+-- Deferred init: register a one-shot Draw callback so that Json.decode
+-- runs on the FIRST FRAME after the script finishes loading, not during
+-- module execution. This prevents the game freezing on the Load button.
+local function deferredInit()
+	Database.Initialize(true)
+	syncPlayerListOnLoad()
+	-- Unregister immediately — we only need to run once
+	callbacks.Unregister("Draw", "DatabaseDeferredInit")
+end
+
+callbacks.Unregister("Draw", "DatabaseDeferredInit")
+callbacks.Register("Draw", "DatabaseDeferredInit", deferredInit)
 
 return Database
