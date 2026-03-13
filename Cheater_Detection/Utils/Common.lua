@@ -103,10 +103,11 @@ function Common.GetSteamID(Player)
 end
 
 function Common.GetSteamID64(Player)
-	assert(Player, "Player is nil")
+	if not Player then return nil end
 
 	local currentTick = globals.TickCount()
 	local playerIndex = Player:GetIndex()
+	if not playerIndex then return nil end
 
 	-- Reset cache on new tick
 	if lastTick ~= currentTick then
@@ -117,14 +118,18 @@ function Common.GetSteamID64(Player)
 	-- Retrieve cached result or calculate it
 	local result = cachedSteamIDs[playerIndex]
 	if not result then
-		local playerInfo = assert(client.GetPlayerInfo(playerIndex), "Failed to get player info")
-		local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
+		local playerInfo = client.GetPlayerInfo(playerIndex)
+		if not playerInfo then return nil end -- Fail silently, don't crash
+
+		local steamID = playerInfo.SteamID
+		if not steamID then return nil end
 
 		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
-			result = "BOT_" .. tostring(playerInfo.UserID)
+			result = "BOT_" .. tostring(playerInfo.UserID or playerIndex)
 		else
 			local converted = steam.ToSteamID64(steamID)
-			result = tostring(assert(converted, "Failed to convert SteamID to SteamID64"))
+			if not converted then return nil end
+			result = tostring(converted)
 		end
 	end
 
