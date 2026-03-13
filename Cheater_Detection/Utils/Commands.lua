@@ -2,6 +2,8 @@
 
 local G = require("Cheater_Detection.Utils.Globals")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local ValveData = require("Cheater_Detection.data.valve_data")
+local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 
 local Commands = {}
 local registered = {}
@@ -84,8 +86,6 @@ local function setupDiagnostics()
 		printc(200, 200, 200, 255, string.format("  IsBot   : %s", isBot))
 
 		-- Check against both valve lists (same logic as valve_check layer 1)
-		local ValveData      = require("Cheater_Detection.data.valve_data")
-		local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 		local idStr = tostring(steam64)
 		local inValveData     = ValveData.KnownSteamID64s[idStr] == true
 		local inValveEmployees = type(ValveEmployees.List) == "table" and (ValveEmployees.List[idStr] ~= nil)

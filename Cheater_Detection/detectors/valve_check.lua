@@ -22,7 +22,6 @@ local Common        = require("Cheater_Detection.Utils.Common")
 local Database      = require("Cheater_Detection.Database.Database")
 local Logger        = require("Cheater_Detection.Utils.Logger")
 local G             = require("Cheater_Detection.Utils.Globals")
-local Commands      = require("Cheater_Detection.Utils.Commands")
 
 local ValveCheck = {}
 
@@ -145,6 +144,17 @@ function ValveCheck.ProcessPlayer(playerState)
 	local id  = playerState.id
 	local now = globals.CurTime()
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
+
+	-- Skip local player unless debug mode is enabled
+	if not isDebug then
+		local localPlayer = entities.GetLocalPlayer()
+		if localPlayer then
+			local localSteamID = Common.GetSteamID64(localPlayer)
+			if localSteamID and tostring(localSteamID) == tostring(id) then
+				return -- Skip local player check
+			end
+		end
+	end
 
 	-- ── Layer 1: SteamID64 instant check ──────────────────────────────────────
 	-- Always log in debug so user can verify their ID matches what the engine sees
