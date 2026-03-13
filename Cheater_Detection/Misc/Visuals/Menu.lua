@@ -92,6 +92,25 @@ local function DrawMenu()
 		end
 		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
 		TimMenu.Tooltip("Show floating world labels for confirmed cheaters.")
+		TimMenu.NextLine()
+
+		if Main.Cheater_Tags then
+			Main.TagFilters = Main.TagFilters or {}
+			local tf = Main.TagFilters
+			if type(tf.ShowValve)   ~= "boolean" then tf.ShowValve   = true end
+			if type(tf.ShowCheater) ~= "boolean" then tf.ShowCheater = true end
+			if type(tf.ShowVac)     ~= "boolean" then tf.ShowVac     = true end
+			if type(tf.ShowSus)     ~= "boolean" then tf.ShowSus     = true end
+
+			tf.ShowValve   = TimMenu.Checkbox("  Valve Employee", tf.ShowValve)
+			TimMenu.NextLine()
+			tf.ShowCheater = TimMenu.Checkbox("  Cheater", tf.ShowCheater)
+			TimMenu.NextLine()
+			tf.ShowVac     = TimMenu.Checkbox("  VAC Banned", tf.ShowVac)
+			TimMenu.NextLine()
+			tf.ShowSus     = TimMenu.Checkbox("  Suspicious", tf.ShowSus)
+			TimMenu.NextLine()
+		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 

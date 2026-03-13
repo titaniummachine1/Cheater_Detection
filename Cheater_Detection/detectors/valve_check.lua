@@ -64,6 +64,13 @@ local function applyValveFlag(playerState, reason)
 	playerState.flags = playerState.flags | Constants.Flags.VALVE
 
 	if playerState.flags ~= oldFlags then
+		-- Print to console exactly which SteamID matched and why
+		printc(255, 215, 0, 255, string.format(
+			"[ValveCheck] VALVE EMPLOYEE detected! SteamID64=%s Name=%s Reason=%s",
+			playerState.id,
+			playerState.wrap:GetName(),
+			reason
+		))
 		Database.UpsertCheater(playerState.id, {
 			name  = playerState.wrap:GetName(),
 			reason = reason,

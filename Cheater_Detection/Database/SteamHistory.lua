@@ -485,6 +485,10 @@ local function requestBatch()
 			return
 		end
 
+		if type(body) ~= "string" then
+			handleError("HTTP callback body was not a string", contexts)
+			return
+		end
 		local ok, decoded = pcall(Json.decode, body)
 		if not ok or type(decoded) ~= "table" then
 			handleError("JSON Decode failed", contexts)
@@ -497,8 +501,8 @@ end
 
 local function refreshEnabled()
 	local cfg = getConfig()
-	local apiKey = cfg and cfg.ApiKey or nil
-	apiKey = apiKey ~= "" and apiKey or nil
+	local rawKey = cfg and cfg.ApiKey
+	local apiKey = (type(rawKey) == "string" and rawKey ~= "") and rawKey or nil
 
 	if apiKey ~= state.apiKey then
 		state.apiKey = apiKey

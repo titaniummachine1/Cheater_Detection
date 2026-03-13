@@ -3,12 +3,18 @@ local Default_Config = {
 
 	Main = {
 		Fetch_Database = true,
-		AutoPriority = true, -- Auto set priority 10 on detected cheaters
-		AutoFetch = true, -- Automatically fetch database on startup
+		AutoPriority = true,
+		AutoFetch = true,
 		LastFetchTimestamp = 0,
 		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,
+		TagFilters = {
+			ShowValve   = true,
+			ShowCheater = true,
+			ShowVac     = true,
+			ShowSus     = true,
+		},
 	},
 
 	Advanced = {
