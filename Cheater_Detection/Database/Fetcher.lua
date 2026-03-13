@@ -68,7 +68,7 @@ Fetcher.State = {
     coro = nil
 }
 
--- Synchronous parsing wrapper (called inside coroutine but doesn't yield itself)
+-- Synchronous parsing wrapper (Safe-Chunking)
 local function parseSourceSync(source, content)
 	Log(LogLevel.INFO, string.format("[FETCHER] Parsing: %s", source.name))
 
@@ -77,8 +77,9 @@ local function parseSourceSync(source, content)
 
 	local success, err = pcall(function()
 		if source.parser == "raw" then
-			-- Parse lines directly (Sync)
+            local count = 0
 			for line in content:gmatch("[^\n\r]+") do
+				count = count + 1
 				local steamID64 = Parsers.GetSteamID64(line)
 				
 				if steamID64 then
@@ -96,6 +97,11 @@ local function parseSourceSync(source, content)
                         stats.errors = stats.errors + 1
                     end
 				end
+
+                -- Yield every 500 entries to prevent game freeze/watchdog crash
+                if count % 500 == 0 then
+                    coroutine.yield()
+                end
 			end
 		elseif source.parser == "tf2db" then
 			local data, parseErr = Parsers.ParseJsonTF2DB(content)
@@ -131,6 +137,11 @@ local function parseSourceSync(source, content)
 				else
 					stats.errors = stats.errors + 1
 				end
+
+                -- Yield for large JSON files too
+                if i % 300 == 0 then
+                    coroutine.yield()
+                end
 			end
             data = nil
 		else
@@ -235,13 +246,14 @@ end
 local lastTick = 0
 
 function Fetcher.Tick()
-    if not Fetcher.State.coro then return end
+    local coro = Fetcher.State.coro
+    if not coro or type(coro) ~= "thread" then return end
 
     local currentTick = globals.TickCount()
-    if currentTick == lastTick then return end -- Process only once per simulation tick
+    if currentTick == lastTick then return end 
     lastTick = currentTick
     
-    local status, err = coroutine.resume(Fetcher.State.coro)
+    local status, err = coroutine.resume(coro)
     if not status then
         Log(LogLevel.ERROR, "[FETCHER] Coroutine error: " .. tostring(err))
         Fetcher.State.isRunning = false
@@ -249,7 +261,7 @@ function Fetcher.Tick()
         return
     end
 
-    if Fetcher.State.coro and coroutine.status(Fetcher.State.coro) == "dead" then
+    if type(coro) == "thread" and coroutine.status(coro) == "dead" then
         local wasRunning = Fetcher.State.isRunning
         Fetcher.State.coro = nil
         if wasRunning then
