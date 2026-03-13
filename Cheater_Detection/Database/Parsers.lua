@@ -119,80 +119,38 @@ end
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
 function Parsers.GetSteamID64(input)
-	if not input then
-		return nil
-	end
+	if not input then return nil end
 
-	local id_str = tostring(input):match("^%s*(.-)%s*$") -- Trim
-	if not id_str then
-		return nil
-	end
-
-	-- 1. Check if it's a plain numeric ID that's in the valid SteamID64 range
-	if id_str:match("^%d+$") then
-		local num = tonumber(id_str)
-		if num and num >= 76500000000000000 and num <= 77000000000000000 then
-			return id_str
-		end
-	end
-
-	-- 2. Validate against standard SteamID64 format
-	if id_str:match("^7656119%d+$") and string.len(id_str) >= 17 then
+	-- Optimization: Check if it's already a standard SteamID64 string (starts with 765, length ~17)
+	local id_str = tostring(input):match("^%s*(765%d+)")
+	if id_str and #id_str >= 17 then
 		return id_str
 	end
 
-	-- 3. Try conversion using built-in function (handles SteamID2, SteamID3)
-	local steamID64_from_pcall = nil
-	if steam and steam.ToSteamID64 then -- Ensure steam API is available
-		local success, result = pcall(steam.ToSteamID64, id_str)
+	-- Trim and handle standard SteamID formats
+	id_str = tostring(input):match("^%s*(.-)%s*$")
+	if not id_str or id_str == "" then return nil end
 
-		-- Check if pcall succeeded AND the result is usable (string or number)
-		local result_str = nil
-		if success and result then
-			-- Convert to string if necessary
-			if type(result) == "number" then
-				result_str = tostring(result)
-			elseif type(result) == "string" then
-				result_str = result
-			end
-
-			-- If we got a usable string, trim and validate it
-			if result_str then
-				local trimmed_result = result_str:match("^%s*(.-)%s*$")
-
-				-- Check if this is a valid SteamID64 by numeric range instead of strict pattern
-				if trimmed_result and trimmed_result:match("^%d+$") then
-					local num = tonumber(trimmed_result)
-					if num and num >= 76561197960265728 and num <= 77000000000000000 then -- Corrected range
-						return trimmed_result
-					end
-				end
-			end
-		else
-			-- Debug print statement removed
-			-- Log(LogLevel.DEBUG, "[PARSERS] steam API or steam.ToSteamID64 not available for conversion attempt")
-		end
-	else
-		-- Debug print statement removed
-		-- Log(LogLevel.DEBUG, "[PARSERS] steam API or steam.ToSteamID64 not available for conversion attempt")
-	end
-
-	-- If conversion via pcall was successful, return that result
-	if steamID64_from_pcall then
-		return steamID64_from_pcall
-	end
-
-	-- 4. Manual fallback for SteamID3 (only if steps 1 & 2 failed)
+	-- Manual fallback for SteamID3 (common in community lists)
 	local accountID = id_str:match("%[U:1:(%d+)%]")
 	if accountID then
 		accountID = tonumber(accountID)
 		if accountID then
-			local steamID64 = tostring(76561197960265728 + accountID)
-			return steamID64
+			return tostring(76561197960265728 + accountID)
 		end
 	end
 
-	-- 5. All attempts failed
+	-- Expensive path: Only call engine/steam API if absolutely necessary
+	if steam and steam.ToSteamID64 then
+		local success, result = pcall(steam.ToSteamID64, id_str)
+		if success and result then
+			local result_str = tostring(result):match("(765%d+)")
+			if result_str and #result_str >= 17 then
+				return result_str
+			end
+		end
+	end
+
 	return nil
 end
 
@@ -211,7 +169,8 @@ function Parsers.ParseJsonTF2DB(contentString)
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success or type(data) ~= "table" then
-		return nil, "JSON decode failed: " .. tostring(data)
+        local preview = string.sub(tostring(contentString), 1, 50):gsub("[%c%s]+", " ")
+		return nil, string.format("JSON decode failed: %s (Success: %s, Preview: %s)", tostring(data), tostring(success), preview)
 	end
 
 	if not data.players or type(data.players) ~= "table" then

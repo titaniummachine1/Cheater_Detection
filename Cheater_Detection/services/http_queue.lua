@@ -8,8 +8,7 @@ local HttpQueue = {}
 
 local queue = {}
 local isProcessing = false
-local lastRequestTime = 0
-local REQUEST_DELAY = 1.0 -- 1 second between requests (Safe for GitHub)
+local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
 
 function HttpQueue.Enqueue(url, callback)
 	table.insert(queue, { url = url, callback = callback })

@@ -224,14 +224,18 @@ function Fetcher.Start()
                 coroutine.yield()
             end
 
-            if data and type(data) == "string" and #data > 0 then
+            if data and type(data) == "string" and #data > 2 then
                 local a, u, e = parseSourceSync(source, data)
                 Fetcher.State.results.total_added = Fetcher.State.results.total_added + a
                 Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + u
                 Fetcher.State.results.errors = Fetcher.State.results.errors + e
                 Parsers.AddSourceStats(source.name, 0, a, 0, e, u) 
             else
-                Log(LogLevel.WARNING, "[FETCHER] Invalid or empty data from " .. source.name)
+                local detail = data and ("Len: " .. #tostring(data)) or "NIL"
+                if type(data) == "string" and #data > 0 then
+                    detail = detail .. " | Prev: " .. string.sub(data, 1, 30):gsub("[%c%s]+", " ")
+                end
+                Log(LogLevel.WARNING, string.format("[FETCHER] Invalid data from %s (%s)", source.name, detail))
                 Fetcher.State.results.errors = Fetcher.State.results.errors + 1
             end
             
