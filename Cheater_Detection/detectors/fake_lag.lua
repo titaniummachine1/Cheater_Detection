@@ -63,10 +63,6 @@ function FakeLag.ProcessPlayer(playerState)
 
     -- Only record events that meet the threshold
     if deltaTicks >= MAX_TICK_DELTA then
-        -- 22 tick cooldown between adding weight for FakeLag per suspect
-        local lastFlag = data.lastFlagTick or 0
-        if (curTick - lastFlag) < 22 then return end
-
         table.insert(data.events, { tick = curTick, amount = deltaTicks })
         
         -- Clean up events older than 330 ticks (approx 5 seconds)
@@ -88,6 +84,10 @@ function FakeLag.ProcessPlayer(playerState)
             end
 
             if consistent then
+                -- 22 tick cooldown between adding weight/marking for FakeLag per suspect
+                local lastFlag = data.lastFlagTick or 0
+                if (curTick - lastFlag) < 22 then return end
+
                 data.lastFlagTick = curTick
                 -- Lower score increment for FakeLag as requested
                 playerState.score = math.min(99, playerState.score + 5)
