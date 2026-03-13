@@ -3,6 +3,7 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
+local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 
@@ -31,8 +32,9 @@ function FakeLag.ProcessPlayer(playerState)
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
 
-    -- Skip bots and local player
-    if Common.IsBot(entity) or entity == entities.GetLocalPlayer() then return end
+    -- Skip bots. Skip local player unless debug mode is enabled for testing.
+    local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+    if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then return end
 
     local id = playerState.id
     if not playerStats[id] then

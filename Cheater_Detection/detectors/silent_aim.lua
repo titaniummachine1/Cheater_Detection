@@ -9,6 +9,7 @@ local EventBus = require("Cheater_Detection.core.event_bus")
 local PlayerCache = require("Cheater_Detection.core.player_cache")
 local Constants = require("Cheater_Detection.core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
+local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 
 local SilentAim = {}
@@ -39,7 +40,8 @@ local function onDamageEvent(event)
 		if not ply then return end
 		
 		local localPlayer = entities.GetLocalPlayer()
-		if not localPlayer or localPlayer:GetIndex() == ply:GetIndex() then return end
+		local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+		if not localPlayer or (localPlayer:GetIndex() == ply:GetIndex() and not isDebug) then return end
 		
 		local steamID64 = Common.GetSteamID64(ply)
 		if not steamID64 then return end

@@ -4,6 +4,7 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
+local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 
@@ -19,8 +20,9 @@ function Bhop.ProcessPlayer(playerState)
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
 
-    -- Skip local player
-    if entity == entities.GetLocalPlayer() then return end
+    -- Skip local player unless debug mode is enabled for testing.
+    local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+    if entity == entities.GetLocalPlayer() and not isDebug then return end
 
     local id = playerState.id
     if not playerData[id] then
@@ -48,9 +50,9 @@ function Bhop.ProcessPlayer(playerState)
                 
                 -- Threshold for adding suspicion
                 if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
-                    local increment = 10
+                    local increment = 2
                     -- Scale increment for extreme consistency
-                    if data.consecutivePerfects > 10 then increment = 25 end
+                    if data.consecutivePerfects > 10 then increment = 5 end
                     
                     playerState.score = math.min(99, playerState.score + increment)
                     

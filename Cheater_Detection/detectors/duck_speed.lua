@@ -4,6 +4,7 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
+local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 
@@ -16,6 +17,10 @@ function DuckSpeed.ProcessPlayer(playerState)
 	if not playerState or not playerState.wrap then return end
 	local entity = playerState.wrap:GetRawEntity()
 	if not entity then return end
+
+	-- Skip local player unless debug mode is enabled for testing.
+	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	if entity == entities.GetLocalPlayer() and not isDebug then return end
 
 	local id = playerState.id
 	if not tickCounters[id] then tickCounters[id] = 0 end

@@ -1,4 +1,5 @@
 local Constants = require("Cheater_Detection.core.constants")
+local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
@@ -40,8 +41,9 @@ function WarpDT.ProcessPlayer(playerState)
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
 
-    -- Skip bots and local player
-    if Common.IsBot(entity) or entity == entities.GetLocalPlayer() then return end
+    -- Skip bots. Skip local player unless debug mode is enabled for testing.
+    local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+    if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then return end
 
     local id = playerState.id
     if not playerStats[id] then
@@ -140,8 +142,8 @@ function WarpDT.ProcessPlayer(playerState)
     if #data.events >= 1 then
         local reason = "Warp/DT (Burst + Recharge)"
         
-        -- Scale increment based on events
-        local increment = (#data.events >= 2) and 40 or 20
+        -- Scale increment based on events (Much more leeway: 5 per single, 15 for repeat)
+        local increment = (#data.events >= 2) and 15 or 5
         playerState.score = math.min(99, playerState.score + increment)
 
         if playerState.score >= Constants.Threshold.SUSPICIOUS then

@@ -4,6 +4,7 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
+local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 
@@ -14,6 +15,10 @@ function AntiAim.ProcessPlayer(playerState)
 	
 	-- Already marked as cheater? skip
 	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then return end
+
+	local entity = playerState.wrap:GetRawEntity()
+	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	if entity == entities.GetLocalPlayer() and not isDebug then return end
 
 	local angles = playerState.wrap:GetEyeAngles()
 	if not angles then return end
