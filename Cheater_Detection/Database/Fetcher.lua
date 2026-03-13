@@ -353,9 +353,10 @@ function Fetcher.Start()
 				Parsers.AddSourceStats(source.name, 0, 0, 0, 1, 0)
 			end
 
-			-- Yield one frame between sources to keep the game smooth.
-			-- The HttpQueue 1.2s delay between requests means there's already a natural
-			-- pause between fetches — we don't need an artificial sleep here.
+			-- Yield between sources. ParseTF2BotDetector already yields before
+			-- its Json.decode, but this extra yield ensures the game gets a
+			-- full frame after the entire parse+iteration completes before we
+			-- start fetching the next source.
 			coroutine.yield()
 		end
 

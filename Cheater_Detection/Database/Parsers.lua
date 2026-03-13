@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local Common = require("Cheater_Detection.Utils.Common")
 -- [[ Imported by: Fetcher.lua (indirectly) ]]
 local Json = Common.Json
@@ -168,9 +169,14 @@ function Parsers.ParseJsonTF2DB(contentString)
 
 	local success, data = pcall(Json.decode, contentString)
 
-	if not success or type(data) ~= "table" then
-        local preview = string.sub(tostring(contentString), 1, 50):gsub("[%c%s]+", " ")
-		return nil, string.format("JSON decode failed: %s (Success: %s, Preview: %s)", tostring(data), tostring(success), preview)
+	if not success then
+		local preview = string.sub(tostring(contentString), 1, 50):gsub("[%c%s]+", " ")
+		return nil, string.format("JSON decode error: %s (Preview: %s)", tostring(data), preview)
+	end
+
+	if type(data) ~= "table" then
+		local preview = string.sub(tostring(contentString), 1, 100):gsub("[%c%s]+", " ")
+		return nil, string.format("JSON decode returned %s instead of table (Preview: %s)", type(data), preview)
 	end
 
 	if not data.players or type(data.players) ~= "table" then
@@ -218,6 +224,12 @@ function Parsers.ParseRawIDs(contentString, cause)
 	-- Iterate over each line in the content string
 	for line in contentString:gmatch("[^\n\r]+") do
 		lineCount = lineCount + 1
+        
+        -- Yield every 300 lines to prevent game freeze
+        if lineCount % 300 == 0 then
+            coroutine.yield()
+        end
+
 		local steamID64 = Parsers.ParseRawLine(line)
 		if steamID64 then
 			if not entries[steamID64] then -- Avoid duplicates within the same file
@@ -261,6 +273,10 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 		return nil, "JSON decode function is unavailable"
 	end
 
+	-- Yield BEFORE the blocking native decode so the game renders a frame first.
+	-- Json.decode cannot be interrupted by yield once started, so we must yield
+	-- before it. This matches the natural pacing the old button click gave.
+	coroutine.yield()
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success or type(data) ~= "table" then
@@ -280,8 +296,13 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 	end
 
 	-- Process each player
-	for _, player in ipairs(players) do
+	for i, player in ipairs(players) do
 		stats.processed = stats.processed + 1
+        
+        -- Yield every 300 entries to prevent game freeze
+        if i % 300 == 0 then
+            coroutine.yield()
+        end
 
 		-- Get the SteamID and convert to SteamID64
 		local steamID64 = Parsers.GetSteamID64(player.steamid)
