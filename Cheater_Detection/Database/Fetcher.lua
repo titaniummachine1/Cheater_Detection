@@ -284,15 +284,16 @@ local function importLocalFiles()
 			local content = file:read("*a")
 			file:close()
 			if content and content ~= "" then
+				coroutine.yield() -- Yield after reading large content
 				local parserType = filename:match("%.json$") and "tf2db" or "raw"
-				local added = parseSource(
+				local added, updated, errors = parseSource(
 					{ name = filename, parser = parserType, cause = "Local Import" },
 					content
 				)
 				totalImported = totalImported + (added or 0)
 			end
 		end
-		coroutine.yield() -- Yield after each file
+		coroutine.yield() -- Yield after each file processing
 	end
 
 	if totalImported > 0 then
