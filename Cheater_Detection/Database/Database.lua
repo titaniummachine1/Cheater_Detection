@@ -25,6 +25,14 @@ local Database = {
 	},
 }
 
+--[[ Constants ]]
+-- Unload saves are skipped if the database exceeds this entry count.
+-- Encoding a very large JSON blob in the Unload callback is a blocking
+-- operation that will freeze and crash TF2. Hard detections (VAC/Valve)
+-- and the fetch-complete save already save immediately during runtime,
+-- so important data is never lost even if we skip the unload save.
+local MAX_ENTRIES_FOR_UNLOAD_SAVE = 5000
+
 --[[ Local Variables/Utilities ]]
 local LogLevel = {
 	ERROR = 1,
@@ -64,6 +72,15 @@ local function Log(level, message, color)
 	printc(color[1], color[2], color[3], color[4], prefix .. message)
 end
 
+--[[ Helpers ]]
+local function countEntries(db)
+	local count = 0
+	for _ in pairs(db) do
+		count = count + 1
+	end
+	return count
+end
+
 --[[ Public Module Functions ]]
 
 -- Robust SetPriority with multiple fallback methods
@@ -71,21 +88,20 @@ function Database.SetPriority(target, priority, isInGame)
 	if not target then return false end
 
 	local success = false
-	local lastError = nil
 
 	-- Method 1: Try entity (only if in-game)
 	if isInGame ~= false and type(target) == "userdata" then
-		success, lastError = pcall(playerlist.SetPriority, target, priority)
+		success = pcall(playerlist.SetPriority, target, priority)
 		if success then return true end
 	end
 
 	-- Method 2: Try index (only if in-game)
 	if isInGame ~= false and type(target) == "number" and target < 101 then
-		success, lastError = pcall(playerlist.SetPriority, target, priority)
+		success = pcall(playerlist.SetPriority, target, priority)
 		if success then return true end
 	end
 
-	-- Method 3: Try SteamID64
+	-- Method 3: Try SteamID64 string
 	local steamID64 = nil
 	if type(target) == "string" and #target == 17 then
 		steamID64 = target
@@ -94,7 +110,7 @@ function Database.SetPriority(target, priority, isInGame)
 	end
 
 	if steamID64 then
-		success, lastError = pcall(playerlist.SetPriority, steamID64, priority)
+		success = pcall(playerlist.SetPriority, steamID64, priority)
 		if success then
 			if priority == 10 then
 				local menuMain = G.Menu and G.Menu.Main
@@ -114,7 +130,7 @@ function Database.SetPriority(target, priority, isInGame)
 		local accountID = tonumber(steamID64) - 76561197960265728
 		if accountID and accountID > 0 then
 			local steamID3 = string.format("[U:1:%d]", accountID)
-			success, lastError = pcall(playerlist.SetPriority, steamID3, priority)
+			success = pcall(playerlist.SetPriority, steamID3, priority)
 			if success then return true end
 		end
 	end
@@ -124,18 +140,34 @@ end
 
 function Database.GetFilePath()
 	pcall(filesystem.CreateDirectory, "Lua Cheater_Detection")
-	return "Lua Cheater_Detection/database.json" 
+	return "Lua Cheater_Detection/database.json"
 end
 
-function Database.SaveDatabase()
-	if not Database.State.isDirty or not G.DataBase then
-		return
+-- Saves the database to disk.
+-- isUnloadCall: set to true when called from the Unload callback.
+--   The unload-time save is skipped if the database exceeds MAX_ENTRIES_FOR_UNLOAD_SAVE
+--   because large JSON encodes block the main thread and crash TF2.
+--   During normal runtime this parameter should be false.
+function Database.SaveDatabase(isUnloadCall)
+	if not G.DataBase then return end
+	if not Database.State.isDirty then return end
+
+	-- Unload guard: skip blocking JSON encode for very large databases.
+	if isUnloadCall then
+		local entryCount = countEntries(G.DataBase)
+		if entryCount > MAX_ENTRIES_FOR_UNLOAD_SAVE then
+			printc(255, 200, 0, 255, string.format(
+				"[CD] DB save skipped on unload: %d entries (limit %d). Hard detections were already saved during session.",
+				entryCount, MAX_ENTRIES_FOR_UNLOAD_SAVE
+			))
+			return
+		end
 	end
 
 	local encodedData = nil
 	if Json and Json.encode then
-		local success, result = pcall(Json.encode, G.DataBase)
-		if success and type(result) == "string" then
+		local encodeOk, result = pcall(Json.encode, G.DataBase)
+		if encodeOk and type(result) == "string" then
 			encodedData = result
 		else
 			Log(LogLevel.ERROR, "[DB] Json.encode failed: " .. tostring(result))
@@ -147,20 +179,20 @@ function Database.SaveDatabase()
 	end
 
 	local filepath = Database.GetFilePath()
-	
+
 	local file = io.open(filepath, "w")
 	if not file then
-		Log(LogLevel.ERROR, "[DB] Failed to open file for writing")
+		Log(LogLevel.ERROR, "[DB] Failed to open file for writing: " .. filepath)
 		return
 	end
 
 	file:write(encodedData)
 	file:close()
-	encodedData = nil -- Explicitly clear memory
+	encodedData = nil
 
 	Database.State.isDirty = false
 	Database.State.lastSave = os.time()
-	Log(LogLevel.SUCCESS, "[DB] Database saved successfully")
+	Log(LogLevel.SUCCESS, "[DB] Database flushed to disk")
 end
 
 function Database.LoadDatabase(silent, force)
@@ -181,6 +213,7 @@ function Database.LoadDatabase(silent, force)
 	file:close()
 
 	if not content or #content == 0 then
+		Log(LogLevel.WARNING, "[DB] Database file is empty")
 		G.DataBase = {}
 		Database.State.isInitialized = true
 		return
@@ -190,7 +223,7 @@ function Database.LoadDatabase(silent, force)
         if not Json or not Json.decode then return nil end
         return Json.decode(content)
     end)
-	content = nil -- Free memory immediately
+	content = nil
 
 	if not success or type(decodedData) ~= "table" then
 		Log(LogLevel.ERROR, "[DB] JSON Decode Failed: " .. tostring(decodedData))
@@ -199,14 +232,15 @@ function Database.LoadDatabase(silent, force)
 		return
 	end
 
-    -- Process Synchronously (Normal)
     G.DataBase = decodedData
     local entriesToRemove = {}
     local total = 0
-    
+
     for steamID, value in pairs(G.DataBase) do
         total = total + 1
-        if type(value) ~= "table" or type(steamID) ~= "string" or #steamID ~= 17 then
+        local isValidKey = type(steamID) == "string" and steamID:match("^7656119%d+$")
+        local isValidValue = type(value) == "table"
+        if not isValidKey or not isValidValue then
             table.insert(entriesToRemove, steamID)
         end
     end
@@ -238,7 +272,6 @@ function Database.ClearLocalPlayer()
             if G.DataBase[mySteamID] then
                 G.DataBase[mySteamID] = nil
                 Database.State.isDirty = true
-                Log(LogLevel.INFO, "[DB] Local player cleared from database")
             end
 		end
 	end
@@ -258,23 +291,37 @@ function Database.UpsertCheater(steamID, data)
 
 	local existing = G.DataBase[steamID]
 	local currentTime = os.time()
+    local score = data.score or 0
 
 	if existing then
-		local scoreDelta = math.abs((data.score or 0) - (existing.Score or 0))
+		local scoreDelta = math.abs(score - (existing.Score or 0))
 		local timeDelta = currentTime - (existing.Timestamp or 0)
-		if scoreDelta < 5 and timeDelta < 60 then return false end
+		local reasonChanged = data.reason ~= existing.Reason
+
+		if scoreDelta < 1 and timeDelta < 3600 and not reasonChanged and persistentFlags == existing.Flags then
+			return false
+		end
 	end
 
 	G.DataBase[steamID] = {
 		Name = data.name or "Unknown",
 		Reason = data.reason or "Cheater",
 		Flags = persistentFlags,
-		Score = data.score or 0,
+		Score = score,
 		Timestamp = currentTime,
 	}
 
 	Database.State.isDirty = true
-	Log(LogLevel.INFO, string.format("[DB] Added cheater: %s (%s) - Reason: %s", data.name or "Unknown", steamID, data.reason or "Cheater"))
+
+	-- Instant save on hard detections or max suspicion (>= 99).
+	-- These are NOT subject to the unload size guard — they must always persist.
+	local isHardDetection = (persistentFlags & (Constants.Flags.VALVE | Constants.Flags.VAC_BANNED)) ~= 0
+    local isMaxSuspicion = score >= 99
+
+	if isHardDetection or isMaxSuspicion or (data.reason and data.reason:find("VAC")) then
+		Database.SaveDatabase(false) -- runtime save, no size guard
+	end
+
 	return true
 end
 
@@ -289,28 +336,42 @@ function Database.RemoveCheater(steamID)
 		G.DataBase[steamID] = nil
 		Database.State.isDirty = true
 		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
+		Database.SaveDatabase(false) -- runtime save, no size guard
 		return true
 	end
 	return false
 end
 
 function Database.ForceSave()
-	local wasDirty = Database.State.isDirty
 	Database.State.isDirty = true
-	Database.SaveDatabase()
-	Database.State.isDirty = wasDirty
+	Database.SaveDatabase(false)
 	return true
 end
 
 local function DatabaseAutoSaveOnUnload()
-	if Database.Config.SaveOnExit and Database.State.isDirty then
-		Database.SaveDatabase()
+	Log(LogLevel.INFO, "[DB] Unloading script, saving database...")
+	-- isUnloadCall = true applies the size guard to prevent the freeze.
+	Database.SaveDatabase(true)
+end
+
+callbacks.Unregister("Unload", "DatabaseAutoSaveOnUnload")
+callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
+
+-- Set Priority 10 on start for all existing DB entries
+local function syncPlayerListOnLoad()
+	if not G.DataBase then return end
+	local count = 0
+	for id, _ in pairs(G.DataBase) do
+		pcall(playerlist.SetPriority, id, 10)
+		count = count + 1
+	end
+	if count > 0 then
+		Log(LogLevel.DEBUG, string.format("[DB] Synced %d entries to engine playerlist", count))
 	end
 end
 
-callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
-
 -- Self-init
 Database.Initialize(true)
+syncPlayerListOnLoad()
 
 return Database
