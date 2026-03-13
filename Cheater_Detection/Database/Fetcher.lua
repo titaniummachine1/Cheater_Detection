@@ -70,47 +70,95 @@ Fetcher.State = {
 
 -- Async parsing wrapper
 local function parseSourceAsync(source, content)
-    Log(LogLevel.INFO, string.format("[FETCHER] Async Parsing: %s", source.name))
-    
-    -- For now, we still call the sync parsers, but since it's only one source at a time
-    -- and the HTTP part is already async, it should be significantly better.
-    -- If parsing still freezes, we can further subdivide Parsers.
-    local added, updated, errors = select(1, pcall(function()
-        if source.parser == "raw" then
-            local entries, err = Parsers.ParseRawIDs(content, source.cause)
-            if not entries then error(err) end
-            
-            local a, u = 0, 0
-            for id, data in pairs(entries) do
-                if not G.DataBase[id] then
-                    G.DataBase[id] = data
-                    a = a + 1
-                    Database.State.isDirty = true
-                else
-                    -- Update logic (simplified)
-                    local existing = G.DataBase[id]
-                    if (existing.Name == "Unknown" and data.Name ~= "Unknown") then
-                        existing.Name = data.Name
-                        u = u + 1
-                        Database.State.isDirty = true
-                    end
-                end
-            end
-            return a, u, 0
-        elseif source.parser == "tf2db" then
-            local _, err, stats = Parsers.ParseTF2BotDetector(content, source.cause, G.DataBase)
-            if not stats then error(err) end
-            return stats.added, stats.updated, stats.errors
-        end
-        return 0, 0, 1
-    end))
-    
-    if type(added) ~= "number" then
-        Log(LogLevel.WARNING, "[FETCHER] Parsing error: " .. tostring(updated))
-        return 0, 0, 1
-    end
-    
-    return added, updated, errors
+	Log(LogLevel.INFO, string.format("[FETCHER] Async Parsing: %s", source.name))
+
+	local stats = { added = 0, updated = 0, errors = 0 }
+
+	local success, err = pcall(function()
+		if source.parser == "raw" then
+			local entries, parseErr = Parsers.ParseRawIDs(content, source.cause)
+			if not entries then
+				error(parseErr or "Unknown parsing error")
+			end
+
+			local count = 0
+			for id, data in pairs(entries) do
+				count = count + 1
+				if not G.DataBase[id] then
+					G.DataBase[id] = data
+					stats.added = stats.added + 1
+					Database.State.isDirty = true
+				else
+					local existing = G.DataBase[id]
+					if existing.Name == "Unknown" and data.Name ~= "Unknown" then
+						existing.Name = data.Name
+						stats.updated = stats.updated + 1
+						Database.State.isDirty = true
+					end
+				end
+
+				-- Yield every 500 entries to prevent freeze
+				if count % 500 == 0 then
+					coroutine.yield()
+				end
+			end
+		elseif source.parser == "tf2db" then
+			-- Parse JSON into data table
+			local data, parseErr = Parsers.ParseJsonTF2DB(content)
+			if not data or not data.players then
+				error(parseErr or "TF2DB Parser failed to get players")
+			end
+
+			local count = 0
+			for _, player in ipairs(data.players) do
+				count = count + 1
+				local steamID64 = Parsers.GetSteamID64(player.steamid)
+				if steamID64 then
+					local playerName = "Unknown"
+					if player.last_seen and player.last_seen.player_name then
+						playerName = player.last_seen.player_name
+					end
+
+					local reason = source.cause or "TF2DB"
+					if player.attributes and #player.attributes > 0 then
+						reason = player.attributes[1]:gsub("^%l", string.upper)
+					end
+
+					if not G.DataBase[steamID64] then
+						G.DataBase[steamID64] = {
+							Name = playerName,
+							Reason = reason,
+						}
+						stats.added = stats.added + 1
+						Database.State.isDirty = true
+					else
+						local existing = G.DataBase[steamID64]
+						if existing.Name == "Unknown" and playerName ~= "Unknown" then
+							existing.Name = playerName
+							stats.updated = stats.updated + 1
+							Database.State.isDirty = true
+						end
+					end
+				else
+					stats.errors = stats.errors + 1
+				end
+
+				-- Yield every 500 entries
+				if count % 500 == 0 then
+					coroutine.yield()
+				end
+			end
+		else
+			stats.errors = 1
+		end
+	end)
+
+	if not success then
+		Log(LogLevel.WARNING, "[FETCHER] Parsing error: " .. tostring(err))
+		return 0, 0, 1
+	end
+
+	return stats.added, stats.updated, stats.errors
 end
 
 -- Helper function to check if all required modules are properly loaded
@@ -197,8 +245,14 @@ function Fetcher.Start()
     end)
 end
 
+local lastTick = 0
+
 function Fetcher.Tick()
     if not Fetcher.State.coro then return end
+
+    local currentTick = globals.TickCount()
+    if currentTick == lastTick then return end -- Process only once per simulation tick
+    lastTick = currentTick
     
     local ok, err = coroutine.resume(Fetcher.State.coro)
     if not ok then

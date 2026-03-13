@@ -16,11 +16,22 @@ function HttpQueue.Enqueue(url, callback)
 end
 
 function HttpQueue.Process()
-	if #queue == 0 or isProcessing then
+	if #queue == 0 then
 		return
 	end
 
-	local now = globals.RealTime()
+    local now = globals.RealTime()
+
+    -- Safety: If stuck processing for more than 10 seconds, reset lock
+    if isProcessing and (now - lastRequestTime > 10) then
+        print("[HTTP QUEUE] Request timeout, resetting lock...")
+        isProcessing = false
+    end
+
+    if isProcessing then
+        return
+    end
+
 	if (now - lastRequestTime) < REQUEST_DELAY then
 		return
 	end

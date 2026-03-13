@@ -55,8 +55,6 @@ local function OnCreateMove(cmd)
 		return 
 	end
 	
-	Scheduler.Tick()
-
 	-- Only start fetching the Valve group members once per server session
 	if not hasSearchedGroup then
 		hasSearchedGroup = true
@@ -85,6 +83,7 @@ local function OnCreateMove(cmd)
 end
 
 local function OnDraw()
+	Scheduler.Tick()
 	Visuals.DrawTags()
 end
 

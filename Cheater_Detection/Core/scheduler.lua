@@ -29,12 +29,15 @@ function Scheduler.Tick()
 		SteamLookup.TickGroupFetch()
 	end
 
-	-- Every frame (Fetcher/HttpQueue handle their own internal states)
+	-- Every frame (Fetcher/HttpQueue/Database handle their own internal states)
 	local HttpQueue = require("Cheater_Detection.services.http_queue")
 	HttpQueue.Tick()
 
 	local Fetcher = require("Cheater_Detection.Database.Fetcher")
 	Fetcher.Tick()
+    
+    local Database = require("Cheater_Detection.Database.Database")
+    Database.Tick()
 end
 
 return Scheduler
