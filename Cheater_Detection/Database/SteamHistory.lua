@@ -470,32 +470,37 @@ local function requestBatch()
 
 	local url = string.format(API_TEMPLATE, cfg.ApiKey, table.concat(ids, ","))
 
-	-- Use HttpQueue to avoid blocking during network I/O
+	-- Use HttpQueue to avoid blocking during network I/O.
+	-- The inner pcall guarantees state.scanning is always reset even on an unhandled Lua error.
 	HttpQueue.Enqueue(url, function(body)
-		if not body or body == "" then
-			handleError("HTTP Request failed (empty response)", contexts)
-			return
-		end
+		local ok, err = pcall(function()
+			if type(body) ~= "string" or body == "" then
+				handleError("HTTP Request failed (empty/invalid response)", contexts)
+				return
+			end
 
-		-- Check for HTML/Error responses
-		if body:match("<html>") or body:match("<title>") or body:match("429") or body:match("502") or body:match("503") or body:match("504") then
-			local errorMsg = "API returned HTML (likely down)"
-			if body:match("429") then errorMsg = "Rate limited (429)" end
-			handleError(errorMsg, contexts)
-			return
-		end
+			-- Detect HTML error pages before trying to JSON-decode
+			if body:match("<html>") or body:match("<title>") or body:match("429") or body:match("502") or body:match("503") or body:match("504") then
+				local errorMsg = "API returned HTML (likely down)"
+				if body:match("429") then errorMsg = "Rate limited (429)" end
+				handleError(errorMsg, contexts)
+				return
+			end
 
-		if type(body) ~= "string" then
-			handleError("HTTP callback body was not a string", contexts)
-			return
-		end
-		local ok, decoded = pcall(Json.decode, body)
-		if not ok or type(decoded) ~= "table" then
-			handleError("JSON Decode failed", contexts)
-			return
-		end
+			local decodeOk, decoded = pcall(Json.decode, body)
+			if not decodeOk or type(decoded) ~= "table" then
+				handleError("JSON Decode failed", contexts)
+				return
+			end
 
-		handleBatchResponse(ids, contexts, decoded)
+			handleBatchResponse(ids, contexts, decoded)
+		end)
+
+		if not ok then
+			-- Unhandled error inside callback: unlock scanning so future batches aren't blocked
+			state.scanning = false
+			printc(255, 80, 80, 255, "[SteamHistory] Unexpected batch callback error: " .. tostring(err))
+		end
 	end)
 end
 

@@ -246,30 +246,26 @@ function Evidence.GetThreshold()
 	return pct * 2
 end
 
---- Try to mark player as cheater if threshold is exceeded
----@param steamID string Player's SteamID64
----@param evidence table? Evidence data
----@param state table? Player state
-local function tryMarkCheater(steamID, evidence, state)
-	if not evidence or evidence.MarkedAsCheater then
-		return
-	end
+--- When evidence score crosses the configured % threshold, raise suspicion
+--- and apply auto-priority (priority 10). Does NOT mark as a definitive CHEATER –
+--- that requires a hard detection (anti-aim, etc.) going through its own path.
+---@param steamID string
+---@param evidence table
+---@param state table?
+local function tryApplyAutoPriority(steamID, evidence, state)
+	if not evidence then return end
 
 	local threshold = Evidence.GetThreshold()
 
-	if evidence.TotalScore < threshold then
-		return
-	end
+	if evidence.TotalScore < threshold then return end
 
-	evidence.MarkedAsCheater = true
+	-- Already raised priority this session? Skip to avoid spam.
+	if evidence.AutoPriorityApplied then return end
+	evidence.AutoPriorityApplied = true
+
 	state = state or select(2, getOrCreateEvidence(steamID)) or {}
-	state.info = state.info or {}
-	state.info.IsCheater = true
 
-	-- Use name from state.info (already populated by PlayerState.AttachWrappedPlayer)
 	local playerName = (state.info and state.info.Name) or "Unknown"
-
-	-- Fallback: search FastPlayers if name not in state (don't exclude local player)
 	if playerName == "Unknown" then
 		local allPlayers = FastPlayers.GetAll(false)
 		for _, player in ipairs(allPlayers) do
@@ -277,63 +273,38 @@ local function tryMarkCheater(steamID, evidence, state)
 				local name = player.GetName and player:GetName()
 				if name and name ~= "" then
 					playerName = name
-					-- Update state for future use
-					if state.info then
-						state.info.Name = name
-					end
+					if state.info then state.info.Name = name end
 				end
 				break
 			end
 		end
 	end
 
-	local primaryReason = "Cheater"
-	local maxWeight = 0
-	for detectionName, reasonData in pairs(evidence.Reasons) do
-		if reasonData.Weight > maxWeight then
-			maxWeight = reasonData.Weight
-			local reasonMap = {
-				["anti_aim"] = "Anti-Aim",
-				["bhop"] = "Bhop",
-				["fake_lag"] = "Fake Lag",
-				["warp_dt"] = "Warp/Doubletap",
-				["Duck_Speed"] = "Duck Speed",
-				["silent_aimbot"] = "Silent Aimbot",
-				["manual_priority"] = "Manual Priority",
-			}
-			primaryReason = reasonMap[detectionName] or detectionName
-		end
-	end
-
-	Database.UpsertCheater(steamID, {
-		name = playerName,
-		reason = primaryReason,
-		proof = "Evidence System",
-		evidenceScore = evidence.TotalScore,
-		reasons = evidence.Reasons,
-		firstSeen = os.time(),
-		lastSeen = os.time(),
-	})
-
-	-- Immediate save after marking cheater (critical moment, prevents data loss)
-	Database.SaveDatabase()
-
-	-- Set priority 10 if AutoPriority enabled
+	-- Set priority 10 if AutoPriority is enabled
 	if G.Menu.Main and G.Menu.Main.AutoPriority then
 		Evidence.SetPriorityForSteamID(steamID, 10)
+		Logger.Info("Evidence", string.format(
+			"Auto-priority 10 applied to %s (Score: %.1f >= %.1f) – SUSPICIOUS",
+			playerName, evidence.TotalScore, threshold
+		))
+	else
+		Logger.Debug("Evidence", string.format(
+			"%s crossed suspicion threshold (%.1f >= %.1f) but AutoPriority is off",
+			playerName, evidence.TotalScore, threshold
+		))
 	end
 
-	if G.Menu.Advanced.debug then
-		print(
-			string.format(
-				"[Evidence] MARKED %s as cheater (Score: %.1f >= %.1f) - Saved to database",
-				playerName,
-				evidence.TotalScore,
-				threshold
-			)
-		)
+	-- Debug breakdown of contributing detections
+	if G.Menu.Advanced and G.Menu.Advanced.debug then
+		for detName, reasonData in pairs(evidence.Reasons) do
+			Logger.Debug("Evidence", string.format(
+				"  └ %s: weight=%.1f category=%s",
+				detName, reasonData.Weight, tostring(reasonData.Category)
+			))
+		end
 	end
 end
+
 
 --- Add evidence weight for a specific detection
 ---@param steamID string Player's SteamID64
@@ -390,7 +361,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	-- Recalculate total and check if player should be marked
 	recalcTotalScore(evidence)
 
-	tryMarkCheater(steamID, evidence, state)
+	tryApplyAutoPriority(steamID, evidence, state)
 
 	enqueueForDecay(steamID)
 end
@@ -442,7 +413,7 @@ local function processEvidenceState(steamID, state, deltaTime)
 	if evidence.Dirty or changed then
 		recalcTotalScore(evidence)
 		evidence.Dirty = false
-		tryMarkCheater(steamID, evidence, state)
+		tryApplyAutoPriority(steamID, evidence, state)
 	end
 
 	return hasReasons and next(evidence.Reasons) ~= nil
@@ -573,7 +544,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 		evidence.Dirty = true
 		recalcTotalScore(evidence)
 		enqueueForDecay(steamID)
-		tryMarkCheater(steamID, evidence, state)
+		tryApplyAutoPriority(steamID, evidence, state)
 
 		-- Debug: Log decay
 		Logger.Debug(

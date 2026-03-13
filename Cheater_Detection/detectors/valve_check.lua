@@ -1,45 +1,118 @@
 --[[ detectors/valve_check.lua
-     Valve Employee Detector (adapted from v2.2)
-     
-     Detection Layers (in order):
-       1. SteamID64 static list (instant, 260+ known employees)
-       2. Item badge (DefIndex 11) or item quality (Quality 8) inspection
-       3. Steam Group async membership check (paged, rate-limited via HttpQueue)
-     
-     Private Profile Safety:
-       - Layer 3 ONLY marks VALVE if the profile XML *explicitly* contains
-         the Group ID. Missing or empty data = no flag.
-       - Bots are always skipped in normal mode.
+     Valve Employee Detector
+
+     Detection Layers (run every ProcessPlayer tick):
+       1. SteamID64 static list (instant)
+       2. Item badge / Valve-quality item (throttled: every 30s)
+       3. Async Steam Group + ban profile check
+          - Retried every PROFILE_RECHECK_INTERVAL seconds if not yet confirmed
+          - A failed/empty HTTP response does NOT permanently set externalChecked;
+            the player will be re-queued on the next interval.
+
+     Console debug output (requires G.Menu.Advanced.debug = true):
+       Logs every check attempt, result, and skip reason.
 ]]
 
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
-local ValveData = require("Cheater_Detection.data.valve_data")
-local Constants = require("Cheater_Detection.core.constants")
-local EventBus = require("Cheater_Detection.core.event_bus")
-local Common = require("Cheater_Detection.Utils.Common")
-local Database = require("Cheater_Detection.Database.Database")
+local ValveData   = require("Cheater_Detection.data.valve_data")
+local Constants   = require("Cheater_Detection.core.constants")
+local EventBus    = require("Cheater_Detection.core.event_bus")
+local Common      = require("Cheater_Detection.Utils.Common")
+local Database    = require("Cheater_Detection.Database.Database")
+local Logger      = require("Cheater_Detection.Utils.Logger")
+local G           = require("Cheater_Detection.Utils.Globals")
 
 local ValveCheck = {}
 
--- Rate-limit item checks per player: once per 60s
+-- How often (seconds) to re-attempt the async profile check per player
+local PROFILE_RECHECK_INTERVAL = 120 -- Re-verify every 2 minutes
+
+-- Track last item check time per player: id -> CurTime
 local lastItemCheck = {}
 
--- Track which players had their group already checked this session
-local groupCheckDone = {}
+-- Track last async profile-check TIME per player: id -> CurTime
+-- (NOT a boolean; we re-check periodically even after success)
+local lastProfileCheck = {}
 
+-- ──────────────────────────────────────────────────────────────────────────────
 -- Layer 1: SteamID64 static lookup
+-- ──────────────────────────────────────────────────────────────────────────────
 local function isKnownValveID64(s64)
-	if not s64 then return false end
-	return ValveData.KnownSteamID64s[tostring(s64)] == true
+	return s64 ~= nil and ValveData.KnownSteamID64s[tostring(s64)] == true
 end
 
--- Layer 1b: Legacy Steam2 lookup (manual list fallback)
+-- Layer 1b: Legacy Steam2 fallback
 local function isKnownValveIDSteam2(s2)
-	if not s2 then return false end
-	return ValveData.ManualIDsSteam2[s2] == true
+	return s2 ~= nil and ValveData.ManualIDsSteam2[s2] == true
 end
 
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Apply VALVE flag (idempotent – only logs/saves on first apply)
+-- ──────────────────────────────────────────────────────────────────────────────
+local function applyValveFlag(playerState, reason)
+	local oldFlags = playerState.flags
+	playerState.flags = playerState.flags | Constants.Flags.VALVE
+
+	if playerState.flags ~= oldFlags then
+		printc(255, 215, 0, 255, string.format(
+			"[ValveCheck] VALVE EMPLOYEE detected! SteamID64=%s  Name=%s  Reason=%s",
+			playerState.id, playerState.wrap:GetName(), reason
+		))
+		Database.UpsertCheater(playerState.id, {
+			name   = playerState.wrap:GetName(),
+			reason = reason,
+			flags  = playerState.flags,
+			score  = playerState.score,
+		})
+		EventBus.Publish("OnPlayerStateChange", playerState, reason)
+	end
+end
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Apply VAC ban flag
+-- ──────────────────────────────────────────────────────────────────────────────
+local function applyVacFlag(playerState)
+	local oldFlags = playerState.flags
+	playerState.flags = playerState.flags | Constants.Flags.VAC_BANNED
+	if playerState.flags ~= oldFlags then
+		Logger.Info("ValveCheck", string.format(
+			"VAC ban confirmed – SteamID64=%s  Name=%s",
+			playerState.id, playerState.wrap:GetName()
+		))
+		Database.UpsertCheater(playerState.id, {
+			name   = playerState.wrap:GetName(),
+			reason = "VAC Ban on Record",
+			flags  = playerState.flags,
+			score  = playerState.score,
+		})
+		EventBus.Publish("OnPlayerStateChange", playerState, "VAC Ban on Record")
+	end
+end
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Apply Community/Trade ban flag
+-- ──────────────────────────────────────────────────────────────────────────────
+local function applyCommBanFlag(playerState)
+	local oldFlags = playerState.flags
+	playerState.flags = playerState.flags | Constants.Flags.COMM_BANNED
+	if playerState.flags ~= oldFlags then
+		Logger.Info("ValveCheck", string.format(
+			"Community/Trade ban confirmed – SteamID64=%s  Name=%s",
+			playerState.id, playerState.wrap:GetName()
+		))
+		Database.UpsertCheater(playerState.id, {
+			name   = playerState.wrap:GetName(),
+			reason = "Community/Trade Ban",
+			flags  = playerState.flags,
+			score  = playerState.score,
+		})
+		EventBus.Publish("OnPlayerStateChange", playerState, "Community/Trade Ban")
+	end
+end
+
+-- ──────────────────────────────────────────────────────────────────────────────
 -- Layer 2: Item + Badge check (pcall-safe)
+-- ──────────────────────────────────────────────────────────────────────────────
 local function checkPlayerItems(ply)
 	for slot = 0, 18 do
 		local okEnt, ent = pcall(ply.GetEntityForLoadoutSlot, ply, slot)
@@ -58,40 +131,21 @@ local function checkPlayerItems(ply)
 	return false, ""
 end
 
--- Apply the VALVE flag and persist
-local function applyValveFlag(playerState, reason)
-	local oldFlags = playerState.flags
-	playerState.flags = playerState.flags | Constants.Flags.VALVE
-
-	if playerState.flags ~= oldFlags then
-		-- Print to console exactly which SteamID matched and why
-		printc(255, 215, 0, 255, string.format(
-			"[ValveCheck] VALVE EMPLOYEE detected! SteamID64=%s Name=%s Reason=%s",
-			playerState.id,
-			playerState.wrap:GetName(),
-			reason
-		))
-		Database.UpsertCheater(playerState.id, {
-			name  = playerState.wrap:GetName(),
-			reason = reason,
-			flags  = playerState.flags,
-			score  = playerState.score,
-		})
-		EventBus.Publish("OnPlayerStateChange", playerState, reason)
-	end
-end
-
--- Main processor called every frame per player (rate-limited internally)
+-- ──────────────────────────────────────────────────────────────────────────────
+-- Main processor
+-- ──────────────────────────────────────────────────────────────────────────────
 function ValveCheck.ProcessPlayer(playerState)
 	assert(playerState, "ValveCheck.ProcessPlayer: playerState missing")
 
-	local id = playerState.id
+	local id  = playerState.id
 	local now = globals.CurTime()
+	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 
 	-- ── Layer 1: SteamID64 instant check ──────────────────────────────────────
 	if isKnownValveID64(id) then
+		if isDebug then Logger.Debug("ValveCheck", id .. " matched static SteamID64 list") end
 		applyValveFlag(playerState, "Known Valve SteamID")
-		return -- No need to do further checks
+		return
 	end
 
 	-- ── Layer 1b: Legacy Steam2 fallback ──────────────────────────────────────
@@ -99,73 +153,73 @@ function ValveCheck.ProcessPlayer(playerState)
 	if ply then
 		local s2 = Common.GetSteamID(ply)
 		if isKnownValveIDSteam2(s2) then
+			if isDebug then Logger.Debug("ValveCheck", id .. " matched legacy Steam2 list (" .. tostring(s2) .. ")") end
 			applyValveFlag(playerState, "Known Valve SteamID (Legacy)")
 			return
 		end
 	end
 
-	-- ── Layer 2: Item Check (throttled to once per 60s) ───────────────────────
-	if not lastItemCheck[id] or (now - lastItemCheck[id] > 60) then
+	-- ── Layer 2: Item / Badge check (every 30s) ─────────────────────────────
+	local lastItem = lastItemCheck[id]
+	if not lastItem or (now - lastItem > 30) then
 		lastItemCheck[id] = now
 		if ply then
+			if isDebug then Logger.Debug("ValveCheck", id .. " – running item/badge check") end
 			local found, reason = checkPlayerItems(ply)
 			if found then
+				if isDebug then Logger.Debug("ValveCheck", id .. " – item/badge HIT: " .. reason) end
 				applyValveFlag(playerState, reason)
 				return
+			else
+				if isDebug then Logger.Debug("ValveCheck", id .. " – item/badge: no match") end
 			end
 		end
 	end
 
-	-- ── Layer 3: Async Steam Group check (once per session per player) ────────
-	if not groupCheckDone[id] and not playerState.externalChecked then
-		groupCheckDone[id] = true
+	-- ── Layer 3: Async profile check (VAC / Comm ban / Valve Group) ──────────
+	-- Retry every PROFILE_RECHECK_INTERVAL seconds regardless of previous outcome.
+	-- This means failed HTTP responses don't permanently skip a player.
+	local lastProfile = lastProfileCheck[id]
+	if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
+		lastProfileCheck[id] = now
+		if isDebug then Logger.Debug("ValveCheck", id .. " – queuing async profile check") end
 
 		SteamLookup.CheckProfileAsync(id, function(results)
-			-- Only flag VALVE if the XML *contains* the GroupID
-			-- This naturally handles private profiles (they return no group data)
+			if not results then
+				if isDebug then Logger.Debug("ValveCheck", id .. " – async profile check returned nil (HTTP failed)") end
+				-- Reset timer so it retries sooner (10s) instead of waiting 2 min
+				lastProfileCheck[id] = now - (PROFILE_RECHECK_INTERVAL - 10)
+				return
+			end
+
+			if isDebug then
+				Logger.Debug("ValveCheck", string.format(
+					"%s – profile check result: isValve=%s vacBanned=%s tradeBanned=%s",
+					id, tostring(results.isValve), tostring(results.vacBanned), tostring(results.tradeBanned)
+				))
+			end
+
 			if results.isValve then
 				applyValveFlag(playerState, "Valve Steam Group Member")
 			end
-
-			-- Also pick up ban flags from same call
 			if results.vacBanned then
-				local oldFlags = playerState.flags
-				playerState.flags = playerState.flags | Constants.Flags.VAC_BANNED
-				if playerState.flags ~= oldFlags then
-					Database.UpsertCheater(id, {
-						name  = playerState.wrap:GetName(),
-						reason = "VAC Ban on Record",
-						flags  = playerState.flags,
-						score  = playerState.score,
-					})
-					EventBus.Publish("OnPlayerStateChange", playerState, "VAC Ban on Record")
-				end
+				applyVacFlag(playerState)
 			end
-
 			if results.tradeBanned then
-				local oldFlags = playerState.flags
-				playerState.flags = playerState.flags | Constants.Flags.COMM_BANNED
-				if playerState.flags ~= oldFlags then
-					Database.UpsertCheater(id, {
-						name  = playerState.wrap:GetName(),
-						reason = "Community/Trade Ban",
-						flags  = playerState.flags,
-						score  = playerState.score,
-					})
-					EventBus.Publish("OnPlayerStateChange", playerState, "Community/Trade Ban")
-				end
+				applyCommBanFlag(playerState)
 			end
 
+			-- Mark CHECKED flag only when we actually got a valid response
 			playerState.externalChecked = true
 			playerState.flags = playerState.flags | Constants.Flags.CHECKED
 		end)
 	end
 end
 
--- Reset session state on new map
+-- Reset per-player timers on disconnect so rejoining players are re-checked
 EventBus.Subscribe("OnPlayerDisconnect", function(id)
-	lastItemCheck[id] = nil
-	groupCheckDone[id] = nil
+	lastItemCheck[id]   = nil
+	lastProfileCheck[id] = nil
 end)
 
 return ValveCheck
