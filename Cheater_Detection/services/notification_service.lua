@@ -16,8 +16,9 @@ local Common = require("Cheater_Detection.Utils.Common")
 
 local NotificationService = {}
 
--- Per-player cooldown timers (suspicion update notifications only)
-local lastNotifyTime = {}
+-- Global and per-player cooldown timers
+local lastNotifyTimes = {}   -- Array of timestamps for global frequency limiting
+local lastPlayerNotify = {}  -- PlayerID -> last timestamp
 
 -- lnxLib toast helper (safe fallback if lnxLib not loaded)
 local lnxNotifs = nil
@@ -85,26 +86,39 @@ local function OnStateChange(playerState, reason)
 	local score = playerState.score
 	local now = globals.CurTime()
 
+	-- Frequency Limit: Max 10 per second globally to prevent spam
+	lastNotifyTimes = lastNotifyTimes or {}
+	-- Clean up old entries in frequency buffer
+	for i = #lastNotifyTimes, 1, -1 do
+		if now - lastNotifyTimes[i] > 1 then
+			table.remove(lastNotifyTimes, i)
+		end
+	end
+
+	-- If we already sent 10 in the last second, drop this one
+	if #lastNotifyTimes >= 10 then return end
+
 	local isCheater = (flags & Constants.Flags.CHEATER) ~= 0
 	local isValve = (flags & Constants.Flags.VALVE) ~= 0
 	local isVacBanned = (flags & Constants.Flags.VAC_BANNED) ~= 0
 	local isCommBanned = (flags & Constants.Flags.COMM_BANNED) ~= 0
 	local isSus = (flags & Constants.Flags.SUSPICIOUS) ~= 0
 
-	-- Hard detections skip cooldown; probabilistic ones respect it
+	-- Hard detections (Cheater/Valve/Ban) ignore the per-player score threshold but still respect global freq limit
 	local isHard = isCheater or isValve or isVacBanned or isCommBanned
 
 	if not isHard then
 		local minScore = type(cfg.SuspicionThreshold) == "number" and cfg.SuspicionThreshold or 30
 		if score < minScore then return end
 
-		local cooldown = type(cfg.SuspicionCooldown) == "number" and cfg.SuspicionCooldown or 10
-		if lastNotifyTime[id] and (now - lastNotifyTime[id] < cooldown) then
+		-- Per-player cooldown to avoid spamming the SAME player too fast
+		if lastPlayerNotify[id] and (now - lastPlayerNotify[id] < 1) then
 			return
 		end
 	end
 
-	lastNotifyTime[id] = now
+	table.insert(lastNotifyTimes, now)
+	lastPlayerNotify[id] = now
 
 	-- Build messages
 	local colorMsg = ""
@@ -146,7 +160,7 @@ end
 
 -- Cleanup cooldown on disconnect
 EventBus.Subscribe("OnPlayerDisconnect", function(id)
-	lastNotifyTime[id] = nil
+	lastPlayerNotify[id] = nil
 end)
 
 return NotificationService

@@ -93,79 +93,46 @@ function WarpDT.ProcessPlayer(playerState)
 
     local curTick = globals.TickCount()
     
-    -- STATE MACHINE: Burst -> Recharge
+    -- STATE MACHINE: Simple Burst Detect
     if burstAmount > 0 then
-        -- Record the burst event and its size
-        data.lastBurstTick = curTick
-        data.lastBurstAmount = burstAmount
-        data.isRecharging = true
-    end
-
-    -- If we are in the "Recharging" phase, look for lack of simulation time progress
-    if data.isRecharging then
-        local timeSinceBurst = curTick - (data.lastBurstTick or 0)
-        
-        -- Warp usually recharges for the same amount of ticks it used
-        -- We give it a window of time to show "0" progress
-        local lastDelta = deltaTicks[#deltaTicks] or 1
-        if lastDelta == 0 then
-            data.rechargeTicks = (data.rechargeTicks or 0) + 1
-        end
-
-        -- If they have recharged enough OR too much time passed
-        if timeSinceBurst > 66 then -- 1 second timeout
-            data.isRecharging = false
-            data.rechargeTicks = 0
-        elseif data.rechargeTicks and data.rechargeTicks >= 4 then
-            -- We detected a Burst AND a period of 0-simulation-progress (recharge)
-            -- This is a high-confidence Warp/DT signature.
+        -- Warp is more "one-time" but we still want some consistency or high score
+        -- We detect a Burst and then wait for a cooldown (24 ticks) before allowing another detection for this player
+        if not data.lastWarpTick or (curTick - data.lastWarpTick) > 24 then
+            data.lastWarpTick = curTick
+            table.insert(data.events, curTick)
             
-            -- Record this specific signature event
-            local lastEvent = data.events[#data.events]
-            if not lastEvent or (curTick - lastEvent) > 20 then
-                table.insert(data.events, curTick)
+            local reason = "Warp/DT (Packet Burst)"
+            
+            -- Scale increment based on events (Leeway: 5 per single, 15 for repeat)
+            local increment = (#data.events >= 2) and 15 or 5
+            playerState.score = math.min(99, playerState.score + increment)
+
+            if playerState.score >= Constants.Threshold.SUSPICIOUS then
+                playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+            end
+
+            if playerState.score >= Constants.Threshold.HIGH_RISK then
+                playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
+            end
+
+            Database.UpsertCheater(id, {
+                name = playerState.wrap:GetName(),
+                reason = reason,
+                flags = playerState.flags,
+                score = playerState.score
+            })
+
+            EventBus.Publish("OnPlayerStateChange", playerState, reason)
+            
+            -- Clean up events older than 660 ticks (approx 10 seconds)
+            while #data.events > 0 and (curTick - data.events[1]) > 660 do
+                table.remove(data.events, 1)
             end
             
-            -- Reset state so we don't spam 1 signature per tick
-            data.isRecharging = false
-            data.rechargeTicks = 0
-        end
-    end
-
-    -- Clean up events older than 660 ticks (approx 10 seconds for Warp)
-    while #data.events > 0 and (curTick - data.events[1]) > 660 do
-        table.remove(data.events, 1)
-    end
-
-    -- Warp is more "one-time" but we still want some consistency or high score
-    -- 2 sequences is enough for definitive suspicion, 1 is enough for minor scoring
-    if #data.events >= 1 then
-        local reason = "Warp/DT (Burst + Recharge)"
-        
-        -- Scale increment based on events (Much more leeway: 5 per single, 15 for repeat)
-        local increment = (#data.events >= 2) and 15 or 5
-        playerState.score = math.min(99, playerState.score + increment)
-
-        if playerState.score >= Constants.Threshold.SUSPICIOUS then
-            playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-        end
-
-        if playerState.score >= Constants.Threshold.HIGH_RISK then
-            playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-        end
-
-        Database.UpsertCheater(id, {
-            name = playerState.wrap:GetName(),
-            reason = reason,
-            flags = playerState.flags,
-            score = playerState.score
-        })
-
-        EventBus.Publish("OnPlayerStateChange", playerState, reason)
-        
-        -- If we hit high risk, clear one event so we don't spam
-        if #data.events >= 2 then
-            table.remove(data.events, 1)
+            -- If we have many events, clear the oldest one to prevent compounding spam
+            if #data.events >= 2 then
+                table.remove(data.events, 1)
+            end
         end
     end
 end

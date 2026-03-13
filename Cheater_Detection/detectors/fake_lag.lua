@@ -62,8 +62,11 @@ function FakeLag.ProcessPlayer(playerState)
     local curTick = globals.TickCount()
 
     -- Only record events that meet the threshold
-    -- Jitter is often 2-3 ticks. Real exploits use much more (14+).
     if deltaTicks >= MAX_TICK_DELTA then
+        -- 22 tick cooldown between adding weight for FakeLag per suspect
+        local lastFlag = data.lastFlagTick or 0
+        if (curTick - lastFlag) < 22 then return end
+
         table.insert(data.events, { tick = curTick, amount = deltaTicks })
         
         -- Clean up events older than 330 ticks (approx 5 seconds)
@@ -71,21 +74,23 @@ function FakeLag.ProcessPlayer(playerState)
             table.remove(data.events, 1)
         end
 
-        -- Trigger suspicion ONLY if they choke in a repeating, rhythmic fashion
-        -- Require at least 3 events of similar duration (consistent rhythm)
+        -- Trigger suspicion ONLY if they choke in a rhythmic, repeating fashion
+        -- (choking same amount of ticks for exact amount and repeating)
         if #data.events >= 3 then
             local consistent = true
             local firstAmount = data.events[1].amount
             for i = 2, #data.events do
                 local diff = math.abs(data.events[i].amount - firstAmount)
-                if diff > 3 then -- Allow small variance in the pattern
+                if diff > 1 then -- Stricter rhythm matching
                     consistent = false
                     break
                 end
             end
 
             if consistent then
-                playerState.score = math.min(99, playerState.score + 15)
+                data.lastFlagTick = curTick
+                -- Lower score increment for FakeLag as requested
+                playerState.score = math.min(99, playerState.score + 5)
                 
                 local reason = string.format("Fake Lag (Rhythmic choke: %d ticks)", deltaTicks)
                 
