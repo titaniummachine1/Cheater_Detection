@@ -8,6 +8,7 @@ local HttpQueue = {}
 
 local queue = {}
 local isProcessing = false
+local lastRequestTime = 0
 local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
 
 function HttpQueue.Enqueue(url, callback)
