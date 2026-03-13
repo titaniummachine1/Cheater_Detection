@@ -38,11 +38,10 @@ callbacks.Register("SendStringCmd", "CD_Commands", onStringCmd)
 
 local function setupSteamHistory()
 	Commands.Register("steamhistory", function(args)
-		local shell = G.Menu and G.Menu.Misc and G.Menu.Misc.SteamHistory
-		if not shell then
-			Logger.Error("Commands", "SteamHistory menu state missing")
-			return
-		end
+		G.Menu = G.Menu or {}
+		G.Menu.Misc = G.Menu.Misc or {}
+		G.Menu.Misc.SteamHistory = G.Menu.Misc.SteamHistory or {}
+		local shell = G.Menu.Misc.SteamHistory
 
 		local key = args and args[1] or nil
 		if not key or key == "" then

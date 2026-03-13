@@ -95,13 +95,20 @@ function Common.IsFriend(entity, includeParty)
 	return false
 end
 
+function Common.GetSteamID(Player)
+	assert(Player, "Player is nil")
+	local playerIndex = Player:GetIndex()
+	local playerInfo = client.GetPlayerInfo(playerIndex)
+	return playerInfo and playerInfo.SteamID or "[U:1:0]"
+end
+
 function Common.GetSteamID64(Player)
 	assert(Player, "Player is nil")
 
 	local currentTick = globals.TickCount()
 	local playerIndex = Player:GetIndex()
 
-	-- Reset cache on new tick (simple conditional is better than "branchless")
+	-- Reset cache on new tick
 	if lastTick ~= currentTick then
 		cachedSteamIDs = {}
 		lastTick = currentTick

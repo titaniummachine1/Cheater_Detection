@@ -65,23 +65,33 @@ local function SendAlert(outputConfig, messageConfig)
 
 	local sentToExternalChannel = false
 	local allowParty = messageConfig.allowParty
-	if allowParty == nil then
-		allowParty = true
-	end
+	if allowParty == nil then allowParty = true end
 
-	if allowParty and outputConfig.PartyChat then
+	if allowParty and outputConfig.Party then
 		SendPartyChatMessage(messageColored)
 		sentToExternalChannel = true
 	end
 
-	if outputConfig.ClientChat and not sentToExternalChannel then
+	if outputConfig.PublicChat then
+		client.Command(string.format('say "%s"', escapeForCommand(messagePlain)), true)
+		sentToExternalChannel = true
+	end
+
+	if outputConfig.LocalChat and not sentToExternalChannel then
 		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send client chat message")
 		end
-	elseif not outputConfig.PublicChat and not outputConfig.ClientChat then
+	elseif not outputConfig.PublicChat and not outputConfig.LocalChat then
 		-- Ensure local feedback even if only console output was requested
 		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send fallback client chat message")
+		end
+	end
+
+	if outputConfig.Toast then
+		local ok, lnx = pcall(require, "lnxLib")
+		if ok and lnx and lnx.UI and lnx.UI.Notifications then
+			pcall(lnx.UI.Notifications.Add, messagePlain)
 		end
 	end
 end

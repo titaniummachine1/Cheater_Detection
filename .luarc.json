@@ -5,6 +5,10 @@
         "c:/gitProjects/Lmaobox-Annotations/library"
     ],
     "Lua.workspace.checkThirdParty": "Apply",
+    "Lua.workspace.ignoreDir": [
+        "**/.git",
+        "c:/Users/Terminatort8000/Downloads"
+    ],
     "Lua.diagnostics.globals": [
         "client",
         "entities",
@@ -24,6 +28,7 @@
         "models",
         "render",
         "warp",
+        "http",
         "Vector3",
         "IN_ATTACK",
         "IN_JUMP",
@@ -36,9 +41,11 @@
         "TEAM_BLU",
         "TEAM_RED",
         "FL_ONGROUND",
+        "FL_DUCKING",
         "PrintC",
         "printc",
-        "GetScriptName"
+        "GetScriptName",
+        "draw",
+        "FONTFLAG_OUTLINE"
     ]
 }
-

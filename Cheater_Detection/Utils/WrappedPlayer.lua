@@ -6,6 +6,9 @@ local Common = require("Cheater_Detection.Utils.Common")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local G = require("Cheater_Detection.Utils.Globals")
 
+-- Safety: Polyfill Vector3 if missing (Lmaobox usually provides it globally)
+local _Vector3 = Vector3 or function(x, y, z) return {x=x, y=y, z=z} end
+
 ---@class WrappedPlayer
 ---@field _rawEntity Entity Raw entity object
 local WrappedPlayer = {}
@@ -165,15 +168,19 @@ function WrappedPlayer:GetSimulationTime()
 end
 
 function WrappedPlayer:GetHitboxPos(hitboxIndex)
-	local hitboxes = self._rawEntity:GetHitboxes()
-	if not hitboxes then
+	-- SetupBones is the preferred API (GetHitboxes is deprecated)
+	local bones = self._rawEntity:SetupBones()
+	if not bones then
 		return nil
 	end
-	local hb = hitboxes[hitboxIndex]
-	if not hb then
+	-- bones is a table of matrices. Each matrix has [1..3] rows of [1..4] cols.
+	-- The translation (position) is stored in column 4 of each row: [row][4].
+	-- We read the 4th column of each row to get the world position of this bone.
+	local matrix = bones[hitboxIndex]
+	if not matrix then
 		return nil
 	end
-	return (hb[1] + hb[2]) * 0.5
+	return _Vector3(matrix[1][4], matrix[2][4], matrix[3][4])
 end
 
 function WrappedPlayer:GetPropInt(...)

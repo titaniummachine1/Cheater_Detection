@@ -24,6 +24,19 @@ local Default_Config = {
 		SilentAimbot = true, -- Silent aimbot (extrapolation) detection
 	},
 
+	Notifications = {
+		Enable = true,
+		SuspicionCooldown = 10, -- Seconds between per-player suspicion update notifications
+		Channels = {
+			LocalChat  = true,  -- Only you see it (client.ChatPrintf)
+			PublicChat = false, -- Entire server sees it (say)
+			Party      = false, -- Your party only (say_party)
+			Toast      = true,  -- lnxLib corner pop-up
+			Console    = true,  -- Console print
+		},
+		SuspicionThreshold = 30, -- Only notify above this %
+	},
+
 	Misc = {
 		Autovote = true,
 		AutovoteAutoCast = true,

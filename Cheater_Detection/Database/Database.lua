@@ -8,6 +8,7 @@
 local Common = require("Cheater_Detection.Utils.Common")
 -- [[ Imported by: Fetcher.lua (indirectly) ]]
 local G = require("Cheater_Detection.Utils.Globals")
+local Constants = require("Cheater_Detection.core.constants")
 -- [[ Imported by: Fetcher.lua, Database.lua ]]
 local Json = Common.Json
 -- [[ Imported by: Database.lua ]]
@@ -214,8 +215,17 @@ function Database.SaveDatabase()
 	end
 
 	local encodedData
-	if Json and Json.encode then -- Add nil check for Json.encode
-		encodedData = Json.encode(G.DataBase)
+	if Json and Json.encode then
+		local rawResult = Json.encode(G.DataBase)
+		-- Json.encode returns string on success.
+		-- Some implementations return a boolean (true) on in-place mutation.
+		-- We only accept a real string.
+		if type(rawResult) == "string" then
+			encodedData = rawResult
+		else
+			Log(LogLevel.ERROR, "[DB] Json.encode returned non-string result, aborting save")
+			return
+		end
 	else
 		Log(LogLevel.ERROR, "[DB] Json.encode function is not available!")
 		return -- Cannot proceed without encoder
@@ -237,9 +247,6 @@ function Database.SaveDatabase()
 
 	file:write(encodedData)
 	file:close()
-
-	--@diagnostic disable-next-line: cast-local-type -- Disable incorrect linter warning
-	encodedData = nil -- Clear reference for GC
 
 	Database.State.isDirty = false
 	Database.State.lastSave = os.time()
@@ -479,9 +486,17 @@ function Database.UpsertCheater(steamID, data)
 	end
 
 	-- Minimal format like fetched databases: just Name and Reason
+	local persistentFlags = 0
+	if data.flags then
+		persistentFlags = data.flags & Constants.PERSISTENT_MASK
+	end
+
 	G.DataBase[steamID] = {
 		Name = data.name or "Unknown",
-		Reason = data.reason or "Cheater", -- Use provided reason, fallback to "Cheater" for imported data
+		Reason = data.reason or "Cheater", -- Use provided reason
+		Flags = persistentFlags,
+		Score = data.score or 0,
+		Timestamp = os.time(),
 	}
 
 	-- Mark as dirty for save
