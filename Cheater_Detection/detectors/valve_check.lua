@@ -14,13 +14,15 @@
 ]]
 
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
-local ValveData   = require("Cheater_Detection.data.valve_data")
-local Constants   = require("Cheater_Detection.core.constants")
-local EventBus    = require("Cheater_Detection.core.event_bus")
-local Common      = require("Cheater_Detection.Utils.Common")
-local Database    = require("Cheater_Detection.Database.Database")
-local Logger      = require("Cheater_Detection.Utils.Logger")
-local G           = require("Cheater_Detection.Utils.Globals")
+local ValveData     = require("Cheater_Detection.data.valve_data")
+local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
+local Constants     = require("Cheater_Detection.core.constants")
+local EventBus      = require("Cheater_Detection.core.event_bus")
+local Common        = require("Cheater_Detection.Utils.Common")
+local Database      = require("Cheater_Detection.Database.Database")
+local Logger        = require("Cheater_Detection.Utils.Logger")
+local G             = require("Cheater_Detection.Utils.Globals")
+local Commands      = require("Cheater_Detection.Utils.Commands")
 
 local ValveCheck = {}
 
@@ -34,11 +36,14 @@ local lastItemCheck = {}
 -- (NOT a boolean; we re-check periodically even after success)
 local lastProfileCheck = {}
 
--- ──────────────────────────────────────────────────────────────────────────────
--- Layer 1: SteamID64 static lookup
--- ──────────────────────────────────────────────────────────────────────────────
+-- Layer 1: Check both static tables (valve_data AND ValveEmployees)
 local function isKnownValveID64(s64)
-	return s64 ~= nil and ValveData.KnownSteamID64s[tostring(s64)] == true
+	if not s64 then return false end
+	local key = tostring(s64)
+	if ValveData.KnownSteamID64s[key] == true then return true end
+	if ValveEmployees.IsEmployee and ValveEmployees.IsEmployee(key) then return true end
+	if type(ValveEmployees.List) == "table" and ValveEmployees.List[key] then return true end
+	return false
 end
 
 -- Layer 1b: Legacy Steam2 fallback
@@ -142,8 +147,15 @@ function ValveCheck.ProcessPlayer(playerState)
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 
 	-- ── Layer 1: SteamID64 instant check ──────────────────────────────────────
+	-- Always log in debug so user can verify their ID matches what the engine sees
+	if isDebug then
+		Logger.Debug("ValveCheck", string.format(
+			"Processing ID=%s Name=%s  inKnownList=%s",
+			tostring(id), playerState.wrap:GetName(), tostring(isKnownValveID64(id))
+		))
+	end
+
 	if isKnownValveID64(id) then
-		if isDebug then Logger.Debug("ValveCheck", id .. " matched static SteamID64 list") end
 		applyValveFlag(playerState, "Known Valve SteamID")
 		return
 	end
