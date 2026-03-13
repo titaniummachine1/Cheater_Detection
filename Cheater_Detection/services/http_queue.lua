@@ -9,44 +9,43 @@ local HttpQueue = {}
 local queue = {}
 local isProcessing = false
 local lastRequestTime = 0
-local REQUEST_DELAY = 1.0 -- Seconds between requests
+local REQUEST_DELAY = 0.1 -- 100ms between requests (Fast but safe)
 
 function HttpQueue.Enqueue(url, callback)
 	table.insert(queue, { url = url, callback = callback })
-	if not isProcessing then
-		HttpQueue.Process()
-	end
 end
 
 function HttpQueue.Process()
-	if #queue == 0 then
-		isProcessing = false
+	if #queue == 0 or isProcessing then
 		return
 	end
 
-	isProcessing = true
 	local now = globals.RealTime()
-	local diff = now - lastRequestTime
-
-	if diff < REQUEST_DELAY then
-		-- Wait and try again
+	if (now - lastRequestTime) < REQUEST_DELAY then
 		return
 	end
 
 	local item = table.remove(queue, 1)
+	isProcessing = true
 	lastRequestTime = now
 
 	http.GetAsync(item.url, function(data)
-		pcall(item.callback, data)
-		-- Process next after some time
+		isProcessing = false -- Allow next request
+		local status, err = pcall(item.callback, data)
+		if not status then
+			print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(err))
+		end
 	end)
 end
 
--- Hook into scheduler tick
+-- Tick function to be called from the scheduler
+function HttpQueue.Tick()
+	HttpQueue.Process()
+end
+
+-- Legacy support for OneSecondTick if still used
 EventBus.Subscribe("OneSecondTick", function()
-	if #queue > 0 then
-		HttpQueue.Process()
-	end
+	HttpQueue.Tick()
 end)
 
 return HttpQueue

@@ -29,7 +29,10 @@ function Scheduler.Tick()
 		SteamLookup.TickGroupFetch()
 	end
 
-	-- Every frame (Fetcher handles its own internal rate limiting/states)
+	-- Every frame (Fetcher/HttpQueue handle their own internal states)
+	local HttpQueue = require("Cheater_Detection.services.http_queue")
+	HttpQueue.Tick()
+
 	local Fetcher = require("Cheater_Detection.Database.Fetcher")
 	Fetcher.Tick()
 end
