@@ -72,57 +72,75 @@ function WarpDT.ProcessPlayer(playerState)
 
     if #simTicks < HISTORY_SIZE then return end
 
+    -- Calculate deltas
     local deltaTicks = {}
     for i = 2, #simTicks do
         deltaTicks[#deltaTicks + 1] = simTicks[i] - simTicks[i - 1]
     end
 
-    -- Check for a warp signature in THIS buffer
-    local hasWarpSignature = false
+    -- Look for a "Burst" event (large simulation time shift)
+    local burstAmount = 0
     for _, d in ipairs(deltaTicks) do
-        -- Skip huge deltas (respawn, teleport)
-        -- Normal jitter is 2-4. Exploits are 8+.
-        if d > 7 and d < 64 then
-            hasWarpSignature = true
+        if d > 12 and d < 64 then -- 12+ ticks in one frame is a significant burst
+            burstAmount = d
             break
         end
     end
-    
-    if not hasWarpSignature then
-        -- Also check variance for "mathematical" warp
-        local sum = 0
-        for _, d in ipairs(deltaTicks) do sum = sum + d end
-        local mean = sum / #deltaTicks
-        local sumSq = 0
-        for _, d in ipairs(deltaTicks) do
-            local diff = d - mean
-            sumSq = sumSq + diff * diff
-        end
-        local stdDev = math.sqrt(sumSq / (#deltaTicks - 1))
-        -- Standard deviation of 2.0+ is very high for normal gameplay
-        if stdDev > 2.0 then hasWarpSignature = true end
-    end
 
     local curTick = globals.TickCount()
-    if hasWarpSignature then
-        -- Only record an event at most once every 33 ticks (0.5s)
-        local lastEvent = data.events[#data.events]
-        if not lastEvent or (curTick - lastEvent) > 33 then
-            table.insert(data.events, curTick)
+    
+    -- STATE MACHINE: Burst -> Recharge
+    if burstAmount > 0 then
+        -- Record the burst event and its size
+        data.lastBurstTick = curTick
+        data.lastBurstAmount = burstAmount
+        data.isRecharging = true
+    end
+
+    -- If we are in the "Recharging" phase, look for lack of simulation time progress
+    if data.isRecharging then
+        local timeSinceBurst = curTick - (data.lastBurstTick or 0)
+        
+        -- Warp usually recharges for the same amount of ticks it used
+        -- We give it a window of time to show "0" progress
+        local lastDelta = deltaTicks[#deltaTicks] or 1
+        if lastDelta == 0 then
+            data.rechargeTicks = (data.rechargeTicks or 0) + 1
+        end
+
+        -- If they have recharged enough OR too much time passed
+        if timeSinceBurst > 66 then -- 1 second timeout
+            data.isRecharging = false
+            data.rechargeTicks = 0
+        elseif data.rechargeTicks and data.rechargeTicks >= 4 then
+            -- We detected a Burst AND a period of 0-simulation-progress (recharge)
+            -- This is a high-confidence Warp/DT signature.
+            
+            -- Record this specific signature event
+            local lastEvent = data.events[#data.events]
+            if not lastEvent or (curTick - lastEvent) > 20 then
+                table.insert(data.events, curTick)
+            end
+            
+            -- Reset state so we don't spam 1 signature per tick
+            data.isRecharging = false
+            data.rechargeTicks = 0
         end
     end
 
-    -- Clean up events older than 330 ticks (approx 5 seconds)
-    while #data.events > 0 and (curTick - data.events[1]) > 330 do
+    -- Clean up events older than 660 ticks (approx 10 seconds for Warp)
+    while #data.events > 0 and (curTick - data.events[1]) > 660 do
         table.remove(data.events, 1)
     end
 
-    -- Trigger ONLY if they warp consistently (4+ clusters in 5 seconds)
-    if #data.events >= 4 then
-        local reason = "Warp/DT (Consistent rhythm)"
+    -- Warp is more "one-time" but we still want some consistency or high score
+    -- 2 sequences is enough for definitive suspicion, 1 is enough for minor scoring
+    if #data.events >= 1 then
+        local reason = "Warp/DT (Burst + Recharge)"
         
-        -- Progressive suspicion
-        playerState.score = math.min(99, playerState.score + 12)
+        -- Scale increment based on events
+        local increment = (#data.events >= 2) and 40 or 20
+        playerState.score = math.min(99, playerState.score + increment)
 
         if playerState.score >= Constants.Threshold.SUSPICIOUS then
             playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
@@ -141,8 +159,10 @@ function WarpDT.ProcessPlayer(playerState)
 
         EventBus.Publish("OnPlayerStateChange", playerState, reason)
         
-        -- Clear some events to prevent instant re-triggering on every tick
-        table.remove(data.events, 1) 
+        -- If we hit high risk, clear one event so we don't spam
+        if #data.events >= 2 then
+            table.remove(data.events, 1)
+        end
     end
 end
 
