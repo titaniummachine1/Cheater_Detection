@@ -452,6 +452,8 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	end
 end
 
+local HttpQueue = require("Cheater_Detection.services.http_queue")
+
 local function requestBatch()
 	local cfg = getConfig()
 	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
@@ -468,65 +470,29 @@ local function requestBatch()
 
 	local url = string.format(API_TEMPLATE, cfg.ApiKey, table.concat(ids, ","))
 
-	-- Track request start time for timeout detection
-	local requestStart = globals.RealTime()
-	local success, body = pcall(http.Get, url)
-	local requestDuration = globals.RealTime() - requestStart
-
-	if not success or type(body) ~= "string" or body == "" then
-		local errorMsg = "HTTP Request failed"
-		if requestDuration > 10 then
-			errorMsg = string.format("HTTP Request timed out (%.1fs)", requestDuration)
+	-- Use HttpQueue to avoid blocking during network I/O
+	HttpQueue.Enqueue(url, function(body)
+		if not body or body == "" then
+			handleError("HTTP Request failed (empty response)", contexts)
+			return
 		end
-		handleError(errorMsg, contexts)
-		return
-	end
 
-	-- Warn about slow responses (potential rate limiting)
-	if requestDuration > 5 then
-		printInfo({ 255, 200, 100, 255 }, string.format("[SteamHistory] Slow response (%.1fs)", requestDuration))
-	end
-
-	-- Check for HTML/Error responses
-	if
-		body:match("<html>")
-		or body:match("<title>")
-		or body:match("502 Bad Gateway")
-		or body:match("503 Service Unavailable")
-		or body:match("504 Gateway Timeout")
-		or body:match("429 Too Many Requests")
-		or body:match("429 Rate Limited")
-		or body:match("Rate limit exceeded")
-		or body:match("error code:")
-		or body:match("Cloudflare")
-		or body:match("DDoS protection")
-	then
-		local errorMsg = "API returned HTML (likely down)"
-		if body:match("429") or body:match("Rate limit") then
-			errorMsg = "Rate limited (429)"
-		elseif body:match("502") or body:match("503") or body:match("504") then
-			errorMsg = "Server error (502/503/504)"
-		elseif body:match("Cloudflare") or body:match("DDoS") then
-			errorMsg = "Cloudflare/DDoS protection"
+		-- Check for HTML/Error responses
+		if body:match("<html>") or body:match("<title>") or body:match("429") or body:match("502") or body:match("503") or body:match("504") then
+			local errorMsg = "API returned HTML (likely down)"
+			if body:match("429") then errorMsg = "Rate limited (429)" end
+			handleError(errorMsg, contexts)
+			return
 		end
-		handleError(errorMsg, contexts)
-		return
-	end
 
-	local ok, decoded = pcall(Json.decode, body)
-	if not ok or type(decoded) ~= "table" then
-		local preview = body:sub(1, 50):gsub("\n", " ")
-		handleError(string.format("JSON Decode failed (%s...)", preview), contexts)
-		return
-	end
+		local ok, decoded = pcall(Json.decode, body)
+		if not ok or type(decoded) ~= "table" then
+			handleError("JSON Decode failed", contexts)
+			return
+		end
 
-	-- Success! Reset error count
-	state.errorCount = 0
-	state.nextRetryTime = 0
-	state.consecutiveFailures = 0
-
-	handleBatchResponse(ids, contexts, decoded)
-	state.scanning = false
+		handleBatchResponse(ids, contexts, decoded)
+	end)
 end
 
 local function refreshEnabled()
