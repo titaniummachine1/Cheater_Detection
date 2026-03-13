@@ -326,9 +326,9 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 
 	-- Skip local player unless debug mode is enabled
 	if not G.Menu.Advanced.debug then
-		local localPlayer = entities.GetLocalPlayer()
+		local localPlayer = FastPlayers.GetLocal()
 		if localPlayer then
-			local localSteamID = Common.GetSteamID64(localPlayer)
+			local localSteamID = localPlayer:GetSteamID64()
 			if localSteamID and tostring(localSteamID) == steamID then
 				return -- Skip local player
 			end

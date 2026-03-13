@@ -22,6 +22,7 @@ local Common        = require("Cheater_Detection.Utils.Common")
 local Database      = require("Cheater_Detection.Database.Database")
 local Logger        = require("Cheater_Detection.Utils.Logger")
 local G             = require("Cheater_Detection.Utils.Globals")
+local FastPlayers   = require("Cheater_Detection.Utils.FastPlayers")
 
 local ValveCheck = {}
 
@@ -147,9 +148,9 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	-- Skip local player unless debug mode is enabled
 	if not isDebug then
-		local localPlayer = entities.GetLocalPlayer()
+		local localPlayer = FastPlayers.GetLocal()
 		if localPlayer then
-			local localSteamID = Common.GetSteamID64(localPlayer)
+			local localSteamID = localPlayer:GetSteamID64()
 			if localSteamID and tostring(localSteamID) == tostring(id) then
 				return -- Skip local player check
 			end
