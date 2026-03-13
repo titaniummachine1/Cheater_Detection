@@ -35,7 +35,7 @@ Evidence.Config = {
 	},
 
 	-- Thresholds
-	MarkAsCheatThreshold = 100, -- Total weight to mark as cheater
+	Evicence_Tolerance = 50, -- Evidence threshold % (0–100) to mark as cheater
 	MinWeightFloor = 0, -- Cannot decay below this
 
 	-- Category mappings (only implemented detections)
@@ -233,9 +233,17 @@ end
 --[[ Public Functions ]]
 
 --- Get the current evidence threshold from menu
----@return number Current threshold value
+---@return number Current threshold value (internal 0-200 score scale)
 function Evidence.GetThreshold()
-	return G.Menu.Advanced.Evicence_Tolerance or Evidence.Config.MarkAsCheatThreshold
+	-- Stored as 0–100 % in the menu; multiply by 2 to map to the internal score scale
+	local pct = G.Menu.Advanced.Evicence_Tolerance
+	if type(pct) ~= "number" then
+		pct = 50 -- default 50%
+	end
+	if pct > 100 then
+		pct = 50 -- clamp legacy raw value
+	end
+	return pct * 2
 end
 
 --- Try to mark player as cheater if threshold is exceeded

@@ -9,12 +9,7 @@ local Default_Config = {
 		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,
-		TagFilters = {
-			ShowValve   = true,
-			ShowCheater = true,
-			ShowVac     = true,
-			ShowSus     = true,
-		},
+		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
 	},
 
 	Advanced = {

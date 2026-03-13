@@ -36,11 +36,12 @@ local function buildTagList(flags, score)
 	local isVac      = (flags & Constants.Flags.VAC_BANNED) ~= 0
 	local isSus      = (flags & Constants.Flags.SUSPICIOUS) ~= 0 or (score >= Constants.Threshold.SUSPICIOUS)
 
-	-- cfg may be nil if menu hasn't loaded yet; default to showing all
-	local showValve   = not cfg or cfg.ShowValve   ~= false
-	local showCheater = not cfg or cfg.ShowCheater ~= false
-	local showVac     = not cfg or cfg.ShowVac     ~= false
-	local showSus     = not cfg or cfg.ShowSus     ~= false
+	-- cfg is a boolean array: [1]=Valve, [2]=Cheater, [3]=VAC, [4]=Suspicious
+	-- If nil/missing, default to showing all
+	local showValve   = not cfg or cfg[1] ~= false
+	local showCheater = not cfg or cfg[2] ~= false
+	local showVac     = not cfg or cfg[3] ~= false
+	local showSus     = not cfg or cfg[4] ~= false
 
 	if isValve and showValve then
 		tags[#tags + 1] = { text = "VALVE EMPLOYEE", r = 255, g = 215, b = 0 }

@@ -97,18 +97,13 @@ local function DrawMenu()
 		if Main.Cheater_Tags then
 			Main.TagFilters = Main.TagFilters or {}
 			local tf = Main.TagFilters
-			if type(tf.ShowValve)   ~= "boolean" then tf.ShowValve   = true end
-			if type(tf.ShowCheater) ~= "boolean" then tf.ShowCheater = true end
-			if type(tf.ShowVac)     ~= "boolean" then tf.ShowVac     = true end
-			if type(tf.ShowSus)     ~= "boolean" then tf.ShowSus     = true end
-
-			tf.ShowValve   = TimMenu.Checkbox("  Valve Employee", tf.ShowValve)
-			TimMenu.NextLine()
-			tf.ShowCheater = TimMenu.Checkbox("  Cheater", tf.ShowCheater)
-			TimMenu.NextLine()
-			tf.ShowVac     = TimMenu.Checkbox("  VAC Banned", tf.ShowVac)
-			TimMenu.NextLine()
-			tf.ShowSus     = TimMenu.Checkbox("  Suspicious", tf.ShowSus)
+			-- TagFilters stored as a Combo-compatible boolean array
+			-- [1]=Valve, [2]=Cheater, [3]=VAC, [4]=Suspicious
+			if type(tf[1]) ~= "boolean" then tf[1] = true end
+			if type(tf[2]) ~= "boolean" then tf[2] = true end
+			if type(tf[3]) ~= "boolean" then tf[3] = true end
+			if type(tf[4]) ~= "boolean" then tf[4] = true end
+			Main.TagFilters = TimMenu.Combo("Visible Tags", tf, { "Valve", "Cheater", "VAC", "Suspicious" })
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
@@ -129,10 +124,16 @@ local function DrawMenu()
 		local Advanced = G.Menu.Advanced
 
 		TimMenu.BeginSector("Evidence System")
-		-- Initialize with default value if nil
-		Advanced.Evicence_Tolerance = Advanced.Evicence_Tolerance or 100
-		Advanced.Evicence_Tolerance = TimMenu.Slider("Evidence Tolerance", Advanced.Evicence_Tolerance, 1, 200, 1)
-		TimMenu.Tooltip("Threshold for marking players as cheaters (higher = more strict)")
+		-- Stored as 0–100 %; internally scaled x2 to match the evidence score range
+		if type(Advanced.Evicence_Tolerance) ~= "number" then
+			Advanced.Evicence_Tolerance = 50
+		end
+		-- Clamp legacy values > 100 down to the new scale
+		if Advanced.Evicence_Tolerance > 100 then
+			Advanced.Evicence_Tolerance = 50
+		end
+		Advanced.Evicence_Tolerance = TimMenu.Slider("Evidence Threshold %", Advanced.Evicence_Tolerance, 0, 100, 1)
+		TimMenu.Tooltip("Minimum suspicion % required to auto-mark a player as a cheater (higher = stricter)")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
