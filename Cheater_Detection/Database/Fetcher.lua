@@ -213,14 +213,14 @@ function Fetcher.Start()
                 coroutine.yield()
             end
 
-            if data then
+            if data and type(data) == "string" and #data > 0 then
                 local a, u, e = parseSourceSync(source, data)
                 Fetcher.State.results.total_added = Fetcher.State.results.total_added + a
                 Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + u
                 Fetcher.State.results.errors = Fetcher.State.results.errors + e
-                Parsers.AddSourceStats(source.name, 0, a, 0, e, u) -- Partial stats
+                Parsers.AddSourceStats(source.name, 0, a, 0, e, u) 
             else
-                Log(LogLevel.WARNING, "[FETCHER] No data received from " .. source.name)
+                Log(LogLevel.WARNING, "[FETCHER] Invalid or empty data from " .. source.name)
                 Fetcher.State.results.errors = Fetcher.State.results.errors + 1
             end
             
@@ -241,13 +241,21 @@ function Fetcher.Tick()
     if currentTick == lastTick then return end -- Process only once per simulation tick
     lastTick = currentTick
     
-    local ok, err = coroutine.resume(Fetcher.State.coro)
-    if not ok then
+    local status, err = coroutine.resume(Fetcher.State.coro)
+    if not status then
         Log(LogLevel.ERROR, "[FETCHER] Coroutine error: " .. tostring(err))
         Fetcher.State.isRunning = false
         Fetcher.State.coro = nil
-    elseif coroutine.status(Fetcher.State.coro) == "dead" then
+        return
+    end
+
+    if Fetcher.State.coro and coroutine.status(Fetcher.State.coro) == "dead" then
+        local wasRunning = Fetcher.State.isRunning
         Fetcher.State.coro = nil
+        if wasRunning then
+            Fetcher.State.isRunning = false
+            Log(LogLevel.DEBUG, "[FETCHER] Coroutine finished normally")
+        end
     end
 end
 
