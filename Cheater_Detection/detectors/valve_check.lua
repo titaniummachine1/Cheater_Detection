@@ -36,10 +36,16 @@ local lastItemCheck = {}
 -- (NOT a boolean; we re-check periodically even after success)
 local lastProfileCheck = {}
 
+-- Track if Layer 1 logging has occurred for a player: id -> boolean
+local layer1Logged  = {}
+
 -- Layer 1: Check both static tables (valve_data AND ValveEmployees)
 local function isKnownValveID64(s64)
 	if not s64 then return false end
-	local key = tostring(s64)
+	local idStr = tostring(s64)
+	local key = idStr:match("^%s*(.-)%s*$") or idStr
+	if key == "" then return false end
+	
 	if ValveData.KnownSteamID64s[key] == true then return true end
 	if ValveEmployees.IsEmployee and ValveEmployees.IsEmployee(key) then return true end
 	if type(ValveEmployees.List) == "table" and ValveEmployees.List[key] then return true end
@@ -158,8 +164,10 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	-- ── Layer 1: SteamID64 instant check ──────────────────────────────────────
-	-- Always log in debug so user can verify their ID matches what the engine sees
-	if isDebug then
+	-- Always log in debug so user can verify their ID matches what the engine sees,
+	-- but only do it ONCE per player to avoid spamming the console every tick!
+	if isDebug and not layer1Logged[id] then
+		layer1Logged[id] = true
 		Logger.Debug("ValveCheck", string.format(
 			"Processing ID=%s Name=%s  inKnownList=%s",
 			tostring(id), playerState.wrap:GetName(), tostring(isKnownValveID64(id))

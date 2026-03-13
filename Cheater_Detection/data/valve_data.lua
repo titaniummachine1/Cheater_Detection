@@ -301,9 +301,12 @@ if ok and ValveEmployees and type(ValveEmployees.List) == "table" then
 	local mergedCount = 0
 	for id64 in pairs(ValveEmployees.List) do
 		local idStr = tostring(id64)
-		if not ValveData.KnownSteamID64s[idStr] then
-			ValveData.KnownSteamID64s[idStr] = true
-			mergedCount = mergedCount + 1
+		if idStr then
+			idStr = idStr:match("^%s*(.-)%s*$")
+			if idStr and idStr ~= "" and not ValveData.KnownSteamID64s[idStr] then
+				ValveData.KnownSteamID64s[idStr] = true
+				mergedCount = mergedCount + 1
+			end
 		end
 	end
 	if mergedCount > 0 then
