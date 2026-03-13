@@ -12,6 +12,7 @@
 local EventBus = require("Cheater_Detection.core.event_bus")
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
+local Common = require("Cheater_Detection.Utils.Common")
 
 local NotificationService = {}
 
@@ -128,6 +129,12 @@ local function OnStateChange(playerState, reason)
 	end
 
 	if colorMsg == "" then return end
+
+	-- Cleanup self in debug mode to ensure fresh tests
+	if (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug) and id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) then
+		local Database = require("Cheater_Detection.Database.Database")
+		Database.RemoveCheater(id)
+	end
 
 	local channels = ResolveChannels(cfg, isValve, isCheater)
 	Dispatch(channels, colorMsg, plainMsg)

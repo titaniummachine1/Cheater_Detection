@@ -468,6 +468,18 @@ function Database.Initialize(silent)
 	Database.State.isInitialized = true
 end
 
+function Database.ClearLocalPlayer()
+	local localPlayer = entities.GetLocalPlayer()
+	if localPlayer then
+		local mySteamID = Common.GetSteamID64(localPlayer)
+		if mySteamID and G.DataBase[mySteamID] then
+			G.DataBase[mySteamID] = nil
+			Database.State.isDirty = true
+			Log(LogLevel.SUCCESS, string.format("[DB] Cleared local player from database (SteamID64: %s)", mySteamID))
+		end
+	end
+end
+
 --[[ Self-Initialization ]]
 -- Initial load and setup (silent=true to avoid verbose messages at load time)
 Database.Initialize(true)
@@ -502,12 +514,26 @@ function Database.UpsertCheater(steamID, data)
 		persistentFlags = data.flags & Constants.PERSISTENT_MASK
 	end
 
+	local existing = G.DataBase[steamID]
+	local currentTime = os.time()
+
+	-- Throttling: only update if score changed significantly or enough time passed
+	if existing then
+		local scoreDelta = math.abs((data.score or 0) - (existing.Score or 0))
+		local timeDelta = currentTime - (existing.Timestamp or 0)
+		
+		-- Only update if score increased by 5+ or 60 seconds passed
+		if scoreDelta < 5 and timeDelta < 60 then
+			return false
+		end
+	end
+
 	G.DataBase[steamID] = {
 		Name = data.name or "Unknown",
 		Reason = data.reason or "Cheater", -- Use provided reason
 		Flags = persistentFlags,
 		Score = data.score or 0,
-		Timestamp = os.time(),
+		Timestamp = currentTime,
 	}
 
 	-- Mark as dirty for save

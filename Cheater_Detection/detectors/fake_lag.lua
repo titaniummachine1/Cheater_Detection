@@ -9,7 +9,7 @@ local EventBus = require("Cheater_Detection.core.event_bus")
 local FakeLag = {}
 
 -- Constant threshold for fake lag (usually 14-15 on TF2)
-local MAX_TICK_DELTA = 14
+local MAX_TICK_DELTA = 22 --max fakelag value is 22
 
 -- Per-player tracking
 -- Per-player tracking
@@ -26,7 +26,7 @@ function FakeLag.ProcessPlayer(playerState)
     if not playerState.wrap then return end
 
     -- Check local stability to avoid false positives
-    if not Common.CheckConnectionState() then return end
+    if not Common.CheckConnectionState() or Common.IsFrameGap() then return end
 
     local entity = playerState.wrap:GetRawEntity()
     if not entity or not entity:IsValid() or not entity:IsAlive() then return end
@@ -60,35 +60,52 @@ function FakeLag.ProcessPlayer(playerState)
     local curTick = globals.TickCount()
 
     -- Only record events that meet the threshold
+    -- Jitter is often 2-3 ticks. Real exploits use much more (14+).
     if deltaTicks >= MAX_TICK_DELTA then
-        table.insert(data.events, curTick)
+        table.insert(data.events, { tick = curTick, amount = deltaTicks })
         
-        -- Clean up events older than 132 ticks (approx 2 seconds)
-        while #data.events > 0 and (curTick - data.events[1]) > 132 do
+        -- Clean up events older than 330 ticks (approx 5 seconds)
+        while #data.events > 0 and (curTick - data.events[1].tick) > 330 do
             table.remove(data.events, 1)
         end
 
-        -- Trigger suspicion ONLY if they choke in a repeating fashion (2+ times in 2 seconds)
-        if #data.events >= 2 then
-            playerState.score = math.min(99, playerState.score + 15)
-            
-            local reason = string.format("Fake Lag (Choke pattern detected)")
-            
-            if playerState.score >= Constants.Threshold.HIGH_RISK then
-                playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-                playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-            elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
-                playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+        -- Trigger suspicion ONLY if they choke in a repeating, rhythmic fashion
+        -- Require at least 3 events of similar duration (consistent rhythm)
+        if #data.events >= 3 then
+            local consistent = true
+            local firstAmount = data.events[1].amount
+            for i = 2, #data.events do
+                local diff = math.abs(data.events[i].amount - firstAmount)
+                if diff > 3 then -- Allow small variance in the pattern
+                    consistent = false
+                    break
+                end
             end
 
-            Database.UpsertCheater(id, {
-                name = playerState.wrap:GetName(),
-                reason = reason,
-                flags = playerState.flags,
-                score = playerState.score
-            })
+            if consistent then
+                playerState.score = math.min(99, playerState.score + 15)
+                
+                local reason = string.format("Fake Lag (Rhythmic choke: %d ticks)", deltaTicks)
+                
+                if playerState.score >= Constants.Threshold.HIGH_RISK then
+                    playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
+                    playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+                elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
+                    playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+                end
 
-            EventBus.Publish("OnPlayerStateChange", playerState, reason)
+                Database.UpsertCheater(id, {
+                    name = playerState.wrap:GetName(),
+                    reason = reason,
+                    flags = playerState.flags,
+                    score = playerState.score
+                })
+
+                EventBus.Publish("OnPlayerStateChange", playerState, reason)
+                
+                -- Clear events to wait for next sequence
+                data.events = {}
+            end
         end
     end
 
