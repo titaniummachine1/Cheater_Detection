@@ -35,7 +35,7 @@ local function SendPartyChatMessage(message)
 	if not message or message == "" then
 		return
 	end
-	client.Command(string.format('say_party "%s"', escapeForCommand(message)), true)
+	client.Command(string.format('tf_party_chat "%s"', escapeForCommand(message)), true)
 end
 
 -- message configuration table expects:

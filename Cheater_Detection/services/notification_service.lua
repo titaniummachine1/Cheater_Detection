@@ -4,7 +4,7 @@
      Channels:
        LocalChat  = client.ChatPrintf   (only you see it)
        PublicChat = client.Command("say ...")  (whole server sees it)
-       Party      = client.Command("say_party ...")
+       Party      = client.Command("tf_party_chat ...")
        Toast      = lnxLib UI.Notifications (corner pop-up via optional lnxLib)
        Console    = print()
 ]]
@@ -62,7 +62,7 @@ local function Dispatch(channels, colorMsg, plainMsg)
 
 	-- Party: broadcasts to your party chat only
 	if channels.Party then
-		client.Command("say_party " .. plainMsg, true)
+		client.Command("tf_party_chat \"" .. plainMsg .. "\"", true)
 	end
 
 	-- Toast: lnxLib corner notification pop-up

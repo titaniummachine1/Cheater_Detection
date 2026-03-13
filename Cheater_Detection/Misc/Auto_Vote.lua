@@ -104,7 +104,7 @@ local function recordScorePenalties()
 		if activeVote.targetIdx then
 			local targetEntity = entities.GetByIndex(activeVote.targetIdx)
 			if targetEntity and targetEntity:IsValid() then
-				local targetSteamID = targetEntity:GetSteamID64()
+				local targetSteamID = Common.GetSteamID64(targetEntity)
 				if targetSteamID == localSteamID or isFriendEntity(targetEntity) then
 					-- They're voting against us/friend - we want NO
 					ourVoteOption = 2
@@ -379,7 +379,7 @@ local function issueVote(target)
 end
 
 local function sendVote(voteIdx, option)
-	client.Command(string.format("vote %d option%d", voteIdx, option), true)
+	client.Command(string.format("vote option%d", option), true)
 end
 
 local function determineVoteOptionForEntity(entity)
@@ -435,13 +435,13 @@ local function handleVoteStart(msg)
 
 	local voteTargetEntity = entities.GetByIndex(targetIdx)
 	if voteTargetEntity and voteTargetEntity:IsValid() and callerIdx ~= localIndex then
-		local voteTargetSteamID = voteTargetEntity:GetSteamID64()
+		local voteTargetSteamID = Common.GetSteamID64(voteTargetEntity)
 		-- Is this a vote against US?
 		if voteTargetSteamID == localSteamID then
 			-- Get caller info and add to retaliation group
 			local callerEntity = entities.GetByIndex(callerIdx)
 			if callerEntity and callerEntity:IsValid() then
-				local callerSteamID = callerEntity:GetSteamID64()
+				local callerSteamID = Common.GetSteamID64(callerEntity)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
 				recordRetaliationCaller(callerSteamID, callerName)
 			end
@@ -449,7 +449,7 @@ local function handleVoteStart(msg)
 		elseif isFriendEntity(voteTargetEntity) then
 			local callerEntity = entities.GetByIndex(callerIdx)
 			if callerEntity and callerEntity:IsValid() then
-				local callerSteamID = callerEntity:GetSteamID64()
+				local callerSteamID = Common.GetSteamID64(callerEntity)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
 				recordRetaliationCaller(callerSteamID, callerName)
 			end
@@ -466,8 +466,7 @@ local function handleVoteStart(msg)
 		if callerIdx == localIndex then
 			local targetEntity = entities.GetByIndex(targetIdx)
 			if targetEntity and targetEntity:IsValid() then
-				-- GetSteamID64() is forwarded to WPlayer via metatable (lint warning is false positive)
-				local targetSteamID = targetEntity:GetSteamID64()
+				local targetSteamID = Common.GetSteamID64(targetEntity)
 				if targetSteamID == State.currentTarget.steamID then
 					-- This is DEFINITELY our vote! Clear timeout and proceed
 					State.voteSentTime = 0
