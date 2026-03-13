@@ -292,7 +292,13 @@ function Database.LoadDatabase(silent, force)
 	Log(LogLevel.DEBUG, "[DB] Decoding JSON content") -- Keep DEBUG
 	local decodedData
 	if Json and Json.decode then -- Add nil check for Json.decode
-		decodedData = Json.decode(content)
+		local success, result = pcall(Json.decode, content)
+		if success then
+			decodedData = result
+		else
+			Log(LogLevel.ERROR, "[DB] JSON decode error: " .. tostring(result))
+			decodedData = nil
+		end
 	else
 		-- Always log critical error
 		Log(LogLevel.ERROR, "[DB] Json.decode function is not available!")
