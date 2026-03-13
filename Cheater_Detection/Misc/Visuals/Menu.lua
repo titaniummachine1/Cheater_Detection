@@ -202,27 +202,19 @@ local function DrawMenu()
 		if type(N.Channels.Party)      ~= "boolean" then N.Channels.Party      = false end
 		if type(N.Channels.Toast)      ~= "boolean" then N.Channels.Toast      = true  end
 		if type(N.Channels.Console)    ~= "boolean" then N.Channels.Console    = true  end
-		if type(N.SuspicionCooldown) ~= "number" then N.SuspicionCooldown = 10 end
+		if type(N.SuspicionCooldown) ~= "number" then N.SuspicionCooldown = 15 end
 		if type(N.SuspicionThreshold) ~= "number" then N.SuspicionThreshold = 30 end
 
-		TimMenu.BeginSector("General")
-		N.Enable = TimMenu.Checkbox("Enable Notifications", N.Enable)
-		TimMenu.Tooltip("Master toggle for all detection notifications.")
+		TimMenu.BeginSector("Master Switch")
+		N.Enable = TimMenu.Checkbox("Enable System-Wide Notifications", N.Enable)
+		TimMenu.Tooltip("Master toggle for all chat and visual alerts.")
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		if N.Enable then
-			TimMenu.BeginSector("Suspicion Alerts")
-			N.SuspicionCooldown = TimMenu.Slider("Cooldown (s)", N.SuspicionCooldown, 5, 60, 1)
-			TimMenu.Tooltip("Min. seconds between suspicion % update notifications per player.")
-			TimMenu.NextLine()
-			N.SuspicionThreshold = TimMenu.Slider("Min. Sus % to Alert", N.SuspicionThreshold, 10, 99, 1)
-			TimMenu.Tooltip("Only notify if suspicion exceeds this %.")
-			TimMenu.EndSector()
-			TimMenu.NextLine()
-
-			local channelOptions = { "Local Chat", "Public Chat", "Party", "Notification", "Console" }
-			local function DrawChannelCombo(label, ch)
+			-- Helper for drawing consistent channel lists
+			local channelOptions = { "Local Chat", "Public Chat", "Party", "Log Toast", "Console Log" }
+			local function DrawChannelList(label, ch)
 				local act = { ch.LocalChat, ch.PublicChat, ch.Party, ch.Toast, ch.Console }
 				act = TimMenu.Combo(label, act, channelOptions)
 				ch.LocalChat = act[1]
@@ -233,52 +225,51 @@ local function DrawMenu()
 				TimMenu.NextLine()
 			end
 
-			TimMenu.BeginSector("Output Channels")
-			TimMenu.Text("Where to send detection alerts:")
+			-- 1. Main Output Configuration
+			TimMenu.BeginSector("Global Output Settings")
+			TimMenu.Text("Default channels for all detections:")
 			TimMenu.NextLine()
-			DrawChannelCombo("Active Channels", N.Channels)
+			DrawChannelList("Active Channels", N.Channels)
+			
+			TimMenu.Text("Suspicion Filtering:")
+			TimMenu.NextLine()
+			N.SuspicionThreshold = TimMenu.Slider("Alert Threshold %", N.SuspicionThreshold, 5, 95, 5)
+			TimMenu.Tooltip("Only notify if a player's suspicion score exceeds this percentage.")
+			TimMenu.NextLine()
+			N.SuspicionCooldown = TimMenu.Slider("Spam Cooldown (s)", N.SuspicionCooldown, 5, 120, 5)
+			TimMenu.Tooltip("Wait this long before updating a player's suspicion alert in chat.")
 			TimMenu.EndSector()
 			TimMenu.NextLine()
 
-			-- Per-type overrides
+			-- 2. conditional situational overrides
+			TimMenu.BeginSector("Conditional Overrides")
 			N.Overrides = N.Overrides or {}
 			local OV = N.Overrides
 
-			TimMenu.BeginSector("Override: Confirmed Cheater")
+			-- Cheater Override
 			if type(OV.UseCheaterOverride) ~= "boolean" then OV.UseCheaterOverride = false end
-			OV.UseCheaterOverride = TimMenu.Checkbox("Custom Channels for Cheater", OV.UseCheaterOverride)
-			TimMenu.Tooltip("Override output channels for confirmed cheater detections.")
+			OV.UseCheaterOverride = TimMenu.Checkbox("Unique Channels for Confirmed Cheaters", OV.UseCheaterOverride)
+			TimMenu.Tooltip("Use different chat channels when a player is 100% caught cheating.")
 			TimMenu.NextLine()
 			if OV.UseCheaterOverride then
 				OV.Cheater = OV.Cheater or { LocalChat=true, PublicChat=false, Party=false, Toast=true, Console=true }
-				if type(OV.Cheater.LocalChat)  ~= "boolean" then OV.Cheater.LocalChat  = true  end
-				if type(OV.Cheater.PublicChat) ~= "boolean" then OV.Cheater.PublicChat = false end
-				if type(OV.Cheater.Party)      ~= "boolean" then OV.Cheater.Party      = false end
-				if type(OV.Cheater.Toast)      ~= "boolean" then OV.Cheater.Toast      = true  end
-				if type(OV.Cheater.Console)    ~= "boolean" then OV.Cheater.Console    = true  end
-				DrawChannelCombo("Cheater Channels", OV.Cheater)
+				DrawChannelList("-> Cheater Output", OV.Cheater)
 			end
-			TimMenu.EndSector()
-			TimMenu.NextLine()
 
-			TimMenu.BeginSector("Override: Valve Employee")
+			-- Valve Override
 			if type(OV.UseValveOverride) ~= "boolean" then OV.UseValveOverride = false end
-			OV.UseValveOverride = TimMenu.Checkbox("Custom Channels for Valve", OV.UseValveOverride)
-			TimMenu.Tooltip("Override output channels for Valve employee detections.")
+			OV.UseValveOverride = TimMenu.Checkbox("Unique Channels for Valve Employees", OV.UseValveOverride)
+			TimMenu.Tooltip("Use different chat channels for Valve detections.")
 			TimMenu.NextLine()
 			if OV.UseValveOverride then
 				OV.Valve = OV.Valve or { LocalChat=true, PublicChat=false, Party=true, Toast=true, Console=true }
-				if type(OV.Valve.LocalChat)  ~= "boolean" then OV.Valve.LocalChat  = true  end
-				if type(OV.Valve.PublicChat) ~= "boolean" then OV.Valve.PublicChat = false end
-				if type(OV.Valve.Party)      ~= "boolean" then OV.Valve.Party      = true  end
-				if type(OV.Valve.Toast)      ~= "boolean" then OV.Valve.Toast      = true  end
-				if type(OV.Valve.Console)    ~= "boolean" then OV.Valve.Console    = true  end
-				DrawChannelCombo("Valve Channels", OV.Valve)
+				DrawChannelList("-> Valve Output", OV.Valve)
 			end
 			TimMenu.EndSector()
 			TimMenu.NextLine()
 
-			-- ---- Join Alerts (moved here from Misc tab) ----
+			-- 3. Join Alerts
+			TimMenu.BeginSector("Join & Discovery Alerts")
 			local Misc = G.Menu.Misc or {}
 			Misc.JoinNotifications = Misc.JoinNotifications or {}
 			local JN = Misc.JoinNotifications
@@ -286,14 +277,13 @@ local function DrawMenu()
 			if type(JN.CheckCheater) ~= "boolean" then JN.CheckCheater = true end
 			if type(JN.CheckValve) ~= "boolean" then JN.CheckValve = true end
 
-			TimMenu.BeginSector("Join Alerts")
-			JN.Enable = TimMenu.Checkbox("Alert on Player Join", JN.Enable)
-			TimMenu.Tooltip("Warn when a cheater or Valve employee joins the match.")
+			JN.Enable = TimMenu.Checkbox("Notify on Player Connections", JN.Enable)
+			TimMenu.Tooltip("Warning popups when a labeled player joins the server mid-game.")
 			TimMenu.NextLine()
 			if JN.Enable then
-				JN.CheckCheater = TimMenu.Checkbox("Cheaters", JN.CheckCheater)
+				JN.CheckCheater = TimMenu.Checkbox("Alert for Cheaters", JN.CheckCheater)
 				TimMenu.SameLine()
-				JN.CheckValve = TimMenu.Checkbox("Valve Employees", JN.CheckValve)
+				JN.CheckValve = TimMenu.Checkbox("Alert for Valve", JN.CheckValve)
 				TimMenu.NextLine()
 			end
 			TimMenu.EndSector()

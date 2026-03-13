@@ -481,6 +481,11 @@ function Database.UpsertCheater(steamID, data)
 		return false
 	end
 
+	-- Skip bots/HLTV (prefixed with BOT_)
+	if steamID:sub(1, 4) == "BOT_" then
+		return false
+	end
+
 	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
 		Log(LogLevel.ERROR, "[DB] UpsertCheater: Invalid steamID format: " .. steamID)
 		return false

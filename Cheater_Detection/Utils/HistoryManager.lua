@@ -30,14 +30,22 @@ HistoryManager.Fields = {
 
 --[[ Field Builders ]]
 
-local function buildAngles(player) return player:GetEyeAngles() end
-local function buildEyePos(player) return player:GetEyePos() end
+local function buildAngles(player) return player.GetEyeAngles and player:GetEyeAngles() end
+local function buildEyePos(player) return player.GetEyePos and player:GetEyePos() end
 local function buildHeadHitbox(player) return player.GetHitboxPos and player:GetHitboxPos(1) end
 local function buildBodyHitbox(player) return player.GetHitboxPos and player:GetHitboxPos(4) end
-local function buildSimTime(player) return player:GetSimulationTime() end
-local function buildOnGround(player) return player:IsOnGround() end
-local function buildVelocity(player) return player:GetVelocity() end
-local function buildViewOffset(player) return player:GetViewOffset() end
+local function buildSimTime(player) 
+	if player.GetSimulationTime then return player:GetSimulationTime() end
+	if player.GetPropFloat then return player:GetPropFloat("m_flSimulationTime") end
+	return nil
+end
+local function buildOnGround(player) return player.IsOnGround and player:IsOnGround() end
+local function buildVelocity(player) 
+	if player.GetVelocity then return player:GetVelocity() end
+	if player.EstimateAbsVelocity then return player:EstimateAbsVelocity() end
+	return nil
+end
+local function buildViewOffset(player) return player.GetViewOffset and player:GetViewOffset() end
 
 local FIELD_BUILDERS = {
 	[HistoryManager.Fields.Angles] = buildAngles,

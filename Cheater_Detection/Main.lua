@@ -18,6 +18,11 @@ local ValveCheck = require("Cheater_Detection.detectors.valve_check")
 local SilentAim = require("Cheater_Detection.detectors.silent_aim")
 local AntiAim = require("Cheater_Detection.detectors.antiaim")
 local DuckSpeed = require("Cheater_Detection.detectors.duck_speed")
+local Bhop = require("Cheater_Detection.detectors.bhop")
+local WarpDT = require("Cheater_Detection.detectors.warp_dt")
+local FakeLag = require("Cheater_Detection.detectors.fake_lag")
+
+local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 
 -- Actions
 local NotificationService = require("Cheater_Detection.services.notification_service")
@@ -64,11 +69,17 @@ local function OnCreateMove(cmd)
 		local ply = players[i]
 		local pState = PlayerCache.Get(ply)
 		if pState then
+			-- Update history snapshot first
+			HistoryManager.Push(pState.wrap)
+
 			-- Layer 1-3 Detections
 			ValveCheck.ProcessPlayer(pState)
 			SilentAim.ProcessPlayer(pState)
 			AntiAim.ProcessPlayer(pState)
 			DuckSpeed.ProcessPlayer(pState)
+			Bhop.ProcessPlayer(pState)
+			WarpDT.ProcessPlayer(pState)
+			FakeLag.ProcessPlayer(pState)
 		end
 	end
 end

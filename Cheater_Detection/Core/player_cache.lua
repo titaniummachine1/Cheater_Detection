@@ -93,7 +93,11 @@ function PlayerCache.Hearthbeat()
 					state.flags = state.flags & ~Constants.Flags.SUSPICIOUS
 					state.flags = state.flags & ~Constants.Flags.HIGH_RISK
 				elseif state.score < Constants.Threshold.HIGH_RISK then
+					state.flags = state.flags | Constants.Flags.SUSPICIOUS
 					state.flags = state.flags & ~Constants.Flags.HIGH_RISK
+				else
+					state.flags = state.flags | Constants.Flags.SUSPICIOUS
+					state.flags = state.flags | Constants.Flags.HIGH_RISK
 				end
 			end
 		end

@@ -121,7 +121,7 @@ function Common.GetSteamID64(Player)
 		local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
 
 		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
-			result = tostring(playerInfo.UserID)
+			result = "BOT_" .. tostring(playerInfo.UserID)
 		else
 			local converted = steam.ToSteamID64(steamID)
 			result = tostring(assert(converted, "Failed to convert SteamID to SteamID64"))
@@ -130,6 +130,12 @@ function Common.GetSteamID64(Player)
 
 	cachedSteamIDs[playerIndex] = result
 	return result
+end
+
+function Common.IsBot(Player)
+	if not Player then return false end
+	local info = client.GetPlayerInfo(Player:GetIndex())
+	return info and (info.IsBot or info.IsHLTV) or false
 end
 
 function Common.IsCheater(playerInfo)

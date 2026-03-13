@@ -152,8 +152,13 @@ function ValveCheck.ProcessPlayer(playerState)
 	local now = globals.CurTime()
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 
-	-- Skip if already confirmed as Valve
-	if (playerState.flags & Constants.Flags.VALVE) ~= 0 then
+	-- Skip Bots (Non-SteamID64)
+	if not tostring(id):match("^7656119%d+$") or #tostring(id) ~= 17 then
+		return
+	end
+
+	-- Skip if already definitively flagged as Valve or Cheater
+	if (playerState.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
 		return
 	end
 
@@ -184,8 +189,8 @@ function ValveCheck.ProcessPlayer(playerState)
 		return
 	end
 
-	-- Skip all subsequent layers if already definitively checked or flagged
-	if playerState.externalChecked or (playerState.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
+	-- Skip all subsequent layers if already fully checked
+	if playerState.externalChecked or playerState.itemChecked then
 		return
 	end
 
@@ -200,10 +205,9 @@ function ValveCheck.ProcessPlayer(playerState)
 		end
 	end
 
-	-- ── Layer 2: Item / Badge check (every 30s) ─────────────────────────────
-	local lastItem = lastItemCheck[id]
-	if not lastItem or (now - lastItem > 30) then
-		lastItemCheck[id] = now
+	-- ── Layer 2: Item / Badge check (ONCE per session) ───────────────────────
+	if not playerState.itemChecked then
+		playerState.itemChecked = true -- Mark as done immediately to prevent re-entry
 		if ply then
 			if isDebug then Logger.Debug("ValveCheck", id .. " – running item/badge check") end
 			local found, reason = checkPlayerItems(ply)
@@ -218,42 +222,43 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	-- ── Layer 3: Async profile check (VAC / Comm ban / Valve Group) ──────────
-	-- Retry every PROFILE_RECHECK_INTERVAL seconds regardless of previous outcome 
-	-- until externalChecked is true or flagged.
-	local lastProfile = lastProfileCheck[id]
-	if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
-		lastProfileCheck[id] = now
-		if isDebug then Logger.Debug("ValveCheck", id .. " – queuing async profile check") end
+	if not playerState.profileChecked then
+		local lastProfile = lastProfileCheck[id]
+		if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
+			lastProfileCheck[id] = now
+			if isDebug then Logger.Debug("ValveCheck", id .. " – queuing async profile check") end
 
-		SteamLookup.CheckProfileAsync(id, function(results)
-			if not results then
-				if isDebug then Logger.Debug("ValveCheck", id .. " – async profile check returned nil (HTTP failed)") end
-				-- Reset timer so it retries sooner (10s) instead of waiting 2 min
-				lastProfileCheck[id] = now - (PROFILE_RECHECK_INTERVAL - 10)
-				return
-			end
+			SteamLookup.CheckProfileAsync(id, function(results)
+				if not results then
+					if isDebug then Logger.Debug("ValveCheck", id .. " – async profile check returned nil (HTTP failed)") end
+					-- Reset timer so it retries sooner (10s) instead of waiting 2 min
+					lastProfileCheck[id] = now - (PROFILE_RECHECK_INTERVAL - 10)
+					return
+				end
 
-			if isDebug then
-				Logger.Debug("ValveCheck", string.format(
-					"%s – profile check result: isValve=%s vacBanned=%s tradeBanned=%s",
-					id, tostring(results.isValve), tostring(results.vacBanned), tostring(results.tradeBanned)
-				))
-			end
+				if isDebug then
+					Logger.Debug("ValveCheck", string.format(
+						"%s – profile check result: isValve=%s vacBanned=%s tradeBanned=%s",
+						id, tostring(results.isValve), tostring(results.vacBanned), tostring(results.tradeBanned)
+					))
+				end
 
-			if results.isValve then
-				applyValveFlag(playerState, "Valve Steam Group Member")
-			end
-			if results.vacBanned then
-				applyVacFlag(playerState)
-			end
-			if results.tradeBanned then
-				applyCommBanFlag(playerState)
-			end
+				if results.isValve then
+					applyValveFlag(playerState, "Valve Steam Group Member")
+				end
+				if results.vacBanned then
+					applyVacFlag(playerState)
+				end
+				if results.tradeBanned then
+					applyCommBanFlag(playerState)
+				end
 
-			-- Mark CHECKED flag only when we actually got a valid response
-			playerState.externalChecked = true
-			playerState.flags = playerState.flags | Constants.Flags.CHECKED
-		end)
+				-- Mark checked so we NEVER run Layer 3 again for this player this session
+				playerState.profileChecked = true
+				playerState.externalChecked = true
+				playerState.flags = playerState.flags | Constants.Flags.CHECKED
+			end)
+		end
 	end
 end
 
