@@ -152,6 +152,11 @@ function ValveCheck.ProcessPlayer(playerState)
 	local now = globals.CurTime()
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 
+	-- Skip if already confirmed as Valve
+	if (playerState.flags & Constants.Flags.VALVE) ~= 0 then
+		return
+	end
+
 	-- Skip local player unless debug mode is enabled
 	if not isDebug then
 		local localPlayer = FastPlayers.GetLocal()
@@ -176,6 +181,11 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	if isKnownValveID64(id) then
 		applyValveFlag(playerState, "Known Valve SteamID")
+		return
+	end
+
+	-- Skip all subsequent layers if already definitively checked or flagged
+	if playerState.externalChecked or (playerState.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
 		return
 	end
 
@@ -208,8 +218,8 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	-- ── Layer 3: Async profile check (VAC / Comm ban / Valve Group) ──────────
-	-- Retry every PROFILE_RECHECK_INTERVAL seconds regardless of previous outcome.
-	-- This means failed HTTP responses don't permanently skip a player.
+	-- Retry every PROFILE_RECHECK_INTERVAL seconds regardless of previous outcome 
+	-- until externalChecked is true or flagged.
 	local lastProfile = lastProfileCheck[id]
 	if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
 		lastProfileCheck[id] = now

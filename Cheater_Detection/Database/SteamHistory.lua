@@ -12,6 +12,7 @@ local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local Database = require("Cheater_Detection.Database.Database")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
+local Constants = require("Cheater_Detection.core.constants")
 local Json = Common.Json
 
 --[[ Constants ]]
@@ -262,26 +263,45 @@ local function flagPlayer(steamID, context, entry)
 
 	local name = resolveName(steamID, context, entry, stateEntry)
 
-	printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged (%s)", name, reason))
+	-- Hard evidence decision:
+	-- If the ban reason explicitly mentions cheats/hacks, we mark as CHEATER immediately.
+	local lowerReason = reason:lower()
+	local isHardEvidence = lowerReason:find("aimbot") or lowerReason:find("cheat") or lowerReason:find("hack") or lowerReason:find("smac")
 
 	local formattedReason = string.format("SteamHistory (%s)", reason)
+	local flags = 0
+	if isHardEvidence then
+		flags = Constants.Flags.CHEATER
+		printInfo({ 255, 50, 50, 255 }, string.format("[SteamHistory] %s flagged as CHEATER (Reason: %s)", name, reason))
+	else
+		flags = Constants.Flags.SUSPICIOUS
+		printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged as SUSPICIOUS (Reason: %s)", name, reason))
+	end
+
 	if stateEntry then
 		stateEntry.info = stateEntry.info or {}
 		stateEntry.info.LastFlagReason = formattedReason
 		stateEntry.info.LastFlagSource = "SteamHistory"
+		stateEntry.flags = stateEntry.flags | flags
+		
 		local evidence = stateEntry.Evidence or {}
 		evidence.Reasons = evidence.Reasons or {}
 		evidence.Reasons.SteamHistory = {
-			Weight = (evidence.Reasons.SteamHistory and evidence.Reasons.SteamHistory.Weight) or 0,
+			Weight = isHardEvidence and 100 or 50,
 			Category = "Exploit",
 			LastAddedTick = globals.TickCount(),
 		}
 		stateEntry.Evidence = evidence
+		
+		if isHardEvidence then
+			stateEntry.score = 100
+		end
 	end
 
 	Database.UpsertCheater(steamID, {
 		name = name,
 		reason = formattedReason,
+		flags = flags
 	})
 
 	-- Set priority 10 if AutoPriority enabled

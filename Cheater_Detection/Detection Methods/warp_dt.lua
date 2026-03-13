@@ -9,6 +9,9 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local Constants = require("Cheater_Detection.core.constants")
+local EventBus = require("Cheater_Detection.core.event_bus")
+local Database = require("Cheater_Detection.Database.Database")
 
 --[[ Module Declaration ]]
 local WarpDT = {}
@@ -138,12 +141,43 @@ function WarpDT.Check(player, steamID)
 	]]
 	stdDev = math.max(-132, stdDev)
 
-	-- Detect warp signature
-	if stdDev == WARP_STDDEV_SIGNATURE then
+	-- Detect warp signature or spike
+	local spikeDetected = false
+	for i = 1, #deltaTicks do
+		-- Detection for ticks shifted (SimulationTime delta > 1.5x tickrate)
+		-- Normal movement is 1, maybe 2 with jitter. 3+ is a blatant warp/DT.
+		if deltaTicks[i] > 3 then 
+			spikeDetected = true
+			break
+		end
+	end
+
+	if stdDev == WARP_STDDEV_SIGNATURE or spikeDetected then
+		local reason = spikeDetected and "Tick Spike (Warp)" or "Warp Signature"
+		
+		-- Direct mark as cheater per user request
+		local state = PlayerState.Get(steamID)
+		if state then
+			local oldFlags = state.flags
+			state.flags = state.flags | Constants.Flags.CHEATER
+			state.score = 100
+			
+			Database.UpsertCheater(steamID, {
+				name = player:GetName(),
+				reason = reason,
+				flags = state.flags,
+				score = state.score
+			})
+			
+			if oldFlags ~= state.flags then
+				EventBus.Publish("OnPlayerStateChange", state, reason)
+			end
+		end
+
 		Evidence.AddEvidence(steamID, DETECTION_NAME, EVIDENCE_WEIGHT)
 
 		if G.Menu.Advanced.debug then
-			print(string.format("[WarpDT] %s - Sequence burst detected (stdDev: %.0f)", player:GetName(), stdDev))
+			print(string.format("[WarpDT] %s - %s detected (stdDev: %.1f)", player:GetName(), reason, stdDev))
 		end
 
 		return true
