@@ -163,31 +163,8 @@ function Database.SaveDatabase()
 	Log(LogLevel.SUCCESS, "[DB] Database saved successfully")
 end
 
--- Asynchronous loading state
-local loadCoroutine = nil
-local lastTick = 0
-
-function Database.Tick()
-    local currentTick = globals.TickCount()
-    if currentTick == lastTick then return end -- Only run simulation once per engine tick
-    lastTick = currentTick
-
-    if loadCoroutine then
-        local ok, err = coroutine.resume(loadCoroutine)
-        if not ok then
-            Log(LogLevel.ERROR, "[DB] Load Coroutine Error: " .. tostring(err))
-            loadCoroutine = nil
-            Database.State.isInitialized = true -- Fail safe
-        elseif coroutine.status(loadCoroutine) == "dead" then
-            loadCoroutine = nil
-            Database.State.isInitialized = true
-        end
-    end
-end
-
 function Database.LoadDatabase(silent, force)
 	if Database.State.isInitialized and not force then return end
-    if loadCoroutine then return end
 
 	Log(LogLevel.INFO, "[DB] Starting database load...")
 	local filePath = Database.GetFilePath()
@@ -222,39 +199,30 @@ function Database.LoadDatabase(silent, force)
 		return
 	end
 
-    loadCoroutine = coroutine.create(function()
-        G.DataBase = decodedData
-        local entriesToRemove = {}
-        local count = 0
-        local total = 0
-        
-        for _ in pairs(G.DataBase) do total = total + 1 end
-        
-        Log(LogLevel.DEBUG, string.format("[DB] Validating %d entries...", total))
-
-        for steamID, value in pairs(G.DataBase) do
-            count = count + 1
-            if type(value) ~= "table" or type(steamID) ~= "string" or #steamID ~= 17 then
-                table.insert(entriesToRemove, steamID)
-            end
-
-            if count % 500 == 0 then
-                coroutine.yield()
-            end
+    -- Process Synchronously (Normal)
+    G.DataBase = decodedData
+    local entriesToRemove = {}
+    local total = 0
+    
+    for steamID, value in pairs(G.DataBase) do
+        total = total + 1
+        if type(value) ~= "table" or type(steamID) ~= "string" or #steamID ~= 17 then
+            table.insert(entriesToRemove, steamID)
         end
+    end
 
-        for _, key in ipairs(entriesToRemove) do
-            G.DataBase[key] = nil
-        end
+    for _, key in ipairs(entriesToRemove) do
+        G.DataBase[key] = nil
+    end
 
-        Database.State.lastLoaded = os.time()
-        Log(LogLevel.SUCCESS, string.format("[DB] Database ready: %d valid entries", total - #entriesToRemove))
-        Database.ClearLocalPlayer()
-    end)
+    Database.State.lastLoaded = os.time()
+    Log(LogLevel.SUCCESS, string.format("[DB] Database ready: %d valid entries", total - #entriesToRemove))
+    Database.ClearLocalPlayer()
+    Database.State.isInitialized = true
 end
 
 function Database.Initialize(silent)
-	if Database.State.isInitialized or loadCoroutine then return end
+	if Database.State.isInitialized then return end
 	if type(G.DataBase) ~= "table" then
 		G.DataBase = {}
 	end

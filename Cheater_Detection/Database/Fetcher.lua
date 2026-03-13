@@ -68,72 +68,61 @@ Fetcher.State = {
     coro = nil
 }
 
--- Async parsing wrapper
-local function parseSourceAsync(source, content)
-	Log(LogLevel.INFO, string.format("[FETCHER] Async Parsing: %s", source.name))
+-- Synchronous parsing wrapper (called inside coroutine but doesn't yield itself)
+local function parseSourceSync(source, content)
+	Log(LogLevel.INFO, string.format("[FETCHER] Parsing: %s", source.name))
 
 	local stats = { added = 0, updated = 0, errors = 0 }
+	local defaultReason = source.cause or "Unknown Source"
 
 	local success, err = pcall(function()
 		if source.parser == "raw" then
-			local entries, parseErr = Parsers.ParseRawIDs(content, source.cause)
-			if not entries then
-				error(parseErr or "Unknown parsing error")
-			end
-
-			local count = 0
-			for id, data in pairs(entries) do
-				count = count + 1
-				if not G.DataBase[id] then
-					G.DataBase[id] = data
-					stats.added = stats.added + 1
-					Database.State.isDirty = true
-				else
-					local existing = G.DataBase[id]
-					if existing.Name == "Unknown" and data.Name ~= "Unknown" then
-						existing.Name = data.Name
-						stats.updated = stats.updated + 1
+			-- Parse lines directly (Sync)
+			for line in content:gmatch("[^\n\r]+") do
+				local steamID64 = Parsers.GetSteamID64(line)
+				
+				if steamID64 then
+					if not G.DataBase[steamID64] then
+						G.DataBase[steamID64] = {
+							Name = "Unknown",
+							Reason = defaultReason,
+						}
+						stats.added = stats.added + 1
 						Database.State.isDirty = true
 					end
-				end
-
-				-- Yield every 500 entries to prevent freeze
-				if count % 500 == 0 then
-					coroutine.yield()
+				else
+                    local trimmed = line:match("^%s*(.-)%s*$")
+                    if trimmed ~= "" and not trimmed:match("^[#/-]") then
+                        stats.errors = stats.errors + 1
+                    end
 				end
 			end
 		elseif source.parser == "tf2db" then
-			-- Parse JSON into data table
 			local data, parseErr = Parsers.ParseJsonTF2DB(content)
 			if not data or not data.players then
-				error(parseErr or "TF2DB Parser failed to get players")
+				error(parseErr or "TF2DB Parser failed")
 			end
 
-			local count = 0
-			for _, player in ipairs(data.players) do
-				count = count + 1
+			for i = 1, #data.players do
+                local player = data.players[i]
 				local steamID64 = Parsers.GetSteamID64(player.steamid)
 				if steamID64 then
-					local playerName = "Unknown"
-					if player.last_seen and player.last_seen.player_name then
-						playerName = player.last_seen.player_name
-					end
-
-					local reason = source.cause or "TF2DB"
+					local playerName = player.last_seen and player.last_seen.player_name or "Unknown"
+					local reason = defaultReason
 					if player.attributes and #player.attributes > 0 then
 						reason = player.attributes[1]:gsub("^%l", string.upper)
 					end
 
 					if not G.DataBase[steamID64] then
 						G.DataBase[steamID64] = {
-							Name = playerName,
+							Name = playerName or "Unknown",
 							Reason = reason,
 						}
 						stats.added = stats.added + 1
 						Database.State.isDirty = true
 					else
 						local existing = G.DataBase[steamID64]
-						if existing.Name == "Unknown" and playerName ~= "Unknown" then
+						if (existing.Name == "Unknown" or not existing.Name) and playerName ~= "Unknown" then
 							existing.Name = playerName
 							stats.updated = stats.updated + 1
 							Database.State.isDirty = true
@@ -142,19 +131,17 @@ local function parseSourceAsync(source, content)
 				else
 					stats.errors = stats.errors + 1
 				end
-
-				-- Yield every 500 entries
-				if count % 500 == 0 then
-					coroutine.yield()
-				end
 			end
+            data = nil
 		else
 			stats.errors = 1
 		end
 	end)
 
+    content = nil 
+
 	if not success then
-		Log(LogLevel.WARNING, "[FETCHER] Parsing error: " .. tostring(err))
+		Log(LogLevel.WARNING, "[FETCHER] Parsing error: " .. string.sub(tostring(err), 1, 100))
 		return 0, 0, 1
 	end
 
@@ -227,7 +214,7 @@ function Fetcher.Start()
             end
 
             if data then
-                local a, u, e = parseSourceAsync(source, data)
+                local a, u, e = parseSourceSync(source, data)
                 Fetcher.State.results.total_added = Fetcher.State.results.total_added + a
                 Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + u
                 Fetcher.State.results.errors = Fetcher.State.results.errors + e
