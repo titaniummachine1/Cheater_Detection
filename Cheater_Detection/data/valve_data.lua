@@ -293,4 +293,24 @@ ValveData.KnownSteamID64s = {
 	["76561199690380138"] = true,
 }
 
+-- Merge Database/ValveEmployees.lua into the lookup table.
+-- This means any SteamID64 added to ValveEmployees.lua is picked up
+-- automatically by the Layer 1 instant check without touching this file.
+local ok, ValveEmployees = pcall(require, "Cheater_Detection.Database.ValveEmployees")
+if ok and ValveEmployees and type(ValveEmployees.List) == "table" then
+	local mergedCount = 0
+	for id64 in pairs(ValveEmployees.List) do
+		local idStr = tostring(id64)
+		if not ValveData.KnownSteamID64s[idStr] then
+			ValveData.KnownSteamID64s[idStr] = true
+			mergedCount = mergedCount + 1
+		end
+	end
+	if mergedCount > 0 then
+		print(string.format("[ValveData] Merged %d IDs from ValveEmployees.lua", mergedCount))
+	end
+else
+	print("[ValveData] WARNING: Could not load Database/ValveEmployees.lua – " .. tostring(ValveEmployees))
+end
+
 return ValveData
