@@ -1,6 +1,7 @@
 --[[
     Quaternion Math Utilities
     For angle extrapolation and aimbot detection
+    Refactored for zero-allocation performance.
 ]]
 
 local Quaternion = {}
@@ -9,18 +10,12 @@ local Quaternion = {}
 -- Core Quaternion Functions
 -- ============================================================================
 
--- Create a new quaternion
-function Quaternion.new(w, x, y, z)
-	return { w = w or 1, x = x or 0, y = y or 0, z = z or 0 }
-end
-
 -- Convert Euler angles (pitch, yaw, roll) to Quaternion
 -- Angles are in degrees
--- NOTE: Negates pitch to match Source engine conventions
 function Quaternion.fromEuler(pitch, yaw, roll)
-	local p = math.rad(pitch) * 0.5
-	local y = math.rad(yaw) * 0.5
-	local r = math.rad(roll) * 0.5
+	local p = math.rad(pitch or 0) * 0.5
+	local y = math.rad(yaw or 0) * 0.5
+	local r = math.rad(roll or 0) * 0.5
 
 	local cy = math.cos(y)
 	local sy = math.sin(y)
@@ -29,24 +24,24 @@ function Quaternion.fromEuler(pitch, yaw, roll)
 	local cr = math.cos(r)
 	local sr = math.sin(r)
 
-	return Quaternion.new(
-		cr * cp * cy + sr * sp * sy, -- w
-		sr * cp * cy - cr * sp * sy, -- x
-		cr * sp * cy + sr * cp * sy, -- y
-		cr * cp * sy - sr * sp * cy -- z
-	)
+	local qw = cr * cp * cy + sr * sp * sy
+	local qx = sr * cp * cy - cr * sp * sy
+	local qy = cr * sp * cy + sr * cp * sy
+	local qz = cr * cp * sy - sr * sp * cy
+	
+	return qw, qx, qy, qz
 end
 
--- Convert Quaternion to Euler angles (pitch, yaw, roll)
+-- Convert Quaternion components to Euler angles (pitch, yaw, roll)
 -- Returns angles in degrees
--- NOTE: Negates pitch to match Source engine conventions
-function Quaternion.toEuler(q)
-	local len = math.sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z)
-	if len < 0.0001 then
+function Quaternion.toEuler(qw, qx, qy, qz)
+	local lenSq = qw * qw + qx * qx + qy * qy + qz * qz
+	if lenSq < 0.0001 then
 		return 0, 0, 0
 	end
 
-	local w, x, y, z = q.w / len, q.x / len, q.y / len, q.z / len
+	local f = 1.0 / math.sqrt(lenSq)
+	local w, x, y, z = qw * f, qx * f, qy * f, qz * f
 
 	-- Roll
 	local sinr_cosp = 2 * (w * x + y * z)
@@ -70,63 +65,55 @@ function Quaternion.toEuler(q)
 	return math.deg(pitch), math.deg(yaw), math.deg(roll)
 end
 
--- Normalize a quaternion
-function Quaternion.normalize(q)
-	local len = math.sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z)
-	if len < 0.0001 then
-		return Quaternion.new(1, 0, 0, 0)
+-- Normalize quaternion components
+function Quaternion.normalize(w, x, y, z)
+	local lenSq = w * w + x * x + y * y + z * z
+	if lenSq < 0.0001 then
+		return 1, 0, 0, 0
 	end
-	return Quaternion.new(q.w / len, q.x / len, q.y / len, q.z / len)
+	local f = 1.0 / math.sqrt(lenSq)
+	return w * f, x * f, y * f, z * f
 end
 
 -- Multiply two quaternions
-function Quaternion.multiply(q1, q2)
-	return Quaternion.new(
-		q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z,
-		q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y,
-		q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
-		q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w
-	)
+function Quaternion.multiply(w1, x1, y1, z1, w2, x2, y2, z2)
+	local rw = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+	local rx = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+	local ry = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+	local rz = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+	return rw, rx, ry, rz
 end
 
 -- Spherical Linear Interpolation (SLERP)
-function Quaternion.slerp(q1, q2, t)
-	local dot = q1.w * q2.w + q1.x * q2.x + q1.y * q2.y + q1.z * q2.z
+function Quaternion.slerp(w1, x1, y1, z1, w2, x2, y2, z2, t)
+	local dot = w1 * w2 + x1 * x2 + y1 * y2 + z1 * z2
 
 	-- Take shorter path
-	local q2_copy = { w = q2.w, x = q2.x, y = q2.y, z = q2.z }
 	if dot < 0 then
-		q2_copy.w = -q2_copy.w
-		q2_copy.x = -q2_copy.x
-		q2_copy.y = -q2_copy.y
-		q2_copy.z = -q2_copy.z
+		w2, x2, y2, z2 = -w2, -x2, -y2, -z2
 		dot = -dot
 	end
 
 	-- Use linear interpolation for very close quaternions
 	if dot > 0.9995 then
 		return Quaternion.normalize(
-			Quaternion.new(
-				q1.w + t * (q2_copy.w - q1.w),
-				q1.x + t * (q2_copy.x - q1.x),
-				q1.y + t * (q2_copy.y - q1.y),
-				q1.z + t * (q2_copy.z - q1.z)
-			)
+			w1 + t * (w2 - w1),
+			x1 + t * (x2 - x1),
+			y1 + t * (y2 - y1),
+			z1 + t * (z2 - z1)
 		)
 	end
 
 	dot = math.max(-1, math.min(1, dot))
 	local theta = math.acos(dot)
 	local sinTheta = math.sin(theta)
-	local w1 = math.sin((1 - t) * theta) / sinTheta
-	local w2 = math.sin(t * theta) / sinTheta
+	local sc1 = math.sin((1 - t) * theta) / sinTheta
+	local sc2 = math.sin(t * theta) / sinTheta
 
-	return Quaternion.new(
-		q1.w * w1 + q2_copy.w * w2,
-		q1.x * w1 + q2_copy.x * w2,
-		q1.y * w1 + q2_copy.y * w2,
-		q1.z * w1 + q2_copy.z * w2
-	)
+	return w1 * sc1 + w2 * sc2,
+		x1 * sc1 + x2 * sc2,
+		y1 * sc1 + y2 * sc2,
+		z1 * sc1 + z2 * sc2
 end
 
 -- ============================================================================
@@ -134,9 +121,9 @@ end
 -- ============================================================================
 
 -- Calculate quaternion delta (rotation from q1 to q2)
-local function quaternionDelta(q1, q2)
-	local conj_q1 = { w = q1.w, x = -q1.x, y = -q1.y, z = -q1.z }
-	return Quaternion.multiply(q2, conj_q1)
+local function quaternionDelta(w1, x1, y1, z1, w2, x2, y2, z2)
+	-- conj(q1) = (w1, -x1, -y1, -z1)
+	return Quaternion.multiply(w2, x2, y2, z2, w1, -x1, -y1, -z1)
 end
 
 -- ============================================================================
@@ -144,50 +131,43 @@ end
 -- ============================================================================
 
 -- Extrapolate angles based on history
--- angleHistory: array of {pitch, yaw, roll} tables (at least 3 required)
--- ticksAhead: how many ticks to predict (default 1)
--- Returns: predicted {pitch, yaw, roll} or nil
-function Quaternion.extrapolateAngle(angleHistory, ticksAhead)
-	ticksAhead = ticksAhead or 1
-
-	if #angleHistory < 3 then
-		return nil -- Need at least 3 points
+-- history: any table with [idx] containing .pitch, .yaw, .roll fields
+-- count: current number of items in history
+-- ticksAhead: prediction distance
+-- Returns: pitch, yaw, roll (predicted)
+function Quaternion.extrapolate(history, count, ticksAhead)
+	if count < 3 then
+		return nil
 	end
 
-	-- Convert last 3 Euler angles to quaternions
-	local q3 = Quaternion.fromEuler(
-		angleHistory[#angleHistory].pitch,
-		angleHistory[#angleHistory].yaw,
-		angleHistory[#angleHistory].roll or 0
-	)
-	local q2 = Quaternion.fromEuler(
-		angleHistory[#angleHistory - 1].pitch,
-		angleHistory[#angleHistory - 1].yaw,
-		angleHistory[#angleHistory - 1].roll or 0
-	)
-	local q1 = Quaternion.fromEuler(
-		angleHistory[#angleHistory - 2].pitch,
-		angleHistory[#angleHistory - 2].yaw,
-		angleHistory[#angleHistory - 2].roll or 0
-	)
+	-- Access history (assuming standard array access or HistoryManager wrap)
+	local a3 = history[count]
+	local a2 = history[count - 1]
+	local a1 = history[count - 2]
+	
+	if not (a1 and a2 and a3) then return nil end
 
-	-- Calculate velocity quaternions
-	local vel1 = quaternionDelta(q1, q2)
-	local vel2 = quaternionDelta(q2, q3)
+	-- To Quaternions
+	local w3, x3, y3, z3 = Quaternion.fromEuler(a3.pitch, a3.yaw, a3.roll)
+	local w2, x2, y2, z2 = Quaternion.fromEuler(a2.pitch, a2.yaw, a2.roll)
+	local w1, x1, y1, z1 = Quaternion.fromEuler(a1.pitch, a1.yaw, a1.roll)
 
-	-- Average velocities for smoother prediction
-	local avgVel = Quaternion.slerp(vel1, vel2, 0.5)
+	-- Rotation Velocities
+	local vw1, vx1, vy1, vz1 = quaternionDelta(w1, x1, y1, z1, w2, x2, y2, z2)
+	local vw2, vx2, vy2, vz2 = quaternionDelta(w2, x2, y2, z2, w3, x3, y3, z3)
 
-	-- Extrapolate tick by tick (RIGHT multiply = local-space rotation, correct for view angles)
-	local result = q3
-	for i = 1, ticksAhead do
-		result = Quaternion.multiply(result, avgVel)
-		result = Quaternion.normalize(result)
+	-- Avg Velocity (SLERP)
+	local vaw, vax, vay, vaz = Quaternion.slerp(vw1, vx1, vy1, vz1, vw2, vx2, vy2, vz2, 0.5)
+
+	-- Extrapolate
+	local rw, rx, ry, rz = w3, x3, y3, z3
+	for i = 1, ticksAhead or 1 do
+		rw, rx, ry, rz = Quaternion.multiply(rw, rx, ry, rz, vaw, vax, vay, vaz)
+		rw, rx, ry, rz = Quaternion.normalize(rw, rx, ry, rz)
 	end
 
-	-- Convert back to Euler
-	local pitch, yaw, roll = Quaternion.toEuler(result)
-	return { pitch = pitch, yaw = yaw, roll = roll }
+	-- Back to Euler
+	return Quaternion.toEuler(rw, rx, ry, rz)
 end
 
 return Quaternion

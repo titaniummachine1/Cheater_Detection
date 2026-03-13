@@ -240,8 +240,8 @@ end
 
 --- Try to mark player as cheater if threshold is exceeded
 ---@param steamID string Player's SteamID64
----@param evidence table Evidence data
----@param state table Player state
+---@param evidence table? Evidence data
+---@param state table? Player state
 local function tryMarkCheater(steamID, evidence, state)
 	if not evidence or evidence.MarkedAsCheater then
 		return
@@ -493,8 +493,8 @@ function Evidence.IsMarkedCheater(steamID)
 		return false
 	end
 
-	-- Ensure steamID is a string
-	-- steamID = tostring(steamID) -- Use raw key
+	-- Ensure steamID is a string for table lookup
+	steamID = tostring(steamID)
 
 	-- Check database first (known cheater lists)
 	if G.DataBase[steamID] then
@@ -630,7 +630,7 @@ end
 
 --- Get detailed evidence breakdown for a player
 ---@param steamID string Player's SteamID64
----@return table Evidence details
+---@return table? Evidence details
 function Evidence.GetDetails(steamID)
 	if not steamID then
 		return nil

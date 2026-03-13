@@ -28,102 +28,93 @@ HistoryManager.Fields = {
 	ViewOffset = "view_offset",
 }
 
+--[[ Field Builders ]]
+
+local function buildAngles(player) return player:GetEyeAngles() end
+local function buildEyePos(player) return player:GetEyePos() end
+local function buildHeadHitbox(player) return player.GetHitboxPos and player:GetHitboxPos(1) end
+local function buildBodyHitbox(player) return player.GetHitboxPos and player:GetHitboxPos(4) end
+local function buildSimTime(player) return player:GetSimulationTime() end
+local function buildOnGround(player) return player:IsOnGround() end
+local function buildVelocity(player) return player:GetVelocity() end
+local function buildViewOffset(player) return player:GetViewOffset() end
+
 local FIELD_BUILDERS = {
-	[HistoryManager.Fields.Angles] = function(player)
-		return player:GetEyeAngles()
-	end,
-	[HistoryManager.Fields.EyePosition] = function(player)
-		return player:GetEyePos()
-	end,
-	[HistoryManager.Fields.HeadHitbox] = function(player)
-		return player.GetHitboxPos and player:GetHitboxPos(1) or nil
-	end,
-	[HistoryManager.Fields.BodyHitbox] = function(player)
-		return player.GetHitboxPos and player:GetHitboxPos(4) or nil
-	end,
-	[HistoryManager.Fields.SimulationTime] = function(player)
-		return player:GetSimulationTime()
-	end,
-	[HistoryManager.Fields.OnGround] = function(player)
-		return player:IsOnGround()
-	end,
-	[HistoryManager.Fields.Velocity] = function(player)
-		return player:GetVelocity()
-	end,
-	[HistoryManager.Fields.ViewOffset] = function(player)
-		return player:GetViewOffset()
-	end,
+	[HistoryManager.Fields.Angles] = buildAngles,
+	[HistoryManager.Fields.EyePosition] = buildEyePos,
+	[HistoryManager.Fields.HeadHitbox] = buildHeadHitbox,
+	[HistoryManager.Fields.BodyHitbox] = buildBodyHitbox,
+	[HistoryManager.Fields.SimulationTime] = buildSimTime,
+	[HistoryManager.Fields.OnGround] = buildOnGround,
+	[HistoryManager.Fields.Velocity] = buildVelocity,
+	[HistoryManager.Fields.ViewOffset] = buildViewOffset,
 }
 
---[[ Ring buffer with array-compatible read access ]]
-
-local RingMT = {}
-
-function RingMT.__len(self)
-	return rawget(self, "_count")
-end
-
-function RingMT.__index(self, key)
-	if type(key) ~= "number" then
-		return nil
-	end
-	local count = rawget(self, "_count")
-	if key < 1 or key > count then
-		return nil
-	end
-	local capacity = rawget(self, "_capacity")
-	local head = rawget(self, "_head")
-	local oldestSlot = (head - count) % capacity
-	local slot = (oldestSlot + key - 1) % capacity + 1
-	return rawget(self, "_buf")[slot]
-end
-
-function RingMT.__newindex(self, key, value)
-	if type(key) == "string" and key:sub(1, 1) == "_" then
-		rawset(self, key, value)
-		return
-	end
-end
+--[[ Ring buffer functions ]]
 
 local function createRing(capacity)
 	local buf = {}
 	for i = 1, capacity do
-		buf[i] = {}
+		buf[i] = {
+			tick = 0,
+			-- Fields will be populated here
+		}
 	end
-	local ring = setmetatable({}, RingMT)
-	rawset(ring, "_buf", buf)
-	rawset(ring, "_head", 0)
-	rawset(ring, "_count", 0)
-	rawset(ring, "_capacity", capacity)
-	return ring
+	
+	return {
+		_buf = buf,
+		_head = 0,
+		_count = 0,
+		_capacity = capacity
+	}
+end
+
+function HistoryManager.GetAt(ring, key)
+	if not ring then return nil end
+	local count = ring._count
+	if key < 1 or key > count then
+		return nil
+	end
+	local capacity = ring._capacity
+	local head = ring._head
+	local oldestSlot = (head - count) % capacity
+	local slot = (oldestSlot + key - 1) % capacity + 1
+	return ring._buf[slot]
+end
+
+function HistoryManager.GetCount(ring)
+	return ring and ring._count or 0
 end
 
 local function ringPush(ring)
-	local capacity = rawget(ring, "_capacity")
-	local head = rawget(ring, "_head")
-	local count = rawget(ring, "_count")
+	local capacity = ring._capacity
+	local head = ring._head
+	local count = ring._count
 
 	local nextHead = head % capacity + 1
-	rawset(ring, "_head", nextHead)
+	ring._head = nextHead
 
 	if count < capacity then
-		rawset(ring, "_count", count + 1)
+		ring._count = count + 1
 	end
 
-	return rawget(ring, "_buf")[nextHead]
+	return ring._buf[nextHead]
 end
 
 local function ringClear(ring)
-	rawset(ring, "_head", 0)
-	rawset(ring, "_count", 0)
+	ring._head = 0
+	ring._count = 0
 end
 
 local function isRing(t)
-	return type(t) == "table" and rawget(t, "_buf") ~= nil
+	return type(t) == "table" and t._buf ~= nil
 end
 
 local function getCapacity()
-	return (maxRetentionTicks > 0 and maxRetentionTicks) or DEFAULT_RETENTION_TICKS
+	if maxRetentionTicks > 0 then
+		return maxRetentionTicks
+	end
+	return DEFAULT_RETENTION_TICKS
 end
 
 local function recomputeRequirements()
@@ -162,16 +153,17 @@ local function ensureRing(state)
 	local history = state.History
 
 	if isRing(history) then
-		local existingCap = rawget(history, "_capacity")
-		if existingCap == cap then
+		if history._capacity == cap then
 			return history
 		end
+		
 		local newRing = createRing(cap)
-		local oldCount = rawget(history, "_count")
-		local copyCount = (oldCount < cap) and oldCount or cap
+		local oldCount = history._count
+		local copyCount = math.min(oldCount, cap)
 		local startIdx = oldCount - copyCount + 1
+		
 		for i = startIdx, oldCount do
-			local src = history[i]
+			local src = HistoryManager.GetAt(history, i)
 			if src then
 				local dst = ringPush(newRing)
 				for k, v in pairs(src) do
@@ -187,7 +179,7 @@ local function ensureRing(state)
 
 	if type(history) == "table" then
 		local total = #history
-		local copyCount = (total < cap) and total or cap
+		local copyCount = math.min(total, cap)
 		local startIdx = total - copyCount + 1
 		for i = startIdx, total do
 			local src = history[i]

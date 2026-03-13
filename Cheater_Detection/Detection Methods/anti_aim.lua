@@ -20,20 +20,15 @@ local INVALID_PITCH_MAX = 90
 local EXACT_PITCH_SUSPECT = 89.000 -- Common rage AA value
 
 --[[ Helper Functions ]]
-local function validatePlayer(player)
-	if not player or not player:IsValid() or not player:IsAlive() or player:IsDormant() then
-		return false
-	end
-	return true
-end
-
 --[[ Public Functions ]]
 function AntiAim.Check(player, steamID)
+	assert(player, "AntiAim.Check: player missing")
+	
 	if not G.Menu.Advanced.AntyAim then
 		return false
 	end
 
-	if not validatePlayer(player) then
+	if not Common.IsValidPlayer(player, true, false) then
 		return false
 	end
 

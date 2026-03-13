@@ -114,10 +114,10 @@ function Common.GetSteamID64(Player)
 		local steamID = assert(playerInfo.SteamID, "Failed to get SteamID")
 
 		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
-			result = playerInfo.UserID
+			result = tostring(playerInfo.UserID)
 		else
 			local converted = steam.ToSteamID64(steamID)
-			result = assert(converted, "Failed to convert SteamID to SteamID64")
+			result = tostring(assert(converted, "Failed to convert SteamID to SteamID64"))
 		end
 	end
 
@@ -164,18 +164,20 @@ function Common.IsCheater(playerInfo)
 	return isMarkedCheater or inDatabase or priorityCheater
 end
 
----@param entity Entity
+---@param entity any
 ---@param checkFriend boolean?
 ---@param checkDormant boolean?
----@param skipEntity Entity? Optional entity to skip (e.g., the local player)
+---@param skipEntity any? Optional entity to skip (e.g., the local player)
 function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
+	assert(entity, "Common.IsValidPlayer: entity missing")
+	
 	-- Simple validation checks
-	if not entity or not entity:IsValid() or not entity:IsAlive() then
-		return false
-	end
+	if not entity:IsValid() then return false end
+	if not entity:IsAlive() then return false end
 
 	-- Check dormancy (default is to reject dormant unless explicitly false)
-	if checkDormant ~= false and entity:IsDormant() then
+	local isDormant = entity:IsDormant()
+	if checkDormant ~= false and isDormant then
 		return false
 	end
 
@@ -191,46 +193,12 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 	end
 
 	-- Skip friends (default behavior unless debug enabled or explicitly disabled)
-	if not G.Menu.Advanced.debug and checkFriend ~= false and Common.IsFriend(entity) then
+	local isFriend = Common.IsFriend(entity)
+	if not G.Menu.Advanced.debug and checkFriend ~= false and isFriend then
 		return false
 	end
 
 	return true -- Entity is a valid player
-end
-
--- Create a common record structure
-function Common.createRecord(angle, position, headHitbox, bodyHitbox, simTime, onGround)
-	return {
-		Angle = angle,
-		ViewPos = position,
-		Hitboxes = {
-			Head = headHitbox,
-			Body = bodyHitbox,
-		},
-		SimTime = simTime,
-		onGround = onGround,
-	}
-end
-
--- Maximum number of historical snapshots to keep per player
-Common.MAX_HISTORY = 66
-
--- Convenience: build a record directly from a player wrapper/entity
----@param player table|Entity WrappedPlayer or entity implementing required methods
----@return table|nil record
-function Common.createRecordFromPlayer(player)
-	if not player or type(player.GetEyeAngles) ~= "function" then
-		return nil
-	end
-
-	return Common.createRecord(
-		player:GetEyeAngles(),
-		player:GetEyePos(),
-		player:GetHitboxPos(1), -- Head
-		player:GetHitboxPos(4), -- Body
-		player:GetSimulationTime(),
-		player:IsOnGround()
-	)
 end
 
 -- Legacy shim; new code should use HistoryManager.Push directly

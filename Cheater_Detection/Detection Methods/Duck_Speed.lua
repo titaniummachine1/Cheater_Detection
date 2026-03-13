@@ -18,30 +18,29 @@ local FULLY_CROUCHED_VIEW_OFFSET = 45 -- View offset Z when fully crouched
 -- Per-player state tracking
 local playerDuckData = {}
 
---[[ Helper Functions ]]
-local function validatePlayer(player)
-	if not player or not player:IsValid() or not player:IsAlive() or player:IsDormant() then
-		return false
-	end
-	return true
-end
-
-local function initPlayerData(steamID)
-	if not playerDuckData[steamID] then
-		playerDuckData[steamID] = {
+--[[ Functions ]]
+local function getPlayerData(steamID)
+	assert(steamID, "getPlayerData: steamID missing")
+	local data = playerDuckData[steamID]
+	if not data then
+		data = {
 			violationTicks = 0,
 			lastDecayTick = 0,
 		}
+		playerDuckData[steamID] = data
 	end
+	return data
 end
 
 --[[ Public Functions ]]
 function DuckSpeed.Check(player, steamID)
+	assert(player, "DuckSpeed.Check: player missing")
+	
 	if not G.Menu.Advanced.DuckSpeed then
 		return false
 	end
 
-	if not validatePlayer(player) then
+	if not Common.IsValidPlayer(player, true, false) then
 		return false
 	end
 
@@ -50,8 +49,7 @@ function DuckSpeed.Check(player, steamID)
 	end
 
 	-- Initialize tracking data
-	initPlayerData(steamID)
-	local data = playerDuckData[steamID]
+	local data = getPlayerData(steamID)
 
 	-- Get raw entity for prop access
 	local entity = player:GetRawEntity()

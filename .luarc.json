@@ -1,0 +1,44 @@
+{
+    "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
+    "Lua.runtime.version": "Lua 5.4",
+    "Lua.workspace.library": [
+        "c:/gitProjects/Lmaobox-Annotations/library"
+    ],
+    "Lua.workspace.checkThirdParty": "Apply",
+    "Lua.diagnostics.globals": [
+        "client",
+        "entities",
+        "globals",
+        "playerlist",
+        "callbacks",
+        "steam",
+        "vector",
+        "EulerAngles",
+        "gui",
+        "input",
+        "filesystem",
+        "engine",
+        "clientstate",
+        "party",
+        "materials",
+        "models",
+        "render",
+        "warp",
+        "Vector3",
+        "IN_ATTACK",
+        "IN_JUMP",
+        "IN_DUCK",
+        "IN_FORWARD",
+        "IN_BACK",
+        "IN_USE",
+        "TEAM_SPECTATOR",
+        "TEAM_UNASSIGNED",
+        "TEAM_BLU",
+        "TEAM_RED",
+        "FL_ONGROUND",
+        "PrintC",
+        "printc",
+        "GetScriptName"
+    ]
+}
+

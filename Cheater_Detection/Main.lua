@@ -50,25 +50,27 @@ local SilentAimbot = require("Cheater_Detection.Detection Methods.silent_aimbot"
 --[[ Variables ]]
 
 --[[ Update the player data every tick ]]
---
 local function OnCreateMove(cmd)
-	local DebugMode = G.Menu.Advanced and G.Menu.Advanced.debug
+	local DebugMode = false
+	if G.Menu.Advanced then
+		DebugMode = G.Menu.Advanced.debug
+	end
+
 	TickProfiler.SetEnabled(DebugMode)
 	TickProfiler.BeginSection("CreateMove")
 
-	local function profilerEnd()
-		TickProfiler.EndSection("CreateMove")
-	end
-
-	-- Use FastPlayers for optimized player fetching (required directly)
+	-- Use FastPlayers for optimized player fetching
 	TickProfiler.BeginSection("FetchPlayers")
-	local pLocal = FastPlayers.GetLocal() -- Get cached local player (still store in G for now)
-	G.pLocal = pLocal -- Store for Evidence system to identify local player
-	local allPlayers = FastPlayers.GetAll(not G.Menu.Advanced.debug) -- Exclude local unless debug mode
+	local pLocal = FastPlayers.GetLocal()
+	G.pLocal = pLocal 
+	
+	local fastFilter = true
+	if DebugMode then fastFilter = false end
+	local allPlayers = FastPlayers.GetAll(fastFilter)
 	TickProfiler.EndSection("FetchPlayers")
 
-	if not pLocal then -- Need local player to proceed
-		profilerEnd()
+	if not pLocal then
+		TickProfiler.EndSection("CreateMove")
 		return
 	end
 
@@ -78,7 +80,7 @@ local function OnCreateMove(cmd)
 	TickProfiler.EndSection("CheckConnection")
 
 	if not isStable or isFrameGap then
-		profilerEnd()
+		TickProfiler.EndSection("CreateMove")
 		return
 	end
 
@@ -90,8 +92,9 @@ local function OnCreateMove(cmd)
 	-- Iterate over the cached list of players
 	for _, Player in ipairs(allPlayers) do
 		local steamID = Player:GetSteamID64()
+		if not steamID then goto continue end
 
-		-- Skip if already confirmed cheater (optimization - database or marked)
+		-- Skip if already confirmed cheater
 		TickProfiler.BeginSection("CheckCheaterStatus")
 		local isMarked = Evidence.IsMarkedCheater(steamID)
 		TickProfiler.EndSection("CheckCheaterStatus")
@@ -100,8 +103,7 @@ local function OnCreateMove(cmd)
 			goto continue
 		end
 
-		-- Push history ONLY for non-dormant players (can't detect dormant anyway)
-		-- This saves ~16KB/tick by skipping useless record building
+		-- Push history ONLY for non-dormant players
 		TickProfiler.BeginSection("HistoryPush")
 		if not Player:IsDormant() then
 			Common.pushHistory(Player)
@@ -146,7 +148,7 @@ local function OnCreateMove(cmd)
 		::continue::
 	end
 
-	profilerEnd()
+	TickProfiler.EndSection("CreateMove")
 end
 
 --[[ Map Change Handler ]]

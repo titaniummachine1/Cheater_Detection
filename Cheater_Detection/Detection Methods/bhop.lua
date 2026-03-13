@@ -19,9 +19,12 @@ local EVIDENCE_WEIGHT = 15
 local PERFECT_JUMP_WINDOW = 2
 local MIN_CONSECUTIVE_HOPS = 4
 
+--[[ Per-Player State ]]
 local playerBhopData = {}
 
+--[[ Functions ]]
 local function getPlayerData(steamID)
+	assert(steamID, "getPlayerData: steamID missing")
 	local data = playerBhopData[steamID]
 	if not data then
 		data = {
@@ -36,6 +39,8 @@ end
 
 --[[ Public Functions ]]
 function Bhop.Check(player, steamID)
+	assert(player, "Bhop.Check: player missing")
+	
 	if not G.Menu.Advanced.Bhop then
 		return false
 	end
