@@ -49,14 +49,14 @@ function Bhop.ProcessPlayer(playerState)
                     -- Scale increment for extreme consistency
                     if data.consecutivePerfects > 10 then increment = 25 end
                     
-                    playerState.score = math.min(100, playerState.score + increment)
+                    playerState.score = math.min(99, playerState.score + increment)
                     
-                    local isBlatant = data.consecutivePerfects >= 12
-                    if playerState.score >= 100 or isBlatant then
-                        playerState.flags = playerState.flags | Constants.Flags.CHEATER
-                        playerState.score = 100
-                    elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
+                    if playerState.score >= Constants.Threshold.SUSPICIOUS then
                         playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+                    end
+
+                    if playerState.score >= Constants.Threshold.HIGH_RISK then
+                        playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
                     end
 
                     local reason = string.format("Bhop Script (%d perfect jumps)", data.consecutivePerfects)
