@@ -22,7 +22,7 @@ local Database = {
 		lastSave = 0,
 		lastLoaded = 0,
 		isInitialized = false,
-		logEntries = 0, -- Track number of changes since last consolidation
+		logEntries = 0,
 	},
 }
 
@@ -159,6 +159,12 @@ function Database.AppendChange(steamID, data, isRemoval)
         ts = os.time()
     }
 
+    if not Json or not Json.encode then
+        Log(LogLevel.ERROR, "[DB] Json.encode unavailable for logging!")
+        file:close()
+        return
+    end
+
     local success, encoded = pcall(Json.encode, change)
     if success and type(encoded) == "string" then
         file:write(encoded .. "\n")
@@ -170,9 +176,20 @@ function Database.AppendChange(steamID, data, isRemoval)
     
     file:close()
     
-    -- Consolidate if the log gets too big (e.g. 200 entries)
-    if Database.State.logEntries > 200 then
-        Database.SaveDatabase()
+    -- CONSOLIDATION LOGIC
+    local currentTime = os.time()
+    local timeSinceLastSave = currentTime - Database.State.lastSave
+    local isHardEvidence = false
+    if data and data.Flags then
+        isHardEvidence = (data.Flags & Constants.Flags.CHEATER) ~= 0
+    end
+
+    -- Trigger full save if:
+    -- 1. Cooldown (10s) passed AND (100+ entries OR Hard Evidence)
+    if timeSinceLastSave >= 10 then
+        if Database.State.logEntries >= 100 or isHardEvidence then
+            Database.SaveDatabase()
+        end
     end
 end
 
@@ -218,6 +235,8 @@ function Database.SaveDatabase()
 
     -- After full save, we can clear the log
     local logPath = Database.GetLogPath()
+    if not logPath then return end
+
     local logFile = io.open(logPath, "w")
     if logFile then
         logFile:close()
@@ -236,7 +255,7 @@ function Database.LoadDatabase(silent, force)
 	local filePath = Database.GetFilePath()
     local logPath = Database.GetLogPath()
 
-	local file = io.open(filePath, "r")
+	local file = (filePath and io.open(filePath, "r")) or nil
     local content = nil
 	if file then
         content = file:read("*a")
@@ -262,7 +281,7 @@ function Database.LoadDatabase(silent, force)
 	end
 
     -- REPLAY LOGS: Apply any 1/15th of the entries that were saved in the log
-    local logFile = io.open(logPath, "r")
+    local logFile = (logPath and io.open(logPath, "r")) or nil
     if logFile then
         Log(LogLevel.INFO, "[DB] Replaying updates log...")
         local replayCount = 0
