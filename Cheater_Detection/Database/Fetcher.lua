@@ -129,8 +129,8 @@ function Fetcher.Start()
     state.sourceIdx = 1
     state.fileIdx = 1
     state.entryIdx = 1
-    state.playersToProcess = nil
     state.waitEndTime = 0
+    Database.State.suppressFullSave = true
 end
 
 -- Core Tick function (called every frame from Draw/Scheduler)
@@ -322,10 +322,15 @@ function Fetcher.Tick()
             local added, updated, err = Parsers.ParseTF2BotDetector_MergeEntry(players[i], G.DataBase, staticID, source.cause)
             
             s.processed = s.processed + 1
-            if err then s.errors = s.errors + 1
-            elseif added then s.added = s.added + 1
-            elseif updated then s.updated = s.updated + 1
-            else s.existing = s.existing + 1 end
+            if err then 
+                s.errors = s.errors + 1
+            elseif added or updated then 
+                if added then s.added = s.added + 1 end
+                if updated then s.updated = s.updated + 1 end
+                Database.State.isDirty = true -- Ensure the DB knows it needs saving!
+            else 
+                s.existing = s.existing + 1 
+            end
 
             if count >= chunkSize then break end
         end
@@ -453,14 +458,17 @@ function Fetcher.FinishFetch()
 	end
 
 	if Database.State.isDirty then
-		Log(LogLevel.INFO, "Changes detected, saving database")
+		Log(LogLevel.INFO, "[FETCHER] Changes detected, saving database...")
 		Database.SaveDatabase()
+	else
+        Log(LogLevel.DEBUG, "[FETCHER] No changes detected (isDirty=false), skipping save")
 	end
 
 	local mainMenu = G and G.Menu and G.Menu.Main
 	if mainMenu then mainMenu.LastFetchTimestamp = os.time() end
 
 	Fetcher.State.isRunning = false
+    Database.State.suppressFullSave = false
 	Log(LogLevel.DEBUG, "Fetch process finished")
 end
 

@@ -23,6 +23,7 @@ local Database = {
 		lastLoaded = 0,
 		isInitialized = false,
 		logEntries = 0,
+        suppressFullSave = false, -- If true, SaveDatabase will only append to log even if triggers met
 	},
 }
 
@@ -186,9 +187,16 @@ function Database.AppendChange(steamID, data, isRemoval)
 
     -- Trigger full save if:
     -- 1. Cooldown (10s) passed AND (100+ entries OR Hard Evidence)
-    if timeSinceLastSave >= 10 then
-        if Database.State.logEntries >= 100 or isHardEvidence then
-            Database.SaveDatabase()
+    -- 2. OR Log is getting dangerously large (1000+ entries) and 60s passed
+    local entries = Database.State.logEntries
+    if timeSinceLastSave >= 10 and not Database.State.suppressFullSave then
+        if (entries >= 100 or isHardEvidence) then
+            -- Avoid saving too often if we are in a massive fetch
+            if entries > 1000 and timeSinceLastSave < 60 then
+                -- Wait for 60s for massive logs to reduce IO burst
+            else
+                Database.SaveDatabase()
+            end
         end
     end
 end
@@ -201,16 +209,26 @@ function Database.SaveDatabase()
 	local encodedData = nil
 	if Json and Json.encode then
 		-- Unified Database Persistence: Save EVERYTHING to database.json
-		local saveTable = G.DataBase
+		-- DATA OPTIMIZATION: Create a shallow copy for saving that omits redundant data
+		local saveTable = {}
 		local count = 0
-		for _ in pairs(saveTable) do
-			count = count + 1
+		for k, v in pairs(G.DataBase) do
+            count = count + 1
+            local clean = {}
+            -- Only save what we need
+            if v.Name and v.Name ~= "Unknown" then clean.Name = v.Name end
+            if v.Reason and v.Reason ~= "Unknown Source" then clean.Reason = v.Reason end
+            if v.Static then clean.Static = v.Static end
+            if v.Flags and v.Flags ~= 0 then clean.Flags = v.Flags end
+            if v.Score and v.Score ~= 0 then clean.Score = v.Score end
+            
+            saveTable[k] = clean
 		end
 
 		local success, result = pcall(Json.encode, saveTable)
 		if success and type(result) == "string" then
 			encodedData = result
-			Log(LogLevel.DEBUG, string.format("[DB] Encoded %d entries for saving", count))
+			Log(LogLevel.DEBUG, string.format("[DB] Encoded %d entries (Optimized Size: %.1f KB)", count, #result / 1024))
 		else
 			Log(LogLevel.ERROR, "[DB] Json.encode failed: " .. tostring(result))
 			return
