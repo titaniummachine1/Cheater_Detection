@@ -9,6 +9,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.core.constants")
 local Json = Common.Json
+local AsyncSaver = require("Cheater_Detection.Utils.async_saver")
 
 --[[ Module Declaration ]]
 local Database = {
@@ -24,6 +25,7 @@ local Database = {
 		isInitialized = false,
 		logEntries = 0,
         suppressFullSave = false, -- If true, SaveDatabase will only append to log even if triggers met
+        isSaving = false,        -- True if an async save is in progress
 	},
 }
 
@@ -177,6 +179,9 @@ function Database.AppendChange(steamID, data, isRemoval)
     
     file:close()
     
+    -- Optimized trigger logic: only check if we are not already saving
+    if Database.State.isSaving then return end
+
     -- CONSOLIDATION LOGIC
     local currentTime = os.time()
     local timeSinceLastSave = currentTime - Database.State.lastSave
@@ -202,68 +207,52 @@ function Database.AppendChange(steamID, data, isRemoval)
 end
 
 function Database.SaveDatabase()
-	if not G.DataBase then
+	if not G.DataBase or Database.State.isSaving then
 		return
 	end
 
-	local encodedData = nil
-	if Json and Json.encode then
-		-- Unified Database Persistence: Save EVERYTHING to database.json
-		-- DATA OPTIMIZATION: Create a shallow copy for saving that omits redundant data
-		local saveTable = {}
-		local count = 0
-		for k, v in pairs(G.DataBase) do
-            count = count + 1
-            local clean = {}
-            -- Only save what we need
-            if v.Name and v.Name ~= "Unknown" then clean.Name = v.Name end
-            if v.Reason and v.Reason ~= "Unknown Source" then clean.Reason = v.Reason end
-            if v.Static then clean.Static = v.Static end
-            if v.Flags and v.Flags ~= 0 then clean.Flags = v.Flags end
-            if v.Score and v.Score ~= 0 then clean.Score = v.Score end
-            
-            saveTable[k] = clean
-		end
-
-		local success, result = pcall(Json.encode, saveTable)
-		if success and type(result) == "string" then
-			encodedData = result
-			Log(LogLevel.DEBUG, string.format("[DB] Encoded %d entries (Optimized Size: %.1f KB)", count, #result / 1024))
-		else
-			Log(LogLevel.ERROR, "[DB] Json.encode failed: " .. tostring(result))
-			return
-		end
-	else
-		Log(LogLevel.ERROR, "[DB] Json.encode unavailable!")
-		return
-	end
-
-	local filepath = Database.GetFilePath()
-	
-    Log(LogLevel.DEBUG, "[DB] Opening file for writing: " .. tostring(filepath))
-	local file = io.open(filepath, "w")
-	if not file then
-		Log(LogLevel.ERROR, "[DB] Failed to open file for writing: " .. tostring(filepath))
-		return
-	end
-
-	file:write(encodedData)
-	file:close()
-	encodedData = nil
-
-    -- After full save, we can clear the log
-    local logPath = Database.GetLogPath()
-    if not logPath then return end
-
-    local logFile = io.open(logPath, "w")
-    if logFile then
-        logFile:close()
-        Database.State.logEntries = 0
+    -- DATA OPTIMIZATION: Create a shallow copy for saving that omits redundant data
+    local saveTable = {}
+    local count = 0
+    for k, v in pairs(G.DataBase) do
+        count = count + 1
+        local clean = {}
+        -- Only save what we need
+        if v.Name and v.Name ~= "Unknown" then clean.Name = v.Name end
+        if v.Reason and v.Reason ~= "Unknown Source" then clean.Reason = v.Reason end
+        if v.Static then clean.Static = v.Static end
+        if v.Flags and v.Flags ~= 0 then clean.Flags = v.Flags end
+        if v.Score and v.Score ~= 0 then clean.Score = v.Score end
+        
+        saveTable[k] = clean
     end
 
-	Database.State.isDirty = false
-	Database.State.lastSave = os.time()
-    Log(LogLevel.SUCCESS, string.format("[DB SUCCESS] Database consolidated and flushed to disk: %s", filepath))
+    local filepath = Database.GetFilePath()
+    Log(LogLevel.DEBUG, string.format("[DB] Initiating async save for %d entries...", count))
+    
+    Database.State.isSaving = true
+    
+    AsyncSaver.Save(filepath, saveTable, function(success, err)
+        Database.State.isSaving = false
+        if not success then
+            Log(LogLevel.ERROR, "[DB] Async Save failed: " .. tostring(err))
+            return
+        end
+
+        -- After successful full save, we can clear the log
+        local logPath = Database.GetLogPath()
+        if logPath then
+            local logFile = io.open(logPath, "w")
+            if logFile then
+                logFile:close()
+                Database.State.logEntries = 0
+            end
+        end
+
+        Database.State.isDirty = false
+        Database.State.lastSave = os.time()
+        Log(LogLevel.SUCCESS, string.format("[DB SUCCESS] Database consolidated and flushed to disk asynchronously: %s", filepath))
+    end)
 end
 
 function Database.LoadDatabase(silent, force)
