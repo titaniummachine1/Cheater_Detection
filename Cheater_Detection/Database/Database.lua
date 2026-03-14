@@ -208,6 +208,18 @@ function Database.LoadDatabase(silent, force)
 		return
 	end
 
+    -- Hardcoded migration map for common long URLs to save space
+    local migrationMap = {
+        ["megacheaterdb"] = "mega_scat",
+        ["official"] = "tf2bd_off",
+        ["qfoxb"] = "qfoxb",
+        ["joekiller"] = "joekiller",
+        ["rgl%-gg"] = "sleepy_rgl",
+        ["CheaterFriend"] = "d3_friend",
+        ["TacobotList"] = "d3_taco",
+        ["Group"] = "d3_group"
+    }
+
     G.DataBase = decodedData
     local entriesToRemove = {}
     local total = 0
@@ -217,11 +229,26 @@ function Database.LoadDatabase(silent, force)
         if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
             table.insert(entriesToRemove, steamID)
         else
-            -- DATA INTEGRITY: Strip Static flag if it was accidentally saved to disk
-            -- Anything in database.json is by definition persistent
-            if value.Static then
-                value.Static = nil
-                Database.State.isDirty = true
+            -- DATABASE COMPRESSION: Migrate and sanitize URLs/Long strings
+            if type(value.Static) == "string" then
+                local staticVal = value.Static
+                if staticVal:find("http") or #staticVal > 25 then
+                    local found = false
+                    for pattern, id in pairs(migrationMap) do
+                        if staticVal:find(pattern) then
+                            value.Static = id
+                            found = true
+                            Database.State.isDirty = true
+                            break
+                        end
+                    end
+                    
+                    -- If no specific mapping found, reduce to a generic identifier
+                    if not found then
+                        value.Static = "Ext" -- Shortest possible generic ID
+                        Database.State.isDirty = true
+                    end
+                end
             end
         end
     end
@@ -232,8 +259,53 @@ function Database.LoadDatabase(silent, force)
 
     Database.State.lastLoaded = os.time()
     Log(LogLevel.SUCCESS, string.format("[DB] Database ready: %d entries", total - #entriesToRemove))
+    
+    Database.SanitizeAll() -- Aggressive sweep on load
     Database.ClearLocalPlayer()
     Database.State.isInitialized = true
+end
+
+function Database.SanitizeAll()
+    if not G.DataBase then return end
+    
+    local migrationMap = {
+        ["megacheaterdb"] = "mega_scat",
+        ["official"] = "tf2bd_off",
+        ["qfoxb"] = "qfoxb",
+        ["joekiller"] = "joekiller",
+        ["rgl%-gg"] = "sleepy_rgl",
+        ["CheaterFriend"] = "d3_friend",
+        ["TacobotList"] = "d3_taco",
+        ["Group"] = "d3_group"
+    }
+
+    local sanitized = 0
+    for _, value in pairs(G.DataBase) do
+        if type(value.Static) == "string" then
+            local staticVal = value.Static
+            if staticVal:find("http") or #staticVal > 25 then
+                local found = false
+                for pattern, id in pairs(migrationMap) do
+                    if staticVal:find(pattern) then
+                        value.Static = id
+                        found = true
+                        break
+                    end
+                end
+                
+                if not found then
+                    value.Static = "Ext"
+                end
+                sanitized = sanitized + 1
+                Database.State.isDirty = true
+            end
+        end
+    end
+
+    if sanitized > 0 then
+        Log(LogLevel.SUCCESS, string.format("[DB] Aggressively sanitized %d entries (stripped URLs)", sanitized))
+        Database.SaveDatabase() -- Force flush to clean the file immediately
+    end
 end
 
 function Database.Initialize(silent)
@@ -265,6 +337,13 @@ function Database.UpsertCheater(steamID, data)
 
 	if type(G.DataBase) ~= "table" then G.DataBase = {} end
 
+    -- DATABASE COMPRESSION: Sanitize URL identifiers before storage
+    if type(data.Static) == "string" then
+        if data.Static:find("http") or #data.Static > 25 then
+            data.Static = "Ext"
+        end
+    end
+
 	local persistentFlags = 0
 	if data.flags then
 		persistentFlags = data.flags & Constants.PERSISTENT_MASK
@@ -290,6 +369,7 @@ function Database.UpsertCheater(steamID, data)
 		Flags = persistentFlags,
 		Score = score,
 		Timestamp = currentTime,
+        Static = data.Static or false
 	}
 
 	Database.State.isDirty = true

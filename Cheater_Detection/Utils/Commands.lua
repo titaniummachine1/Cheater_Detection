@@ -47,13 +47,27 @@ local function setupSteamHistory()
 
 		local key = args and args[1] or nil
 		if not key or key == "" then
-			Logger.Warning("Commands", "Usage: steamhistory <api_key>")
+			printc(255, 100, 100, 255, "[SteamHistory] Usage: steamhistory <api_key>")
+			printc(255, 100, 100, 255, "[SteamHistory] Get your key at: https://steamhistory.net")
 			return
 		end
 
 		shell.ApiKey = key
-		shell.Enable = false
-		Logger.Info("Commands", "SteamHistory API key stored")
+		shell.Enable = true -- Enable it automatically when key is set
+        
+		-- Force update in the module itself
+		local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
+		if SteamHistory and SteamHistory.OnApiKeyUpdated then
+			SteamHistory.OnApiKeyUpdated()
+		end
+
+        -- Persist the change
+        local Config = require("Cheater_Detection.Utils.Config")
+        if Config and Config.SaveCFG then
+            Config.SaveCFG()
+        end
+
+		printc(0, 255, 140, 255, "[SteamHistory] API key stored and module enabled!")
 	end)
 end
 

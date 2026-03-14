@@ -155,14 +155,13 @@ function Parsers.GetSteamID64(input)
 	return nil
 end
 
--- Parses a JSON string (specifically bots.tf format expected)
--- Returns: { players = { { steamid="...", attributes={...}, last_seen={player_name="..."} }, ... } } or nil, errorMsg
-function Parsers.ParseJsonTF2DB(contentString)
+-- Decodes a JSON string and returns the players array for chunked processing
+-- Returns: playersArray or nil, errorMsg
+function Parsers.GetPlayersFromJSON(contentString)
 	if not contentString or contentString == "" then
 		return nil, "Empty content string"
 	end
 
-	-- Ensure the JSON decoder is available before calling pcall
 	if not Json or type(Json.decode) ~= "function" then
 		return nil, "JSON decode function is unavailable"
 	end
@@ -170,24 +169,95 @@ function Parsers.ParseJsonTF2DB(contentString)
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success then
-		local preview = string.sub(tostring(contentString), 1, 50):gsub("[%c%s]+", " ")
-		return nil, string.format("JSON decode error: %s (Preview: %s)", tostring(data), preview)
+		return nil, "JSON decode error: " .. tostring(data)
 	end
 
 	if type(data) ~= "table" then
-		local preview = string.sub(tostring(contentString), 1, 100):gsub("[%c%s]+", " ")
-		return nil, string.format("JSON decode returned %s instead of table (Preview: %s)", type(data), preview)
+		return nil, "JSON decode returned " .. type(data)
 	end
 
-	if not data.players or type(data.players) ~= "table" then
-		-- Allow if the root object itself is the list of players
-		if type(data) == "table" and #data > 0 and type(data[1]) == "table" and data[1].steamid then
-			return { players = data }, nil -- Wrap it for consistency
+	local players = data.players
+	if not players then
+		-- Fallback for root-level arrays
+		if #data > 0 and data[1].steamid then
+			players = data
 		end
+	end
+
+	if not players then
 		return nil, "JSON missing 'players' array"
 	end
 
-	return data, nil
+	return players, nil
+end
+
+-- Processes a single player entry into the database
+-- Returns: wasAdded, wasUpdated, wasError
+function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticSource, defaultReason)
+    if not player or type(player) ~= "table" then return false, false, true end
+
+    -- Get the SteamID and convert to SteamID64
+    local steamID64 = Parsers.GetSteamID64(player.steamid)
+    if not steamID64 then return false, false, true end
+
+    -- Determine player name (from last_seen if available)
+    local playerName = "Unknown"
+    if player.last_seen and player.last_seen.player_name then
+        playerName = player.last_seen.player_name
+    end
+
+    -- Get the first attribute as the reason
+    local reason = defaultReason or "Unknown Source"
+    if player.attributes and #player.attributes > 0 then
+        -- Use first attribute, capitalized
+        local firstAttribute = player.attributes[1]
+        reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
+    end
+
+    -- Add to entries if not already there
+    if existingEntries[steamID64] then
+        -- "Stealer mode" - Update entry if it has better information
+        local existingEntry = existingEntries[steamID64]
+        local updated = false
+
+        -- If existing entry has unknown name and this one has a name
+        if (existingEntry.Name == "Unknown" or existingEntry.Name == nil)
+            and playerName and playerName ~= "Unknown"
+        then
+            existingEntry.Name = playerName
+            updated = true
+        end
+
+        -- If existing entry has unknown reason and this one has a reason
+        if (existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
+            and reason and reason ~= "Unknown Source"
+        then
+            existingEntry.Reason = reason
+            updated = true
+        end
+
+        -- Mark as static if this is an external source
+        if staticSource then
+            -- FINAL SAFETY: Never store URLs
+            if type(staticSource) == "string" and (staticSource:find("http") or #staticSource > 25) then
+                staticSource = "Ext"
+            end
+            existingEntry.Static = staticSource
+        end
+
+        return false, updated, false
+    else
+        -- FINAL SAFETY: Never store URLs
+        if type(staticSource) == "string" and (staticSource:find("http") or #staticSource > 25) then
+            staticSource = "Ext"
+        end
+        existingEntries[steamID64] = {
+            Name = playerName,
+            Reason = reason,
+            Static = staticSource or false
+        }
+        return true, false, false
+    end
 end
 
 -- Parses a single line from a raw list
@@ -210,8 +280,8 @@ function Parsers.ParseRawLine(lineString)
 end
 
 -- Parses a raw text file containing one SteamID per line
--- Returns: { [steamId64] = { Name="Unknown", Reason=cause }, ... } or nil, errorMsg
-function Parsers.ParseRawIDs(contentString, cause)
+-- Returns: { [steamId64] = { Name="Unknown", Reason=cause, Static=sourceID }, ... } or nil, errorMsg
+function Parsers.ParseRawIDs(contentString, cause, sourceID)
 	local entries = {}
 	if not contentString or contentString == "" then
 		return entries -- Return empty table, not an error
@@ -230,6 +300,7 @@ function Parsers.ParseRawIDs(contentString, cause)
 				entries[steamID64] = {
 					Name = "Unknown", -- Raw lists usually don't have names
 					Reason = default_reason,
+                    Static = sourceID or true
 				}
 				addedCount = addedCount + 1
 			end
@@ -239,129 +310,29 @@ function Parsers.ParseRawIDs(contentString, cause)
 	return entries, nil -- Return the table of entries
 end
 
--- Parse TF2 Bot Detector JSON format and convert to our database format
+-- Parse TF2 Bot Detector JSON format and convert to our database format (Legacy shim, now uses chunked logic internally if called)
 -- Returns: { [steamid64] = { Name="...", Reason="..." }, ... } or nil, errorMsg
-function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntries, sourceStats, isStatic)
-	if not contentString or contentString == "" then
-		if sourceStats then
-			sourceStats.errors = (sourceStats.errors or 0) + 1
-		end
-		return nil, "Empty content string"
-	end
+function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntries, sourceStats, staticSource)
+	local players, err = Parsers.GetPlayersFromJSON(contentString)
+    if not players then 
+        if sourceStats then sourceStats.errors = (sourceStats.errors or 0) + 1 end
+        return nil, err 
+    end
 
 	local entries = existingEntries or {}
 	local stats = {
-		processed = 0,
-		added = 0,
-		existing = 0,
-		updated = 0, -- New field to track updated entries
-		errors = 0,
+		processed = 0, added = 0, existing = 0, updated = 0, errors = 0,
 	}
 
-	-- Try to decode JSON
-	-- Ensure the JSON decoder is available before calling pcall
-	if not Json or type(Json.decode) ~= "function" then
-		if sourceStats then
-			sourceStats.errors = (sourceStats.errors or 0) + 1
-		end
-		return nil, "JSON decode function is unavailable"
-	end
-
-	local success, data = pcall(Json.decode, contentString)
-
-	if not success or type(data) ~= "table" then
-		if sourceStats then
-			sourceStats.errors = (sourceStats.errors or 0) + 1
-		end
-		return nil, "JSON decode failed: " .. tostring(data)
-	end
-
-	-- Find the players array
-	local players = data.players
-	if not players then
-		if sourceStats then
-			sourceStats.errors = (sourceStats.errors or 0) + 1
-		end
-		return nil, "JSON missing 'players' array"
-	end
-
-	-- Process each player
-	for i, player in ipairs(players) do
+	-- Process each player (Old synchronous behavior, but with the new merge logic)
+	for i = 1, #players do
 		stats.processed = stats.processed + 1
+		local added, updated, errorOccurred = Parsers.ParseTF2BotDetector_MergeEntry(players[i], entries, staticSource, defaultReason)
         
-        -- Yield every 300 entries to prevent game freeze
-        if i % 300 == 0 then
-            coroutine.yield()
-        end
-
-		-- Get the SteamID and convert to SteamID64
-		local steamID64 = Parsers.GetSteamID64(player.steamid)
-		if steamID64 then
-			-- Determine player name (from last_seen if available)
-			local playerName = "Unknown"
-			if player.last_seen and player.last_seen.player_name then
-				playerName = player.last_seen.player_name
-			end
-
-			-- Get the first attribute as the reason
-			local reason = defaultReason or "Unknown Source"
-			if player.attributes and #player.attributes > 0 then
-				-- Use first attribute, capitalized
-				local firstAttribute = player.attributes[1]
-				reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
-
-				-- Only use default reason if no attributes available
-				-- NOT overriding attribute with defaultReason anymore
-			end
-
-			-- Add to entries if not already there
-			if entries[steamID64] then
-				stats.existing = stats.existing + 1
-
-				-- "Stealer mode" - Update entry if it has better information
-				local existingEntry = entries[steamID64]
-				local updated = false
-
-				-- If existing entry has unknown name and this one has a name
-				if
-					(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
-					and playerName
-					and playerName ~= "Unknown"
-				then
-					existingEntry.Name = playerName
-					updated = true
-				end
-
-				-- If existing entry has unknown reason and this one has a reason
-				if
-					(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
-					and reason
-					and reason ~= "Unknown Source"
-				then
-					existingEntry.Reason = reason
-					updated = true
-				end
-
-				-- Increment update counter if we made changes
-				if updated then
-					stats.updated = stats.updated + 1
-				end
-
-                -- Mark as static if this is an external source (stored for session metadata)
-                if isStatic then
-                    existingEntry.Static = true
-                end
-			else
-				entries[steamID64] = {
-					Name = playerName,
-					Reason = reason,
-                    Static = isStatic or false
-				}
-				stats.added = stats.added + 1
-			end
-		else
-			stats.errors = stats.errors + 1
-		end
+        if errorOccurred then stats.errors = stats.errors + 1
+        elseif added then stats.added = stats.added + 1
+        elseif updated then stats.updated = stats.updated + 1
+        else stats.existing = stats.existing + 1 end
 	end
 
 	-- Update source stats if provided

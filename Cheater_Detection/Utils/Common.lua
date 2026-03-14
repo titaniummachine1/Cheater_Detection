@@ -106,8 +106,8 @@ function Common.GetSteamID64(Player)
 	if not Player then return nil end
 
 	local currentTick = globals.TickCount()
-	local playerIndex = Player:GetIndex()
-	if not playerIndex then return nil end
+	local playerIndex = Player and Player:GetIndex()
+	if not playerIndex or playerIndex < 1 or playerIndex > 100 then return nil end
 
 	-- Reset cache on new tick
 	if lastTick ~= currentTick then

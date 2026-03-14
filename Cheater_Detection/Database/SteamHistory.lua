@@ -672,7 +672,7 @@ local function checkApiKey()
 	local cfg = getConfig()
 	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
 		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] API Key missing! Get one at https://steamhistory.net")
-		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] Set it via console: steamhistory <your_key>")
+		printInfo({ 255, 120, 120, 255 }, "[SteamHistory] Set it via console: steamhistory <your_key>")
 	end
 end
 checkApiKey()
