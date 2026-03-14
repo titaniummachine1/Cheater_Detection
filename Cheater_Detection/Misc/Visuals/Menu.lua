@@ -44,27 +44,31 @@ local function DrawMenu()
 		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Player Scanner")
-        G.Menu.Scanner = G.Menu.Scanner or { SteamHistory = false, ValveCheck = true }
-        local sc = G.Menu.Scanner
-        
-        -- Valve check toggle
-        sc.ValveCheck = TimMenu.Checkbox("Valve Check", sc.ValveCheck)
-        TimMenu.Tooltip("Verify if players are Valve employees via profiles and items.")
+            G.Menu.Scanner = G.Menu.Scanner or { SteamHistory = false, ValveCheck = true }
+            local sc = G.Menu.Scanner
+            
+            TimMenu.BeginSector("Valve Verification")
+                sc.ValveCheck = TimMenu.Checkbox("Valve Employee Check", sc.ValveCheck)
+                TimMenu.Tooltip("Verify if players are Valve employees via profiles and items.")
+            TimMenu.EndSector()
+            
+            TimMenu.NextLine()
 
-        -- SteamHistory section inside scanner
-		Misc.SteamHistory = Misc.SteamHistory or {}
-		local sh = Misc.SteamHistory
-		sh.ApiKey = sh.ApiKey or ""
-		local hasKey = sh.ApiKey ~= ""
-		
-		if not hasKey then
-			sc.SteamHistory = false
-			TimMenu.Text("SteamHistory: API Key Missing!")
-			TimMenu.Tooltip("Get key at steamhistory.net and set via console: steamhistory <key>")
-		else
-			sc.SteamHistory = TimMenu.Checkbox("Steam History", sc.SteamHistory)
-			TimMenu.Tooltip("Scan players via SteamHistory API (requires API Key).")
-		end
+            TimMenu.BeginSector("Steam History API")
+                Misc.SteamHistory = Misc.SteamHistory or {}
+                local sh = Misc.SteamHistory
+                sh.ApiKey = sh.ApiKey or ""
+                local hasKey = sh.ApiKey ~= ""
+                
+                if not hasKey then
+                    sc.SteamHistory = false
+                    TimMenu.Text("STATUS: API Key Missing")
+                    TimMenu.Tooltip("Get key at steamhistory.net and set via console: steamhistory <key>")
+                else
+                    sc.SteamHistory = TimMenu.Checkbox("Steam History Scan", sc.SteamHistory)
+                    TimMenu.Tooltip("Scan players via SteamHistory API (requires API Key).")
+                end
+            TimMenu.EndSector()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
