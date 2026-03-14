@@ -165,9 +165,9 @@ end
 --[[ Auto-load config on require ]]
 Config.LoadCFG()
 
--- Set G.Config with key settings for other modules
 G.Config = G.Config or {}
 G.Config.AutoFetch = G.Menu and G.Menu.Main and G.Menu.Main.AutoFetch or true
+G.Config.AutoSync = G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false
 
 --[[ Save configuration automatically when the script unloads ]]
 local function ConfigAutoSaveOnUnload()

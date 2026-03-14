@@ -45,9 +45,13 @@ local function Init()
 	-- Require the Menu at the end of initialization
 	require("Cheater_Detection.Misc.Visuals.Menu")
 	
-    -- Automate Database Fetch (Local then Online) - Now handled ASYNC by Fetcher
+    -- Automate Database Fetch (Local then Online) - Respects AutoSync setting
     local Fetcher = require("Cheater_Detection.Database.Fetcher")
-    Fetcher.Start()        -- Begin async local import followed by online sync
+    if G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false then
+        Fetcher.Start()        -- Begin async local import followed by online sync
+    else
+        print("[CD] Auto-Sync disabled via config.")
+    end
     
 	print("[CD] System initialized.")
 end

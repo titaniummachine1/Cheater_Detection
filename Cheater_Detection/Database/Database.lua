@@ -204,9 +204,11 @@ function Database.LoadDatabase(silent, force)
 	content = nil
 
 	if not success or type(decodedData) ~= "table" then
-		Log(LogLevel.ERROR, "[DB] JSON Decode Failed: " .. tostring(decodedData))
+		Log(LogLevel.ERROR, "[DB] JSON Decode Failed (Corrupted file?): " .. tostring(decodedData))
+        Log(LogLevel.WARNING, "[DB] Resetting database to prevent undefined behavior.")
 		G.DataBase = {}
 		Database.State.isInitialized = true
+        Database.State.isDirty = true -- Flag for a clean save later
 		return
 	end
 

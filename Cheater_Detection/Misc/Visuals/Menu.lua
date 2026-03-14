@@ -47,6 +47,14 @@ local function DrawMenu()
             G.Menu.Scanner = G.Menu.Scanner or { SteamHistory = false, ValveCheck = true }
             local sc = G.Menu.Scanner
             
+            -- Initialize Main.AutoSync if it doesn't exist
+            if type(Main.AutoSync) ~= "boolean" then
+                Main.AutoSync = false -- Default value
+            end
+            Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync)
+            TimMenu.Tooltip("Automatically fetch/merge local and online cheater lists on script load.")
+            TimMenu.NextLine()
+            
             TimMenu.BeginSector("Valve Verification")
                 sc.ValveCheck = TimMenu.Checkbox("Valve Employee Check", sc.ValveCheck)
                 TimMenu.Tooltip("Verify if players are Valve employees via profiles and items.")

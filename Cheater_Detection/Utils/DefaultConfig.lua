@@ -10,6 +10,7 @@ local Default_Config = {
 		Chat_Prefix = true,
 		Cheater_Tags = true,
 		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
+        AutoSync = true, -- Automatically fetch databases on startup
 	},
 
     Scanner = {
