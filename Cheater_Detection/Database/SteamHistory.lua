@@ -534,7 +534,7 @@ local function refreshEnabled()
 		resetState(true)
 	end
 
-	local enabled = cfg and cfg.Enable and apiKey ~= nil
+	local enabled = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.SteamHistory and apiKey ~= nil
 	if enabled ~= state.enabled then
 		state.enabled = enabled
 		if enabled then

@@ -11,6 +11,10 @@ local Scheduler = {}
 local lastHeartbeat = 0
 local ticksPassed = 0
 
+local SteamLookup = require("Cheater_Detection.services.steam_lookup")
+local HttpQueue = require("Cheater_Detection.services.http_queue")
+local Fetcher = require("Cheater_Detection.Database.Fetcher")
+
 function Scheduler.Tick()
 	local currentTick = globals.TickCount()
 	ticksPassed = ticksPassed + 1
@@ -24,20 +28,16 @@ function Scheduler.Tick()
 	-- Every 1 second (approx 66 ticks)
 	if (ticksPassed % Constants.TICKS_PER_SECOND) == 0 then
 		EventBus.Publish("OneSecondTick", currentTick)
-		-- Tick the paged Valve group fetcher
-		local SteamLookup = require("Cheater_Detection.services.steam_lookup")
-		SteamLookup.TickGroupFetch()
 	end
 
-	-- Every frame (Fetcher/HttpQueue/Database handle their own internal states)
-	local HttpQueue = require("Cheater_Detection.services.http_queue")
-	HttpQueue.Tick()
-
-	local Fetcher = require("Cheater_Detection.Database.Fetcher")
-	Fetcher.Tick()
-    
-    local Database = require("Cheater_Detection.Database.Database")
-    Database.Tick()
+	-- Every frame (Fetcher/HttpQueue handle their own internal states)
+	if HttpQueue and HttpQueue.Tick then
+		HttpQueue.Tick()
+	end
+	
+	if Fetcher and Fetcher.Tick then
+		Fetcher.Tick()
+	end
 end
 
 return Scheduler

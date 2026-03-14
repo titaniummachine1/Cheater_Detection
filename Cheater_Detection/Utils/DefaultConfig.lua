@@ -12,6 +12,11 @@ local Default_Config = {
 		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
 	},
 
+    Scanner = {
+        SteamHistory = false,
+        ValveCheck = true,
+    },
+
 	Advanced = {
 		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)

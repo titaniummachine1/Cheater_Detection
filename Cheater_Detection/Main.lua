@@ -1,4 +1,4 @@
----@diagnostic disable: undefined-global
+---@diagnostic disable: undefined-global, undefined-field
 --[[ Main.lua
      New Core Entry Point for Cheater Detection Service.
 ]]
@@ -45,6 +45,11 @@ local function Init()
 	-- Require the Menu at the end of initialization
 	require("Cheater_Detection.Misc.Visuals.Menu")
 	
+    -- Automate Database Fetch (Local then Online)
+    local Fetcher = require("Cheater_Detection.Database.Fetcher")
+    Fetcher.ImportLocal()  -- Merge local files first
+    Fetcher.Start()        -- Begin online sync
+    
 	print("[CD] System initialized.")
 end
 

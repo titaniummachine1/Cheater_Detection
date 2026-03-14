@@ -157,6 +157,11 @@ function ValveCheck.ProcessPlayer(playerState)
 		return
 	end
 
+	-- Skip if Scanner or ValveCheck is disabled
+	if not G or not G.Menu or not G.Menu.Scanner or not G.Menu.Scanner.ValveCheck then
+		return
+	end
+
 	-- Skip if already definitively flagged as Valve or Cheater
 	if (playerState.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
 		return

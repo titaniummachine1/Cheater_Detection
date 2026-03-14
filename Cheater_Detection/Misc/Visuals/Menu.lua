@@ -43,22 +43,27 @@ local function DrawMenu()
 		local Main = G.Menu.Main
 		local Misc = G.Menu.Misc
 
-		TimMenu.BeginSector("SteamHistory")
-		G.Menu.Misc.SteamHistory = G.Menu.Misc.SteamHistory or {}
-		local sh = G.Menu.Misc.SteamHistory
+		TimMenu.BeginSector("Player Scanner")
+        G.Menu.Scanner = G.Menu.Scanner or { SteamHistory = false, ValveCheck = true }
+        local sc = G.Menu.Scanner
+        
+        -- Valve check toggle
+        sc.ValveCheck = TimMenu.Checkbox("Valve Check", sc.ValveCheck)
+        TimMenu.Tooltip("Verify if players are Valve employees via profiles and items.")
+
+        -- SteamHistory section inside scanner
+		Misc.SteamHistory = Misc.SteamHistory or {}
+		local sh = Misc.SteamHistory
 		sh.ApiKey = sh.ApiKey or ""
-		if type(sh.Enable) ~= "boolean" then
-			sh.Enable = false
-		end
 		local hasKey = sh.ApiKey ~= ""
+		
 		if not hasKey then
-			sh.Enable = false
-			TimMenu.Text("API Key Missing!")
-			TimMenu.Text("Get key at: steamhistory.net")
-			TimMenu.Text("Console cmd: steamhistory <key>")
+			sc.SteamHistory = false
+			TimMenu.Text("SteamHistory: API Key Missing!")
+			TimMenu.Tooltip("Get key at steamhistory.net and set via console: steamhistory <key>")
 		else
-			sh.Enable = TimMenu.Checkbox("Enable SteamHistory", sh.Enable)
-			TimMenu.Tooltip("Scan players via SteamHistory API.")
+			sc.SteamHistory = TimMenu.Checkbox("Steam History", sc.SteamHistory)
+			TimMenu.Tooltip("Scan players via SteamHistory API (requires API Key).")
 		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
@@ -424,13 +429,22 @@ local function DrawMenu()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		if TimMenu.Button("Fetch Database") then
-			local Fetcher = require("Cheater_Detection.Database.Fetcher")
-			Fetcher.Start()
+		TimMenu.BeginSector("Summary")
+		local dbCount = 0
+		if type(G.DataBase) == "table" then
+			for _ in pairs(G.DataBase) do
+				dbCount = dbCount + 1
+			end
 		end
-
+		TimMenu.Text("Database Entries: " .. tostring(dbCount))
 		TimMenu.NextLine()
-
+		
+		local lastFetch = G and G.Menu and G.Menu.Main and G.Menu.Main.LastFetchTimestamp
+		if lastFetch then
+			TimMenu.Text("Last Sync: " .. os.date("%H:%M:%S", lastFetch))
+		else
+			TimMenu.Text("Last Sync: Never")
+		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	end

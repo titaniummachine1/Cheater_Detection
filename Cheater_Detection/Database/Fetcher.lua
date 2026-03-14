@@ -1,4 +1,4 @@
----@diagnostic disable: undefined-global
+---@diagnostic disable: undefined-global, undefined-field
 --[[ Cheater Detection - Database Fetcher - Coroutine Async Version ]]
 local Common = require("Cheater_Detection.Utils.Common")
 -- [[ Imported by: Main.lua ]]
@@ -352,6 +352,65 @@ function Fetcher.Tick()
     if coroutine.status(coro) == "dead" then
         Fetcher.State.coro = nil
         Fetcher.State.isRunning = false
+    end
+end
+
+function Fetcher.ImportLocal()
+    Log(LogLevel.INFO, "[FETCHER] Scanning for local imports in 'Lua Cheater_Detection/imports'...")
+    local importPath = "Lua Cheater_Detection/imports"
+    
+    -- Attempt to list files using multiple possible APIs to avoid crashes
+    local files = nil
+    
+    -- Option 1: filesystem.List (Common in lnxlib)
+    if not files and filesystem and filesystem.List then
+        local success, result = pcall(filesystem.List, importPath)
+        if success then files = result end
+    end
+    
+    -- Option 2: filesystem.EnumerateFiles (Some other versions)
+    if not files and filesystem and filesystem.EnumerateFiles then
+        local success, result = pcall(filesystem.EnumerateFiles, importPath)
+        if success then files = result end
+    end
+
+    if not files or #files == 0 then 
+        Log(LogLevel.DEBUG, "[FETCHER] No local import files found or directory missing (or API incompatible).")
+        return 
+    end
+
+    local totalAdded, totalUpdated = 0, 0
+    for _, fileName in ipairs(files) do
+        -- Only process JSON files
+        if fileName:match("%.json$") then
+            local fullPath = importPath .. "/" .. fileName
+            local content = filesystem.Read(fullPath)
+            
+            if content and content ~= "" then
+                Log(LogLevel.INFO, "[FETCHER] Importing local file: " .. fileName)
+                -- Reuse the tf2db parser logic via parseSource
+                local sourceObj = {
+                    name = fileName,
+                    parser = "tf2db",
+                    cause = "Local Import (" .. fileName .. ")"
+                }
+                
+                -- parseSource handles the actual insertion and G.DataBase updates
+                local added, updated, errors = parseSource(sourceObj, content)
+                totalAdded = totalAdded + added
+                totalUpdated = totalUpdated + updated
+            else
+                Log(LogLevel.WARNING, "[FETCHER] Failed to read or empty local file: " .. fileName)
+            end
+        end
+    end
+    
+    if totalAdded > 0 or totalUpdated > 0 then
+        Log(LogLevel.SUCCESS, string.format("[FETCHER] Local import completed. Added: %d, Updated: %d", totalAdded, totalUpdated))
+        -- Save immediately after local import if changes were made
+        Database.SaveDatabase()
+    else
+        Log(LogLevel.INFO, "[FETCHER] Local import finished with no changes.")
     end
 end
 
