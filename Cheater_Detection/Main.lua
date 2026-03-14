@@ -41,7 +41,10 @@ local function Init()
 	if not G.Menu then
 		require("Cheater_Detection.Utils.Config").LoadCFG()
 	end
-
+	
+	-- Require the Menu at the end of initialization
+	require("Cheater_Detection.Misc.Visuals.Menu")
+	
 	print("[CD] System initialized.")
 end
 
@@ -124,7 +127,11 @@ local function OnFireGameEvent(event)
 end
 
 local function OnUnload()
-    print("[CD] System shutdown.")
+    print("[CD] Unloading system...")
+    -- Database and Config have their own internal Unload listeners, but we can trigger a final save here too if needed
+    if Database and Database.SaveDatabase then
+        Database.SaveDatabase()
+    end
 end
 
 -- Re-register

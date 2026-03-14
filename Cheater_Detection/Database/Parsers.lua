@@ -224,12 +224,6 @@ function Parsers.ParseRawIDs(contentString, cause)
 	-- Iterate over each line in the content string
 	for line in contentString:gmatch("[^\n\r]+") do
 		lineCount = lineCount + 1
-        
-        -- Yield every 300 lines to prevent game freeze
-        if lineCount % 300 == 0 then
-            coroutine.yield()
-        end
-
 		local steamID64 = Parsers.ParseRawLine(line)
 		if steamID64 then
 			if not entries[steamID64] then -- Avoid duplicates within the same file
@@ -273,10 +267,6 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 		return nil, "JSON decode function is unavailable"
 	end
 
-	-- Yield BEFORE the blocking native decode so the game renders a frame first.
-	-- Json.decode cannot be interrupted by yield once started, so we must yield
-	-- before it. This matches the natural pacing the old button click gave.
-	coroutine.yield()
 	local success, data = pcall(Json.decode, contentString)
 
 	if not success or type(data) ~= "table" then

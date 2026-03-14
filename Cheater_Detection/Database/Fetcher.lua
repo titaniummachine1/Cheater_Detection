@@ -6,25 +6,16 @@ local G = require("Cheater_Detection.Utils.Globals")
 -- [[ Imported by: None ]]
 local Json = Common.Json
 -- [[ Imported by: Fetcher.lua (indirectly via Common) ]]
-local Database = require("Cheater_Detection.Database.Database")
+local Database = require("Cheater_Detection.Database.Database") -- For SaveDatabase
 -- [[ Imported by: Fetcher.lua ]]
-local Sources = require("Cheater_Detection.Database.Sources")
+local Sources = require("Cheater_Detection.Database.Sources") -- Require Sources
 -- [[ Imported by: Fetcher.lua ]]
-local Parsers = require("Cheater_Detection.Database.Parsers")
--- [[ Imported by: Fetcher.lua ]]
-local HttpQueue = require("Cheater_Detection.services.http_queue")
+local Parsers = require("Cheater_Detection.Database.Parsers") -- Require Parsers
 -- [[ Imported by: Fetcher.lua ]]
 
 local Fetcher = {}
 
---[[ Constants ]]
--- Only re-fetch online sources if data is older than this many seconds (1 hour)
-local FETCH_STALE_SECONDS = 3600
--- Minimum delay in seconds that must pass between sources to respect server rate limits.
--- The HttpQueue already enforces 1.2s between requests; this is an extra courtesy wait.
-local INTER_SOURCE_DELAY = 0.0 -- set to 0: HttpQueue rate limiting is sufficient
-
---[[ Log Level Enum ]]
+-- Define LogLevel locally within Fetcher
 local LogLevel = {
 	ERROR = 1,
 	WARNING = 2,
@@ -33,154 +24,167 @@ local LogLevel = {
 	DEBUG = 5,
 }
 
---[[ Local Log helper ]]
+-- Local Log function for Fetcher module (Defined early)
 local function Log(level, message, color)
 	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 
+	-- Determine if the message should be shown
 	local shouldShow = false
 	if isDebugMode then
-		shouldShow = true
+		shouldShow = true -- Show all levels in debug mode
 	elseif level <= LogLevel.SUCCESS then
-		shouldShow = true
+		shouldShow = true -- Show ERROR, WARNING, SUCCESS in non-debug mode
 	end
 
-	if not shouldShow then return end
+	if not shouldShow then
+		return
+	end
 
 	local prefix = ""
 	local defaultColor = { 255, 255, 255, 255 }
 
 	if level == LogLevel.ERROR then
-		prefix = "[CD FETCHER ERROR] "
-		color = color or { 255, 100, 100, 255 }
+		prefix = "[FETCHER ERROR] "
+		color = color or { 255, 100, 100, 255 } -- Red
 	elseif level == LogLevel.WARNING then
-		prefix = "[CD FETCHER WARNING] "
-		color = color or { 255, 255, 100, 255 }
+		prefix = "[FETCHER WARNING] "
+		color = color or { 255, 255, 100, 255 } -- Yellow
 	elseif level == LogLevel.SUCCESS then
-		prefix = "[CD FETCHER] "
-		color = color or { 0, 255, 140, 255 }
+		prefix = "[FETCHER SUCCESS] "
+		color = color or { 0, 255, 140, 255 } -- Bright Green
 	elseif level == LogLevel.INFO then
-		if not isDebugMode then return end
-		prefix = "[CD FETCHER INFO] "
-		color = color or { 100, 255, 255, 255 }
+		if not isDebugMode then
+			return
+		end
+		prefix = "[FETCHER INFO] "
+		color = color or { 100, 255, 255, 255 } -- Cyan
 	elseif level == LogLevel.DEBUG then
-		if not isDebugMode then return end
-		prefix = "[CD FETCHER DEBUG] "
-		color = color or { 180, 180, 180, 255 }
+		if not isDebugMode then
+			return
+		end
+		prefix = "[FETCHER DEBUG] "
+		color = color or { 180, 180, 180, 255 } -- Grey
 	end
 
 	color = color or defaultColor
 	printc(color[1], color[2], color[3], color[4], prefix .. message)
 end
 
---[[ State ]]
+-- Simplified State tracking
 Fetcher.State = {
 	isRunning = false,
 	startTime = 0,
 	results = {
 		total_added = 0,
-		total_updated = 0,
+		total_updated = 0, -- Keep track of updates
 		errors = 0,
 	},
-	coro = nil,
+    coro = nil
 }
 
---[[ Helpers ]]
+-- Helper to bypass GitHub's strict TLS/User-Agent blocks for game clients
+-- THIS is fixing the "Len: 0" error that ruined the previous fetch.
+local function proxyGitHubUrl(url)
+    if url:match("^https://raw%.githubusercontent%.com/") then
+        return url:gsub("https://raw%.githubusercontent%.com/([^/]+)/([^/]+)/([^/]+)/(.*)", "https://cdn.jsdelivr.net/gh/%1/%2@%3/%4")
+    end
+    return url
+end
 
-local function checkRequirements()
-	Log(LogLevel.DEBUG, "Checking requirements...")
-	if type(G) ~= "table" then
-		Log(LogLevel.ERROR, "CRITICAL: Globals module not loaded")
-		return false
+local function isDatabaseEmpty()
+	if type(G) ~= "table" or type(G.DataBase) ~= "table" then
+		return true
 	end
-	if type(G.DataBase) ~= "table" then
-		Log(LogLevel.ERROR, "CRITICAL: G.DataBase not initialized")
-		return false
-	end
-	if type(Database) ~= "table" then
-		Log(LogLevel.ERROR, "CRITICAL: Database module not loaded")
-		return false
-	end
-	if type(Database.SaveDatabase) ~= "function" then
-		Log(LogLevel.ERROR, "CRITICAL: Database.SaveDatabase missing")
-		return false
-	end
-	if type(Sources) ~= "table" or type(Sources.GetActiveSources) ~= "function" then
-		Log(LogLevel.ERROR, "CRITICAL: Sources module not loaded")
-		return false
-	end
-	if type(Parsers) ~= "table" then
-		Log(LogLevel.ERROR, "CRITICAL: Parsers module not loaded")
-		return false
-	end
-	Log(LogLevel.DEBUG, "All requirements satisfied")
-	return true
+	return next(G.DataBase) == nil
 end
 
 local function isFetchStale()
 	local menu = G and G.Menu and G.Menu.Main
-	if not menu then return true end
+	if not menu then
+		return true
+	end
 	local lastFetch = tonumber(menu.LastFetchTimestamp) or 0
-	return (os.time() - lastFetch) >= FETCH_STALE_SECONDS
+	return (os.time() - lastFetch) >= 3600
 end
 
--- Fetches one source via HttpQueue, yielding the coroutine while waiting for the response.
--- Returns: responseContent (string or nil), errorMessage (string or nil)
+-- Helper function to check if all required modules are properly loaded
+local function checkRequirements()
+	Log(LogLevel.DEBUG, "[FETCHER] Checking requirements...") -- Use Log
+	if type(G) ~= "table" then
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Globals module not loaded properly") -- Use Log
+		return false
+	end
+	if type(G.DataBase) ~= "table" then
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: G.DataBase is not initialized") -- Use Log
+		return false
+	end
+	if type(Database) ~= "table" then
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Database module not loaded properly") -- Use Log
+		return false
+	end
+	if type(Database.SaveDatabase) ~= "function" then
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Database.SaveDatabase function missing") -- Use Log
+		return false
+	end
+	if type(Sources) ~= "table" or type(Sources.GetActiveSources) ~= "function" then
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Sources module not loaded properly") -- Use Log
+		return false
+	end
+	if type(Parsers) ~= "table" then
+		Log(LogLevel.ERROR, "[FETCHER] CRITICAL ERROR: Parsers module not loaded properly") -- Use Log
+		return false
+	end
+	Log(LogLevel.DEBUG, "[FETCHER] All requirements satisfied") -- Use Log
+	return true
+end
+
 local function fetchSource(source)
-	Log(LogLevel.INFO, string.format("Fetching source: %s", source.name))
+	Log(LogLevel.INFO, string.format("[FETCHER] Fetching source: %s (%s)", source.name, source.url))
 
-	local responseContent = nil
-	local isDone = false
-
-	-- HttpQueue.Enqueue is non-blocking. The callback fires when the HTTP response arrives.
-	-- HttpQueue.Tick() is called every draw frame by Scheduler.Tick() (before Fetcher.Tick()),
-	-- so the response will arrive within a frame or two after the request completes.
-	HttpQueue.Enqueue(source.url, function(data)
-		responseContent = data
-		isDone = true
-	end)
-
-	-- Yield until the response callback fires. The scheduler drives this.
-	while not isDone do
-		coroutine.yield()
+	local fetch_success, response_or_error = pcall(http.Get, source.url)
+	if not fetch_success then
+		Log(
+			LogLevel.WARNING,
+			string.format("[FETCHER] Failed to fetch data from %s: %s", source.name, tostring(response_or_error))
+		)
+		return nil, "fetch_failed"
 	end
 
-	if not responseContent or responseContent == "" then
-		Log(LogLevel.WARNING, string.format("No response from: %s", source.name))
+	if type(response_or_error) ~= "string" or response_or_error == "" then
+		Log(LogLevel.WARNING, string.format("[FETCHER] Empty or invalid content from %s", source.name))
 		return nil, "empty_response"
 	end
 
-	-- Detect HTML error pages (404, rate limits, etc.)
-	local lc = responseContent:sub(1, 200):lower()
-	if lc:match("<html") or lc:match("<!doctype") then
-		local detail = "HTML/Error Page"
-		if lc:match("404") then detail = "404 Not Found"
-		elseif lc:match("429") then detail = "429 Rate Limited"
-		elseif lc:match("503") then detail = "503 Unavailable"
-		end
-		Log(LogLevel.WARNING, string.format("HTTP Error from %s: %s", source.name, detail))
-		return nil, detail
-	end
+    -- Detect HTML error pages (404, etc.)
+    if response_or_error:match("<html") or response_or_error:match("<HTML") or response_or_error:match("<!DOCTYPE") then
+        local detail = "HTML/Error Page detected"
+        if response_or_error:match("404") then detail = "404 Not Found"
+        elseif response_or_error:match("429") then detail = "429 Rate Limited"
+        elseif response_or_error:match("503") then detail = "503 Service Unavailable" end
+        Log(LogLevel.WARNING, string.format("[FETCHER] HTTP Error from %s: %s", source.name, detail))
+        return nil, detail
+    end
 
-	Log(LogLevel.DEBUG, string.format("Downloaded %s: %d bytes", source.name, #responseContent))
-	return responseContent, nil
+	Log(
+		LogLevel.DEBUG,
+		string.format("[FETCHER] Download successful from %s. Size: %d bytes", source.name, #response_or_error)
+	)
+
+	return response_or_error, nil
 end
 
--- Parses downloaded content into G.DataBase.
--- Returns: added (int), updated (int), errors (int)
-local function parseSource(source, responseContent)
-	Log(LogLevel.INFO, string.format("Parsing source: %s", source.name))
+local function parseSource(source, response_content)
+	Log(LogLevel.INFO, string.format("[FETCHER] Parsing source: %s", source.name))
 	local sourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 	local added = 0
 	local updated = 0
 	local isDirtyBefore = Database.State.isDirty
 
+	-- Parsing logic
 	if source.parser == "raw" then
-		local entries, errorMsg = Parsers.ParseRawIDs(responseContent, source.cause)
+		local entries, errorMsg = Parsers.ParseRawIDs(response_content, source.cause)
 		if entries then
-			local processedCount = 0
-			local addedCount = 0
-			local updatedCount = 0
-			local existingCount = 0
+			local processedCount, existingCount, addedCount, updatedCount = 0, 0, 0, 0
 			for steamID64, entryData in pairs(entries) do
 				processedCount = processedCount + 1
 				if not G.DataBase[steamID64] then
@@ -189,25 +193,29 @@ local function parseSource(source, responseContent)
 				else
 					existingCount = existingCount + 1
 					local existingEntry = G.DataBase[steamID64]
-					if (existingEntry.Name == "Unknown" or existingEntry.Name == nil)
-						and entryData.Name and entryData.Name ~= "Unknown"
+					if
+						(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
+						and entryData.Name
+						and entryData.Name ~= "Unknown"
 					then
 						existingEntry.Name = entryData.Name
 						updatedCount = updatedCount + 1
 						Database.State.isDirty = true
 					end
-					if (existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
-						and entryData.Reason and entryData.Reason ~= "Unknown Source"
+					if
+						(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
+						and entryData.Reason
+						and entryData.Reason ~= "Unknown Source"
 					then
 						existingEntry.Reason = entryData.Reason
 						updatedCount = updatedCount + 1
 						Database.State.isDirty = true
 					end
 				end
-				-- Yield every 500 entries to prevent frame time spikes
-				if processedCount % 500 == 0 then
-					coroutine.yield()
-				end
+                -- Yield parsing to prevent frametime spikes
+                if processedCount % 500 == 0 then
+                    coroutine.yield()
+                end
 			end
 			added = addedCount
 			updated = updatedCount
@@ -216,22 +224,31 @@ local function parseSource(source, responseContent)
 			sourceStats.existing = existingCount
 			sourceStats.updated = updatedCount
 		else
-			Log(LogLevel.WARNING, string.format("Parse error %s: %s", source.name, errorMsg or "Unknown"))
+			Log(
+				LogLevel.WARNING,
+				string.format("[FETCHER] Error parsing %s: %s", source.name, errorMsg or "Unknown error")
+			) 
 			sourceStats.errors = sourceStats.errors + 1
 		end
 	elseif source.parser == "tf2db" then
-		local _, errorMsg, stats = Parsers.ParseTF2BotDetector(responseContent, source.cause, G.DataBase, sourceStats)
-		if stats then
-			added = stats.added
-			updated = stats.updated
-			sourceStats = stats
-		else
-			Log(LogLevel.WARNING, string.format("Parse error %s: %s", source.name, errorMsg or "Unknown"))
-			sourceStats.errors = sourceStats.errors + 1
-		end
+        -- Use ParseTF2BotDetector for all TF2DB sources
+        local _, errorMsg, stats = Parsers.ParseTF2BotDetector(response_content, source.cause, G.DataBase, sourceStats)
+        if stats then
+            added, updated = stats.added, stats.updated
+            sourceStats = stats
+        else
+            Log(
+                LogLevel.WARNING,
+                string.format("[FETCHER] Error parsing %s: %s", source.name, errorMsg or "Unknown error")
+            ) 
+            sourceStats.errors = sourceStats.errors + 1
+        end
 	else
-		Log(LogLevel.ERROR, string.format("Unknown parser '%s' for source %s", source.parser, source.name))
-		return 0, 0, 1
+		Log( 
+			LogLevel.ERROR,
+			string.format("[FETCHER] Error: Unknown parser type '%s' for source %s", source.parser, source.name)
+		)
+		return 0, 0, 1 -- added, updated, errors
 	end
 
 	Parsers.AddSourceStats(
@@ -247,80 +264,28 @@ local function parseSource(source, responseContent)
 		Database.State.isDirty = true
 	end
 
-	if added > 0 or updated > 0 then
-		Log(LogLevel.DEBUG, string.format("%s: +%d added, ~%d updated", source.name, added, updated))
+	if updated > 0 then
+		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: Added %d, Updated %d", source.name, added, updated)) 
+	elseif added > 0 then
+		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: Added %d", source.name, added)) 
 	else
-		Log(LogLevel.DEBUG, string.format("%s: No changes", source.name))
+		Log(LogLevel.DEBUG, string.format("[FETCHER] %s: No changes", source.name)) 
 	end
 
 	return added, updated, sourceStats.errors
 end
 
--- Scans the local imports directory and merges any .json/.txt files into the database.
-local function importLocalFiles()
-	Log(LogLevel.INFO, "Scanning local imports folder...")
-	pcall(filesystem.CreateDirectory, "Lua Cheater_Detection")
-	pcall(filesystem.CreateDirectory, "Lua Cheater_Detection/imports")
-
-	local files = {}
-	pcall(filesystem.EnumerateDirectory, "Lua Cheater_Detection/imports/*", function(filename, _attributes)
-		if filename:match("%.json$") or filename:match("%.txt$") then
-			table.insert(files, filename)
-		end
-	end)
-
-	if #files == 0 then
-		Log(LogLevel.DEBUG, "No local import files found")
-		return
-	end
-
-	local totalImported = 0
-	for _, filename in ipairs(files) do
-		local path = "Lua Cheater_Detection/imports/" .. filename
-		Log(LogLevel.DEBUG, "Local import: " .. filename)
-
-		local file = io.open(path, "r")
-		if file then
-			local content = file:read("*a")
-			file:close()
-			if content and content ~= "" then
-				coroutine.yield() -- Yield after reading large content
-				local parserType = filename:match("%.json$") and "tf2db" or "raw"
-				local added, updated, errors = parseSource(
-					{ name = filename, parser = parserType, cause = "Local Import" },
-					content
-				)
-				totalImported = totalImported + (added or 0)
-			end
-		end
-		coroutine.yield() -- Yield after each file processing
-	end
-
-	if totalImported > 0 then
-		Log(LogLevel.SUCCESS, string.format("Imported %d new entries from local files", totalImported))
-	end
-end
-
---[[ Public Module Functions ]]
-
--- Starts the async database fetch process.
--- Creates a coroutine that is driven by Fetcher.Tick() every draw frame.
--- Step 1: Local file imports
--- Step 2: Online source fetches (rate-limited via HttpQueue)
--- Step 3: Save database if anything changed
+-- Public Module Functions
 function Fetcher.Start()
+	Log(LogLevel.INFO, "[FETCHER] Starting ASYNC database fetch process")
+
 	if Fetcher.State.isRunning then
-		Log(LogLevel.DEBUG, "Already running — ignoring duplicate Start() call")
+		Log(LogLevel.WARNING, "[FETCHER] Fetch process already running, ignoring request")
 		return
 	end
 
 	if not checkRequirements() then
-		Log(LogLevel.ERROR, "Requirements check failed — aborting fetch")
-		return
-	end
-
-	if not isFetchStale() then
-		Log(LogLevel.INFO, "Database is fresh (fetched < 1 hour ago) — skipping online update")
+		Log(LogLevel.ERROR, "[FETCHER] Requirements check failed, aborting fetch")
 		return
 	end
 
@@ -332,108 +297,105 @@ function Fetcher.Start()
 	Fetcher.State.results.total_updated = 0
 	Fetcher.State.results.errors = 0
 
-	local activeSources = Sources.GetActiveSources()
-	Log(LogLevel.INFO, string.format("Starting ASYNC database fetch: %d online sources", #activeSources))
+	local active_sources = Sources.GetActiveSources()
+	Log(LogLevel.INFO, string.format("[FETCHER] Found %d active sources", #active_sources))
 
-	Fetcher.State.coro = coroutine.create(function()
-		-- Step 1: Local imports (synchronous but yields during heavy loops)
-		importLocalFiles()
-
-		-- Step 2: Online sources (each fetch yields until HttpQueue delivers the response)
-		for i, source in ipairs(activeSources) do
-			Log(LogLevel.INFO, string.format("Source %d/%d: %s", i, #activeSources, source.name))
-
-			local responseContent, _err = fetchSource(source)
-			if responseContent then
-				local added, updated, errors = parseSource(source, responseContent)
-				Fetcher.State.results.total_added = Fetcher.State.results.total_added + (added or 0)
-				Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + (updated or 0)
-				Fetcher.State.results.errors = Fetcher.State.results.errors + (errors or 0)
-			else
-				Fetcher.State.results.errors = Fetcher.State.results.errors + 1
-				Parsers.AddSourceStats(source.name, 0, 0, 0, 1, 0)
-			end
-
-			-- Yield between sources. ParseTF2BotDetector already yields before
-			-- its Json.decode, but this extra yield ensures the game gets a
-			-- full frame after the entire parse+iteration completes before we
-			-- start fetching the next source.
-			coroutine.yield()
-		end
-
-		-- Step 3: Finish
+	if #active_sources == 0 then
+		Log(LogLevel.INFO, "[FETCHER] No active sources found, finishing immediately.")
 		Fetcher.FinishFetch()
-	end)
-end
-
--- Called every draw frame by Scheduler.Tick().
--- Drives the fetch coroutine one step at a time.
-function Fetcher.Tick()
-	local coro = Fetcher.State.coro
-	if not coro or type(coro) ~= "thread" then return end
-	if coroutine.status(coro) == "dead" then
-		Fetcher.State.coro = nil
-		Fetcher.State.isRunning = false
 		return
 	end
 
-	local ok, err = coroutine.resume(coro)
-	if not ok then
-		printc(255, 50, 50, 255, "[CD FETCHER ERROR] Coroutine crashed: " .. tostring(err))
-		Fetcher.State.isRunning = false
-		Fetcher.State.coro = nil
-	end
+    -- Run the entire fetch and parse sequence inside a coroutine
+    Fetcher.State.coro = coroutine.create(function()
+        for i, source in ipairs(active_sources) do
+            Log(LogLevel.DEBUG, string.format("[FETCHER] Processing source %d/%d: %s", i, #active_sources, source.name))
+            
+            -- Step 1: Fetch
+            local response_content, err = fetchSource(source)
+            if response_content then
+                -- Step 2: Parse
+                local added, updated, errors = parseSource(source, response_content)
+                Fetcher.State.results.total_added = Fetcher.State.results.total_added + added
+                Fetcher.State.results.total_updated = Fetcher.State.results.total_updated + updated
+                Fetcher.State.results.errors = Fetcher.State.results.errors + errors
+            else
+                Fetcher.State.results.errors = Fetcher.State.results.errors + 1
+                Parsers.AddSourceStats(source.name, 0, 0, 0, 1, 0)
+            end
+            
+            -- Wait a moment between sources
+            local waitEndTime = globals.RealTime() + 1.2
+            while globals.RealTime() < waitEndTime do
+                coroutine.yield()
+            end
+        end
+
+        -- Fetch completed
+        Fetcher.FinishFetch()
+    end)
 end
 
--- Called at the end of the coroutine after all sources are processed.
-function Fetcher.FinishFetch()
-	local elapsed = globals.RealTime() - Fetcher.State.startTime
+-- Core Tick function (call from scheduler)
+function Fetcher.Tick()
+    local coro = Fetcher.State.coro
+    if not coro or type(coro) ~= "thread" then return end
 
+    local status, err = coroutine.resume(coro)
+    if not status then
+        Log(LogLevel.ERROR, "[FETCHER] Coroutine error: " .. tostring(err))
+        printc(255, 50, 50, 255, "[FETCHER ERROR] " .. tostring(err))
+        Fetcher.State.isRunning = false
+        Fetcher.State.coro = nil
+    end
+
+    if coroutine.status(coro) == "dead" then
+        Fetcher.State.coro = nil
+        Fetcher.State.isRunning = false
+    end
+end
+
+function Fetcher.FinishFetch()
+	local elapsedTime = globals.RealTime() - Fetcher.State.startTime
+
+	-- Only show detailed debug output in debug mode (via Parsers.PrintStatsSummary)
 	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	if isDebugMode then
-		Log(LogLevel.INFO, string.format(
-			"Fetch complete in %.1fs — Added: %d, Updated: %d, Errors: %d",
-			elapsed,
-			Fetcher.State.results.total_added,
-			Fetcher.State.results.total_updated,
-			Fetcher.State.results.errors
-		))
+		Log(LogLevel.INFO, string.format("ASYNC Fetch completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
+			elapsedTime, Fetcher.State.results.total_added, Fetcher.State.results.total_updated, Fetcher.State.results.errors))
 		Parsers.PrintStatsSummary()
 	else
-		printc(0, 255, 140, 255, string.format(
-			"[CD] Database update complete: +%d new, ~%d updated (%d total entries)",
-			Parsers.ParseStats.totalAdded,
-			Parsers.ParseStats.totalUpdated or 0,
-			(function()
-				local count = 0
-				if type(G.DataBase) == "table" then
-					for _ in pairs(G.DataBase) do count = count + 1 end
-				end
-				return count
-			end)()
-		))
+		printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
+		printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
+
 		if Parsers.ParseStats.totalErrors > 0 then
-			printc(255, 150, 0, 255, string.format("[CD] %d source errors during fetch", Parsers.ParseStats.totalErrors))
+			printc(255, 100, 100, 255, string.format("Database errors: %d", Parsers.ParseStats.totalErrors))
 		end
+
+		local dbCount = 0
+		if type(G.DataBase) == "table" then
+			for _ in pairs(G.DataBase) do
+				dbCount = dbCount + 1
+			end
+		end
+		printc(0, 255, 140, 255, string.format("Total database entries: %d", dbCount))
 	end
 
-	-- Save if anything changed. This is a runtime (non-unload) save so there is no size cap.
 	if Database.State.isDirty then
-		Log(LogLevel.INFO, "Changes detected — saving database")
-		Database.SaveDatabase(false)
+		Log(LogLevel.INFO, "Changes detected, saving database")
+		Database.SaveDatabase()
 	else
-		Log(LogLevel.INFO, "No changes detected — skipping save")
+		Log(LogLevel.INFO, "No changes detected, skipping database save")
 	end
 
-	-- Record fetch timestamp so we don't re-fetch for another hour
 	local mainMenu = G and G.Menu and G.Menu.Main
 	if mainMenu then
 		mainMenu.LastFetchTimestamp = os.time()
 	end
 
 	Fetcher.State.isRunning = false
-	Fetcher.State.coro = nil
-	Log(LogLevel.DEBUG, "Fetch coroutine finished")
+    Fetcher.State.coro = nil
+	Log(LogLevel.DEBUG, "Fetch process finished")
 end
 
 function Fetcher.GetStatus()
@@ -442,5 +404,5 @@ function Fetcher.GetStatus()
 	}
 end
 
-Log(LogLevel.DEBUG, ">>> Module execution finished. Returning Fetcher table.")
+Log(LogLevel.DEBUG, "[FETCHER] >>> Module execution finished. Returning Fetcher table.")
 return Fetcher
