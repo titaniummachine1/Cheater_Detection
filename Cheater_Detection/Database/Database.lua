@@ -22,6 +22,7 @@ local Database = {
 		lastSave = 0,
 		lastLoaded = 0,
 		isInitialized = false,
+		logEntries = 0, -- Track number of changes since last consolidation
 	},
 }
 
@@ -123,8 +124,56 @@ function Database.SetPriority(target, priority, isInGame)
 end
 
 function Database.GetFilePath()
-	pcall(filesystem.CreateDirectory, "Lua Cheater_Detection")
-	return "Lua Cheater_Detection/database.json" 
+	local ok, fullPath = pcall(filesystem.CreateDirectory, "Lua Cheater_Detection")
+    if ok and fullPath and type(fullPath) == "string" then
+        local sep = package.config:sub(1, 1) or "\\"
+        return fullPath .. sep .. "database.json"
+    end
+	return "Lua Cheater_Detection/database.json" -- Fallback
+end
+
+function Database.GetLogPath()
+	local ok, fullPath = pcall(filesystem.CreateDirectory, "Lua Cheater_Detection")
+    if ok and fullPath and type(fullPath) == "string" then
+        local sep = package.config:sub(1, 1) or "\\"
+        return fullPath .. sep .. "database_updates.jsonl"
+    end
+	return "Lua Cheater_Detection/database_updates.jsonl" -- Fallback
+end
+
+-- Efficiently appends a change to the log file instead of rewriting the entire DB
+function Database.AppendChange(steamID, data, isRemoval)
+    if not steamID then return end
+    
+    local logPath = Database.GetLogPath()
+    local file = io.open(logPath, "a")
+    if not file then
+        Log(LogLevel.ERROR, "[DB] Failed to open log file for appending: " .. tostring(logPath))
+        return
+    end
+
+    local change = {
+        id = steamID,
+        data = not isRemoval and data or nil,
+        op = isRemoval and "DEL" or "SET",
+        ts = os.time()
+    }
+
+    local success, encoded = pcall(Json.encode, change)
+    if success and type(encoded) == "string" then
+        file:write(encoded .. "\n")
+        Database.State.logEntries = Database.State.logEntries + 1
+        Database.State.isDirty = true
+    else
+        Log(LogLevel.ERROR, "[DB] Failed to encode log entry for " .. steamID)
+    end
+    
+    file:close()
+    
+    -- Consolidate if the log gets too big (e.g. 200 entries)
+    if Database.State.logEntries > 200 then
+        Database.SaveDatabase()
+    end
 end
 
 function Database.SaveDatabase()
@@ -156,9 +205,10 @@ function Database.SaveDatabase()
 
 	local filepath = Database.GetFilePath()
 	
+    Log(LogLevel.DEBUG, "[DB] Opening file for writing: " .. tostring(filepath))
 	local file = io.open(filepath, "w")
 	if not file then
-		Log(LogLevel.ERROR, "[DB] Failed to open file for writing: " .. filepath)
+		Log(LogLevel.ERROR, "[DB] Failed to open file for writing: " .. tostring(filepath))
 		return
 	end
 
@@ -166,9 +216,17 @@ function Database.SaveDatabase()
 	file:close()
 	encodedData = nil
 
+    -- After full save, we can clear the log
+    local logPath = Database.GetLogPath()
+    local logFile = io.open(logPath, "w")
+    if logFile then
+        logFile:close()
+        Database.State.logEntries = 0
+    end
+
 	Database.State.isDirty = false
 	Database.State.lastSave = os.time()
-	Log(LogLevel.SUCCESS, "[DB] Database flushed to disk")
+    Log(LogLevel.SUCCESS, string.format("[DB SUCCESS] Database consolidated and flushed to disk: %s", filepath))
 end
 
 function Database.LoadDatabase(silent, force)
@@ -176,38 +234,61 @@ function Database.LoadDatabase(silent, force)
 
 	Log(LogLevel.INFO, "[DB] Loading database...")
 	local filePath = Database.GetFilePath()
+    local logPath = Database.GetLogPath()
 
 	local file = io.open(filePath, "r")
-	if not file then
-		G.DataBase = {}
-		Database.State.isInitialized = true
-		return
-	end
-
-	local content = file:read("*a")
-	file:close()
+    local content = nil
+	if file then
+        content = file:read("*a")
+        file:close()
+    end
 
 	if not content or #content == 0 then
 		G.DataBase = {}
-		Database.State.isInitialized = true
-		return
+    else
+        local success, decodedData = pcall(function()
+            if not Json or not Json.decode then return nil end
+            return Json.decode(content)
+        end)
+        content = nil
+
+        if not success or type(decodedData) ~= "table" then
+            Log(LogLevel.ERROR, "[DB] JSON Decode Failed (Corrupted file?): " .. tostring(decodedData))
+            Log(LogLevel.WARNING, "[DB] Resetting database base layer.")
+            G.DataBase = {}
+        else
+            G.DataBase = decodedData
+        end
 	end
 
-	local success, decodedData = pcall(function()
-        if not Json or not Json.decode then return nil end
-        return Json.decode(content)
-    end)
-	content = nil
+    -- REPLAY LOGS: Apply any 1/15th of the entries that were saved in the log
+    local logFile = io.open(logPath, "r")
+    if logFile then
+        Log(LogLevel.INFO, "[DB] Replaying updates log...")
+        local replayCount = 0
+        for line in logFile:lines() do
+            if #line > 2 then
+                local ok, entry = pcall(Json.decode, line)
+                if ok and type(entry) == "table" and entry.id then
+                    if entry.op == "DEL" then
+                        G.DataBase[entry.id] = nil
+                    elseif entry.op == "SET" and type(entry.data) == "table" then
+                        G.DataBase[entry.id] = entry.data
+                    end
+                    replayCount = replayCount + 1
+                end
+            end
+        end
+        logFile:close()
+        Database.State.logEntries = replayCount
+        if replayCount > 0 then
+            Log(LogLevel.SUCCESS, string.format("[DB] Applied %d changes from log", replayCount))
+        end
+    end
 
-	if not success or type(decodedData) ~= "table" then
-		Log(LogLevel.ERROR, "[DB] JSON Decode Failed (Corrupted file?): " .. tostring(decodedData))
-        Log(LogLevel.WARNING, "[DB] Resetting database to prevent undefined behavior.")
-		G.DataBase = {}
-		Database.State.isInitialized = true
-        Database.State.isDirty = true -- Flag for a clean save later
-		return
-	end
-
+    local entriesToRemove = {}
+    local total = 0
+    
     -- Hardcoded migration map for common long URLs to save space
     local migrationMap = {
         ["megacheaterdb"] = "mega_scat",
@@ -220,10 +301,6 @@ function Database.LoadDatabase(silent, force)
         ["Group"] = "d3_group"
     }
 
-    G.DataBase = decodedData
-    local entriesToRemove = {}
-    local total = 0
-    
     for steamID, value in pairs(G.DataBase) do
         total = total + 1
         if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
@@ -243,9 +320,8 @@ function Database.LoadDatabase(silent, force)
                         end
                     end
                     
-                    -- If no specific mapping found, reduce to a generic identifier
                     if not found then
-                        value.Static = "Ext" -- Shortest possible generic ID
+                        value.Static = "Ext"
                         Database.State.isDirty = true
                     end
                 end
@@ -260,7 +336,7 @@ function Database.LoadDatabase(silent, force)
     Database.State.lastLoaded = os.time()
     Log(LogLevel.SUCCESS, string.format("[DB] Database ready: %d entries", total - #entriesToRemove))
     
-    Database.SanitizeAll() -- Aggressive sweep on load
+    Database.SanitizeAll()
     Database.ClearLocalPlayer()
     Database.State.isInitialized = true
 end
@@ -374,13 +450,7 @@ function Database.UpsertCheater(steamID, data)
 
 	Database.State.isDirty = true
 	
-	-- Instant Save on Hard Detections or Max Suspicion (>= 99)
-	local isHardDetection = (persistentFlags & (Constants.Flags.VALVE | Constants.Flags.VAC_BANNED)) ~= 0
-    local isMaxSuspicion = score >= 99
-
-	if isHardDetection or isMaxSuspicion or (data.reason and data.reason:find("VAC")) then
-		Database.SaveDatabase()
-	end
+	Database.AppendChange(steamID, G.DataBase[steamID], false)
 
 	return true
 end
@@ -396,7 +466,7 @@ function Database.RemoveCheater(steamID)
 		G.DataBase[steamID] = nil
 		Database.State.isDirty = true
 		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
-		Database.SaveDatabase() -- Save immediately on manual remove
+		Database.AppendChange(steamID, nil, true)
 		return true
 	end
 	return false
