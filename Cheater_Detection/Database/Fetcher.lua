@@ -87,7 +87,9 @@ Fetcher.State = {
     localFiles = {},
     fileIdx = 0,
     playersToProcess = nil,
-    entryIdx = 0,
+    rawIterator = nil, -- For incremental parsing of raw lists
+    rawPendingSource = nil,
+    entryIdx = 1,
     waitEndTime = 0,
     currentSourceStats = nil
 }
@@ -230,14 +232,14 @@ function Fetcher.Tick()
             
             -- FALLBACK: If JSON decode returned a number, it's likely a raw list of IDs
             if not players and err and err:find("returned number") then
-                Log(LogLevel.DEBUG, "[FETCHER] Local file appears to be raw IDs, falling back to raw parser")
-                local rawEntries = Parsers.ParseRawIDs(content, "Local Import", "Ext")
-                -- Convert dict to array for the state machine
-                players = {}
-                for sid64, entry in pairs(rawEntries) do
-                    table.insert(players, { steamid = sid64, attributes = { entry.Reason } })
-                end
-                err = nil
+                Log(LogLevel.DEBUG, "[FETCHER] Local file appears to be raw IDs, switching to incremental raw parser")
+                state.rawIterator = content:gmatch("[^\n\r]+")
+                state.playersToProcess = {}
+                state.entryIdx = 1
+                state.rawPendingSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
+                state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
+                state.mode = "RAW_INCREMENTAL"
+                return
             end
 
             if players then
@@ -258,13 +260,47 @@ function Fetcher.Tick()
         end
 
     --------------------------------------------------------
+    -- STATE: RAW_INCREMENTAL
+    --------------------------------------------------------
+    elseif state.mode == "RAW_INCREMENTAL" then
+        local it = state.rawIterator
+        local source = state.rawPendingSource
+        if not it or not source then
+            Log(LogLevel.ERROR, "[FETCHER] RAW_INCREMENTAL state reached without iterator/source")
+            state.mode = "ONLINE_FETCH"
+            return
+        end
+
+        local count = 0
+        local limit = 500 -- Parse 500 lines per frame (very fast)
+        
+        while count < limit do
+            local line = it()
+            if not line then
+                state.mode = state.nextMode or "LOCAL_PARSE" -- Done prepping table
+                state.activeSource = source
+                state.rawIterator = nil
+                state.rawPendingSource = nil
+                state.nextMode = nil
+                return
+            end
+            
+            local sid64 = Parsers.ParseRawLine(line)
+            if sid64 then
+                if not state.playersToProcess then state.playersToProcess = {} end
+                table.insert(state.playersToProcess, { steamid = sid64, attributes = { source.name or source.cause or "Raw List" } })
+            end
+            count = count + 1
+        end
+
+    --------------------------------------------------------
     -- STATE: LOCAL_PARSE / ONLINE_PARSE (Merged Logic)
     --------------------------------------------------------
     elseif state.mode == "LOCAL_PARSE" or state.mode == "ONLINE_PARSE" then
         local players = state.playersToProcess
         local startIdx = state.entryIdx
         local count = 0
-        local chunkSize = 100 -- STRICT 100 entries per frame
+        local chunkSize = 20 -- STRICT 20 entries per frame to eliminate stutters
 
         local isDirtyBefore = Database.State.isDirty
         local source = state.activeSource
@@ -346,12 +382,15 @@ function Fetcher.Tick()
                 if source.parser == "tf2db" then
                     players, err = Parsers.GetPlayersFromJSON(response)
                 elseif source.parser == "raw" then
-                    local rawEntries = Parsers.ParseRawIDs(response, source.cause, source.sourceID)
-                    -- Convert dict to array for state machine
-                    players = {}
-                    for sid64, entry in pairs(rawEntries) do
-                        table.insert(players, { steamid = sid64, attributes = { entry.Reason } })
-                    end
+                    Log(LogLevel.DEBUG, "[FETCHER] Online source is raw IDs, switching to incremental raw parser")
+                    state.rawIterator = response:gmatch("[^\n\r]+")
+                    state.playersToProcess = {}
+                    state.entryIdx = 1
+                    state.rawPendingSource = source
+                    state.nextMode = "ONLINE_PARSE" -- Resume to online parse after prep
+                    state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
+                    state.mode = "RAW_INCREMENTAL"
+                    return
                 else
                     err = "Unknown parser type: " .. tostring(source.parser)
                 end

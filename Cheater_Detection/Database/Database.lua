@@ -418,21 +418,7 @@ end
 callbacks.Unregister("Unload", "DatabaseAutoSaveOnUnload") -- Ensure no duplicates
 callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
 
--- Set Priority 10 on start for all existing DB entries!
-local function syncPlayerListOnLoad()
-	if not G.DataBase then return end
-	local count = 0
-	for id, _ in pairs(G.DataBase) do
-		pcall(playerlist.SetPriority, id, 10)
-		count = count + 1
-	end
-	if count > 0 then
-		Log(LogLevel.DEBUG, string.format("[DB] Synced %d entries to engine playerlist", count))
-	end
-end
-
 -- Self-init
 Database.Initialize(true)
-syncPlayerListOnLoad()
 
 return Database

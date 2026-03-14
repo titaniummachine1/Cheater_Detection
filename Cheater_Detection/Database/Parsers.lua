@@ -117,10 +117,14 @@ function Parsers.PrintStatsSummary()
 	end
 end
 
+local steamIDCache = {}
+
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
 function Parsers.GetSteamID64(input)
 	if not input then return nil end
+
+    if steamIDCache[input] then return steamIDCache[input] end
 
 	-- Optimization: Check if it's already a standard SteamID64 string (starts with 765, length ~17)
 	local id_str = tostring(input):match("^%s*(765%d+)")
@@ -137,7 +141,9 @@ function Parsers.GetSteamID64(input)
 	if accountID then
 		accountID = tonumber(accountID)
 		if accountID then
-			return tostring(76561197960265728 + accountID)
+			local result = tostring(76561197960265728 + accountID)
+            steamIDCache[input] = result
+            return result
 		end
 	end
 
@@ -147,6 +153,7 @@ function Parsers.GetSteamID64(input)
 		if success and result then
 			local result_str = tostring(result):match("(765%d+)")
 			if result_str and #result_str >= 17 then
+                steamIDCache[input] = result_str
 				return result_str
 			end
 		end
