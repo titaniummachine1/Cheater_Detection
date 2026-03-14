@@ -324,7 +324,7 @@ function Fetcher.Start()
     Fetcher.State.coro = coroutine.create(function()
         -- STEP 0: Process Local Imports ASYNC first
         Log(LogLevel.INFO, "[FETCHER] Processing local imports...")
-        Fetcher.ImportLocal() 
+        Fetcher.ImportLocal(true) 
         coroutine.yield()
 
         for i, source in ipairs(active_sources) do
@@ -374,7 +374,7 @@ function Fetcher.Tick()
     end
 end
 
-function Fetcher.ImportLocal()
+function Fetcher.ImportLocal(isAsync)
     Log(LogLevel.INFO, "[FETCHER] Scanning for local imports in 'Lua Cheater_Detection/imports'...")
     
     -- Rule II.3: Mandatory Validation of engine objects
@@ -436,6 +436,14 @@ function Fetcher.ImportLocal()
                 local added, updated, errors = parseSource(sourceObj, content)
                 totalAdded = totalAdded + added
                 totalUpdated = totalUpdated + updated
+
+                -- Throttling for Async mode
+                if isAsync then
+                    local waitEndTime = globals.RealTime() + 1.2
+                    while globals.RealTime() < waitEndTime do
+                        coroutine.yield()
+                    end
+                end
             else
                 Log(LogLevel.WARNING, "[FETCHER] Failed to read or empty local file: " .. fileName)
             end

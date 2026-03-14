@@ -346,6 +346,16 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 				if updated then
 					stats.updated = stats.updated + 1
 				end
+
+                -- Persistent-First Logic:
+                -- If it's already in the DB and is NOT static, it STAYS non-static.
+                -- We only apply the static flag if it was ALREADY static or is new.
+                if isStatic and (existingEntry.Static == true or existingEntry.Static == nil) then
+                    -- If it doesn't have a Static field at all, it might be from the disk load.
+                    -- HOWEVER, if it's in the database.json, it shouldn't have Static=true.
+                    -- If we are parsing a static source, we only want to mark it static if it's not already a "Permanent" detection.
+                    -- For safety, we only mark it static if it's a new entry (handled below) or already marked static.
+                end
 			else
 				entries[steamID64] = {
 					Name = playerName,
@@ -354,11 +364,6 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 				}
 				stats.added = stats.added + 1
 			end
-
-            -- Update static flag if existing
-            if entries[steamID64] and isStatic then
-                entries[steamID64].Static = true
-            end
 		else
 			stats.errors = stats.errors + 1
 		end

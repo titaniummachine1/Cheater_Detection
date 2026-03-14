@@ -218,6 +218,13 @@ function Database.LoadDatabase(silent, force)
         total = total + 1
         if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
             table.insert(entriesToRemove, steamID)
+        else
+            -- DATA INTEGRITY: Strip Static flag if it was accidentally saved to disk
+            -- Anything in database.json is by definition persistent
+            if value.Static then
+                value.Static = nil
+                Database.State.isDirty = true
+            end
         end
     end
 
