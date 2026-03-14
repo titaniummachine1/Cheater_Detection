@@ -353,11 +353,12 @@ function Fetcher.Tick()
                 state.mode = "LOCAL_READ"
             else
                 state.sourceIdx = state.sourceIdx + 1
+                -- Wait a bit before next fetch to allow UI to breathe and log to append
                 state.mode = "WAITING"
                 state.nextMode = "ONLINE_FETCH"
-                state.waitEndTime = globals.RealTime() + 1.2
+                state.waitEndTime = globals.RealTime() + 1.5
             end
-            state.playersToProcess = nil -- Free memory
+            state.playersToProcess = nil
         end
 
     --------------------------------------------------------

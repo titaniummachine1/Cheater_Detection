@@ -41,6 +41,12 @@ function PlayerCache.Get(ply)
 		local initialFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initialScore = dbEntry and dbEntry.Score or 0
 
+        -- SYNC-ON-JOIN: Notify engine playerlist if this is a known cheater
+        -- (Priority 10 makes bot detector tag them)
+        if initialFlags ~= Constants.Flags.NONE or initialScore >= 99 then
+            pcall(playerlist.SetPriority, id, 10)
+        end
+
 		activeSet[id] = {
 			wrap = WrappedPlayer.FromEntity(ply),
 			flags = initialFlags,
@@ -107,6 +113,21 @@ end
 ---Return the raw active table (for central management)
 function PlayerCache.GetActiveTable()
 	return activeSet
+end
+
+--- Reset all players' checked state (called on map change)
+function PlayerCache.ResetCheckedState()
+    for _, state in pairs(activeSet) do
+        state.externalChecked = false
+    end
+end
+
+--- Cleanup active set (called on map change)
+function PlayerCache.Cleanup()
+    -- On map change, we can basically wipe the active set as everyone is reconnecting
+    for k, v in pairs(activeSet) do
+        activeSet[k] = nil
+    end
 end
 
 return PlayerCache

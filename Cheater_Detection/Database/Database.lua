@@ -149,12 +149,6 @@ function Database.AppendChange(steamID, data, isRemoval)
     if not steamID then return end
     
     local logPath = Database.GetLogPath()
-    local file = io.open(logPath, "a")
-    if not file then
-        Log(LogLevel.ERROR, "[DB] Failed to open log file for appending: " .. tostring(logPath))
-        return
-    end
-
     local change = {
         id = steamID,
         data = not isRemoval and data or nil,
@@ -164,20 +158,22 @@ function Database.AppendChange(steamID, data, isRemoval)
 
     if not Json or not Json.encode then
         Log(LogLevel.ERROR, "[DB] Json.encode unavailable for logging!")
-        file:close()
         return
     end
 
     local success, encoded = pcall(Json.encode, change)
     if success and type(encoded) == "string" then
-        file:write(encoded .. "\n")
-        Database.State.logEntries = Database.State.logEntries + 1
-        Database.State.isDirty = true
+        AsyncSaver.Append(logPath, encoded, function(ok, err)
+            if ok then
+                Database.State.logEntries = Database.State.logEntries + 1
+                Database.State.isDirty = true
+            else
+                Log(LogLevel.ERROR, "[DB] Async Append failed: " .. tostring(err))
+            end
+        end)
     else
         Log(LogLevel.ERROR, "[DB] Failed to encode log entry for " .. steamID)
     end
-    
-    file:close()
     
     -- Optimized trigger logic: only check if we are not already saving
     if Database.State.isSaving then return end
@@ -211,28 +207,13 @@ function Database.SaveDatabase()
 		return
 	end
 
-    -- DATA OPTIMIZATION: Create a shallow copy for saving that omits redundant data
-    local saveTable = {}
-    local count = 0
-    for k, v in pairs(G.DataBase) do
-        count = count + 1
-        local clean = {}
-        -- Only save what we need
-        if v.Name and v.Name ~= "Unknown" then clean.Name = v.Name end
-        if v.Reason and v.Reason ~= "Unknown Source" then clean.Reason = v.Reason end
-        if v.Static then clean.Static = v.Static end
-        if v.Flags and v.Flags ~= 0 then clean.Flags = v.Flags end
-        if v.Score and v.Score ~= 0 then clean.Score = v.Score end
-        
-        saveTable[k] = clean
-    end
-
     local filepath = Database.GetFilePath()
-    Log(LogLevel.DEBUG, string.format("[DB] Initiating async save for %d entries...", count))
+    Log(LogLevel.DEBUG, "[DB] Initiating async save (chunked optimization + encoding)...")
     
     Database.State.isSaving = true
     
-    AsyncSaver.Save(filepath, saveTable, function(success, err)
+    -- Pass the raw database; AsyncSaver will handle the cleaning loop in chunks
+    AsyncSaver.Save(filepath, G.DataBase, function(success, err)
         Database.State.isSaving = false
         if not success then
             Log(LogLevel.ERROR, "[DB] Async Save failed: " .. tostring(err))
