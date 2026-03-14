@@ -52,7 +52,11 @@ local function ProcessTask(task)
             -- Only save essential fields to optimize disk space and speed
             local clean = {}
             if type(v) == "table" then
-                if v.Name and v.Name ~= "Unknown" then clean.Name = v.Name end
+                -- Optimization: Strip name if it's "Unknown" OR if it's just a duplicate of the SteamID
+                if v.Name and v.Name ~= "Unknown" and v.Name ~= tostring(k) then 
+                    clean.Name = v.Name 
+                end
+                
                 if v.Reason and v.Reason ~= "Unknown Source" then clean.Reason = v.Reason end
                 if v.Static then clean.Static = v.Static end
                 if v.Flags and v.Flags ~= 0 then clean.Flags = v.Flags end
@@ -124,7 +128,7 @@ local function ProcessTask(task)
                 err = "io.open failed for append"
             end
         else
-            -- Use filesystem.Write for the full database save
+            -- Use filesystem.Write for the full database save (guaranteed directory creation)
             success = filesystem.Write(task.path, task.fullContent)
             if not success then err = "filesystem.Write failed" end
         end
