@@ -211,7 +211,20 @@ local function parseSource(source, response_content)
 						updatedCount = updatedCount + 1
 						Database.State.isDirty = true
 					end
+
+                    -- Mark as static if this is an external source
+                    if source.cause and (source.cause:find("Local Import") or source.url) then
+                        existingEntry.Static = true
+                    end
 				end
+                
+                -- Mark new or updated entries as static if external
+                if source.cause and (source.cause:find("Local Import") or source.url) then
+                    if G.DataBase[steamID64] then
+                        G.DataBase[steamID64].Static = true
+                    end
+                end
+
                 -- Yield parsing to prevent frametime spikes
                 if processedCount % 500 == 0 then
                     coroutine.yield()
@@ -232,7 +245,8 @@ local function parseSource(source, response_content)
 		end
 	elseif source.parser == "tf2db" then
         -- Use ParseTF2BotDetector for all TF2DB sources
-        local _, errorMsg, stats = Parsers.ParseTF2BotDetector(response_content, source.cause, G.DataBase, sourceStats)
+        local isStatic = source.cause and (source.cause:find("Local Import") or source.url)
+        local _, errorMsg, stats = Parsers.ParseTF2BotDetector(response_content, source.cause, G.DataBase, sourceStats, isStatic)
         if stats then
             added, updated = stats.added, stats.updated
             sourceStats = stats
@@ -308,6 +322,11 @@ function Fetcher.Start()
 
     -- Run the entire fetch and parse sequence inside a coroutine
     Fetcher.State.coro = coroutine.create(function()
+        -- STEP 0: Process Local Imports ASYNC first
+        Log(LogLevel.INFO, "[FETCHER] Processing local imports...")
+        Fetcher.ImportLocal() 
+        coroutine.yield()
+
         for i, source in ipairs(active_sources) do
             Log(LogLevel.DEBUG, string.format("[FETCHER] Processing source %d/%d: %s", i, #active_sources, source.name))
             
@@ -425,7 +444,7 @@ function Fetcher.ImportLocal()
     
     if totalAdded > 0 or totalUpdated > 0 then
         Log(LogLevel.SUCCESS, string.format("[FETCHER] Local import completed. Added: %d, Updated: %d", totalAdded, totalUpdated))
-        Database.SaveDatabase()
+        -- Database.SaveDatabase() -- NO LONGER SAVING STATIC DATA!
     else
         Log(LogLevel.INFO, "[FETCHER] Local import finished with no changes.")
     end

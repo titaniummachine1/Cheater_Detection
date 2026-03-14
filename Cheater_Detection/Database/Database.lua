@@ -134,9 +134,21 @@ function Database.SaveDatabase()
 
 	local encodedData = nil
 	if Json and Json.encode then
-		local success, result = pcall(Json.encode, G.DataBase)
+		-- Filter out Static entries (imported from external sources)
+		-- We only want to save the user's permanent detections to database.json
+		local saveTable = {}
+		local count = 0
+		for id, entry in pairs(G.DataBase) do
+			if not entry.Static then
+				saveTable[id] = entry
+				count = count + 1
+			end
+		end
+
+		local success, result = pcall(Json.encode, saveTable)
 		if success and type(result) == "string" then
 			encodedData = result
+			Log(LogLevel.DEBUG, string.format("[DB] Encoded %d non-static entries for saving", count))
 		else
 			Log(LogLevel.ERROR, "[DB] Json.encode failed: " .. tostring(result))
 			return

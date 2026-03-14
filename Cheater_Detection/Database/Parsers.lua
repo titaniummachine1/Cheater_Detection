@@ -241,7 +241,7 @@ end
 
 -- Parse TF2 Bot Detector JSON format and convert to our database format
 -- Returns: { [steamid64] = { Name="...", Reason="..." }, ... } or nil, errorMsg
-function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntries, sourceStats)
+function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntries, sourceStats, isStatic)
 	if not contentString or contentString == "" then
 		if sourceStats then
 			sourceStats.errors = (sourceStats.errors or 0) + 1
@@ -350,9 +350,15 @@ function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntri
 				entries[steamID64] = {
 					Name = playerName,
 					Reason = reason,
+                    Static = isStatic or false
 				}
 				stats.added = stats.added + 1
 			end
+
+            -- Update static flag if existing
+            if entries[steamID64] and isStatic then
+                entries[steamID64].Static = true
+            end
 		else
 			stats.errors = stats.errors + 1
 		end

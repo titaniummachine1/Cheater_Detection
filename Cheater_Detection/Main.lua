@@ -45,10 +45,9 @@ local function Init()
 	-- Require the Menu at the end of initialization
 	require("Cheater_Detection.Misc.Visuals.Menu")
 	
-    -- Automate Database Fetch (Local then Online)
+    -- Automate Database Fetch (Local then Online) - Now handled ASYNC by Fetcher
     local Fetcher = require("Cheater_Detection.Database.Fetcher")
-    Fetcher.ImportLocal()  -- Merge local files first
-    Fetcher.Start()        -- Begin online sync
+    Fetcher.Start()        -- Begin async local import followed by online sync
     
 	print("[CD] System initialized.")
 end
