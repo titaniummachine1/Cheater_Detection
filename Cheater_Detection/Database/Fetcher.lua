@@ -357,37 +357,55 @@ end
 
 function Fetcher.ImportLocal()
     Log(LogLevel.INFO, "[FETCHER] Scanning for local imports in 'Lua Cheater_Detection/imports'...")
+    
+    -- Rule II.3: Mandatory Validation of engine objects
+    assert(filesystem, "Fetcher.ImportLocal: filesystem engine object missing")
+    
     local importPath = "Lua Cheater_Detection/imports"
     
+    -- Use a helper to safely check for members on engine userdata
+    local function SafeHas(obj, key)
+        local ok, val = pcall(function() return obj[key] end)
+        return ok and val ~= nil
+    end
+
     -- Attempt to list files using multiple possible APIs to avoid crashes
     local files = nil
     
     -- Option 1: filesystem.List (Common in lnxlib)
-    if not files and filesystem and filesystem.List then
+    if not files and SafeHas(filesystem, "List") then
         local success, result = pcall(filesystem.List, importPath)
         if success then files = result end
     end
     
-    -- Option 2: filesystem.EnumerateFiles (Some other versions)
-    if not files and filesystem and filesystem.EnumerateFiles then
-        local success, result = pcall(filesystem.EnumerateFiles, importPath)
+    -- Option 2: filesystem.Enumerate (Standard engine Enumerate)
+    if not files and SafeHas(filesystem, "Enumerate") then
+        local success, result = pcall(filesystem.Enumerate, importPath)
         if success then files = result end
     end
 
+    -- If no files found or API incompatible, just early out (not a hard fail for the script)
     if not files or #files == 0 then 
-        Log(LogLevel.DEBUG, "[FETCHER] No local import files found or directory missing (or API incompatible).")
+        Log(LogLevel.DEBUG, "[FETCHER] No local import files found or directory missing.")
         return 
     end
 
     local totalAdded, totalUpdated = 0, 0
-    for _, fileName in ipairs(files) do
+    for i = 1, #files do
+        local fileName = files[i]
+        assert(type(fileName) == "string", "Fetcher.ImportLocal: fileName is not a string")
+
         -- Only process JSON files
         if fileName:match("%.json$") then
             local fullPath = importPath .. "/" .. fileName
-            local content = filesystem.Read(fullPath)
             
-            if content and content ~= "" then
+            -- Re-validate filesystem before Read
+            assert(SafeHas(filesystem, "Read"), "Fetcher.ImportLocal: filesystem.Read missing")
+            local readSuccess, content = pcall(filesystem.Read, fullPath)
+            
+            if readSuccess and content and content ~= "" then
                 Log(LogLevel.INFO, "[FETCHER] Importing local file: " .. fileName)
+                
                 -- Reuse the tf2db parser logic via parseSource
                 local sourceObj = {
                     name = fileName,
@@ -407,7 +425,6 @@ function Fetcher.ImportLocal()
     
     if totalAdded > 0 or totalUpdated > 0 then
         Log(LogLevel.SUCCESS, string.format("[FETCHER] Local import completed. Added: %d, Updated: %d", totalAdded, totalUpdated))
-        -- Save immediately after local import if changes were made
         Database.SaveDatabase()
     else
         Log(LogLevel.INFO, "[FETCHER] Local import finished with no changes.")

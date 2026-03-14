@@ -507,6 +507,8 @@ local function requestBatch()
 				return
 			end
 
+			-- Rule II.3: Mandatory Validation
+			assert(Json and Json.decode, "SteamHistory: JSON decoder missing")
 			local decodeOk, decoded = pcall(Json.decode, body)
 			if not decodeOk or type(decoded) ~= "table" then
 				handleError("JSON Decode failed", contexts)
