@@ -11,6 +11,7 @@ local _Vector3 = Vector3 or function(x, y, z)
 	return { x = x, y = y, z = z }
 end
 
+---@diagnostic disable: undefined-global, undefined-field, duplicate-doc-field
 ---@class WrappedPlayer
 ---@field _rawEntity Entity Raw entity object
 local WrappedPlayer = {}
@@ -239,7 +240,7 @@ function WrappedPlayer:IsValidPlayer(checkFriend, checkDormant, skipEntity)
 end
 
 --- Get SteamID64 for this player object
----@return string|number The player's SteamID64
+---@return string|number|nil The player's SteamID64, or nil if unavailable
 function WrappedPlayer:GetSteamID64()
 	-- Use rawget to access the cached value directly
 	-- This is CRITICAL to prevent infinite recursion if self._steamID64 triggers __index
@@ -361,7 +362,7 @@ function WrappedPlayer:IsEnemyOf(other)
 end
 
 --- Returns the view offset from the player's origin as a Vector3
----@return Vector3 The player's view offset
+---@return Vector3|nil The player's view offset
 function WrappedPlayer:GetViewOffset()
 	return cacheValue(self, "viewOffset", function()
 		return self._rawEntity:GetPropVector("localdata", "m_vecViewOffset[0]")
@@ -369,7 +370,7 @@ function WrappedPlayer:GetViewOffset()
 end
 
 --- Returns the player's eye position in world coordinates
----@return Vector3 The player's eye position
+---@return Vector3|nil The player's eye position
 function WrappedPlayer:GetEyePos()
 	return cacheValue(self, "eyePos", function()
 		local origin = self:GetAbsOrigin()
@@ -382,7 +383,7 @@ function WrappedPlayer:GetEyePos()
 end
 
 --- Returns the player's eye angles as an EulerAngles object
----@return EulerAngles The player's eye angles
+---@return EulerAngles|nil The player's eye angles
 function WrappedPlayer:GetEyeAngles()
 	return cacheValue(self, "eyeAngles", function()
 		-- Local player: always use engine view angles, never read netprop (causes DataTable warnings).

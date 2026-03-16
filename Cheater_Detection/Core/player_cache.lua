@@ -15,7 +15,7 @@ local PlayerCache = {}
 ---@type table<string, table>
 local activeSet = {} -- Only players currently in the server
 
----@class InternalState
+---@class PlayerCacheState
 ---@field wrap table The WrappedPlayer object
 ---@field flags integer Bitmask of Constants.Flags
 ---@field score number Current suspicion score
@@ -24,7 +24,7 @@ local activeSet = {} -- Only players currently in the server
 
 ---Get or create active state for a player
 ---@param ply Entity
----@return InternalState|nil
+---@return PlayerCacheState|nil
 function PlayerCache.Get(ply)
 	if not ply or not ply:IsValid() then
 		return nil
@@ -42,13 +42,13 @@ function PlayerCache.Get(ply)
 		local initialFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initialScore = dbEntry and dbEntry.Score or 0
 
-        -- SYNC-ON-JOIN: Set priority 10 only for hard confirmed flags.
-        -- CHEATER flag = score-based confirmation, VAC_BANNED = Steam VAC ban,
-        -- VALVE = Valve employee.  Do NOT trigger for SUSPICIOUS/CHECKED/etc.
-        local HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
-        if (initialFlags & HARD_FLAGS) ~= 0 then
-            pcall(playerlist.SetPriority, id, 10)
-        end
+		-- SYNC-ON-JOIN: Set priority 10 only for hard confirmed flags.
+		-- CHEATER flag = score-based confirmation, VAC_BANNED = Steam VAC ban,
+		-- VALVE = Valve employee.  Do NOT trigger for SUSPICIOUS/CHECKED/etc.
+		local HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
+		if (initialFlags & HARD_FLAGS) ~= 0 then
+			pcall(playerlist.SetPriority, id, 10)
+		end
 
 		activeSet[id] = {
 			wrap = WrappedPlayer.FromEntity(ply),
@@ -121,17 +121,17 @@ end
 
 --- Reset all players' checked state (called on map change)
 function PlayerCache.ResetCheckedState()
-    for _, state in pairs(activeSet) do
-        state.externalChecked = false
-    end
+	for _, state in pairs(activeSet) do
+		state.externalChecked = false
+	end
 end
 
 --- Cleanup active set (called on map change)
 function PlayerCache.Cleanup()
-    -- On map change, we can basically wipe the active set as everyone is reconnecting
-    for k, v in pairs(activeSet) do
-        activeSet[k] = nil
-    end
+	-- On map change, we can basically wipe the active set as everyone is reconnecting
+	for k, v in pairs(activeSet) do
+		activeSet[k] = nil
+	end
 end
 
 -- RUNTIME: When any detector fires a hard flag mid-session, mark the player

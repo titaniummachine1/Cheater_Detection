@@ -56,7 +56,7 @@ local function Dispatch(channels, colorMsg, plainMsg)
 	-- LocalChat: only visible to the local player (uses ChatPrintf / client chat)
 	-- Use "%s" as format to prevent ChatPrintf from re-interpreting % in the message.
 	if channels.LocalChat then
-		client.ChatPrintf("%s", colorMsg)
+		client.ChatPrintf("%s", colorMsg) ---@diagnostic disable-line: redundant-parameter
 	end
 
 	-- PublicChat: broadcasts to the entire server in public say

@@ -1,6 +1,7 @@
 --[[ Main.lua
      New Core Entry Point for Cheater Detection Service.
 ]]
+---@diagnostic disable: undefined-global, undefined-field
 -- [[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Config = require("Cheater_Detection.Utils.Config")
