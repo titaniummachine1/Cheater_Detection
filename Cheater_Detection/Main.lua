@@ -40,12 +40,12 @@ local function isDebugEnabled()
 	return G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 end
 
-local function runDetector(detectorName, detectorFn, playerState)
+local function runDetector(detectorName, detectorFn, playerState, ...)
 	assert(detectorName, "runDetector: detectorName missing")
 	assert(detectorFn, "runDetector: detectorFn missing")
 	assert(playerState, "runDetector: playerState missing")
 
-	local ok, err = pcall(detectorFn, playerState)
+	local ok, err = pcall(detectorFn, playerState, ...)
 	if not ok then
 		if not detectorErrorSeen[detectorName] then
 			print(string.format("[CD][DetectorError] %s failed: %s", detectorName, tostring(err)))
@@ -127,13 +127,13 @@ local function OnCreateMove(cmd)
 			HistoryManager.Push(pState.wrap)
 
 			-- Layer 1-3 Detections
-			runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState)
-			runDetector("SilentAim", SilentAim.ProcessPlayer, pState)
-			runDetector("AntiAim", AntiAim.ProcessPlayer, pState)
-			runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState)
-			runDetector("Bhop", Bhop.ProcessPlayer, pState)
-			runDetector("WarpDT", WarpDT.ProcessPlayer, pState)
-			runDetector("FakeLag", FakeLag.ProcessPlayer, pState)
+			runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState, cmd)
+			runDetector("SilentAim", SilentAim.ProcessPlayer, pState, cmd)
+			runDetector("AntiAim", AntiAim.ProcessPlayer, pState, cmd)
+			runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState, cmd)
+			runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
+			runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
+			runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
 		else
 			if isDebugEnabled() and ply and ply:IsValid() then
 				if (cmTick - lastPStateNilLogTick) >= 132 then
