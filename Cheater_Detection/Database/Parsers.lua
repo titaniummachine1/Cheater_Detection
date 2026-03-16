@@ -9,6 +9,9 @@ local G = require("Cheater_Detection.Utils.Globals")
 
 local Parsers = {}
 
+-- Collects first 5 update samples for debug diagnosis (reset each fetch cycle)
+Parsers._updateSamples = {}
+
 -- Stats tracking for parser operations
 Parsers.ParseStats = {
 	sources = {},
@@ -29,16 +32,20 @@ function Parsers.ResetStats()
 		totalErrors = 0,
 		totalUpdated = 0,
 	}
+	Parsers._updateSamples = {}
 end
 
 -- Add stats for a source
-function Parsers.AddSourceStats(sourceName, processed, added, existing, errors, updated)
+function Parsers.AddSourceStats(sourceName, processed, added, existing, errors, updated, updName, updReason, updStatic)
 	Parsers.ParseStats.sources[sourceName] = {
 		processed = processed or 0,
 		added = added or 0,
 		existing = existing or 0,
 		errors = errors or 0,
 		updated = updated or 0,
+		updName = updName or 0,
+		updReason = updReason or 0,
+		updStatic = updStatic or 0,
 	}
 
 	-- Update totals
@@ -59,7 +66,13 @@ function Parsers.GetStatsSummary()
 		-- Check if source has any updates to report
 		local updatesInfo = ""
 		if stats.updated and stats.updated > 0 then
-			updatesInfo = string.format(", Updated: %d", stats.updated)
+			local breakdown = string.format(
+				" (name=%d/reason=%d/static=%d)",
+				stats.updName or 0,
+				stats.updReason or 0,
+				stats.updStatic or 0
+			)
+			updatesInfo = string.format(", Updated: %d%s", stats.updated, breakdown)
 		end
 
 		summary = summary
@@ -114,6 +127,22 @@ function Parsers.PrintStatsSummary()
 		if summary then
 			print(summary) -- Keep using plain print for multi-line debug summary
 		end
+		if #Parsers._updateSamples > 0 then
+			print("[PARSER SAMPLES] First updated entries:")
+			for _, s in ipairs(Parsers._updateSamples) do
+				local parts = { "  id=" .. tostring(s.id) }
+				if s.nameChange then
+					table.insert(parts, "name: " .. s.nameChange)
+				end
+				if s.reasonChange then
+					table.insert(parts, "reason: " .. s.reasonChange)
+				end
+				if s.staticChange then
+					table.insert(parts, "static: " .. s.staticChange)
+				end
+				print(table.concat(parts, " | "))
+			end
+		end
 	end
 end
 
@@ -122,9 +151,13 @@ local steamIDCache = {}
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
 function Parsers.GetSteamID64(input)
-	if not input then return nil end
+	if not input then
+		return nil
+	end
 
-    if steamIDCache[input] then return steamIDCache[input] end
+	if steamIDCache[input] then
+		return steamIDCache[input]
+	end
 
 	-- Optimization: Check if it's already a standard SteamID64 string (starts with 765, length ~17)
 	local id_str = tostring(input):match("^%s*(765%d+)")
@@ -134,7 +167,9 @@ function Parsers.GetSteamID64(input)
 
 	-- Trim and handle standard SteamID formats
 	id_str = tostring(input):match("^%s*(.-)%s*$")
-	if not id_str or id_str == "" then return nil end
+	if not id_str or id_str == "" then
+		return nil
+	end
 
 	-- Manual fallback for SteamID3 (common in community lists)
 	local accountID = id_str:match("%[U:1:(%d+)%]")
@@ -142,8 +177,8 @@ function Parsers.GetSteamID64(input)
 		accountID = tonumber(accountID)
 		if accountID then
 			local result = tostring(76561197960265728 + accountID)
-            steamIDCache[input] = result
-            return result
+			steamIDCache[input] = result
+			return result
 		end
 	end
 
@@ -153,7 +188,7 @@ function Parsers.GetSteamID64(input)
 		if success and result then
 			local result_str = tostring(result):match("(765%d+)")
 			if result_str and #result_str >= 17 then
-                steamIDCache[input] = result_str
+				steamIDCache[input] = result_str
 				return result_str
 			end
 		end
@@ -201,72 +236,106 @@ end
 -- Processes a single player entry into the database
 -- Returns: wasAdded, wasUpdated, wasError
 function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticSource, defaultReason)
-    if not player or type(player) ~= "table" then return false, false, true end
+	if not player or type(player) ~= "table" then
+		return false, false, true
+	end
 
-    -- Get the SteamID and convert to SteamID64
-    local steamID64 = Parsers.GetSteamID64(player.steamid)
-    if not steamID64 then return false, false, true end
+	-- Get the SteamID and convert to SteamID64
+	local steamID64 = Parsers.GetSteamID64(player.steamid)
+	if not steamID64 then
+		return false, false, true
+	end
 
-    -- Determine player name (from last_seen if available)
-    local playerName = "Unknown"
-    if player.last_seen and player.last_seen.player_name then
-        playerName = player.last_seen.player_name
-    end
+	-- Determine player name (from last_seen if available)
+	local playerName = "Unknown"
+	if player.last_seen and player.last_seen.player_name then
+		playerName = player.last_seen.player_name
+	end
 
-    -- Get the first attribute as the reason
-    local reason = defaultReason or "Unknown Source"
-    if player.attributes and #player.attributes > 0 then
-        -- Use first attribute, capitalized
-        local firstAttribute = player.attributes[1]
-        reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
-    end
+	-- Get the first attribute as the reason
+	local reason = defaultReason or "Unknown Source"
+	if player.attributes and #player.attributes > 0 then
+		-- Use first attribute, capitalized
+		local firstAttribute = player.attributes[1]
+		reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
+	end
 
-    -- Add to entries if not already there
-    if existingEntries[steamID64] then
-        -- IN-PLACE UPDATE OPTIMIZATION:
-        -- Data is pre-allocated from database.txt load. Update existing entry fields.
-        local existingEntry = existingEntries[steamID64]
-        local updated = false
+	-- Add to entries if not already there
+	if existingEntries[steamID64] then
+		-- IN-PLACE UPDATE OPTIMIZATION:
+		-- Data is pre-allocated from database.txt load. Update existing entry fields.
+		local existingEntry = existingEntries[steamID64]
+		local updName, updReason, updStatic = false, false, false
 
-        -- If existing entry has unknown name and this one has a name
-        if (existingEntry.Name == "Unknown" or existingEntry.Name == nil)
-            and playerName and playerName ~= "Unknown"
-        then
-            existingEntry.Name = playerName
-            updated = true
-        end
+		-- Capture old values before mutating (used for sample diagnostics)
+		local oldName = existingEntry.Name
+		local oldReason = existingEntry.Reason
 
-        -- If existing entry has unknown reason and this one has a reason
-        if (existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
-            and reason and reason ~= "Unknown Source"
-        then
-            existingEntry.Reason = reason
-            updated = true
-        end
+		-- If existing entry has unknown name and this one has a name
+		if
+			(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
+			and playerName
+			and playerName ~= "Unknown"
+		then
+			existingEntry.Name = playerName
+			updName = true
+		end
 
-        -- Mark as static if this is an external source
-        if staticSource then
-            -- FINAL SAFETY: Never store URLs
-            if type(staticSource) == "string" and (staticSource:find("http") or #staticSource > 25) then
-                staticSource = "Ext"
-            end
-            if existingEntry.Static ~= staticSource then
-                existingEntry.Static = staticSource
-                updated = true
-            end
-        end
+		-- If existing entry has unknown reason and this one has a reason
+		if
+			(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
+			and reason
+			and reason ~= "Unknown Source"
+		then
+			existingEntry.Reason = reason
+			updReason = true
+		end
 
-        return false, updated, false
-    else
-        -- Pre-allocation: Entry doesn't exist, create it in the existing table
-        existingEntries[steamID64] = {
-            Name = playerName or "Unknown",
-            Reason = reason or "Unknown Source",
-            Static = staticSource or false,
-            Timestamp = os.time()
-        }
-        return true, false, false
-    end
+		-- Mark as static if this is an external source
+		if staticSource then
+			-- FINAL SAFETY: Never store URLs
+			if type(staticSource) == "string" and (staticSource:find("http") or #staticSource > 25) then
+				staticSource = "Ext"
+			end
+			local hasStatic = existingEntry.Static ~= nil
+				and existingEntry.Static ~= false
+				and existingEntry.Static ~= ""
+			if not hasStatic then
+				existingEntry.Static = staticSource
+				updStatic = true
+			end
+		end
+
+		local updated = updName or updReason or updStatic
+
+		-- Collect diagnostics sample for the first 5 updated entries
+		if updated and #Parsers._updateSamples < 5 then
+			local sample = { id = steamID64 }
+			if updName then
+				sample.nameChange =
+					string.format("%s -> %s", tostring(oldName == nil and "nil" or oldName), tostring(playerName))
+			end
+			if updReason then
+				sample.reasonChange =
+					string.format("%s -> %s", tostring(oldReason == nil and "nil" or oldReason), tostring(reason))
+			end
+			if updStatic then
+				sample.staticChange = string.format("nil -> %s", tostring(staticSource))
+			end
+			table.insert(Parsers._updateSamples, sample)
+		end
+
+		return false, updated, false, updName, updReason, updStatic
+	else
+		-- Pre-allocation: Entry doesn't exist, create it in the existing table
+		existingEntries[steamID64] = {
+			Name = playerName or "Unknown",
+			Reason = reason or "Unknown Source",
+			Static = staticSource or false,
+			Timestamp = os.time(),
+		}
+		return true, false, false, false, false, false
+	end
 end
 
 -- Parses a single line from a raw list
@@ -325,25 +394,37 @@ end
 -- Returns: { [steamid64] = { Name="...", Reason="..." }, ... } or nil, errorMsg
 function Parsers.ParseTF2BotDetector(contentString, defaultReason, existingEntries, sourceStats, staticSource)
 	local players, err = Parsers.GetPlayersFromJSON(contentString)
-    if not players then 
-        if sourceStats then sourceStats.errors = (sourceStats.errors or 0) + 1 end
-        return nil, err 
-    end
+	if not players then
+		if sourceStats then
+			sourceStats.errors = (sourceStats.errors or 0) + 1
+		end
+		return nil, err
+	end
 
 	local entries = existingEntries or {}
 	local stats = {
-		processed = 0, added = 0, existing = 0, updated = 0, errors = 0,
+		processed = 0,
+		added = 0,
+		existing = 0,
+		updated = 0,
+		errors = 0,
 	}
 
 	-- Process each player (Old synchronous behavior, but with the new merge logic)
 	for i = 1, #players do
 		stats.processed = stats.processed + 1
-		local added, updated, errorOccurred = Parsers.ParseTF2BotDetector_MergeEntry(players[i], entries, staticSource, defaultReason)
-        
-        if errorOccurred then stats.errors = stats.errors + 1
-        elseif added then stats.added = stats.added + 1
-        elseif updated then stats.updated = stats.updated + 1
-        else stats.existing = stats.existing + 1 end
+		local added, updated, errorOccurred =
+			Parsers.ParseTF2BotDetector_MergeEntry(players[i], entries, staticSource, defaultReason)
+
+		if errorOccurred then
+			stats.errors = stats.errors + 1
+		elseif added then
+			stats.added = stats.added + 1
+		elseif updated then
+			stats.updated = stats.updated + 1
+		else
+			stats.existing = stats.existing + 1
+		end
 	end
 
 	-- Update source stats if provided

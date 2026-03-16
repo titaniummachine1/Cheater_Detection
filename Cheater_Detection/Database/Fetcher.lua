@@ -423,7 +423,7 @@ function Fetcher.Tick()
 			if not player then
 				s.errors = s.errors + 1
 			else
-				local added, updated, err =
+				local added, updated, err, updName, updReason, updStatic =
 					Parsers.ParseTF2BotDetector_MergeEntry(player, G.DataBase, staticID, sourceCause)
 
 				if err then
@@ -434,8 +434,17 @@ function Fetcher.Tick()
 					end
 					if updated then
 						s.updated = s.updated + 1
+						if updName then
+							s.updName = (s.updName or 0) + 1
+						end
+						if updReason then
+							s.updReason = (s.updReason or 0) + 1
+						end
+						if updStatic then
+							s.updStatic = (s.updStatic or 0) + 1
+						end
 					end
-					Database.State.isDirty = true -- Ensure the DB knows it needs saving!
+					Database.State.isDirty = true
 				else
 					s.existing = s.existing + 1
 				end
@@ -446,11 +455,6 @@ function Fetcher.Tick()
 			end
 		end
 
-		if Database.State.isDirty and not isDirtyBefore then
-			-- Carry over dirty state to results if needed (currently global)
-		end
-
-		-- Finished this file/source?
 		if state.entryIdx >= #players then
 			local s = state.currentSourceStats
 			if not s or not source then
@@ -458,7 +462,17 @@ function Fetcher.Tick()
 				state.mode = "FINISH"
 				return
 			end
-			Parsers.AddSourceStats(source.name, s.processed, s.added, s.existing, s.errors, s.updated)
+			Parsers.AddSourceStats(
+				source.name,
+				s.processed,
+				s.added,
+				s.existing,
+				s.errors,
+				s.updated,
+				s.updName or 0,
+				s.updReason or 0,
+				s.updStatic or 0
+			)
 			state.results.total_added = state.results.total_added + s.added
 			state.results.total_updated = state.results.total_updated + s.updated
 			state.results.errors = state.results.errors + s.errors
@@ -632,6 +646,9 @@ function Fetcher.FinishFetch()
 
 	Fetcher.State.isRunning = false
 	Database.State.suppressFullSave = false
+	if Database.State.isDirty then
+		Database.SaveDatabase()
+	end
 	Log(LogLevel.DEBUG, "Fetch process finished")
 end
 
