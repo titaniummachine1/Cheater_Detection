@@ -48,6 +48,11 @@ local function isEnabled()
 	return cfg and cfg.Enable
 end
 
+local function isIndicatorEnabled()
+	local cfg = getConfig()
+	return cfg and cfg.Indicator
+end
+
 local function localize(key, ...)
 	local result = client.Localize(key)
 	if not result or #result == 0 then
@@ -251,7 +256,7 @@ local function drawVoteUI()
 		return
 	end
 
-	if not isEnabled() then
+	if not isEnabled() or not isIndicatorEnabled() then
 		return
 	end
 

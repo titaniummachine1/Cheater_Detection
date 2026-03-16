@@ -220,6 +220,9 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		
 		if Misc.Vote_Reveal.Enable then
+			Misc.Vote_Reveal.Indicator = TimMenu.Checkbox("Vote Indicator", Misc.Vote_Reveal.Indicator)
+			TimMenu.NextLine()
+			
 			Misc.Vote_Reveal.TargetTeam = Misc.Vote_Reveal.TargetTeam or { MyTeam = true, enemyTeam = true }
 			local teamOptions = { "My Team", "Enemy Team" }
 			local teamTable = { Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam }
