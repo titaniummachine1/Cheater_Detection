@@ -33,7 +33,8 @@ local function serializeTable(tbl, level, visited)
         local entry_chunks = {}
 
         -- Key representation
-        local keyRepr = (type(k) == "string") and string.format('["%s"]', k) or string.format('[%s]', k)
+        local safeKey = tostring(k):gsub('\\', '\\\\'):gsub('"', '\\"')
+        local keyRepr = (type(k) == "string") and ('["' .. safeKey .. '"]') or ('[' .. safeKey .. ']')
         table.insert(entry_chunks, innerIndent .. keyRepr .. " = ")
 
         -- Value representation
@@ -47,7 +48,7 @@ local function serializeTable(tbl, level, visited)
         elseif type(v) == "string" then
             -- Sanitize string and escape characters
             local sanitized = v:gsub('[^%z\32-\126]', ''):sub(1, 128)
-            sanitized = sanitized:gsub('\\', '\\\\'):gsub('"', '\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
+            sanitized = sanitized:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
             table.insert(entry_chunks, '"' .. sanitized .. '"')
         else
             table.insert(entry_chunks, tostring(v))

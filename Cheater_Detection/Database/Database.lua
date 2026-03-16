@@ -204,7 +204,7 @@ function Database.SaveDatabase()
 		if Serializer.writeFile(filepath, encoded) then
 			Database.State.isDirty = false
 			Database.State.lastSave = os.time()
-			Log(LogLevel.SUCCESS, "[DB SUCCESS] Database flushed to disk: " .. filepath)
+			Log(LogLevel.SUCCESS, "Database flushed to disk: " .. filepath)
 		else
 			Log(LogLevel.ERROR, "[DB] Failed to write database: " .. filepath)
 		end
@@ -312,13 +312,16 @@ function Database.LoadDatabase(silent, force)
 
 		if not success or type(decodedData) ~= "table" then
 			Log(LogLevel.ERROR, "[DB] Load Failed: " .. tostring(decodedData))
-			Log(LogLevel.WARNING, "[DB] Resetting database base layer.")
+			Log(LogLevel.WARNING, "[DB] Data might be corrupted. Resetting database base layer.")
 			G.DataBase = {}
 		else
 			-- PRE-ALLOCATION OPTIMIZATION:
 			-- Use the loaded table as the base memory for G.DataBase
 			-- Fetcher will now update this table in-place rather than creating new entries
 			G.DataBase = decodedData
+			local count = 0
+			for _ in pairs(G.DataBase) do count = count + 1 end
+			Log(LogLevel.SUCCESS, string.format("[DB] Loaded %d entries from disk.", count))
 		end
 	end
 
