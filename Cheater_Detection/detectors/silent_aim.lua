@@ -59,6 +59,10 @@ local shotPending = {}
 local pendingScores = {}
 local pendingAngles = {}
 
+-- steamID64 -> accumulated score to subtract on the next ProcessPlayer call
+-- populated when the attacker kills someone (kill decay)
+local killDecays = {}
+
 -- ── Angle Math ────────────────────────────────────────────────────────────────
 local function wrapAngle(d)
 	return (d + 180) % 360 - 180
@@ -223,6 +227,13 @@ local function onDamageEvent(event)
 	end
 
 	local id = tostring(steamID64)
+
+	-- Kill decay: every kill reduces accumulated aimbot suspicion by 5.
+	-- Applied before analysing the killing shot so legitimate aimers get credit.
+	if eventName == "player_death" then
+		killDecays[id] = (killDecays[id] or 0) + 5
+	end
+
 	local hist = angleHistory[id]
 
 	-- Need at minimum 3 entries: T-2, T-1, T (T is the shot tick)
@@ -299,6 +310,13 @@ function SilentAim.ProcessPlayer(playerState)
 	-- Register entity so FrameStageNotify knows to track it
 	trackedEntities[id] = ply
 
+	-- Apply kill-based score decay accumulated between ProcessPlayer calls
+	local decay = killDecays[id]
+	if decay and decay > 0 then
+		playerState.score = math.max(0, playerState.score - decay)
+		killDecays[id] = nil
+	end
+
 	-- Consume any score that stage-3 prepared
 	local gain = pendingScores[id]
 	if not gain or gain <= 0 then
@@ -313,6 +331,8 @@ function SilentAim.ProcessPlayer(playerState)
 	playerState.score = math.min(99, playerState.score + gain)
 
 	local reason = string.format("SilentAim Spike (%.1f°)", snapAngle)
+
+	local wasSuspicious = (oldFlags & Constants.Flags.SUSPICIOUS) ~= 0
 
 	if playerState.score >= Constants.Threshold.SUSPICIOUS then
 		playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
@@ -330,6 +350,13 @@ function SilentAim.ProcessPlayer(playerState)
 			score = playerState.score,
 		})
 		EventBus.Publish("OnPlayerStateChange", playerState, reason)
+
+		-- Dedicated event: first time this player crosses the SUSPICIOUS threshold
+		-- via aimbot detection.  Lets the real-time analyser and other modules react
+		-- without having to filter through generic OnPlayerStateChange.
+		if not wasSuspicious and (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
+			EventBus.Publish("OnAimbotSuspect", playerState, reason)
+		end
 	end
 end
 
@@ -340,6 +367,7 @@ EventBus.Subscribe("OnPlayerDisconnect", function(id)
 	shotPending[id] = nil
 	pendingScores[id] = nil
 	pendingAngles[id] = nil
+	killDecays[id] = nil
 end)
 
 return SilentAim
