@@ -89,38 +89,35 @@ function Visuals.DrawTags()
 			local score = pState.score
 
 			local tagList = buildTagList(flags, score)
-			if #tagList == 0 then
-				goto continue
-			end
+			if #tagList > 0 then
+				-- DEBUG: Log when tags are being drawn for a player
+				if G.Menu.Advanced.debug and ent == pLocal then
+					-- print(string.format("[Visuals] Drawing %d tags for local player", #tagList))
+				end
 
-			-- DEBUG: Log when tags are being drawn for a player
-			if G.Menu.Advanced.debug and ent == pLocal then
-				-- print(string.format("[Visuals] Drawing %d tags for local player", #tagList))
-			end
+				-- Calculate head position for the tag stack
+				local absOrigin = ent:GetAbsOrigin()
+				-- Fallback view offset if m_vecViewOffset[0] is not found
+				local viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
+				local headPos = absOrigin + viewOffset + _Vector3(0, 0, 15)
+				local x, y = WorldToScreen(headPos)
 
-			-- Calculate head position for the tag stack
-			local absOrigin = ent:GetAbsOrigin()
-			-- Fallback view offset if m_vecViewOffset[0] is not found
-			local viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
-			local headPos = absOrigin + viewOffset + _Vector3(0, 0, 15)
-			local x, y = WorldToScreen(headPos)
+				if x and y then
+					draw.SetFont(fontTag)
+					-- Draw tags top-down, each offset upward from the previous
+					local totalHeight = (#tagList - 1) * LINE_HEIGHT
+					local startY = math.floor(y - totalHeight)
 
-			if x and y then
-				draw.SetFont(fontTag)
-				-- Draw tags top-down, each offset upward from the previous
-				local totalHeight = (#tagList - 1) * LINE_HEIGHT
-				local startY = math.floor(y - totalHeight)
-
-				for j = 1, #tagList do
-					local tag = tagList[j]
-					draw.Color(tag.r, tag.g, tag.b, 255)
-					local tw, th = draw.GetTextSize(tag.text)
-					draw.Text(math.floor(x - tw / 2), startY - th + (j - 1) * LINE_HEIGHT, tag.text)
+					for j = 1, #tagList do
+						local tag = tagList[j]
+						draw.Color(tag.r, tag.g, tag.b, 255)
+						local tw, th = draw.GetTextSize(tag.text)
+						draw.Text(math.floor(x - tw / 2), startY - th + (j - 1) * LINE_HEIGHT, tag.text)
+					end
 				end
 			end
-
-			::continue::
 		end
+		::continue::
 	end
 end
 
