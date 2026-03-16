@@ -33,6 +33,11 @@ local hasSearchedGroup = false
 local detectorErrorSeen = {}
 local lastDrawHeartbeatTick = 0
 local lastCMTraceTick = 0 -- throttle for OnCreateMove diagnostics
+local lastPStateNilLogTick = 0
+
+local function isDebugEnabled()
+	return G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+end
 
 local function runDetector(detectorName, detectorFn, playerState)
 	assert(detectorName, "runDetector: detectorName missing")
@@ -100,17 +105,20 @@ local function OnCreateMove(cmd)
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
-	if (cmTick - lastCMTraceTick) >= 132 then
+	if isDebugEnabled() and (cmTick - lastCMTraceTick) >= 132 then
 		lastCMTraceTick = cmTick
 		print(string.format("[CD-CM] tick=%d serverIP=%s players=%d", cmTick, tostring(serverIP), #players))
 	end
 
 	for i = 1, #players do
 		local ply = players[i]
-		local isLocalPlayer = (ply == entities.GetLocalPlayer())
+		if ply == entities.GetLocalPlayer() then
+			goto continue
+		end
+
 		local pState = PlayerCache.Get(ply)
 		if pState then
-			if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
+			if isDebugEnabled() then
 				assert(pState.wrap, "OnCreateMove: pState.wrap missing for id=" .. tostring(pState.id))
 				assert(pState.id, "OnCreateMove: pState.id missing")
 			end
@@ -127,18 +135,22 @@ local function OnCreateMove(cmd)
 			runDetector("WarpDT", WarpDT.ProcessPlayer, pState)
 			runDetector("FakeLag", FakeLag.ProcessPlayer, pState)
 		else
-			if ply and ply:IsValid() then
-				local steamID = Common.GetSteamID64(ply)
-				print(
-					string.format(
-						"[CD-CM] pState=nil idx=%d isLocal=%s steamID=%s",
-						ply:GetIndex(),
-						tostring(isLocalPlayer),
-						tostring(steamID)
+			if isDebugEnabled() and ply and ply:IsValid() then
+				if (cmTick - lastPStateNilLogTick) >= 132 then
+					lastPStateNilLogTick = cmTick
+					local steamID = Common.GetSteamID64(ply)
+					print(
+						string.format(
+							"[CD-CM] pState=nil idx=%d steamID=%s",
+							ply:GetIndex(),
+							tostring(steamID)
+						)
 					)
-				)
+				end
 			end
 		end
+
+		::continue::
 	end
 end
 

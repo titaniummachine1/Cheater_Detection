@@ -59,6 +59,55 @@ Common.PR = PlayerResource
 
 local cachedSteamIDs = {}
 local lastTick = -1
+local localSteamFallbackWarnTick = 0
+
+local STEAM64_BASE = 76561197960265728
+
+local function convertSteamStringTo64(rawSteamID)
+	if not rawSteamID then
+		return nil
+	end
+
+	local idStr = tostring(rawSteamID)
+	if idStr == "" then
+		return nil
+	end
+
+	local steam64 = idStr:match("^(765%d+)$")
+	if steam64 and #steam64 >= 17 then
+		return steam64
+	end
+
+	local accountID = idStr:match("^%[U:1:(%d+)%]$")
+	if accountID then
+		local numericAccountID = tonumber(accountID)
+		if numericAccountID then
+			return tostring(STEAM64_BASE + numericAccountID)
+		end
+	end
+
+	local steam2Universe, steam2Y, steam2Z = idStr:match("^STEAM_(%d+):(%d+):(%d+)$")
+	if steam2Universe and steam2Y and steam2Z then
+		local z = tonumber(steam2Z)
+		local y = tonumber(steam2Y)
+		if z and y then
+			local accountFromSteam2 = z * 2 + y
+			return tostring(STEAM64_BASE + accountFromSteam2)
+		end
+	end
+
+	if steam and type(steam.ToSteamID64) == "function" then
+		local ok, converted = pcall(steam.ToSteamID64, idStr)
+		if ok and converted then
+			local convertedString = tostring(converted):match("(765%d+)")
+			if convertedString and #convertedString >= 17 then
+				return convertedString
+			end
+		end
+	end
+
+	return nil
+end
 
 --[[ Inlined IsFriend (from lnxLib/TF2/TF2.lua) ]]
 function Common.IsFriend(entity, includeParty)
@@ -123,27 +172,24 @@ function Common.GetSteamID64(Player)
 	local result = cachedSteamIDs[playerIndex]
 	if not result then
 		local playerInfo = client.GetPlayerInfo(playerIndex)
-		if not playerInfo then
-			return nil
-		end -- Fail silently, don't crash
 
-		local steamID = playerInfo.SteamID
-		if not steamID then
-			return nil
+		if playerInfo then
+			local steamID = playerInfo.SteamID
+			if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
+				result = "BOT_" .. tostring(playerInfo.UserID or playerIndex)
+			elseif steamID then
+				result = convertSteamStringTo64(steamID)
+			end
 		end
 
-		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
-			result = "BOT_" .. tostring(playerInfo.UserID or playerIndex)
-		else
-			if not steam or type(steam.ToSteamID64) ~= "function" then
-				return nil
+		-- Loopback/local edge-case: local player may not have resolvable SteamID info yet.
+		-- Use deterministic local fallback so cache/state logic still runs.
+		if not result and playerIndex == client.GetLocalPlayerIndex() then
+			result = "LOCAL_" .. tostring(playerIndex)
+			if (currentTick - localSteamFallbackWarnTick) >= 300 then
+				localSteamFallbackWarnTick = currentTick
+				print(string.format("[Common][WARN] Local SteamID64 unavailable, using fallback id=%s", result))
 			end
-
-			local ok, converted = pcall(steam.ToSteamID64, steamID)
-			if not ok or not converted then
-				return nil
-			end
-			result = tostring(converted)
 		end
 	end
 
@@ -259,19 +305,12 @@ function Common.FromSteamid3To64(steamid3)
 		return raw
 	end
 
-	-- Handle SteamID2 format (STEAM_X:Y:Z)
-	if raw:match("^STEAM_%d+:%d+:%d+$") then
-		local ok, converted = pcall(steam.ToSteamID64, raw)
-		return ok and tostring(converted) or nil
+	if raw:match("^STEAM_%d+:%d+:%d+$") or raw:match("^%[U:1:%d+%]$") then
+		return convertSteamStringTo64(raw)
 	end
 
-	-- Ensure SteamID3 wrapped in brackets
-	if not raw:match("^%[U:1:%d+%]$") then
-		raw = string.format("[U:1:%s]", raw)
-	end
-
-	local ok, converted = pcall(steam.ToSteamID64, raw)
-	return ok and tostring(converted) or nil
+	local wrappedSteam3 = string.format("[U:1:%s]", raw)
+	return convertSteamStringTo64(wrappedSteam3)
 end
 
 function Common.IsSteamID64(steamID)
