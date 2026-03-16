@@ -6,6 +6,7 @@
 local Constants = require("Cheater_Detection.core.constants")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local Common = require("Cheater_Detection.Utils.Common")
+local EventBus = require("Cheater_Detection.core.event_bus")
 
 local G = require("Cheater_Detection.Utils.Globals")
 
@@ -41,9 +42,11 @@ function PlayerCache.Get(ply)
 		local initialFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initialScore = dbEntry and dbEntry.Score or 0
 
-        -- SYNC-ON-JOIN: Notify engine playerlist if this is a known cheater
-        -- (Priority 10 makes bot detector tag them)
-        if initialFlags ~= Constants.Flags.NONE or initialScore >= 99 then
+        -- SYNC-ON-JOIN: Set priority 10 only for hard confirmed flags.
+        -- CHEATER flag = score-based confirmation, VAC_BANNED = Steam VAC ban,
+        -- VALVE = Valve employee.  Do NOT trigger for SUSPICIOUS/CHECKED/etc.
+        local HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
+        if (initialFlags & HARD_FLAGS) ~= 0 then
             pcall(playerlist.SetPriority, id, 10)
         end
 
@@ -86,7 +89,8 @@ function PlayerCache.Hearthbeat()
 			activeSet[id] = nil
 		else
 			-- 2. Performance: Decay suspicion if no events happened
-			if state.score > 0 then
+			-- Hard detections like AntiAim (CHEATER flag) should NOT decay
+			if state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
 				-- Logic for different decay per flag
 				if (state.flags & Constants.Flags.HIGH_RISK) ~= 0 then
 					state.score = math.max(0, state.score - 2)
@@ -129,5 +133,16 @@ function PlayerCache.Cleanup()
         activeSet[k] = nil
     end
 end
+
+-- RUNTIME: When any detector fires a hard flag mid-session, mark the player
+-- at priority 10 immediately so the engine bot-detector acts right away.
+local RUNTIME_HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
+EventBus.Subscribe("OnPlayerStateChange", function(playerState, _reason)
+	assert(playerState, "PlayerCache priority subscriber: playerState missing")
+	assert(playerState.id, "PlayerCache priority subscriber: id missing")
+	if (playerState.flags & RUNTIME_HARD_FLAGS) ~= 0 then
+		pcall(playerlist.SetPriority, playerState.id, 10)
+	end
+end)
 
 return PlayerCache
