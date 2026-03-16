@@ -516,19 +516,19 @@ function Common.IsConnectionStableForDetection()
 	end
 
 	-- Latency > 2 ticks means remote sim times we read are too stale
-	local latency = netChannel:GetAvgLatency(FLOW_INCOMING)
+	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
 	if latency > 2 * tickInterval then
 		return false
 	end
 
 	-- Any packet loss means we are missing data; deltas are unreliable
-	local loss = netChannel:GetAvgLoss(FLOW_INCOMING)
+	local loss = netChannel:GetAvgLoss(E_Flows.FLOW_INCOMING)
 	if loss > 0.01 then
 		return false
 	end
 
 	-- Any outgoing choke means our updates are stacking up
-	local choke = netChannel:GetAvgChoke(FLOW_OUTGOING)
+	local choke = netChannel:GetAvgChoke(E_Flows.FLOW_OUTGOING)
 	if choke > 0 then
 		return false
 	end
