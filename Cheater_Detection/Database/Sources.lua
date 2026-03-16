@@ -40,14 +40,14 @@ Sources.List = {
 	},
 	{
 		name = "TF2BD Official",
-		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/cfg/playerlist.official.json",
+		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
 		cause = "TF2BD Official",
 		parser = "tf2db",
 		sourceID = "tf2bd_off"
 	},
 	{
 		name = "MegaScaterbomb",
-		url = "https://raw.githubusercontent.com/ill5-com/megascatterbomb-tf2-cheater-database/main/megascatterbomb-tf2-cheater-database.json",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
 		cause = "Cheater (MegaScaterbomb)",
 		parser = "tf2db",
 		sourceID = "mega_scat"
@@ -61,7 +61,7 @@ Sources.List = {
 	},
 	{
 		name = "joekiller Player List",
-		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.json",
+		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
 		cause = "TF2BD Community (joekiller)",
 		parser = "tf2db",
 		sourceID = "joekiller"
