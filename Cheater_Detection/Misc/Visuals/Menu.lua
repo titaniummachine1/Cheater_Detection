@@ -44,39 +44,32 @@ local function DrawMenu()
 		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Player Scanner")
-            G.Menu.Scanner = G.Menu.Scanner or { SteamHistory = false, ValveCheck = true }
-            local sc = G.Menu.Scanner
-            
-            -- Initialize Main.AutoSync if it doesn't exist
-            if type(Main.AutoSync) ~= "boolean" then
-                Main.AutoSync = false -- Default value
-            end
-            Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync)
-            TimMenu.Tooltip("Automatically fetch/merge local and online cheater lists on script load.")
-            TimMenu.NextLine()
-            
-            TimMenu.BeginSector("Valve Verification")
-                sc.ValveCheck = TimMenu.Checkbox("Valve Employee Check", sc.ValveCheck)
-                TimMenu.Tooltip("Verify if players are Valve employees via profiles and items.")
-            TimMenu.EndSector()
-            
-            TimMenu.NextLine()
+			G.Menu.Scanner = G.Menu.Scanner or { SteamHistory = false, ValveCheck = true }
+			local sc = G.Menu.Scanner
+			if type(Main.AutoSync) ~= "boolean" then
+				Main.AutoSync = false
+			end
+			Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync)
+			TimMenu.Tooltip("Fetch and merge external cheater sources on startup.")
+			TimMenu.NextLine()
 
-            TimMenu.BeginSector("Steam History API")
-                Misc.SteamHistory = Misc.SteamHistory or {}
-                local sh = Misc.SteamHistory
-                sh.ApiKey = sh.ApiKey or ""
-                local hasKey = sh.ApiKey ~= ""
-                
-                if not hasKey then
-                    sc.SteamHistory = false
-                    TimMenu.Text("STATUS: API Key Missing")
-                    TimMenu.Tooltip("Get key at steamhistory.net and set via console: steamhistory <key>")
-                else
-                    sc.SteamHistory = TimMenu.Checkbox("Steam History Scan", sc.SteamHistory)
-                    TimMenu.Tooltip("Scan players via SteamHistory API (requires API Key).")
-                end
-            TimMenu.EndSector()
+			sc.ValveCheck = TimMenu.Checkbox("Valve Employee Check", sc.ValveCheck)
+			TimMenu.Tooltip("Run Valve verification checks using profile and item signals.")
+			TimMenu.NextLine()
+
+			Misc.SteamHistory = Misc.SteamHistory or {}
+			local sh = Misc.SteamHistory
+			sh.ApiKey = sh.ApiKey or ""
+			local hasKey = sh.ApiKey ~= ""
+
+			if not hasKey then
+				sc.SteamHistory = false
+				TimMenu.Text("SteamHistory: API key missing")
+				TimMenu.Tooltip("Set API key with console command: steamhistory <key>")
+			else
+				sc.SteamHistory = TimMenu.Checkbox("Steam History Scan", sc.SteamHistory)
+				TimMenu.Tooltip("Check players against SteamHistory sourcebans.")
+			end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 

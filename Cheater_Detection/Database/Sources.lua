@@ -13,44 +13,44 @@ Sources.List = {
 	{
 		name = "d3fc0n6 Cheater List",
 		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
-		cause = "Cheater Friend",
+		cause = "D3fc0n6 Cheater List",
 		parser = "raw",
-        sourceID = "d3_friend"
+		sourceID = "d3_cheat"
 	},
 	{
-		name = "d3fc0n6 Tacobot List",
-		url = "https://raw.githubusercontent.com/d3fc0n6/TacobotList/master/64ids",
-		cause = "Cheater Tacobot",
-		parser = "raw",
-        sourceID = "d3_taco"
-	},
-	{
-		name = "d3fc0n6 Group List",
-		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/Group/64ids",
-		cause = "Suspected (Group Member)",
-		parser = "raw",
-        sourceID = "d3_group"
-	},
-	{
-		name = "Sleepy List RGL",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.rgl-gg.json",
-		cause = "Sleepy RGL",
+		name = "Sleepy Cheater List",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy.json",
+		cause = "Sleepy Cheater List",
 		parser = "tf2db",
-        sourceID = "sleepy_rgl"
+		sourceID = "sleepy_main"
 	},
 	{
-		name = "bot detector (Official)",
-		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
-		cause = "Bot (bot detector)",
-		parser = "tf2db", -- Use tf2db parser for this JSON source
-        sourceID = "tf2bd_off"
+		name = "Sleepy External List",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy-external.json",
+		cause = "Sleepy External",
+		parser = "tf2db",
+		sourceID = "sleepy_ext"
 	},
 	{
-		name = "MegaScaterbomb (Scraped)",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
+		name = "Sleepy Nullc0re List",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.nullc0re.json",
+		cause = "Sleepy Nullc0re",
+		parser = "tf2db",
+		sourceID = "sleepy_nullc0re"
+	},
+	{
+		name = "TF2BD Official",
+		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/cfg/playerlist.official.json",
+		cause = "TF2BD Official",
+		parser = "tf2db",
+		sourceID = "tf2bd_off"
+	},
+	{
+		name = "MegaScaterbomb",
+		url = "https://raw.githubusercontent.com/ill5-com/megascatterbomb-tf2-cheater-database/main/megascatterbomb-tf2-cheater-database.json",
 		cause = "Cheater (MegaScaterbomb)",
-		parser = "tf2db", -- Use tf2db parser for this JSON source
-        sourceID = "mega_scat"
+		parser = "tf2db",
+		sourceID = "mega_scat"
 	},
 	{
 		name = "qfoxb Player List",
@@ -61,10 +61,10 @@ Sources.List = {
 	},
 	{
 		name = "joekiller Player List",
-		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
+		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.json",
 		cause = "TF2BD Community (joekiller)",
 		parser = "tf2db",
-        sourceID = "joekiller"
+		sourceID = "joekiller"
 	},
 }
 

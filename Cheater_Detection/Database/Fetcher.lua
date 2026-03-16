@@ -97,6 +97,9 @@ Fetcher.State = {
 	entryIdx = 1,
 	waitEndTime = 0,
 	currentSourceStats = nil,
+	onlineEnqueued = false,
+	onlinePendingCount = 0,
+	onlineResponses = {},
 }
 
 -- Bypasses GitHub blocks
@@ -129,10 +132,16 @@ local function checkRequirements()
 	return true
 end
 
-local function onOnlineResponse(responseBody)
+local function onOnlineResponse(responseBody, errorMessage, source)
 	local state = Fetcher.State
-	state.pendingResponse = responseBody
-	state.pendingResponseReady = true
+	if state.onlinePendingCount > 0 then
+		state.onlinePendingCount = state.onlinePendingCount - 1
+	end
+	table.insert(state.onlineResponses, {
+		source = source,
+		body = responseBody,
+		error = errorMessage,
+	})
 end
 
 -- Logic for starting the process
@@ -162,6 +171,9 @@ function Fetcher.Start()
 	state.pendingResponse = nil
 	state.pendingResponseReady = false
 	state.waitEndTime = 0
+	state.onlineEnqueued = false
+	state.onlinePendingCount = 0
+	state.onlineResponses = {}
 	Database.State.suppressFullSave = true
 end
 
@@ -455,11 +467,7 @@ function Fetcher.Tick()
 				state.fileIdx = state.fileIdx + 1
 				state.mode = "LOCAL_READ"
 			else
-				state.sourceIdx = state.sourceIdx + 1
-				-- Keep this delay tiny; HttpQueue already rate-limits network calls.
-				state.mode = "WAITING"
-				state.nextMode = "ONLINE_FETCH"
-				state.waitEndTime = globals.RealTime() + 0.05
+				state.mode = "ONLINE_WAIT_RESPONSE"
 			end
 			state.playersToProcess = nil
 		end
@@ -468,41 +476,64 @@ function Fetcher.Tick()
 	-- STATE: ONLINE_FETCH
 	--------------------------------------------------------
 	elseif state.mode == "ONLINE_FETCH" then
-		local source = state.activeSources[state.sourceIdx]
-		if not source then
+		if state.onlineEnqueued then
+			state.mode = "ONLINE_WAIT_RESPONSE"
+			return
+		end
+
+		if not state.activeSources or #state.activeSources == 0 then
 			state.mode = "FINISH"
 			return
 		end
 
-		Log(LogLevel.INFO, "[FETCHER] Fetching online source: " .. source.name)
-		local fetchUrl = proxyGitHubUrl(source.url)
+		state.onlineEnqueued = true
+		state.onlinePendingCount = 0
+		state.onlineResponses = {}
 
-		state.pendingSource = source
-		state.pendingResponse = nil
-		state.pendingResponseReady = false
-		HttpQueue.Enqueue(fetchUrl, onOnlineResponse)
+		for _, source in ipairs(state.activeSources) do
+			Log(LogLevel.INFO, "[FETCHER] Fetching online source: " .. source.name)
+			local fetchUrl = proxyGitHubUrl(source.url)
+			local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
+			if enqueued then
+				state.onlinePendingCount = state.onlinePendingCount + 1
+			else
+				Log(LogLevel.WARNING, "[FETCHER] Failed to queue source: " .. source.name)
+				state.results.errors = state.results.errors + 1
+			end
+		end
+
+		if state.onlinePendingCount <= 0 then
+			state.mode = "FINISH"
+			return
+		end
+
 		state.mode = "ONLINE_WAIT_RESPONSE"
 
 	--------------------------------------------------------
 	-- STATE: ONLINE_WAIT_RESPONSE
 	--------------------------------------------------------
 	elseif state.mode == "ONLINE_WAIT_RESPONSE" then
-		if not state.pendingResponseReady then
+		if #state.onlineResponses == 0 then
+			if state.onlinePendingCount <= 0 then
+				state.mode = "FINISH"
+			end
 			return
 		end
 
-		local source = state.pendingSource
-		local response = state.pendingResponse
+		local responsePacket = table.remove(state.onlineResponses, 1)
+		local source = responsePacket and responsePacket.source or nil
+		local response = responsePacket and responsePacket.body or nil
+		local responseError = responsePacket and responsePacket.error or nil
 
-		state.pendingSource = nil
-		state.pendingResponse = nil
-		state.pendingResponseReady = false
+		if responseError then
+			Log(LogLevel.WARNING, "[FETCHER] Failed to fetch " .. (source and source.name or "unknown source"))
+			state.results.errors = state.results.errors + 1
+			return
+		end
 
 		if not source then
-			Log(LogLevel.ERROR, "[FETCHER] Missing pending source after HTTP response")
+			Log(LogLevel.ERROR, "[FETCHER] Missing source after HTTP response")
 			state.results.errors = state.results.errors + 1
-			state.sourceIdx = state.sourceIdx + 1
-			state.mode = "ONLINE_FETCH"
 			return
 		end
 
@@ -511,8 +542,6 @@ function Fetcher.Tick()
 			if response:match("<html") or response:match("<HTML") then
 				Log(LogLevel.WARNING, "[FETCHER] HTML Error page from " .. source.name)
 				state.results.errors = state.results.errors + 1
-				state.sourceIdx = state.sourceIdx + 1
-				state.mode = "ONLINE_FETCH"
 				return
 			end
 
@@ -544,14 +573,10 @@ function Fetcher.Tick()
 			else
 				Log(LogLevel.WARNING, "[FETCHER] Parse error in " .. source.name .. ": " .. tostring(err))
 				state.results.errors = state.results.errors + 1
-				state.sourceIdx = state.sourceIdx + 1
-				state.mode = "ONLINE_FETCH"
 			end
 		else
 			Log(LogLevel.WARNING, "[FETCHER] Failed to fetch " .. source.name)
 			state.results.errors = state.results.errors + 1
-			state.sourceIdx = state.sourceIdx + 1
-			state.mode = "ONLINE_FETCH"
 		end
 
 	--------------------------------------------------------

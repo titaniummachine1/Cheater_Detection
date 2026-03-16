@@ -12,6 +12,19 @@ local isAlive = true -- Set to false on unload to guard in-flight callbacks
 local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
 local currentCoroutine = nil
 
+local function IsGitHubLikeURL(url)
+	if type(url) ~= "string" then
+		return false
+	end
+	if url:find("raw%.githubusercontent%.com") then
+		return true
+	end
+	if url:find("cdn%.jsdelivr%.net/gh/") then
+		return true
+	end
+	return false
+end
+
 -- Try to ensure http library is available
 local function InitializeHTTP()
 	-- 1. Check global http (highest priority)
@@ -44,8 +57,13 @@ local function HttpWorker()
 	while isAlive do
 		if #queue > 0 then
 			local now = globals.RealTime()
-			if (now - lastRequestTime) >= REQUEST_DELAY then
-				local item = table.remove(queue, 1)
+			local item = queue[1]
+			local requiredDelay = REQUEST_DELAY
+			if item and (item.noDelay or IsGitHubLikeURL(item.url)) then
+				requiredDelay = 0
+			end
+			if (now - lastRequestTime) >= requiredDelay then
+				item = table.remove(queue, 1)
 				if item and type(item.callback) == "function" then
 					isProcessing = true
 					lastRequestTime = now
@@ -106,12 +124,16 @@ local function HttpWorker()
 					end
 
 					if success then
-						local cbStatus, cbErr = pcall(item.callback, data)
+						local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
 						if not cbStatus then
 							print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
 						end
 					else
 						print("[HTTP QUEUE ERROR] Request failed: " .. tostring(data))
+						local cbStatus, cbErr = pcall(item.callback, nil, tostring(data), item.context)
+						if not cbStatus then
+							print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
+						end
 					end
 
 					isProcessing = false
@@ -126,7 +148,7 @@ end
 
 --[[ Public API ]]
 
-function HttpQueue.Enqueue(url, callback)
+function HttpQueue.Enqueue(url, callback, context, options)
 	if type(callback) ~= "function" then
 		print(
 			"[HTTP QUEUE ERROR] Enqueue callback must be function, got: "
@@ -136,7 +158,11 @@ function HttpQueue.Enqueue(url, callback)
 		)
 		return false
 	end
-	table.insert(queue, { url = url, callback = callback })
+	local noDelay = false
+	if type(options) == "table" and options.noDelay == true then
+		noDelay = true
+	end
+	table.insert(queue, { url = url, callback = callback, context = context, noDelay = noDelay })
 	return true
 end
 
