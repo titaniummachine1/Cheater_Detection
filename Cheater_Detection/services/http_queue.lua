@@ -76,46 +76,36 @@ local function HttpWorker()
 						success = false
 						data = "No HTTP Library"
 					else
-						-- 1. Try blocking http.Get (Proven working in test)
-						local getOk, getRes = pcall(function()
-							return http.Get(item.url)
+						-- Always use GetAsync (non-blocking). http.Get() is synchronous and
+						-- blocks the game thread for the full HTTP round-trip, causing hitches.
+						local done = false
+						local asyncOk, asyncErr = pcall(function()
+							http.GetAsync(item.url, function(response)
+								if response and #response > 0 then
+									data = response
+									success = true
+								else
+									success = false
+									data = "GetAsync returned empty response"
+								end
+								done = true
+							end)
 						end)
 
-						if getOk and getRes and #getRes > 0 then
-							success = true
-							data = getRes
-						else
-							-- 2. Fallback to http.GetAsync (Experimental/Broken in some builds)
-							local done = false
-							local asyncOk, asyncErr = pcall(function()
-								http.GetAsync(item.url, function(response)
-									-- Only treat as success if we actually got data
-									if response and #response > 0 then
-										data = response
-										success = true
-									else
-										success = false
-										data = "Async returned empty response"
-									end
-									done = true
-								end)
-							end)
-
-							if asyncOk then
-								-- Wait for async callback
-								local waitStart = globals.RealTime()
-								while not done and isAlive do
-									if globals.RealTime() - waitStart > 10 then
-										success = false
-										data = "HTTP Timeout"
-										break
-									end
-									coroutine.yield()
+						if asyncOk then
+							-- Yield each tick until the callback fires (no blocking)
+							local waitStart = globals.RealTime()
+							while not done and isAlive do
+								if globals.RealTime() - waitStart > 10 then
+									success = false
+									data = "HTTP Timeout"
+									break
 								end
-							else
-								success = false
-								data = "All HTTP methods failed: " .. tostring(asyncErr)
+								coroutine.yield()
 							end
+						else
+							success = false
+							data = "GetAsync failed: " .. tostring(asyncErr)
 						end
 					end
 
