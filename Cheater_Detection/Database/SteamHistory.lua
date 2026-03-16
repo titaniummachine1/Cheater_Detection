@@ -644,6 +644,15 @@ local function onCreateMove()
 end
 
 --[[ Public API ]]
+function SteamHistory.HasKey()
+	local cfg = getConfig()
+	return cfg and cfg.ApiKey and cfg.ApiKey ~= ""
+end
+
+function SteamHistory.IsTemporarilyDisabled()
+	return state.temporarilyDisabled
+end
+
 function SteamHistory.OnApiKeyUpdated()
 	resetState(true)
 	refreshEnabled()
