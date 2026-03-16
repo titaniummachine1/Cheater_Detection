@@ -109,7 +109,9 @@ function AntiAim.ProcessPlayer(playerState)
 		return
 	end
 
-	local isInvalid = math.abs(pitch) > 89.1 or pitch == 89.0 or pitch == -89.0
+	-- >= 89.0 catches: exactly ±89 (common AA values), clamped 90.0, and raw 271
+	-- normalised by EulerAngles to -89.  Float equality checks were unreliable.
+	local isInvalid = math.abs(pitch) >= 89.0
 
 	if isInvalid then
 		local oldFlags = playerState.flags

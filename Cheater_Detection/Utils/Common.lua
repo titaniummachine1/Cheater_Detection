@@ -515,9 +515,10 @@ function Common.IsConnectionStableForDetection()
 		return false
 	end
 
-	-- Latency > 2 ticks means remote sim times we read are too stale
+	-- Latency > ~12 ticks (180 ms at 66 Hz) means we are having a bad connection.
+	-- The old threshold of 2 ticks (30 ms) blocked detection on every internet server.
 	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
-	if latency > 2 * tickInterval then
+	if latency > 12 * tickInterval then
 		return false
 	end
 
