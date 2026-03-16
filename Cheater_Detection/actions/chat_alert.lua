@@ -2,7 +2,7 @@
      Handles chat notifications for detections and state changes.
 ]]
 
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.core.constants")
 
 local ChatAlert = {}
@@ -21,14 +21,18 @@ local function OnStateChange(playerState, reason)
 	if (flags & Constants.Flags.CHEATER) ~= 0 then
 		local msg = string.format(
 			"\x07FF0000[DETECTION]\x01 Confirmed Cheater: \x0700FF00%s \x01(%s) \x07AAAAAA[%s]",
-			name, id, reason
+			name,
+			id,
+			reason
 		)
 		client.ChatPrintf("%s", msg) ---@diagnostic disable-line: redundant-parameter
 	elseif (flags & Constants.Flags.SUSPICIOUS) ~= 0 then
 		local displayScore = math.min(99, math.floor(playerState.score))
 		local msg = string.format(
 			"\x07FFD500[SUSPICIOUS]\x01 %s is likely cheating \x07AAAAAA(%d pct) \x01[\x04%s\x01]",
-			name, displayScore, reason
+			name,
+			displayScore,
+			reason
 		)
 		client.ChatPrintf("%s", msg) ---@diagnostic disable-line: redundant-parameter
 	end
@@ -45,7 +49,7 @@ local function OnStateChange(playerState, reason)
 end
 
 function ChatAlert.Init()
-	EventBus.Subscribe("OnPlayerStateChange", OnStateChange)
+	Events.Subscribe("OnPlayerStateChange", OnStateChange)
 end
 
 return ChatAlert

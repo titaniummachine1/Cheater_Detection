@@ -8,8 +8,7 @@ local SteamHistory = {}
 --[[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
-local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
-local PlayerState = require("Cheater_Detection.Utils.PlayerState")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Database = require("Cheater_Detection.Database.Database")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 local Constants = require("Cheater_Detection.core.constants")
@@ -95,7 +94,7 @@ local function getPlayerNameBySteamID(steamID)
 		return scoreboardName
 	end
 
-	for _, player in ipairs(FastPlayers.GetAll(true)) do
+	for _, player in ipairs(PlayerCache.GetAll(true)) do
 		local id = normalizeSteamID64(player:GetSteamID64())
 		if id == steamID then
 			local info = player:GetInfo()
@@ -107,11 +106,6 @@ local function getPlayerNameBySteamID(steamID)
 				return name
 			end
 		end
-	end
-
-	local stateEntry = PlayerState and PlayerState.Get(steamID)
-	if stateEntry and stateEntry.info and stateEntry.info.Name and stateEntry.info.Name ~= "" then
-		return stateEntry.info.Name
 	end
 
 	return nil
@@ -235,13 +229,10 @@ local function matchesKeyword(reason)
 	return false
 end
 
-local function resolveName(steamID, context, entry, stateEntry)
+local function resolveName(steamID, context, entry)
 	local contextName = context and context.name
 	if contextName and contextName ~= "" then
 		return contextName
-	end
-	if stateEntry and stateEntry.info and stateEntry.info.Name and stateEntry.info.Name ~= "" then
-		return stateEntry.info.Name
 	end
 	if entry and entry.PersonaName and entry.PersonaName ~= "" then
 		return entry.PersonaName
@@ -255,13 +246,7 @@ end
 
 local function flagPlayer(steamID, context, entry)
 	local reason = entry.BanReason or "Unknown reason"
-	local stateEntry = PlayerState and PlayerState.GetOrCreate(steamID)
-	if stateEntry and context and context.name and context.name ~= "" then
-		stateEntry.info = stateEntry.info or {}
-		stateEntry.info.Name = context.name
-	end
-
-	local name = resolveName(steamID, context, entry, stateEntry)
+	local name = resolveName(steamID, context, entry)
 
 	-- Hard evidence decision:
 	-- If the ban reason explicitly mentions cheats/hacks, we mark as CHEATER immediately.
@@ -276,26 +261,6 @@ local function flagPlayer(steamID, context, entry)
 	else
 		flags = Constants.Flags.SUSPICIOUS
 		printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged as SUSPICIOUS (Reason: %s)", name, reason))
-	end
-
-	if stateEntry then
-		stateEntry.info = stateEntry.info or {}
-		stateEntry.info.LastFlagReason = formattedReason
-		stateEntry.info.LastFlagSource = "SteamHistory"
-		stateEntry.flags = stateEntry.flags | flags
-		
-		local evidence = stateEntry.Evidence or {}
-		evidence.Reasons = evidence.Reasons or {}
-		evidence.Reasons.SteamHistory = {
-			Weight = isHardEvidence and 100 or 50,
-			Category = "Exploit",
-			LastAddedTick = globals.TickCount(),
-		}
-		stateEntry.Evidence = evidence
-		
-		if isHardEvidence then
-			stateEntry.score = 100
-		end
 	end
 
 	Database.UpsertCheater(steamID, {

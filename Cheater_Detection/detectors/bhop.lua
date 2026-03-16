@@ -6,7 +6,7 @@
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 
 local Bhop = {}
 
@@ -83,7 +83,7 @@ function Bhop.ProcessPlayer(playerState)
 					})
 
 					if playerState.flags ~= oldFlags then
-						EventBus.Publish("OnPlayerStateChange", playerState, reason)
+						Events.Publish("OnPlayerStateChange", playerState, reason)
 					end
 				end
 			else
@@ -98,7 +98,7 @@ function Bhop.ProcessPlayer(playerState)
 end
 
 -- Cleanup
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
+Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerData[id] = nil
 end)
 

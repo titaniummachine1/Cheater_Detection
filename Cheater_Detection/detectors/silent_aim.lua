@@ -24,12 +24,11 @@
        Score is applied in ProcessPlayer (CreateMove) after stage 3 writes it.
 ]]
 
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
-local EventManager = require("Cheater_Detection.Utils.EventManager")
 
 local SilentAim = {}
 
@@ -288,7 +287,7 @@ local function onDamageEvent(event)
 	end
 end
 
-EventManager.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
+Events.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
 
 -- ── ProcessPlayer (called from Main.lua / CreateMove) ─────────────────────────
 function SilentAim.ProcessPlayer(playerState)
@@ -349,19 +348,19 @@ function SilentAim.ProcessPlayer(playerState)
 			flags = playerState.flags,
 			score = playerState.score,
 		})
-		EventBus.Publish("OnPlayerStateChange", playerState, reason)
+		Events.Publish("OnPlayerStateChange", playerState, reason)
 
 		-- Dedicated event: first time this player crosses the SUSPICIOUS threshold
 		-- via aimbot detection.  Lets the real-time analyser and other modules react
 		-- without having to filter through generic OnPlayerStateChange.
 		if not wasSuspicious and (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
-			EventBus.Publish("OnAimbotSuspect", playerState, reason)
+			Events.Publish("OnAimbotSuspect", playerState, reason)
 		end
 	end
 end
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
+Events.Subscribe("OnPlayerDisconnect", function(id)
 	trackedEntities[id] = nil
 	angleHistory[id] = nil
 	shotPending[id] = nil

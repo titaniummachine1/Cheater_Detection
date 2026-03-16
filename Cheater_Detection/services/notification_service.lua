@@ -9,7 +9,7 @@
        Console    = print()
 ]]
 
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
@@ -167,7 +167,7 @@ local function OnStateChange(playerState, reason)
 end
 
 function NotificationService.Init()
-	EventBus.Subscribe("OnPlayerStateChange", OnStateChange)
+	Events.Subscribe("OnPlayerStateChange", OnStateChange)
 end
 
 return NotificationService

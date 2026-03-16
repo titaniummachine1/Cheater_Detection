@@ -5,7 +5,7 @@
 -- [[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Config = require("Cheater_Detection.Utils.Config")
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local PlayerCache = require("Cheater_Detection.core.player_cache")
 local Scheduler = require("Cheater_Detection.core.scheduler")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
@@ -62,7 +62,7 @@ end
 
 -- [[ Initialization ]]
 local function Init()
-	EventBus.Reset()
+	Events.Reset()
 	NotificationService.Init()
 
 	-- Populate global menu config before anything else
@@ -82,7 +82,7 @@ local function Init()
 	print("[CD] System initialized.")
 
 	-- Register Decay Heartbeat
-	EventBus.Subscribe("DecayHeartbeat", function()
+	Events.Subscribe("DecayHeartbeat", function()
 		PlayerCache.Hearthbeat()
 	end)
 end
@@ -95,7 +95,6 @@ local function OnCreateMove(cmd)
 	if not serverIP then
 		if (cmTick - lastCMTraceTick) >= 300 then
 			lastCMTraceTick = cmTick
-			print("[CD-CM] no serverIP, skipping")
 		end
 		hasSearchedGroup = false
 		return
@@ -108,7 +107,6 @@ local function OnCreateMove(cmd)
 	local players = entities.FindByClass("CTFPlayer")
 	if isDebugEnabled() and (cmTick - lastCMTraceTick) >= 132 then
 		lastCMTraceTick = cmTick
-		print(string.format("[CD-CM] tick=%d serverIP=%s players=%d", cmTick, tostring(serverIP), #players))
 	end
 
 	for i = 1, #players do
@@ -141,7 +139,6 @@ local function OnCreateMove(cmd)
 				if (cmTick - lastPStateNilLogTick) >= 132 then
 					lastPStateNilLogTick = cmTick
 					local steamID = Common.GetSteamID64(ply)
-					print(string.format("[CD-CM] pState=nil idx=%d steamID=%s", ply:GetIndex(), tostring(steamID)))
 				end
 			end
 		end
@@ -151,13 +148,6 @@ local function OnCreateMove(cmd)
 end
 
 local function OnDraw()
-	if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
-		local currentTick = globals.TickCount()
-		if (currentTick - lastDrawHeartbeatTick) >= 132 then
-			print("[CD] OnDraw heartbeat")
-			lastDrawHeartbeatTick = currentTick
-		end
-	end
 	Scheduler.Tick()
 	Visuals.DrawTags()
 end
@@ -169,7 +159,7 @@ local function OnFireGameEvent(event)
 		local ent = entities.GetByUserID(uid)
 		if ent then
 			local id = tostring(Common.GetSteamID64(ent))
-			EventBus.Publish("OnPlayerDisconnect", id)
+			Events.Publish("OnPlayerDisconnect", id)
 			PlayerCache.Remove(id)
 		end
 	elseif name == "player_team" then
@@ -181,7 +171,7 @@ local function OnFireGameEvent(event)
 			if ent then
 				local id = tostring(Common.GetSteamID64(ent))
 				if id and id:match("^7656119%d+$") then
-					EventBus.Publish("OnPlayerJoinTeam", id, ent)
+					Events.Publish("OnPlayerJoinTeam", id, ent)
 				end
 			end
 		end

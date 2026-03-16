@@ -5,7 +5,7 @@
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 
 local FakeLag = {}
 
@@ -126,7 +126,7 @@ function FakeLag.ProcessPlayer(playerState)
 				})
 
 				if playerState.flags ~= oldFlags then
-					EventBus.Publish("OnPlayerStateChange", playerState, reason)
+						Events.Publish("OnPlayerStateChange", playerState, reason)
 				end
 
 				-- Clear events to wait for next sequence
@@ -139,7 +139,7 @@ function FakeLag.ProcessPlayer(playerState)
 end
 
 -- Cleanup
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
+Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerStats[id] = nil
 end)
 

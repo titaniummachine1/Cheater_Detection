@@ -3,7 +3,6 @@
 -- Player entity wrapper with cached property access
 
 local Common = require("Cheater_Detection.Utils.Common")
-local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local G = require("Cheater_Detection.Utils.Globals")
 
 -- Safety: Polyfill Vector3 if missing (Lmaobox usually provides it globally)
@@ -44,11 +43,6 @@ local function hydrateWrapper(wrapped, entity, cachedSteamID)
 		local steamID = cachedSteamID or Common.GetSteamID64(entity)
 		if steamID then
 			wrapped._steamID64 = steamID
-
-			-- Attach PlayerState only if needed
-			if PlayerState then
-				wrapped._state = PlayerState.AttachWrappedPlayer(wrapped)
-			end
 		end
 	end
 

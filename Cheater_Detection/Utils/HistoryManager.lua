@@ -5,7 +5,7 @@
      Exposes array-like read access via metatable so consumers iterate normally.
 ]]
 
-local PlayerState = require("Cheater_Detection.Utils.PlayerState")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
@@ -158,18 +158,18 @@ end
 
 local function ensureRing(state)
 	local cap = getCapacity()
-	local history = state.History
+	local history = state.history
 
 	if isRing(history) then
 		if history._capacity == cap then
 			return history
 		end
-		
+
 		local newRing = createRing(cap)
 		local oldCount = history._count
 		local copyCount = math.min(oldCount, cap)
 		local startIdx = oldCount - copyCount + 1
-		
+
 		for i = startIdx, oldCount do
 			local src = HistoryManager.GetAt(history, i)
 			if src then
@@ -179,7 +179,7 @@ local function ensureRing(state)
 				end
 			end
 		end
-		state.History = newRing
+		state.history = newRing
 		return newRing
 	end
 
@@ -200,7 +200,7 @@ local function ensureRing(state)
 		end
 	end
 
-	state.History = newRing
+	state.history = newRing
 	return newRing
 end
 
@@ -264,7 +264,7 @@ function HistoryManager.Push(player)
 		return
 	end
 
-	local state = PlayerState.GetOrCreate(steamID)
+	local state = PlayerCache.GetByID(tostring(steamID))
 	if not state then
 		return
 	end
@@ -277,7 +277,7 @@ function HistoryManager.Push(player)
 	TickProfiler.EndSection("History_Write")
 
 	if hasData then
-		state.Current = record
+		state.current = record
 	end
 end
 

@@ -2,7 +2,7 @@
      Handles external Steam API lookups (Valve Group, Bans, etc.)
 ]]
 
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local ValveData = require("Cheater_Detection.data.valve_data")
 local Constants = require("Cheater_Detection.core.constants")
 

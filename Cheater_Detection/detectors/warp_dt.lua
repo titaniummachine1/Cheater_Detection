@@ -1,10 +1,10 @@
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local Common = require("Cheater_Detection.Utils.Common")
-local PlayerStateLegacy = require("Cheater_Detection.Utils.PlayerState")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local WarpDT = {}
 
@@ -112,13 +112,13 @@ function WarpDT.ProcessPlayer(playerState)
 		return
 	end
 
-	-- HistoryManager uses PlayerState (legacy) storage
-	local legacyState = PlayerStateLegacy.Get(id)
-	if not legacyState or not legacyState.History then
+	-- History stored on the PlayerCache state entry
+	local cacheEntry = PlayerCache.GetByID(id)
+	if not cacheEntry or not cacheEntry.history then
 		return
 	end
 
-	local history = legacyState.History
+	local history = cacheEntry.history
 	local historyCount = HistoryManager.GetCount(history)
 	if historyCount < HISTORY_SIZE then
 		return
@@ -209,7 +209,7 @@ function WarpDT.ProcessPlayer(playerState)
 			-- Only notify when flags actually changed (new threshold crossed).
 			-- Score-only increments within the same flag level are silent.
 			if playerState.flags ~= oldFlags then
-				EventBus.Publish("OnPlayerStateChange", playerState, reason)
+				Events.Publish("OnPlayerStateChange", playerState, reason)
 			end
 
 			-- Clean up events older than 660 ticks (approx 10 seconds)
@@ -226,7 +226,7 @@ function WarpDT.ProcessPlayer(playerState)
 end
 
 -- Cleanup on disconnect
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
+Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerStats[id] = nil
 end)
 

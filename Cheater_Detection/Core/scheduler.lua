@@ -3,7 +3,7 @@
      Ensures heavy logic (decay, db saving) doesn't spike frame time.
 ]]
 
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.core.constants")
 
 local Scheduler = {}
@@ -21,11 +21,11 @@ function Scheduler.Tick()
 
     if currentTick - lastHeartbeat >= (Constants.DECAY_INTERVAL_SECONDS * Constants.TICKS_PER_SECOND) then
         lastHeartbeat = currentTick
-        EventBus.Publish("DecayHeartbeat", currentTick)
+        Events.Publish("DecayHeartbeat", currentTick)
     end
 
     if (ticksPassed % Constants.TICKS_PER_SECOND) == 0 then
-        EventBus.Publish("OneSecondTick", currentTick)
+        Events.Publish("OneSecondTick", currentTick)
     end
 
     if HttpQueue and HttpQueue.Tick then

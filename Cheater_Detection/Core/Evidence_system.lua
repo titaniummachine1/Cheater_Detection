@@ -8,10 +8,12 @@
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
-local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
-local PlayerState = require("Cheater_Detection.Utils.PlayerState")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Database = require("Cheater_Detection.Database.Database")
 local Logger = require("Cheater_Detection.Utils.Logger")
+
+-- Own evidence store (keyed by steamID64 string)
+local evidenceStore = {}
 
 --[[ Module Declaration ]]
 local Evidence = {}
@@ -112,12 +114,8 @@ local function refreshDecayQueue()
 	decayCursor = 1
 	decayQueueDirty = false
 
-	if not PlayerState or not PlayerState.GetTable then
-		return
-	end
-
-	for steamID, state in pairs(PlayerState.GetTable()) do
-		if state and state.Evidence and state.Evidence.Reasons and next(state.Evidence.Reasons) ~= nil then
+	for steamID, evidence in pairs(evidenceStore) do
+		if evidence and evidence.Reasons and next(evidence.Reasons) ~= nil then
 			decayQueue[#decayQueue + 1] = steamID
 			decayQueueIndex[steamID] = true
 		end
@@ -175,21 +173,15 @@ local function getCategory(detectionName)
 end
 
 local function getOrCreateEvidence(steamID)
-	if not PlayerState then
-		return nil, nil
-	end
-	local state = PlayerState.GetOrCreate(steamID)
-	if not state then
-		return nil, nil
-	end
-	state.Evidence = state.Evidence
-		or {
+	if not evidenceStore[steamID] then
+		evidenceStore[steamID] = {
 			TotalScore = 0,
 			LastUpdateTick = globals.TickCount(),
 			Reasons = {},
 			MarkedAsCheater = false,
 		}
-	return state.Evidence, state
+	end
+	return evidenceStore[steamID]
 end
 
 local function initPlayerEvidence(steamID)
@@ -251,60 +243,71 @@ end
 --- that requires a hard detection (anti-aim, etc.) going through its own path.
 ---@param steamID string
 ---@param evidence table
----@param state table?
-local function tryApplyAutoPriority(steamID, evidence, state)
-	if not evidence then return end
+local function tryApplyAutoPriority(steamID, evidence)
+	if not evidence then
+		return
+	end
 
 	local threshold = Evidence.GetThreshold()
 
-	if evidence.TotalScore < threshold then return end
+	if evidence.TotalScore < threshold then
+		return
+	end
 
 	-- Already raised priority this session? Skip to avoid spam.
-	if evidence.AutoPriorityApplied then return end
+	if evidence.AutoPriorityApplied then
+		return
+	end
 	evidence.AutoPriorityApplied = true
 
-	state = state or select(2, getOrCreateEvidence(steamID)) or {}
-
-	local playerName = (state.info and state.info.Name) or "Unknown"
-	if playerName == "Unknown" then
-		local allPlayers = FastPlayers.GetAll(false)
-		for _, player in ipairs(allPlayers) do
-			if tostring(player:GetSteamID64()) == steamID then
-				local name = player.GetName and player:GetName()
-				if name and name ~= "" then
-					playerName = name
-					if state.info then state.info.Name = name end
-				end
-				break
-			end
+	local playerName = "Unknown"
+	local wrap = PlayerCache.GetBySteamID(steamID)
+	if wrap then
+		local name = wrap:GetName()
+		if name and name ~= "" then
+			playerName = name
 		end
 	end
 
 	-- Set priority 10 if AutoPriority is enabled
 	if G.Menu.Main and G.Menu.Main.AutoPriority then
 		Evidence.SetPriorityForSteamID(steamID, 10)
-		Logger.Info("Evidence", string.format(
-			"Auto-priority 10 applied to %s (Score: %.1f >= %.1f) – SUSPICIOUS",
-			playerName, evidence.TotalScore, threshold
-		))
+		Logger.Info(
+			"Evidence",
+			string.format(
+				"Auto-priority 10 applied to %s (Score: %.1f >= %.1f) – SUSPICIOUS",
+				playerName,
+				evidence.TotalScore,
+				threshold
+			)
+		)
 	else
-		Logger.Debug("Evidence", string.format(
-			"%s crossed suspicion threshold (%.1f >= %.1f) but AutoPriority is off",
-			playerName, evidence.TotalScore, threshold
-		))
+		Logger.Debug(
+			"Evidence",
+			string.format(
+				"%s crossed suspicion threshold (%.1f >= %.1f) but AutoPriority is off",
+				playerName,
+				evidence.TotalScore,
+				threshold
+			)
+		)
 	end
 
 	-- Debug breakdown of contributing detections
 	if G.Menu.Advanced and G.Menu.Advanced.debug then
 		for detName, reasonData in pairs(evidence.Reasons) do
-			Logger.Debug("Evidence", string.format(
-				"  └ %s: weight=%.1f category=%s",
-				detName, reasonData.Weight, tostring(reasonData.Category)
-			))
+			Logger.Debug(
+				"Evidence",
+				string.format(
+					"  └ %s: weight=%.1f category=%s",
+					detName,
+					reasonData.Weight,
+					tostring(reasonData.Category)
+				)
+			)
 		end
 	end
 end
-
 
 --- Add evidence weight for a specific detection
 ---@param steamID string Player's SteamID64
@@ -326,7 +329,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 
 	-- Skip local player unless debug mode is enabled
 	if not G.Menu.Advanced.debug then
-		local localPlayer = FastPlayers.GetLocal()
+		local localPlayer = PlayerCache.GetLocal()
 		if localPlayer then
 			local localSteamID = localPlayer:GetSteamID64()
 			if localSteamID and tostring(localSteamID) == steamID then
@@ -338,7 +341,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	-- Debug: Log successful evidence add
 	Logger.Debug("Evidence", string.format("Adding %.1f evidence for %s (method: %s)", weight, steamID, detectionName))
 
-	local evidence, state = getOrCreateEvidence(steamID)
+	local evidence = getOrCreateEvidence(steamID)
 	if not evidence then
 		return
 	end
@@ -361,16 +364,15 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	-- Recalculate total and check if player should be marked
 	recalcTotalScore(evidence)
 
-	tryApplyAutoPriority(steamID, evidence, state)
+	tryApplyAutoPriority(steamID, evidence)
 
 	enqueueForDecay(steamID)
 end
 
-local function processEvidenceState(steamID, state, deltaTime)
-	if not state or not state.Evidence then
+local function processEvidenceState(steamID, evidence, deltaTime)
+	if not evidence then
 		return false
 	end
-	local evidence = state.Evidence
 	if not evidence.Reasons or next(evidence.Reasons) == nil then
 		evidence.Dirty = false
 		return false
@@ -413,7 +415,7 @@ local function processEvidenceState(steamID, state, deltaTime)
 	if evidence.Dirty or changed then
 		recalcTotalScore(evidence)
 		evidence.Dirty = false
-		tryApplyAutoPriority(steamID, evidence, state)
+		tryApplyAutoPriority(steamID, evidence)
 	end
 
 	return hasReasons and next(evidence.Reasons) ~= nil
@@ -441,9 +443,9 @@ local function processDecayBatch()
 		local steamID = decayQueue[decayCursor]
 		decayCursor = decayCursor + 1
 		if steamID then
-			local state = PlayerState and PlayerState.Get and PlayerState.Get(steamID)
-			if state and state.Evidence and state.Evidence.Reasons and next(state.Evidence.Reasons) ~= nil then
-				local hasReasons = processEvidenceState(steamID, state, DECAY_SECONDS_PER_BATCH)
+			local evidence = evidenceStore[steamID]
+			if evidence and evidence.Reasons and next(evidence.Reasons) ~= nil then
+				local hasReasons = processEvidenceState(steamID, evidence, DECAY_SECONDS_PER_BATCH)
 				if not hasReasons then
 					removeFromDecayQueue(steamID)
 				end
@@ -480,22 +482,15 @@ function Evidence.IsMarkedCheater(steamID)
 		return true
 	end
 
-	-- Check if marked by evidence system
-	if G.PlayerData[steamID] and G.PlayerData[steamID].Evidence then
-		return G.PlayerData[steamID].Evidence.MarkedAsCheater
+	-- Check evidence store
+	if evidenceStore[steamID] then
+		return evidenceStore[steamID].MarkedAsCheater == true
 	end
 
 	-- Check playerlist priority
 	local priority = playerlist.GetPriority(steamID)
 	if priority == 10 then
 		return true
-	end
-
-	if PlayerState then
-		local state = PlayerState.Get(steamID)
-		if state and state.Evidence then
-			return state.Evidence.MarkedAsCheater == true
-		end
 	end
 
 	return false
@@ -519,7 +514,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 
 	initPlayerEvidence(steamID)
 
-	local evidence, state = getOrCreateEvidence(steamID)
+	local evidence = getOrCreateEvidence(steamID)
 	if not evidence then
 		return
 	end
@@ -544,7 +539,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 		evidence.Dirty = true
 		recalcTotalScore(evidence)
 		enqueueForDecay(steamID)
-		tryApplyAutoPriority(steamID, evidence, state)
+		tryApplyAutoPriority(steamID, evidence)
 
 		-- Debug: Log decay
 		Logger.Debug(
@@ -572,11 +567,11 @@ function Evidence.GetScore(steamID)
 	-- Ensure steamID is a string
 	steamID = tostring(steamID)
 
-	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence then
+	local evidence = evidenceStore[steamID]
+	if not evidence then
 		return 0
 	end
-
-	return G.PlayerData[steamID].Evidence.TotalScore or 0
+	return evidence.TotalScore or 0
 end
 
 --- Get current evidence weight for a specific detection method
@@ -591,19 +586,14 @@ function Evidence.GetMethodWeight(steamID, detectionName)
 	-- Ensure steamID is a string
 	steamID = tostring(steamID)
 
-	if
-		not G.PlayerData[steamID]
-		or not G.PlayerData[steamID].Evidence
-		or not G.PlayerData[steamID].Evidence.Reasons
-	then
+	local evidence = evidenceStore[steamID]
+	if not evidence or not evidence.Reasons then
 		return 0
 	end
-
-	local methodData = G.PlayerData[steamID].Evidence.Reasons[detectionName]
+	local methodData = evidence.Reasons[detectionName]
 	if not methodData then
 		return 0
 	end
-
 	return methodData.Weight or 0
 end
 
@@ -618,20 +608,14 @@ function Evidence.GetDetails(steamID)
 	-- Ensure steamID is a string
 	steamID = tostring(steamID)
 
-	if not G.PlayerData[steamID] or not G.PlayerData[steamID].Evidence then
-		return nil
-	end
-
-	return G.PlayerData[steamID].Evidence
+	return evidenceStore[steamID]
 end
 
 --- Clean up player data when they leave (centralized black box)
 ---@param steamID string Player's SteamID64
 function Evidence.OnPlayerLeave(steamID)
 	-- Clean up evidence data
-	if G.PlayerData[steamID] then
-		G.PlayerData[steamID] = nil
-	end
+	evidenceStore[steamID] = nil
 	removeFromDecayQueue(steamID)
 
 	-- Detection module data cleanup is handled by script unload
@@ -647,22 +631,18 @@ function Evidence.SetPriorityForSteamID(steamID, priority)
 	end
 	steamID = tostring(steamID)
 
-	local allPlayers = FastPlayers.GetAll(false)
-	for _, player in ipairs(allPlayers) do
-		if tostring(player:GetSteamID64()) == steamID then
-			local entity = player:GetRawEntity()
-			if entity then
-				local success = pcall(playerlist.SetPriority, entity, priority)
-				if success then
-					Logger.Info(
-						"Evidence",
-						string.format("Set priority %d for %s", priority, player:GetName() or steamID)
-					)
-					return true
-				end
-			end
-			break
-		end
+	local wrap = PlayerCache.GetBySteamID(steamID)
+	if not wrap then
+		return false
+	end
+	local entity = wrap:GetRawEntity()
+	if not entity then
+		return false
+	end
+	local success = pcall(playerlist.SetPriority, entity, priority)
+	if success then
+		Logger.Info("Evidence", string.format("Set priority %d for %s", priority, wrap:GetName() or steamID))
+		return true
 	end
 	return false
 end

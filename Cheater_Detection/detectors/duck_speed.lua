@@ -6,7 +6,7 @@
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 
 local DuckSpeed = {}
 
@@ -68,7 +68,7 @@ function DuckSpeed.ProcessPlayer(playerState)
 				})
 
 				if oldFlags ~= playerState.flags then
-					EventBus.Publish("OnPlayerStateChange", playerState, reason)
+						Events.Publish("OnPlayerStateChange", playerState, reason)
 				end
 
 				tickCounters[id] = 0 -- Reset after detection
@@ -83,7 +83,7 @@ function DuckSpeed.ProcessPlayer(playerState)
 end
 
 -- Cleanup when player disconnects
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
+Events.Subscribe("OnPlayerDisconnect", function(id)
 	tickCounters[id] = nil
 end)
 

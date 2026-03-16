@@ -14,15 +14,15 @@
 ]]
 
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
-local ValveData     = require("Cheater_Detection.data.valve_data")
+local ValveData = require("Cheater_Detection.data.valve_data")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
-local Constants     = require("Cheater_Detection.core.constants")
-local EventBus      = require("Cheater_Detection.core.event_bus")
-local Common        = require("Cheater_Detection.Utils.Common")
-local Database      = require("Cheater_Detection.Database.Database")
-local Logger        = require("Cheater_Detection.Utils.Logger")
-local G             = require("Cheater_Detection.Utils.Globals")
-local FastPlayers   = require("Cheater_Detection.Utils.FastPlayers")
+local Constants = require("Cheater_Detection.core.constants")
+local Events = require("Cheater_Detection.Core.Events")
+local Common = require("Cheater_Detection.Utils.Common")
+local Database = require("Cheater_Detection.Database.Database")
+local Logger = require("Cheater_Detection.Utils.Logger")
+local G = require("Cheater_Detection.Utils.Globals")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local ValveCheck = {}
 
@@ -37,18 +37,28 @@ local lastItemCheck = {}
 local lastProfileCheck = {}
 
 -- Track if Layer 1 logging has occurred for a player: id -> boolean
-local layer1Logged  = {}
+local layer1Logged = {}
 
 -- Layer 1: Check both static tables (valve_data AND ValveEmployees)
 local function isKnownValveID64(s64)
-	if not s64 then return false end
+	if not s64 then
+		return false
+	end
 	local idStr = tostring(s64)
 	local key = idStr:match("^%s*(.-)%s*$") or idStr
-	if key == "" then return false end
-	
-	if ValveData.KnownSteamID64s[key] == true then return true end
-	if ValveEmployees.IsEmployee and ValveEmployees.IsEmployee(key) then return true end
-	if type(ValveEmployees.List) == "table" and ValveEmployees.List[key] then return true end
+	if key == "" then
+		return false
+	end
+
+	if ValveData.KnownSteamID64s[key] == true then
+		return true
+	end
+	if ValveEmployees.IsEmployee and ValveEmployees.IsEmployee(key) then
+		return true
+	end
+	if type(ValveEmployees.List) == "table" and ValveEmployees.List[key] then
+		return true
+	end
 	return false
 end
 
@@ -65,17 +75,25 @@ local function applyValveFlag(playerState, reason)
 	playerState.flags = playerState.flags | Constants.Flags.VALVE
 
 	if playerState.flags ~= oldFlags then
-		printc(255, 215, 0, 255, string.format(
-			"[ValveCheck] VALVE EMPLOYEE detected! SteamID64=%s  Name=%s  Reason=%s",
-			playerState.id, playerState.wrap:GetName(), reason
-		))
+		printc(
+			255,
+			215,
+			0,
+			255,
+			string.format(
+				"[ValveCheck] VALVE EMPLOYEE detected! SteamID64=%s  Name=%s  Reason=%s",
+				playerState.id,
+				playerState.wrap:GetName(),
+				reason
+			)
+		)
 		Database.UpsertCheater(playerState.id, {
-			name   = playerState.wrap:GetName(),
+			name = playerState.wrap:GetName(),
 			reason = reason,
-			flags  = playerState.flags,
-			score  = playerState.score,
+			flags = playerState.flags,
+			score = playerState.score,
 		})
-		EventBus.Publish("OnPlayerStateChange", playerState, reason)
+		Events.Publish("OnPlayerStateChange", playerState, reason)
 	end
 end
 
@@ -86,17 +104,17 @@ local function applyVacFlag(playerState)
 	local oldFlags = playerState.flags
 	playerState.flags = playerState.flags | Constants.Flags.VAC_BANNED
 	if playerState.flags ~= oldFlags then
-		Logger.Info("ValveCheck", string.format(
-			"VAC ban confirmed – SteamID64=%s  Name=%s",
-			playerState.id, playerState.wrap:GetName()
-		))
+		Logger.Info(
+			"ValveCheck",
+			string.format("VAC ban confirmed – SteamID64=%s  Name=%s", playerState.id, playerState.wrap:GetName())
+		)
 		Database.UpsertCheater(playerState.id, {
-			name   = playerState.wrap:GetName(),
+			name = playerState.wrap:GetName(),
 			reason = "VAC Ban on Record",
-			flags  = playerState.flags,
-			score  = playerState.score,
+			flags = playerState.flags,
+			score = playerState.score,
 		})
-		EventBus.Publish("OnPlayerStateChange", playerState, "VAC Ban on Record")
+		Events.Publish("OnPlayerStateChange", playerState, "VAC Ban on Record")
 	end
 end
 
@@ -107,17 +125,21 @@ local function applyCommBanFlag(playerState)
 	local oldFlags = playerState.flags
 	playerState.flags = playerState.flags | Constants.Flags.COMM_BANNED
 	if playerState.flags ~= oldFlags then
-		Logger.Info("ValveCheck", string.format(
-			"Community/Trade ban confirmed – SteamID64=%s  Name=%s",
-			playerState.id, playerState.wrap:GetName()
-		))
+		Logger.Info(
+			"ValveCheck",
+			string.format(
+				"Community/Trade ban confirmed – SteamID64=%s  Name=%s",
+				playerState.id,
+				playerState.wrap:GetName()
+			)
+		)
 		Database.UpsertCheater(playerState.id, {
-			name   = playerState.wrap:GetName(),
+			name = playerState.wrap:GetName(),
 			reason = "Community/Trade Ban",
-			flags  = playerState.flags,
-			score  = playerState.score,
+			flags = playerState.flags,
+			score = playerState.score,
 		})
-		EventBus.Publish("OnPlayerStateChange", playerState, "Community/Trade Ban")
+		Events.Publish("OnPlayerStateChange", playerState, "Community/Trade Ban")
 	end
 end
 
@@ -129,7 +151,7 @@ local function checkPlayerItems(ply)
 		local okEnt, ent = pcall(ply.GetEntityForLoadoutSlot, ply, slot)
 		if okEnt and ent then
 			local okQ, quality = pcall(ent.GetPropInt, ent, "m_iEntityQuality")
-			local okD, defIdx  = pcall(ent.GetPropInt, ent, "m_iItemDefinitionIndex")
+			local okD, defIdx = pcall(ent.GetPropInt, ent, "m_iItemDefinitionIndex")
 
 			if okQ and quality == ValveData.QualityID then
 				return true, "Valve-Quality Item (slot " .. slot .. ")"
@@ -148,7 +170,7 @@ end
 function ValveCheck.ProcessPlayer(playerState)
 	assert(playerState, "ValveCheck.ProcessPlayer: playerState missing")
 
-	local id  = playerState.id
+	local id = playerState.id
 	local now = globals.CurTime()
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 
@@ -169,7 +191,7 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	-- Skip local player unless debug mode is enabled
 	if not isDebug then
-		local localPlayer = FastPlayers.GetLocal()
+		local localPlayer = PlayerCache.GetLocal()
 		if localPlayer then
 			local localSteamID = localPlayer:GetSteamID64()
 			if localSteamID and tostring(localSteamID) == tostring(id) then
@@ -183,10 +205,15 @@ function ValveCheck.ProcessPlayer(playerState)
 	-- but only do it ONCE per player to avoid spamming the console every tick!
 	if isDebug and not layer1Logged[id] then
 		layer1Logged[id] = true
-		Logger.Debug("ValveCheck", string.format(
-			"Processing ID=%s Name=%s  inKnownList=%s",
-			tostring(id), playerState.wrap:GetName(), tostring(isKnownValveID64(id))
-		))
+		Logger.Debug(
+			"ValveCheck",
+			string.format(
+				"Processing ID=%s Name=%s  inKnownList=%s",
+				tostring(id),
+				playerState.wrap:GetName(),
+				tostring(isKnownValveID64(id))
+			)
+		)
 	end
 
 	if isKnownValveID64(id) then
@@ -204,7 +231,9 @@ function ValveCheck.ProcessPlayer(playerState)
 	if ply then
 		local s2 = Common.GetSteamID(ply)
 		if isKnownValveIDSteam2(s2) then
-			if isDebug then Logger.Debug("ValveCheck", id .. " matched legacy Steam2 list (" .. tostring(s2) .. ")") end
+			if isDebug then
+				Logger.Debug("ValveCheck", id .. " matched legacy Steam2 list (" .. tostring(s2) .. ")")
+			end
 			applyValveFlag(playerState, "Known Valve SteamID (Legacy)")
 			return
 		end
@@ -214,14 +243,20 @@ function ValveCheck.ProcessPlayer(playerState)
 	if not playerState.itemChecked then
 		playerState.itemChecked = true -- Mark as done immediately to prevent re-entry
 		if ply then
-			if isDebug then Logger.Debug("ValveCheck", id .. " – running item/badge check") end
+			if isDebug then
+				Logger.Debug("ValveCheck", id .. " – running item/badge check")
+			end
 			local found, reason = checkPlayerItems(ply)
 			if found then
-				if isDebug then Logger.Debug("ValveCheck", id .. " – item/badge HIT: " .. reason) end
+				if isDebug then
+					Logger.Debug("ValveCheck", id .. " – item/badge HIT: " .. reason)
+				end
 				applyValveFlag(playerState, reason)
 				return
 			else
-				if isDebug then Logger.Debug("ValveCheck", id .. " – item/badge: no match") end
+				if isDebug then
+					Logger.Debug("ValveCheck", id .. " – item/badge: no match")
+				end
 			end
 		end
 	end
@@ -231,21 +266,31 @@ function ValveCheck.ProcessPlayer(playerState)
 		local lastProfile = lastProfileCheck[id]
 		if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
 			lastProfileCheck[id] = now
-			if isDebug then Logger.Debug("ValveCheck", id .. " – queuing async profile check") end
+			if isDebug then
+				Logger.Debug("ValveCheck", id .. " – queuing async profile check")
+			end
 
 			SteamLookup.CheckProfileAsync(id, function(results)
 				if not results then
-					if isDebug then Logger.Debug("ValveCheck", id .. " – async profile check returned nil (HTTP failed)") end
+					if isDebug then
+						Logger.Debug("ValveCheck", id .. " – async profile check returned nil (HTTP failed)")
+					end
 					-- Reset timer so it retries sooner (10s) instead of waiting 2 min
 					lastProfileCheck[id] = now - (PROFILE_RECHECK_INTERVAL - 10)
 					return
 				end
 
 				if isDebug then
-					Logger.Debug("ValveCheck", string.format(
-						"%s – profile check result: isValve=%s vacBanned=%s tradeBanned=%s",
-						id, tostring(results.isValve), tostring(results.vacBanned), tostring(results.tradeBanned)
-					))
+					Logger.Debug(
+						"ValveCheck",
+						string.format(
+							"%s – profile check result: isValve=%s vacBanned=%s tradeBanned=%s",
+							id,
+							tostring(results.isValve),
+							tostring(results.vacBanned),
+							tostring(results.tradeBanned)
+						)
+					)
 				end
 
 				if results.isValve then
@@ -268,8 +313,8 @@ function ValveCheck.ProcessPlayer(playerState)
 end
 
 -- Reset per-player timers on disconnect so rejoining players are re-checked
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
-	lastItemCheck[id]   = nil
+Events.Subscribe("OnPlayerDisconnect", function(id)
+	lastItemCheck[id] = nil
 	lastProfileCheck[id] = nil
 end)
 

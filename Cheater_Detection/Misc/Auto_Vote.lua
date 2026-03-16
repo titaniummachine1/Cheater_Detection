@@ -2,7 +2,7 @@ local AutoVote = {}
 
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
-local FastPlayers = require("Cheater_Detection.Utils.FastPlayers")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Sources = require("Cheater_Detection.Database.Sources")
@@ -97,7 +97,7 @@ local function recordScorePenalties()
 		ourVoteOption = State.currentTarget.expectedResult
 	else
 		-- Check if we or our friends are the target
-		local localPlayer = FastPlayers.GetLocal()
+		local localPlayer = PlayerCache.GetLocal()
 		local localSteamID = localPlayer and localPlayer:GetSteamID64()
 
 		-- Check if target is us or our friend
@@ -240,8 +240,8 @@ local function collectCandidates()
 	local scoreboard = getScoreboard() or {}
 	local candidates = {}
 
-	local players = FastPlayers.GetAll(true)
-	local localPlayer = FastPlayers.GetLocal()
+	local players = PlayerCache.GetAll(true)
+	local localPlayer = PlayerCache.GetLocal()
 	if not localPlayer then
 		return candidates
 	end
@@ -429,7 +429,7 @@ local function handleVoteStart(msg)
 	State.currentVoteIdx = voteIdx
 
 	-- Check if someone is CALLING a vote against US or our FRIEND
-	local localPlayer = FastPlayers.GetLocal()
+	local localPlayer = PlayerCache.GetLocal()
 	local localIndex = localPlayer and localPlayer:GetIndex() or -1
 	local localSteamID = localPlayer and localPlayer:GetSteamID64()
 
@@ -458,7 +458,7 @@ local function handleVoteStart(msg)
 
 	-- Check if this is the vote WE initiated
 	if State.currentTarget and State.voteSentTime > 0 then
-		local localPlayer = FastPlayers.GetLocal()
+		local localPlayer = PlayerCache.GetLocal()
 		-- GetIndex() is forwarded to WPlayer via metatable (lint warning is false positive)
 		local localIndex = localPlayer and localPlayer:GetIndex() or -1
 

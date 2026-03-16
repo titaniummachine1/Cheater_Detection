@@ -6,7 +6,7 @@
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
-local EventBus = require("Cheater_Detection.core.event_bus")
+local Events = require("Cheater_Detection.Core.Events")
 
 local AntiAim = {}
 
@@ -17,12 +17,12 @@ local AntiAim = {}
 -- both deltas exceed JITTER_SNAP_DEG, then count events. N events within the
 -- window → hard CHEATER flag (same tier as invalid pitch).
 
-local yawHistories = {}   -- id -> array of {yaw, tick}, capped at 3
-local jitterStates = {}   -- id -> {count, windowStart}
+local yawHistories = {} -- id -> array of {yaw, tick}, capped at 3
+local jitterStates = {} -- id -> {count, windowStart}
 
-local JITTER_SNAP_DEG     = 120.0  -- Min yaw delta per tick to count as a snap
-local JITTER_REQUIRED     = 8      -- Consecutive jitter events before flagging
-local JITTER_WINDOW_TICKS = 40     -- ~0.6 s at 66 tick; resets window if exceeded
+local JITTER_SNAP_DEG = 120.0 -- Min yaw delta per tick to count as a snap
+local JITTER_REQUIRED = 8 -- Consecutive jitter events before flagging
+local JITTER_WINDOW_TICKS = 40 -- ~0.6 s at 66 tick; resets window if exceeded
 
 local function wrapAngle(d)
 	return (d + 180) % 360 - 180
@@ -126,7 +126,7 @@ function AntiAim.ProcessPlayer(playerState)
 		})
 
 		if oldFlags ~= playerState.flags then
-			EventBus.Publish("OnPlayerStateChange", playerState, reason)
+			Events.Publish("OnPlayerStateChange", playerState, reason)
 		end
 	end
 
@@ -150,13 +150,13 @@ function AntiAim.ProcessPlayer(playerState)
 			})
 
 			if oldFlags ~= playerState.flags then
-				EventBus.Publish("OnPlayerStateChange", playerState, jitterReason)
+				Events.Publish("OnPlayerStateChange", playerState, jitterReason)
 			end
 		end
 	end
 end
 
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
+Events.Subscribe("OnPlayerDisconnect", function(id)
 	yawHistories[id] = nil
 	jitterStates[id] = nil
 end)
