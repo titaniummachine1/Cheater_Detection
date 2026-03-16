@@ -1,7 +1,6 @@
 --[[ Main.lua
      New Core Entry Point for Cheater Detection Service.
 ]]
-
 -- [[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
 local Config = require("Cheater_Detection.Utils.Config")
@@ -31,6 +30,28 @@ local Visuals = require("Cheater_Detection.actions.visuals")
 local Menu = require("Cheater_Detection.Misc.Visuals.Menu")
 
 local hasSearchedGroup = false
+local detectorErrorSeen = {}
+local lastDrawHeartbeatTick = 0
+
+local function runDetector(detectorName, detectorFn, playerState)
+	assert(detectorName, "runDetector: detectorName missing")
+	assert(detectorFn, "runDetector: detectorFn missing")
+	assert(playerState, "runDetector: playerState missing")
+
+	local ok, err = pcall(detectorFn, playerState)
+	if not ok then
+		if not detectorErrorSeen[detectorName] then
+			print(string.format("[CD][DetectorError] %s failed: %s", detectorName, tostring(err)))
+			detectorErrorSeen[detectorName] = true
+		end
+		return false
+	end
+
+	if detectorErrorSeen[detectorName] then
+		detectorErrorSeen[detectorName] = nil
+	end
+	return true
+end
 
 -- [[ Initialization ]]
 local function Init()
@@ -38,9 +59,7 @@ local function Init()
 	NotificationService.Init()
 
 	-- Populate global menu config before anything else
-	if not G.Menu then
-		require("Cheater_Detection.Utils.Config").LoadCFG()
-	end
+	Config.LoadCFG()
 
 	-- Require the Menu at the end of initialization
 	require("Cheater_Detection.Misc.Visuals.Menu")
@@ -54,6 +73,11 @@ local function Init()
 	end
 
 	print("[CD] System initialized.")
+
+	-- Register Decay Heartbeat
+	EventBus.Subscribe("DecayHeartbeat", function()
+		PlayerCache.Hearthbeat()
+	end)
 end
 
 -- [[ Callbacks ]]
@@ -69,26 +93,48 @@ local function OnCreateMove(cmd)
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
+	if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
+		assert(type(players) == "table", "OnCreateMove: entities.FindByClass did not return table")
+	end
+
 	for i = 1, #players do
 		local ply = players[i]
 		local pState = PlayerCache.Get(ply)
 		if pState then
+			if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
+				assert(pState.wrap, "OnCreateMove: pState.wrap missing for id=" .. tostring(pState.id))
+				assert(pState.id, "OnCreateMove: pState.id missing")
+			end
+
 			-- Update history snapshot first
 			HistoryManager.Push(pState.wrap)
 
 			-- Layer 1-3 Detections
-			ValveCheck.ProcessPlayer(pState)
-			SilentAim.ProcessPlayer(pState)
-			AntiAim.ProcessPlayer(pState)
-			DuckSpeed.ProcessPlayer(pState)
-			Bhop.ProcessPlayer(pState)
-			WarpDT.ProcessPlayer(pState)
-			FakeLag.ProcessPlayer(pState)
+			runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState)
+			runDetector("SilentAim", SilentAim.ProcessPlayer, pState)
+			runDetector("AntiAim", AntiAim.ProcessPlayer, pState)
+			runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState)
+			runDetector("Bhop", Bhop.ProcessPlayer, pState)
+			runDetector("WarpDT", WarpDT.ProcessPlayer, pState)
+			runDetector("FakeLag", FakeLag.ProcessPlayer, pState)
+		else
+			if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
+				if ply and ply:IsValid() and ply ~= entities.GetLocalPlayer() then
+					print(string.format("[CD][WARN] PlayerCache.Get returned nil for valid ply idx=%d", ply:GetIndex()))
+				end
+			end
 		end
 	end
 end
 
 local function OnDraw()
+	if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
+		local currentTick = globals.TickCount()
+		if (currentTick - lastDrawHeartbeatTick) >= 132 then
+			print("[CD] OnDraw heartbeat")
+			lastDrawHeartbeatTick = currentTick
+		end
+	end
 	Scheduler.Tick()
 	Visuals.DrawTags()
 end
@@ -117,16 +163,7 @@ local function OnFireGameEvent(event)
 			end
 		end
 	elseif name == "player_death" then
-		local attacker_uid = event:GetInt("attacker")
-		if attacker_uid ~= 0 then
-			local attacker_ent = entities.GetByUserID(attacker_uid)
-			if attacker_ent then
-				local id = tostring(Common.GetSteamID64(attacker_ent))
-				if id and id:match("^7656119%d+$") then
-					PlayerCache.DecayPlayer(id)
-				end
-			end
-		end
+		-- Decay is handled globally by heartbeat now
 	elseif name == "game_newmap" or name == "teamplay_round_start" then
 		-- Reset all "checked" states on map change so we re-verify everyone
 		PlayerCache.ResetCheckedState()

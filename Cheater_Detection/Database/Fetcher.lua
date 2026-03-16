@@ -633,6 +633,9 @@ function Fetcher.FinishFetch()
 	else
 		printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
 		printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
+		if results.total_updated > 0 then
+			printc(255, 255, 100, 255, string.format("Database entries updated: %d", results.total_updated))
+		end
 		if results.errors > 0 then
 			printc(255, 100, 100, 255, "Errors encountered: " .. results.errors)
 		end

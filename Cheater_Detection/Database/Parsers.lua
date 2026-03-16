@@ -249,7 +249,12 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 	-- Determine player name (from last_seen if available)
 	local playerName = "Unknown"
 	if player.last_seen and player.last_seen.player_name then
-		playerName = player.last_seen.player_name
+		local rawName = player.last_seen.player_name
+		-- Reject names that are just the SteamID64 itself (some sources use ID as placeholder)
+		local isSteamID = type(rawName) == "string" and rawName:match("^7656119%d%d%d%d%d%d%d%d%d%d$")
+		if not isSteamID then
+			playerName = rawName
+		end
 	end
 
 	-- Get the first attribute as the reason
