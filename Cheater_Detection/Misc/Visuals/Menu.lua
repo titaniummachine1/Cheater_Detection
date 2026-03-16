@@ -44,9 +44,9 @@ local function DrawMenu()
 		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Player Scanner")
-		Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync)
+		Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync == true)
 		TimMenu.NextLine()
-		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck)
+		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck == true)
 		TimMenu.NextLine()
 
 		local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
@@ -62,17 +62,17 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Detection Automation")
 		local Advanced = G.Menu.Advanced
-		Advanced.AutoPriority = TimMenu.Checkbox("Auto Priority", Advanced.AutoPriority)
+		Advanced.AutoPriority = TimMenu.Checkbox("Auto Priority", Advanced.AutoPriority == true)
 		TimMenu.NextLine()
-		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
+		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 		
 		TimMenu.BeginSector("Visual Feedback")
-		Main.Chat_Prefix = TimMenu.Checkbox("Chat Prefix", Main.Chat_Prefix)
+		Main.Chat_Prefix = TimMenu.Checkbox("Chat Prefix", Main.Chat_Prefix == true)
 		TimMenu.NextLine()
-		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
+		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags == true)
 		TimMenu.NextLine()
 		
 		if Main.Cheater_Tags then
@@ -85,7 +85,7 @@ local function DrawMenu()
 		TimMenu.BeginSector("Valve Safety")
 		Misc.JoinNotifications = Misc.JoinNotifications or {}
 		local JN = Misc.JoinNotifications
-		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave on Valve Join", JN.ValveAutoDisconnect)
+		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave on Valve Join", JN.ValveAutoDisconnect == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 
@@ -100,33 +100,33 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Exploit Detection")
-		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke)
+		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke == true)
 		TimMenu.NextLine()
-		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp)
+		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp == true)
 		TimMenu.NextLine()
-		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim)
+		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 
 		TimMenu.BeginSector("Aim Detection")
-		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot)
+		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Movement Detection")
-		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop)
+		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop == true)
 		TimMenu.NextLine()
-		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed)
+		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Debug")
-		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
+		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
 		TimMenu.NextLine()
 		local logLevels = { "Debug", "Info", "Warning", "Error" }
-		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
+		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel or 2, logLevels)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 
@@ -135,7 +135,7 @@ local function DrawMenu()
 		local N = G.Menu.Notifications or {}
 
 		TimMenu.BeginSector("Master Switch")
-		N.Enable = TimMenu.Checkbox("Enable System-Wide Notifications", N.Enable)
+		N.Enable = TimMenu.Checkbox("Enable System-Wide Notifications", N.Enable == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
@@ -145,7 +145,7 @@ local function DrawMenu()
 			local channelOptions = { "Local Chat", "Public Chat", "Party", "Log Toast", "Console Log" }
 			N.Channels = N.Channels or {LocalChat=true, PublicChat=false, Party=false, Toast=true, Console=true}
 			local ch = N.Channels
-			local act = { ch.LocalChat, ch.PublicChat, ch.Party, ch.Toast, ch.Console }
+			local act = { ch.LocalChat == true, ch.PublicChat == true, ch.Party == true, ch.Toast == true, ch.Console == true }
 			act = TimMenu.Combo("Default channels for all detections", act, channelOptions)
 			ch.LocalChat, ch.PublicChat, ch.Party, ch.Toast, ch.Console = act[1], act[2], act[3], act[4], act[5]
 			TimMenu.NextLine()
@@ -162,9 +162,9 @@ local function DrawMenu()
 			TimMenu.BeginSector("Conditional Overrides")
 			N.Overrides = N.Overrides or {}
 			local OV = N.Overrides
-			OV.UseCheaterOverride = TimMenu.Checkbox("Unique Channels for Confirmed Cheaters", OV.UseCheaterOverride)
+			OV.UseCheaterOverride = TimMenu.Checkbox("Unique Channels for Confirmed Cheaters", OV.UseCheaterOverride == true)
 			TimMenu.NextLine()
-			OV.UseValveOverride = TimMenu.Checkbox("Unique Channels for Valve Employees", OV.UseValveOverride)
+			OV.UseValveOverride = TimMenu.Checkbox("Unique Channels for Valve Employees", OV.UseValveOverride == true)
 			TimMenu.NextLine()
 			TimMenu.EndSector()
 			TimMenu.NextLine()
@@ -173,13 +173,13 @@ local function DrawMenu()
 			local Misc = G.Menu.Misc or {}
 			Misc.JoinNotifications = Misc.JoinNotifications or {}
 			local JN = Misc.JoinNotifications
-			JN.Enable = TimMenu.Checkbox("Notify on Player Connections", JN.Enable)
+			JN.Enable = TimMenu.Checkbox("Notify on Player Connections", JN.Enable == true)
 			TimMenu.NextLine()
 			
 			if JN.Enable then
-				JN.CheckCheater = TimMenu.Checkbox("Alert for Cheaters", JN.CheckCheater)
+				JN.CheckCheater = TimMenu.Checkbox("Alert for Cheaters", JN.CheckCheater == true)
 				TimMenu.NextLine()
-				JN.CheckValve = TimMenu.Checkbox("Alert for Valve", JN.CheckValve)
+				JN.CheckValve = TimMenu.Checkbox("Alert for Valve", JN.CheckValve == true)
 				TimMenu.NextLine()
 			end
 			TimMenu.EndSector()
@@ -190,10 +190,10 @@ local function DrawMenu()
 		local Misc = G.Menu.Misc
 
 		TimMenu.BeginSector("Vote Automation")
-		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote)
+		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote == true)
 		TimMenu.NextLine()
 		if Misc.Autovote then
-			Misc.AutovoteAutoCast = TimMenu.Checkbox("Auto Cast Votes", Misc.AutovoteAutoCast)
+			Misc.AutovoteAutoCast = TimMenu.Checkbox("Auto Cast Votes", Misc.AutovoteAutoCast == true)
 			TimMenu.NextLine()
 			
 			Misc.intent = Misc.intent or {}
@@ -216,16 +216,16 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Vote Reveal Alerts")
 		Misc.Vote_Reveal = Misc.Vote_Reveal or {}
-		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable)
+		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable == true)
 		TimMenu.NextLine()
 		
 		if Misc.Vote_Reveal.Enable then
-			Misc.Vote_Reveal.Indicator = TimMenu.Checkbox("Vote Indicator", Misc.Vote_Reveal.Indicator)
+			Misc.Vote_Reveal.Indicator = TimMenu.Checkbox("Vote Indicator", Misc.Vote_Reveal.Indicator == true)
 			TimMenu.NextLine()
 			
 			Misc.Vote_Reveal.TargetTeam = Misc.Vote_Reveal.TargetTeam or { MyTeam = true, enemyTeam = true }
 			local teamOptions = { "My Team", "Enemy Team" }
-			local teamTable = { Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam }
+			local teamTable = { Misc.Vote_Reveal.TargetTeam.MyTeam == true, Misc.Vote_Reveal.TargetTeam.enemyTeam == true }
 			teamTable = TimMenu.Combo("Target Teams", teamTable, teamOptions)
 			Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam = teamTable[1], teamTable[2]
 			TimMenu.NextLine()
@@ -233,7 +233,7 @@ local function DrawMenu()
 			Misc.Vote_Reveal.Output = Misc.Vote_Reveal.Output or { LocalChat = true, Toast = true, Console = true }
 			local vo = Misc.Vote_Reveal.Output
 			local channelOptions = { "Local Chat", "Public Chat", "Party", "Notification", "Console" }
-			local act = { vo.LocalChat, vo.PublicChat, vo.Party, vo.Toast, vo.Console }
+			local act = { vo.LocalChat == true, vo.PublicChat == true, vo.Party == true, vo.Toast == true, vo.Console == true }
 			act = TimMenu.Combo("Vote Output", act, channelOptions)
 			vo.LocalChat, vo.PublicChat, vo.Party, vo.Toast, vo.Console = act[1], act[2], act[3], act[4], act[5]
 			TimMenu.NextLine()
@@ -243,7 +243,7 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Class Change Alerts")
 		Misc.Class_Change_Reveal = Misc.Class_Change_Reveal or {}
-		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable == true)
 		TimMenu.NextLine()
 		
 		if Misc.Class_Change_Reveal.Enable then
@@ -253,7 +253,7 @@ local function DrawMenu()
 			Misc.Class_Change_Reveal.Output = Misc.Class_Change_Reveal.Output or { LocalChat = true, Toast = true, Console = true }
 			local co = Misc.Class_Change_Reveal.Output
 			local channelOptions = { "Local Chat", "Public Chat", "Party", "Notification", "Console" }
-			local act = { co.LocalChat, co.PublicChat, co.Party, co.Toast, co.Console }
+			local act = { co.LocalChat == true, co.PublicChat == true, co.Party == true, co.Toast == true, co.Console == true }
 			act = TimMenu.Combo("Class Change Output", act, channelOptions)
 			co.LocalChat, co.PublicChat, co.Party, co.Toast, co.Console = act[1], act[2], act[3], act[4], act[5]
 			TimMenu.NextLine()
