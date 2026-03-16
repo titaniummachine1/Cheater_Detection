@@ -32,6 +32,7 @@ local Menu = require("Cheater_Detection.Misc.Visuals.Menu")
 local hasSearchedGroup = false
 local detectorErrorSeen = {}
 local lastDrawHeartbeatTick = 0
+local lastCMTraceTick = 0 -- throttle for OnCreateMove diagnostics
 
 local function runDetector(detectorName, detectorFn, playerState)
 	assert(detectorName, "runDetector: detectorName missing")
@@ -83,7 +84,13 @@ end
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
 	-- Definitive check if we are actually connected to a game server
-	if not engine.GetServerIP() then
+	local serverIP = engine.GetServerIP()
+	local cmTick = globals.TickCount()
+	if not serverIP then
+		if (cmTick - lastCMTraceTick) >= 300 then
+			lastCMTraceTick = cmTick
+			print("[CD-CM] no serverIP, skipping")
+		end
 		hasSearchedGroup = false
 		return
 	end
@@ -93,12 +100,14 @@ local function OnCreateMove(cmd)
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
-	if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
-		assert(type(players) == "table", "OnCreateMove: entities.FindByClass did not return table")
+	if (cmTick - lastCMTraceTick) >= 132 then
+		lastCMTraceTick = cmTick
+		print(string.format("[CD-CM] tick=%d serverIP=%s players=%d", cmTick, tostring(serverIP), #players))
 	end
 
 	for i = 1, #players do
 		local ply = players[i]
+		local isLocalPlayer = (ply == entities.GetLocalPlayer())
 		local pState = PlayerCache.Get(ply)
 		if pState then
 			if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
@@ -118,10 +127,16 @@ local function OnCreateMove(cmd)
 			runDetector("WarpDT", WarpDT.ProcessPlayer, pState)
 			runDetector("FakeLag", FakeLag.ProcessPlayer, pState)
 		else
-			if G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true then
-				if ply and ply:IsValid() and ply ~= entities.GetLocalPlayer() then
-					print(string.format("[CD][WARN] PlayerCache.Get returned nil for valid ply idx=%d", ply:GetIndex()))
-				end
+			if ply and ply:IsValid() then
+				local steamID = Common.GetSteamID64(ply)
+				print(
+					string.format(
+						"[CD-CM] pState=nil idx=%d isLocal=%s steamID=%s",
+						ply:GetIndex(),
+						tostring(isLocalPlayer),
+						tostring(steamID)
+					)
+				)
 			end
 		end
 	end
