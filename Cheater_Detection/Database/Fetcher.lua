@@ -270,7 +270,17 @@ function Fetcher.Tick()
 			if fileName:match("%.cfg$") or fileName:match("%.lua$") or fileName:match("%.txt$") then
 				-- Try Lua loading
 				local success, result = pcall(function()
-					local chunk = load(content)
+					-- Try with return prepended (new format)
+					local chunk = load("return " .. content)
+					if chunk then
+						local res = chunk()
+						if res then
+							return res
+						end
+					end
+
+					-- Try raw load (old format)
+					chunk = load(content)
 					if chunk then
 						return chunk()
 					end
@@ -593,18 +603,6 @@ function Fetcher.FinishFetch()
 			count = count + 1
 		end
 		printc(0, 255, 140, 255, string.format("Total database entries: %d", count))
-	end
-
-	if Database.State.isDirty then
-		Log(LogLevel.INFO, "[FETCHER] Changes detected, saving database...")
-		Database.SaveDatabase()
-	else
-		Log(LogLevel.DEBUG, "[FETCHER] No changes detected (isDirty=false), skipping save")
-	end
-
-	local mainMenu = G and G.Menu and G.Menu.Main
-	if mainMenu then
-		mainMenu.LastFetchTimestamp = os.time()
 	end
 
 	Fetcher.State.isRunning = false

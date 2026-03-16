@@ -123,7 +123,7 @@ local function ProcessTask(task)
 	-- State 5: Finalize & Write
 	if task.state == "ENCODING_DONE" then
 		table.insert(task.encodedChunks, "}")
-		task.fullContent = "return " .. table.concat(task.encodedChunks)
+		task.fullContent = table.concat(task.encodedChunks)
 		task.state = "WRITE"
 	end
 

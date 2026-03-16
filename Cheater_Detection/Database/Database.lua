@@ -10,7 +10,6 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
-local AsyncSaver = require("Cheater_Detection.Utils.async_saver")
 
 --[[ Module Declaration ]]
 local Database = {
@@ -24,9 +23,8 @@ local Database = {
 		lastSave = 0,
 		lastLoaded = 0,
 		isInitialized = false,
-		logEntries = 0,
-		suppressFullSave = false, -- If true, SaveDatabase will only append to log even if triggers met
-		isSaving = false, -- True if an async save is in progress
+		suppressFullSave = false, -- Unused in simplified version
+		isSaving = false, -- Unused in simplified version
 	},
 }
 
@@ -72,36 +70,9 @@ local function Log(level, message, color)
 end
 
 local function SaveMetadata()
-	local path = "Lua Cheater_Detection/database.metadata.txt"
-	local meta = {
-		LastSync = Database.State.lastSave > 0 and Database.State.lastSave or Database.State.lastLoaded,
-		Version = 1,
-	}
-	local encoded = Serializer.serializeTable(meta)
-	if encoded then
-		Serializer.writeFile(path, "return " .. encoded)
-	end
 end
 
 local function LoadMetadata()
-	local path = "Lua Cheater_Detection/database.metadata.txt"
-	local content = Serializer.readFile(path)
-	if not content then
-		-- Migration: try old .lua path
-		content = Serializer.readFile("Lua Cheater_Detection/database.metadata.lua")
-	end
-
-	if content then
-		local ok, decoded = pcall(function()
-			local chunk = load(content)
-			if chunk then
-				return chunk()
-			end
-		end)
-		if ok and type(decoded) == "table" then
-			Database.State.lastSave = decoded.LastSync or 0
-		end
-	end
 end
 
 --[[ Public Module Functions ]]
@@ -188,100 +159,82 @@ function Database.GetLogPath()
 	return "Lua Cheater_Detection/database_updates.txtl" -- Fallback
 end
 
--- Efficiently appends a change to the log file instead of rewriting the entire DB
+-- Simplified: Just mark as dirty for future sync save
 function Database.AppendChange(steamID, data, isRemoval)
 	if not steamID then
 		return
 	end
 
-	local logPath = Database.GetLogPath()
-	local change = {
-		id = steamID,
-		data = not isRemoval and data or nil,
-		op = isRemoval and "DEL" or "SET",
-		ts = os.time(),
-	}
-
-	local encoded = Serializer.serializeTable(change)
-	if encoded then
-		AsyncSaver.Append(logPath, encoded, function(ok, err)
-			if ok then
-				Database.State.logEntries = Database.State.logEntries + 1
-				Database.State.isDirty = true
-			else
-				Log(LogLevel.ERROR, "[DB] Async Append failed: " .. tostring(err))
-			end
-		end)
-	else
-		Log(LogLevel.ERROR, "[DB] Failed to encode log entry for " .. steamID)
-	end
-
-	-- Optimized trigger logic: only check if we are not already saving
-	if Database.State.isSaving then
-		return
-	end
-
-	-- CONSOLIDATION LOGIC
-	local currentTime = os.time()
-	local timeSinceLastSave = currentTime - Database.State.lastSave
-	local isHardEvidence = false
-	if data and data.Flags then
-		isHardEvidence = (data.Flags & Constants.Flags.CHEATER) ~= 0
-	end
-
-	-- Trigger full save if:
-	-- 1. Cooldown (10s) passed AND (100+ entries OR Hard Evidence)
-	-- 2. OR Log is getting dangerously large (1000+ entries) and 60s passed
-	local entries = Database.State.logEntries
-	if timeSinceLastSave >= 10 and not Database.State.suppressFullSave then
-		if entries >= 100 or isHardEvidence then
-			-- Avoid saving too often if we are in a massive fetch
-			if entries > 1000 and timeSinceLastSave < 60 then
-				-- Wait for 60s for massive logs to reduce IO burst
-			else
-				Database.SaveDatabase()
-			end
-		end
-	end
+	Database.State.isDirty = true
 end
 
 function Database.SaveDatabase()
-	if not G.DataBase or Database.State.isSaving then
+	if not G.DataBase or not Database.State.isDirty then
 		return
 	end
 
 	local filepath = Database.GetFilePath()
-	Log(LogLevel.DEBUG, "[DB] Initiating async save (chunked optimization + encoding)...")
+	Log(LogLevel.DEBUG, "[DB] Synchronous save to disk...")
 
-	Database.State.isSaving = true
-
-	-- Pass the raw database; AsyncSaver will handle the cleaning loop in chunks
-	AsyncSaver.Save(filepath, G.DataBase, function(success, err)
-		Database.State.isSaving = false
-		if not success then
-			Log(LogLevel.ERROR, "[DB] Async Save failed: " .. tostring(err))
-			return
-		end
-
-		-- After successful full save, we can clear the log
-		local logPath = Database.GetLogPath()
-		if logPath then
-			local logFile = io.open(logPath, "w")
-			if logFile then
-				logFile:close()
-				Database.State.logEntries = 0
+	local cleanedData = {}
+	for k, v in pairs(G.DataBase) do
+		if type(v) == "table" and type(k) == "string" then
+			local clean = {}
+			if v.Name and v.Name ~= "Unknown" and v.Name ~= tostring(k) then
+				clean.Name = v.Name
 			end
+			if v.Reason and v.Reason ~= "Unknown Source" then
+				clean.Reason = v.Reason
+			end
+			if v.Static then
+				clean.Static = v.Static
+			end
+			if v.Flags and v.Flags ~= 0 then
+				clean.Flags = v.Flags
+			end
+			if v.Score and v.Score ~= 0 then
+				clean.Score = v.Score
+			end
+			cleanedData[k] = clean
 		end
+	end
 
-		Database.State.isDirty = false
-		Database.State.lastSave = os.time()
-		SaveMetadata()
-		Log(
-			LogLevel.SUCCESS,
-			string.format("[DB SUCCESS] Database consolidated and flushed to disk asynchronously: %s", filepath)
-		)
-	end)
+	local encoded = Serializer.serializeTable(cleanedData)
+	if encoded then
+		if Serializer.writeFile(filepath, encoded) then
+			Database.State.isDirty = false
+			Database.State.lastSave = os.time()
+			Log(LogLevel.SUCCESS, "[DB SUCCESS] Database flushed to disk: " .. filepath)
+		else
+			Log(LogLevel.ERROR, "[DB] Failed to write database: " .. filepath)
+		end
+	end
 end
+
+local function OnFireEvent(event)
+	local eventName = event:GetName()
+
+	-- Trigger save on local player death
+	if eventName == "player_death" then
+		local victimID = event:GetInt("userid")
+		local victimEntity = entities.GetByUserID(victimID)
+		local localPlayer = entities.GetLocalPlayer()
+
+		if victimEntity and localPlayer and victimEntity:GetIndex() == localPlayer:GetIndex() then
+			Log(LogLevel.DEBUG, "[DB] Local player died, triggering save...")
+			Database.SaveDatabase()
+		end
+	end
+
+	-- Trigger save on map change/round end
+	if eventName == "game_newmap" or eventName == "round_start" then
+		Log(LogLevel.DEBUG, "[DB] Game event " .. eventName .. ", triggering save...")
+		Database.SaveDatabase()
+	end
+end
+
+callbacks.Unregister("FireGameEvent", "Database_Events")
+callbacks.Register("FireGameEvent", "Database_Events", OnFireEvent)
 
 function Database.LoadDatabase(silent, force)
 	if Database.State.isInitialized and not force then
@@ -321,11 +274,24 @@ function Database.LoadDatabase(silent, force)
 		G.DataBase = {}
 	else
 		local success, decodedData = pcall(function()
-			-- Try Lua load first
-			local chunk, err = load(content)
+			-- Try Lua load with return prepended (new format)
+			local chunk, err = load("return " .. content)
 			if chunk then
-				return chunk()
+				local res = chunk()
+				if res then
+					return res
+				end
 			end
+
+			-- Try raw Lua load (old format)
+			chunk, err = load(content)
+			if chunk then
+				local res = chunk()
+				if res then
+					return res
+				end
+			end
+
 			-- Fallback to JSON for migration
 			return Common.Json.decode(content)
 		end)
@@ -337,52 +303,6 @@ function Database.LoadDatabase(silent, force)
 			G.DataBase = {}
 		else
 			G.DataBase = decodedData
-		end
-	end
-
-	-- REPLAY LOGS: Apply any changes that were saved in the log
-	local logFile = (logPath and io.open(logPath, "r")) or nil
-	if not logFile then
-		local luaLogPath = logPath:gsub("%.txtl$", ".lual")
-		logFile = io.open(luaLogPath, "r")
-		if not logFile then
-			local cfgLogPath = logPath:gsub("%.txtl$", ".cfgl")
-			logFile = io.open(cfgLogPath, "r")
-			if not logFile then
-				local oldLogPath = logPath:gsub("%.txtl$", ".jsonl")
-				logFile = io.open(oldLogPath, "r")
-			end
-		end
-	end
-
-	if logFile then
-		Log(LogLevel.INFO, "[DB] Replaying updates log...")
-		local replayCount = 0
-		for line in logFile:lines() do
-			if #line > 2 then
-				local ok, entry = pcall(function()
-					-- Try Lua load
-					local chunk = load("return " .. line)
-					if chunk then
-						return chunk()
-					end
-					-- Fallback to JSON
-					return Common.Json.decode(line)
-				end)
-				if ok and type(entry) == "table" and entry.id then
-					if entry.op == "DEL" then
-						G.DataBase[entry.id] = nil
-					elseif entry.op == "SET" and type(entry.data) == "table" then
-						G.DataBase[entry.id] = entry.data
-					end
-					replayCount = replayCount + 1
-				end
-			end
-		end
-		logFile:close()
-		Database.State.logEntries = replayCount
-		if replayCount > 0 then
-			Log(LogLevel.SUCCESS, string.format("[DB] Applied %d changes from log", replayCount))
 		end
 	end
 
@@ -562,48 +482,12 @@ function Database.ForceSave()
 end
 
 local function DatabaseAutoSaveOnUnload()
-	if not G.DataBase then
+	if not G.DataBase or not Database.State.isDirty then
 		return
 	end
 
-	-- Flush pending log (append) tasks synchronously — fast, small strings only.
-	AsyncSaver.Flush()
-
-	-- Synchronous full-database save. Minor stutter on unload is acceptable.
-	local filepath = Database.GetFilePath()
-	local cleanedData = {}
-	for k, v in pairs(G.DataBase) do
-		if type(v) == "table" and type(k) == "string" then
-			local clean = {}
-			if v.Name and v.Name ~= "Unknown" and v.Name ~= tostring(k) then
-				clean.Name = v.Name
-			end
-			if v.Reason and v.Reason ~= "Unknown Source" then
-				clean.Reason = v.Reason
-			end
-			if v.Static then
-				clean.Static = v.Static
-			end
-			if v.Flags and v.Flags ~= 0 then
-				clean.Flags = v.Flags
-			end
-			if v.Score and v.Score ~= 0 then
-				clean.Score = v.Score
-			end
-			cleanedData[k] = clean
-		end
-	end
-
-	local encoded = Serializer.serializeTable(cleanedData)
-	if encoded then
-		local f = io.open(filepath, "w")
-		if f then
-			f:write("return " .. encoded)
-			f:close()
-			Database.State.lastSave = os.time()
-			SaveMetadata()
-		end
-	end
+	-- Simple synchronous save on unload
+	Database.SaveDatabase()
 end
 
 callbacks.Unregister("Unload", "DatabaseAutoSaveOnUnload") -- Ensure no duplicates

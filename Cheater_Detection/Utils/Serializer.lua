@@ -20,31 +20,37 @@ end
 -- ---------------------------------------------------------------------- 
 -- Serialize a Lua table to a readable string. 
 -- Uses a visited table to avoid infinite loops on self‑references. 
+-- Optimized with table.concat and basic character sanitization.
 -- ---------------------------------------------------------------------- 
 local function serializeTable(tbl, level, visited) 
     level = level or 0 
     visited = visited or {} 
     local indent = string.rep("    ", level) 
-    local out = indent .. "{\n" 
+    local chunks = { "{\n" }
+    
     for k, v in pairs(tbl) do 
         local keyRepr = (type(k) == "string") and string.format('["%s"]', k) or string.format("[%s]", k) 
-        out = out .. indent .. "    " .. keyRepr .. " = " 
+        table.insert(chunks, indent .. "    " .. keyRepr .. " = ")
+        
         if type(v) == "table" then 
             if visited[v] then 
-                out = out .. "--[[cycle]]" 
+                table.insert(chunks, "--[[cycle]],\n")
             else 
                 visited[v] = true 
-                out = out .. serializeTable(v, level + 1, visited) 
+                table.insert(chunks, serializeTable(v, level + 1, visited))
+                table.insert(chunks, ",\n")
             end 
-            out = out .. ",\n" 
         elseif type(v) == "string" then 
-            out = out .. string.format('"%s",\n', v) 
+            -- Sanitize string: strip common malicious invisible characters (U+200B to U+200F, etc.)
+            local sanitized = v:gsub("[\226\128\139-\226\128\143]", "")
+            table.insert(chunks, string.format('"%s",\n', sanitized))
         else 
-            out = out .. tostring(v) .. ",\n" 
+            table.insert(chunks, tostring(v) .. ",\n")
         end 
     end 
-    out = out .. indent .. "}" 
-    return out 
+    
+    table.insert(chunks, indent .. "}") 
+    return table.concat(chunks)
 end 
  
 -- ---------------------------------------------------------------------- 
