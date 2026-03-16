@@ -29,6 +29,15 @@ end
 -- Per-player pattern tracking
 local playerStats = {} -- id -> { events = {tick1, tick2...} }
 
+-- Global hitch window: once a hitch is confirmed, suppress ALL WarpDT for this many ticks.
+-- This prevents players who arrive late to the burst tick from slipping past the threshold.
+local SERVER_HITCH_WINDOW = 66 -- 1 s at 66 tick
+local lastServerHitchTick = -SERVER_HITCH_WINDOW
+
+local function isInHitchWindow(curTick)
+	return (curTick - lastServerHitchTick) < SERVER_HITCH_WINDOW
+end
+
 -- Simultaneous-burst suppression: track which players burst each tick.
 -- Key = gameTick, Value = list of player ids that burst on that tick.
 -- Entries are cleared when they are more than 2 ticks old.
@@ -162,9 +171,19 @@ function WarpDT.ProcessPlayer(playerState)
 		-- simultaneous-burst table is always populated for the hitch guard below.
 		recordBurst(curTick, id)
 
+		-- Bail immediately if we are already inside a confirmed hitch window.
+		if isInHitchWindow(curTick) then
+			return
+		end
+
 		if not data.lastWarpTick or (curTick - data.lastWarpTick) > 24 then
 			-- If many players burst at the same tick it is a server/network hitch — skip.
 			if isServerHitch(curTick) then
+				-- Arm the global window so latecomers this burst are also suppressed.
+				lastServerHitchTick = curTick
+				-- Apply per-player cooldown so this burst doesn't re-fire every tick
+				-- while the stale delta remains in the history buffer (~33 ticks).
+				data.lastWarpTick = curTick
 				if isDebug then
 					print(string.format("[WarpDT] server hitch suppressed burst for %s (tick=%d)", id, curTick))
 				end
@@ -175,6 +194,7 @@ function WarpDT.ProcessPlayer(playerState)
 			table.insert(data.events, curTick)
 
 			local reason = "Warp/DT (Packet Burst)"
+			local oldFlags = playerState.flags
 
 			-- Scale increment based on events (Leeway: 5 per single, 15 for repeat)
 			local increment = (#data.events >= 2) and 15 or 5
@@ -195,7 +215,11 @@ function WarpDT.ProcessPlayer(playerState)
 				score = playerState.score,
 			})
 
-			EventBus.Publish("OnPlayerStateChange", playerState, reason)
+			-- Only notify when flags actually changed (new threshold crossed).
+			-- Score-only increments within the same flag level are silent.
+			if playerState.flags ~= oldFlags then
+				EventBus.Publish("OnPlayerStateChange", playerState, reason)
+			end
 
 			-- Clean up events older than 660 ticks (approx 10 seconds)
 			while #data.events > 0 and (curTick - data.events[1]) > 660 do
