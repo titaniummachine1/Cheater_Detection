@@ -4,6 +4,7 @@ local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local Common = require("Cheater_Detection.Utils.Common")
+local PlayerStateLegacy = require("Cheater_Detection.Utils.PlayerState")
 
 local WarpDT = {}
 
@@ -112,7 +113,6 @@ function WarpDT.ProcessPlayer(playerState)
 	end
 
 	-- HistoryManager uses PlayerState (legacy) storage
-	local PlayerStateLegacy = require("Cheater_Detection.Utils.PlayerState")
 	local legacyState = PlayerStateLegacy.Get(id)
 	if not legacyState or not legacyState.History then
 		return
