@@ -69,11 +69,9 @@ local function Log(level, message, color)
 	printc(color[1], color[2], color[3], color[4], prefix .. message)
 end
 
-local function SaveMetadata()
-end
+local function SaveMetadata() end
 
-local function LoadMetadata()
-end
+local function LoadMetadata() end
 
 --[[ Public Module Functions ]]
 
@@ -333,7 +331,9 @@ function Database.LoadDatabase(silent, force)
 			-- Fetcher will now update this table in-place rather than creating new entries
 			G.DataBase = decodedData
 			local count = 0
-			for _ in pairs(G.DataBase) do count = count + 1 end
+			for _ in pairs(G.DataBase) do
+				count = count + 1
+			end
 			Log(LogLevel.SUCCESS, string.format("[DB] Loaded %d entries from disk.", count))
 		end
 	end

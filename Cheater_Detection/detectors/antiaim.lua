@@ -11,20 +11,6 @@ local Common = require("Cheater_Detection.Utils.Common")
 
 local AntiAim = {}
 
--- ── Yaw Jitter Detection ──────────────────────────────────────────────────────
--- Classic jitter AA (Lmaobox / rage cheats): yaw snaps ±120-180° every tick,
--- alternating between two positions so the head hitbox is never stable.
--- Detection: find 3 consecutive ticks where the yaw delta alternates sign AND
--- both deltas exceed JITTER_SNAP_DEG, then count events. N events within the
--- window → hard CHEATER flag (same tier as invalid pitch).
-
-local yawHistories = {} -- id -> array of {yaw, tick}, capped at 3
-local jitterStates = {} -- id -> {count, windowStart}
-
-local JITTER_SNAP_DEG = 120.0 -- Min yaw delta per tick to count as a snap
-local JITTER_REQUIRED = 8 -- Consecutive jitter events before flagging
-local JITTER_WINDOW_TICKS = 40 -- ~0.6 s at 66 tick; resets window if exceeded
-
 local function isInvalidPitchValue(pitch)
 	if type(pitch) ~= "number" then
 		return false
@@ -59,13 +45,13 @@ local function tryExtractPitchYaw(angleObj)
 	return pitch, yaw
 end
 
-local function tracePhase(phase, playerState, detail)
+local function traceLog(playerState, detail)
 	local id = playerState and playerState.id or "nil"
 	if detail ~= nil then
-		print(string.format("[AntiAim] %s id=%s %s", tostring(phase), tostring(id), tostring(detail)))
+		print(string.format("[AntiAim] id=%s %s", tostring(id), tostring(detail)))
 		return
 	end
-	print(string.format("[AntiAim] %s id=%s", tostring(phase), tostring(id)))
+	print(string.format("[AntiAim] id=%s", tostring(id)))
 end
 
 local function readDetectionAngles(wrap, entity, cmd, isLocalDebug)
@@ -169,72 +155,18 @@ local function formatCandidates(candidates)
 	return table.concat(parts, " | ")
 end
 
-local function wrapAngle(d)
-	return (d + 180) % 360 - 180
-end
-
-local function checkYawJitter(id, yaw, curTick)
-	if not yawHistories[id] then
-		yawHistories[id] = {}
-	end
-
-	local hist = yawHistories[id]
-
-	-- Only record one entry per tick (CreateMove may fire multiple times)
-	if #hist == 0 or hist[#hist].tick ~= curTick then
-		hist[#hist + 1] = { yaw = yaw, tick = curTick }
-		if #hist > 3 then
-			table.remove(hist, 1)
-		end
-	end
-
-	if #hist < 3 then
-		return false
-	end
-
-	local delta1 = wrapAngle(hist[2].yaw - hist[1].yaw)
-	local delta2 = wrapAngle(hist[3].yaw - hist[2].yaw)
-
-	-- Jitter: two large swings in opposite directions back-to-back
-	local isJitterTick = math.abs(delta1) >= JITTER_SNAP_DEG
-		and math.abs(delta2) >= JITTER_SNAP_DEG
-		and (delta1 * delta2 < 0)
-
-	if not jitterStates[id] then
-		jitterStates[id] = { count = 0, windowStart = curTick }
-	end
-
-	local js = jitterStates[id]
-
-	if curTick - js.windowStart > JITTER_WINDOW_TICKS then
-		js.count = 0
-		js.windowStart = curTick
-	end
-
-	if isJitterTick then
-		js.count = js.count + 1
-		if js.count >= JITTER_REQUIRED then
-			js.count = 0
-			js.windowStart = curTick
-			return true
-		end
-	end
-
-	return false
-end
-
 function AntiAim.ProcessPlayer(playerState, cmd)
 	assert(playerState, "AntiAim.ProcessPlayer: playerState missing")
 	assert(playerState.wrap, "AntiAim.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
 	assert(playerState.id, "AntiAim.ProcessPlayer: playerState.id missing")
-	tracePhase(1, playerState, "enter")
+	traceLog(playerState, "enter")
 
 	local entity = playerState.wrap:GetRawEntity()
 	if not entity then
-		tracePhase(2, playerState, "raw entity missing")
+		traceLog(playerState, "raw entity missing")
 		return
 	end
-	tracePhase(2, playerState, "raw entity ok")
+	traceLog(playerState, "raw entity ok")
 
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	local localPlayer = entities.GetLocalPlayer()
@@ -245,32 +177,32 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	end
 
 	if not Common.IsValidPlayer(entity, false, true, skipEntity) then
-		tracePhase(3, playerState, "IsValidPlayer rejected")
+		traceLog(playerState, "IsValidPlayer rejected")
 		return
 	end
-	tracePhase(3, playerState, "IsValidPlayer ok")
+	traceLog(playerState, "IsValidPlayer ok")
 
 	local simTime = playerState.wrap:GetSimulationTime()
 	if not simTime or simTime <= 0 then
-		tracePhase(4, playerState, "invalid simTime")
+		traceLog(playerState, "invalid simTime")
 		return
 	end
-	tracePhase(4, playerState, string.format("simTime=%.6f", simTime))
+	traceLog(playerState, string.format("simTime=%.6f", simTime))
 
 	local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
 	if isCheater and not isDebug then
-		tracePhase(5, playerState, "already cheater and debug off")
+		traceLog(playerState, "already cheater and debug off")
 		return
 	end
-	tracePhase(5, playerState, "cheater gate ok")
+	traceLog(playerState, "cheater gate ok")
 
-	local pitch, yaw, angleSource, candidates = readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
+	local pitch, yaw, angleSource, candidates =
+		readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
 	if pitch == nil then
-		tracePhase(6, playerState, "pitch nil")
+		traceLog(playerState, "pitch nil")
 		return
 	end
-	tracePhase(
-		6,
+	traceLog(
 		playerState,
 		string.format(
 			"pitch=%.3f yaw=%s source=%s all=%s",
@@ -282,10 +214,10 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	)
 
 	local isInvalid = isInvalidPitchValue(pitch)
-	tracePhase(7, playerState, string.format("isInvalid=%s", tostring(isInvalid)))
+	traceLog(playerState, string.format("isInvalid=%s", tostring(isInvalid)))
 
 	if isInvalid then
-		tracePhase(8, playerState, "invalid pitch hit")
+		traceLog(playerState, "invalid pitch hit")
 		local oldFlags = playerState.flags
 		playerState.flags = playerState.flags | Constants.Flags.CHEATER
 		playerState.score = 100
@@ -303,39 +235,6 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 			Events.Publish("OnPlayerStateChange", playerState, reason)
 		end
 	end
-
-	-- ── Yaw Jitter Check ─────────────────────────────────────────────────────
-	if type(yaw) == "number" then
-		local curTick = globals.TickCount()
-		local hasJitter = checkYawJitter(playerState.id, yaw, curTick)
-		tracePhase(9, playerState, string.format("yawJitter=%s", tostring(hasJitter)))
-		if hasJitter then
-			tracePhase(10, playerState, "yaw jitter hit")
-			local oldFlags = playerState.flags
-			playerState.flags = playerState.flags | Constants.Flags.CHEATER
-			playerState.score = 100
-
-			local jitterReason = "Yaw Jitter Anti-Aim"
-
-			Database.UpsertCheater(playerState.id, {
-				name = playerState.wrap:GetName(),
-				reason = jitterReason,
-				flags = playerState.flags,
-				score = playerState.score,
-			})
-
-			if oldFlags ~= playerState.flags then
-				Events.Publish("OnPlayerStateChange", playerState, jitterReason)
-			end
-		end
-	else
-		tracePhase(9, playerState, "yaw nil")
-	end
 end
-
-Events.Subscribe("OnPlayerDisconnect", function(id)
-	yawHistories[id] = nil
-	jitterStates[id] = nil
-end)
 
 return AntiAim
