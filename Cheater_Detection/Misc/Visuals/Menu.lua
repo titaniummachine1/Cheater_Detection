@@ -451,8 +451,8 @@ local function DrawMenu()
 		TimMenu.Text("Database Entries: " .. tostring(dbCount))
 		TimMenu.NextLine()
 		
-		local lastFetch = G and G.Menu and G.Menu.Main and G.Menu.Main.LastFetchTimestamp
-		if lastFetch then
+		local lastFetch = G and G.Database and G.Database.State and G.Database.State.lastSave
+		if lastFetch and lastFetch > 0 then
 			TimMenu.Text("Last Sync: " .. os.date("%H:%M:%S", lastFetch))
 		else
 			TimMenu.Text("Last Sync: Never")

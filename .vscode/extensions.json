@@ -1,5 +1,6 @@
 {
     "recommendations": [
+        "emeraldwalk.RunOnSave",
         "sumneko.lua",
         "rc.lmaobox-lua-api-snippets",
         "gccfeli.vscode-lua",

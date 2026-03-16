@@ -1,5 +1,8 @@
 {
     "editor.formatOnSave": true,
+        "Lua.diagnostics.enable": true,
+        "Lua.diagnostics.workspaceDelay": 0,
+        "Lua.hint.enable": true,
     "[lua]": {
       "editor.defaultFormatter": "JohnnyMorganz.stylua", 
       // Or if using LuaFormat: "editor.defaultFormatter": "koihik.vscode-lua-format",

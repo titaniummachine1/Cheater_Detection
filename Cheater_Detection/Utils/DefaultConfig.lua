@@ -5,7 +5,6 @@ local Default_Config = {
 		Fetch_Database = true,
 		AutoPriority = true,
 		AutoFetch = true,
-		LastFetchTimestamp = 0,
 		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,

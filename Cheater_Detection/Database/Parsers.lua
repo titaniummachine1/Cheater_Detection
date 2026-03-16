@@ -268,7 +268,7 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 end
 
 -- Parses a single line from a raw list
--- Returns: steamID64 string or nil
+-- Returns: steamID64 string or nil (Note: can return multiple if we refactor, but for now it's used line-by-line)
 function Parsers.ParseRawLine(lineString)
 	if not lineString then
 		return nil
@@ -282,11 +282,13 @@ function Parsers.ParseRawLine(lineString)
 	end
 
 	-- Attempt to get SteamID64
+	-- If the line contains multiple IDs, we just try the first one for now,
+	-- but GetSteamID64 is robust enough to find it.
 	local steamID64 = Parsers.GetSteamID64(trimmedLine)
 	return steamID64
 end
 
--- Parses a raw text file containing one SteamID per line
+-- Parses a raw text file containing SteamIDs (one or more per line)
 -- Returns: { [steamId64] = { Name="Unknown", Reason=cause, Static=sourceID }, ... } or nil, errorMsg
 function Parsers.ParseRawIDs(contentString, cause, sourceID)
 	local entries = {}
@@ -298,16 +300,16 @@ function Parsers.ParseRawIDs(contentString, cause, sourceID)
 	local lineCount = 0
 	local addedCount = 0
 
-	-- Iterate over each line in the content string
-	for line in contentString:gmatch("[^\n\r]+") do
-		lineCount = lineCount + 1
-		local steamID64 = Parsers.ParseRawLine(line)
+	-- Iterate over each word (potential SteamID) in the content string
+	-- This handles both line-separated and space-separated lists
+	for word in contentString:gmatch("[%w%[%]:_]+") do
+		local steamID64 = Parsers.GetSteamID64(word)
 		if steamID64 then
 			if not entries[steamID64] then -- Avoid duplicates within the same file
 				entries[steamID64] = {
 					Name = "Unknown", -- Raw lists usually don't have names
 					Reason = default_reason,
-                    Static = sourceID or true
+					Static = sourceID or true,
 				}
 				addedCount = addedCount + 1
 			end

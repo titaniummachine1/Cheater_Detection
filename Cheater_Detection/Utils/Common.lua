@@ -103,11 +103,15 @@ function Common.GetSteamID(Player)
 end
 
 function Common.GetSteamID64(Player)
-	if not Player then return nil end
+	if not Player then
+		return nil
+	end
 
 	local currentTick = globals.TickCount()
 	local playerIndex = Player and Player:GetIndex()
-	if not playerIndex or playerIndex < 1 or playerIndex > 100 then return nil end
+	if not playerIndex or playerIndex < 1 or playerIndex > 100 then
+		return nil
+	end
 
 	-- Reset cache on new tick
 	if lastTick ~= currentTick then
@@ -119,16 +123,26 @@ function Common.GetSteamID64(Player)
 	local result = cachedSteamIDs[playerIndex]
 	if not result then
 		local playerInfo = client.GetPlayerInfo(playerIndex)
-		if not playerInfo then return nil end -- Fail silently, don't crash
+		if not playerInfo then
+			return nil
+		end -- Fail silently, don't crash
 
 		local steamID = playerInfo.SteamID
-		if not steamID then return nil end
+		if not steamID then
+			return nil
+		end
 
 		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
 			result = "BOT_" .. tostring(playerInfo.UserID or playerIndex)
 		else
-			local converted = steam.ToSteamID64(steamID)
-			if not converted then return nil end
+			if not steam or type(steam.ToSteamID64) ~= "function" then
+				return nil
+			end
+
+			local ok, converted = pcall(steam.ToSteamID64, steamID)
+			if not ok or not converted then
+				return nil
+			end
 			result = tostring(converted)
 		end
 	end
@@ -138,7 +152,9 @@ function Common.GetSteamID64(Player)
 end
 
 function Common.IsBot(Player)
-	if not Player then return false end
+	if not Player then
+		return false
+	end
 	local info = client.GetPlayerInfo(Player:GetIndex())
 	return info and (info.IsBot or info.IsHLTV) or false
 end
@@ -188,10 +204,14 @@ end
 ---@param skipEntity any? Optional entity to skip (e.g., the local player)
 function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 	assert(entity, "Common.IsValidPlayer: entity missing")
-	
+
 	-- Simple validation checks
-	if not entity:IsValid() then return false end
-	if not entity:IsAlive() then return false end
+	if not entity:IsValid() then
+		return false
+	end
+	if not entity:IsAlive() then
+		return false
+	end
 
 	-- Check dormancy (default is to reject dormant unless explicitly false)
 	local isDormant = entity:IsDormant()
