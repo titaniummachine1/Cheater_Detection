@@ -118,6 +118,11 @@ function PlayerCache.Get(ply)
 
 	local id = tostring(steamID)
 	if not activeSet[id] then
+		local wrap = WrappedPlayer.FromEntity(ply)
+		if not wrap then
+			return nil
+		end
+
 		local dbEntry   = G.DataBase[id]
 		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initScore = dbEntry and dbEntry.Score  or 0
@@ -129,7 +134,7 @@ function PlayerCache.Get(ply)
 
 		activeSet[id] = {
 			id              = id,
-			wrap            = WrappedPlayer.FromEntity(ply),
+			wrap            = wrap,
 			flags           = initFlags,
 			score           = initScore,
 			externalChecked = false,
@@ -165,7 +170,7 @@ end
 
 function PlayerCache.Hearthbeat()
 	for id, state in pairs(activeSet) do
-		local ply = state.wrap:GetRawEntity()
+		local ply = state.wrap and state.wrap:GetRawEntity()
 		if not ply or not ply:IsValid() then
 			activeSet[id] = nil
 			markDirty()
