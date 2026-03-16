@@ -492,6 +492,50 @@ function Common.CheckConnectionState()
 	return true
 end
 
+-- Returns true when the local connection is stable enough to trust
+-- simulation-time-based detectors (WarpDT, FakeLag).
+--
+-- Rules (per spec):
+--   • FPS below server tick rate → engine can't process every packet → unreliable
+--   • Incoming avg latency > 2 tick intervals → our view of remote sim times is too stale
+--   • Any incoming packet loss > 1%
+--   • Any outgoing choke > 0 → our end is queuing packets → timing is off
+function Common.IsConnectionStableForDetection()
+	local tickInterval = globals.TickInterval()
+	local tickRate = 1.0 / tickInterval
+
+	-- FPS gate: must be able to process at tick frequency
+	local fps = 1.0 / globals.FrameTime()
+	if fps < tickRate then
+		return false
+	end
+
+	local netChannel = clientstate.GetNetChannel()
+	if not netChannel then
+		return false
+	end
+
+	-- Latency > 2 ticks means remote sim times we read are too stale
+	local latency = netChannel:GetAvgLatency(FLOW_INCOMING)
+	if latency > 2 * tickInterval then
+		return false
+	end
+
+	-- Any packet loss means we are missing data; deltas are unreliable
+	local loss = netChannel:GetAvgLoss(FLOW_INCOMING)
+	if loss > 0.01 then
+		return false
+	end
+
+	-- Any outgoing choke means our updates are stacking up
+	local choke = netChannel:GetAvgChoke(FLOW_OUTGOING)
+	if choke > 0 then
+		return false
+	end
+
+	return true
+end
+
 --[[ Registrations and final actions ]]
 --
 local function OnUnload()

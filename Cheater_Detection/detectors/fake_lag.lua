@@ -27,8 +27,13 @@ function FakeLag.ProcessPlayer(playerState)
 	assert(playerState.wrap, "FakeLag.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
 	assert(playerState.id, "FakeLag.ProcessPlayer: playerState.id missing")
 
-	-- Check local stability to avoid false positives
-	if not Common.CheckConnectionState() or Common.IsFrameGap() then
+	-- Menu gate: cheapest check first
+	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.Choke) then
+		return
+	end
+
+	-- Connection/FPS stability gate: remote sim times are unreliable when connection is bad
+	if not Common.IsConnectionStableForDetection() then
 		return
 	end
 

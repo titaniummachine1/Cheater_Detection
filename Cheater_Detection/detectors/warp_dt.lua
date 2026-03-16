@@ -72,24 +72,20 @@ local function timeToTicks(time)
 	return math.floor(0.5 + time / globals.TickInterval())
 end
 
--- Returns true if our own connection looks unhealthy this tick.
--- Uses engine-available signals: high latency or significant packet loss.
-local function isLocalConnectionUnstable()
-	local netInfo = net and net.GetAverageLatency and net.GetAverageLatency(0)
-	if netInfo and netInfo > 0.25 then -- >250 ms average RTT = we are lagging
-		return true
-	end
-	local loss = net and net.GetAverageLoss and net.GetAverageLoss(0)
-	if loss and loss > 0.05 then -- >5% packet loss
-		return true
-	end
-	return false
-end
-
 function WarpDT.ProcessPlayer(playerState)
 	assert(playerState, "WarpDT.ProcessPlayer: playerState missing")
 	assert(playerState.wrap, "WarpDT.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
 	assert(playerState.id, "WarpDT.ProcessPlayer: playerState.id missing")
+
+	-- Menu gate: cheapest check first
+	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.Warp) then
+		return
+	end
+
+	-- Connection/FPS stability gate: remote sim times are unreliable when connection is bad
+	if not Common.IsConnectionStableForDetection() then
+		return
+	end
 
 	ensureConsumer()
 
@@ -101,11 +97,6 @@ function WarpDT.ProcessPlayer(playerState)
 	-- Skip bots. Skip local player unless debug mode is enabled for testing.
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then
-		return
-	end
-
-	-- Bail early if our own connection looks shaky — we can't trust remote sim times.
-	if isLocalConnectionUnstable() then
 		return
 	end
 

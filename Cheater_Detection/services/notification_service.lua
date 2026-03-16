@@ -54,8 +54,9 @@ local function Dispatch(channels, colorMsg, plainMsg)
 	end
 
 	-- LocalChat: only visible to the local player (uses ChatPrintf / client chat)
+	-- Use "%s" as format to prevent ChatPrintf from re-interpreting % in the message.
 	if channels.LocalChat then
-		client.ChatPrintf(colorMsg)
+		client.ChatPrintf("%s", colorMsg)
 	end
 
 	-- PublicChat: broadcasts to the entire server in public say
@@ -140,12 +141,12 @@ local function OnStateChange(playerState, reason)
 	elseif isSus then
 		local displayScore = math.min(99, math.floor(score))
 		colorMsg = string.format(
-			"\x07FFD500[SUSPICIOUS]\x01 %s is %d%% likely cheating (%s)",
+			"\x07FFD500[SUSPICIOUS]\x01 %s is %d pct likely cheating (%s)",
 			name,
 			displayScore,
 			reason or ""
 		)
-		plainMsg = string.format("[SUSPICIOUS] %s is %d%% likely cheating (%s)", name, displayScore, reason or "")
+		plainMsg = string.format("[SUSPICIOUS] %s is %d pct likely cheating (%s)", name, displayScore, reason or "")
 	end
 
 	if colorMsg == "" then

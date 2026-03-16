@@ -14,11 +14,15 @@ local function OnStateChange(playerState, reason)
 
 	-- Individual status checks
 	if (flags & Constants.Flags.VALVE) ~= 0 then
-		client.ChatPrintf(string.format("\x07FFD700[WARNING]\x01 Valve Employee: \x0700FF00%s \x01(%s)", name, id))
+		client.ChatPrintf(
+			"%s",
+			string.format("\x07FFD700[WARNING]\x01 Valve Employee: \x0700FF00%s \x01(%s)", name, id)
+		)
 	end
 
 	if (flags & Constants.Flags.CHEATER) ~= 0 then
 		client.ChatPrintf(
+			"%s",
 			string.format(
 				"\x07FF0000[DETECTION]\x01 Confirmed Cheater: \x0700FF00%s \x01(%s) \x07AAAAAA[%s]",
 				name,
@@ -29,8 +33,9 @@ local function OnStateChange(playerState, reason)
 	elseif (flags & Constants.Flags.SUSPICIOUS) ~= 0 then
 		local displayScore = math.min(99, math.floor(playerState.score))
 		client.ChatPrintf(
+			"%s",
 			string.format(
-				"\x07FFD500[SUSPICIOUS]\x01 %s is likely cheating \x07AAAAAA(%d%%) \x01[\x04%s\x01]",
+				"\x07FFD500[SUSPICIOUS]\x01 %s is likely cheating \x07AAAAAA(%d pct) \x01[\x04%s\x01]",
 				name,
 				displayScore,
 				reason
@@ -39,11 +44,11 @@ local function OnStateChange(playerState, reason)
 	end
 
 	if (flags & Constants.Flags.VAC_BANNED) ~= 0 then
-		client.ChatPrintf(string.format("\x07FFB300[BAN]\x01 %s has a VAC ban on record!", name))
+		client.ChatPrintf("%s", string.format("\x07FFB300[BAN]\x01 %s has a VAC ban on record!", name))
 	end
 
 	if (flags & Constants.Flags.COMM_BANNED) ~= 0 then
-		client.ChatPrintf(string.format("\x07FFB300[BAN]\x01 %s has a Community/Trade ban!", name))
+		client.ChatPrintf("%s", string.format("\x07FFB300[BAN]\x01 %s has a Community/Trade ban!", name))
 	end
 end
 
