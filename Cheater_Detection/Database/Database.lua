@@ -213,22 +213,35 @@ end
 
 local function OnFireEvent(event)
 	local eventName = event:GetName()
+	local localPlayer = entities.GetLocalPlayer()
 
 	-- Trigger save on local player death
 	if eventName == "player_death" then
 		local victimID = event:GetInt("userid")
 		local victimEntity = entities.GetByUserID(victimID)
-		local localPlayer = entities.GetLocalPlayer()
 
-		if victimEntity and localPlayer and victimEntity:GetIndex() == localPlayer:GetIndex() then
+		local isLocalDeath = victimEntity and localPlayer and victimEntity:GetIndex() == localPlayer:GetIndex()
+		if isLocalDeath then
 			Log(LogLevel.DEBUG, "[DB] Local player died, triggering save...")
 			Database.SaveDatabase()
 		end
 	end
 
-	-- Trigger save on map change/round end
-	if eventName == "game_newmap" or eventName == "round_start" then
-		Log(LogLevel.DEBUG, "[DB] Game event " .. eventName .. ", triggering save...")
+	-- Trigger save when local player spawns (respawn after death)
+	if eventName == "player_spawn" then
+		local spawnedID = event:GetInt("userid")
+		local spawnedEntity = entities.GetByUserID(spawnedID)
+
+		local isLocalSpawn = spawnedEntity and localPlayer and spawnedEntity:GetIndex() == localPlayer:GetIndex()
+		if isLocalSpawn then
+			Log(LogLevel.DEBUG, "[DB] Local player spawned, triggering save...")
+			Database.SaveDatabase()
+		end
+	end
+
+	-- Trigger save on map change only (not round_start — fires every round)
+	if eventName == "game_newmap" then
+		Log(LogLevel.DEBUG, "[DB] Map change, triggering save...")
 		Database.SaveDatabase()
 	end
 end
@@ -388,7 +401,7 @@ function Database.SanitizeAll()
 
 	if sanitized > 0 then
 		Log(LogLevel.SUCCESS, string.format("[DB] Aggressively sanitized %d entries (stripped URLs)", sanitized))
-		Database.SaveDatabase() -- Force flush to clean the file immediately
+		-- isDirty is already set by UpsertCheater; save will happen on next natural trigger
 	end
 end
 
