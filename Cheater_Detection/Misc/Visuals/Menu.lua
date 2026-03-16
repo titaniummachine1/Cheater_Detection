@@ -45,7 +45,9 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Player Scanner")
 		Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync)
+		TimMenu.NextLine()
 		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck)
+		TimMenu.NextLine()
 
 		local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 		local shStatus = "Ready"
@@ -61,16 +63,21 @@ local function DrawMenu()
 		TimMenu.BeginSector("Detection Automation")
 		local Advanced = G.Menu.Advanced
 		Advanced.AutoPriority = TimMenu.Checkbox("Auto Priority", Advanced.AutoPriority)
+		TimMenu.NextLine()
 		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
-
+		
 		TimMenu.BeginSector("Visual Feedback")
 		Main.Chat_Prefix = TimMenu.Checkbox("Chat Prefix", Main.Chat_Prefix)
+		TimMenu.NextLine()
 		Main.Cheater_Tags = TimMenu.Checkbox("Cheater Tags", Main.Cheater_Tags)
+		TimMenu.NextLine()
 		
 		if Main.Cheater_Tags then
 			Main.TagFilters = TimMenu.Combo("Visible Tags", Main.TagFilters or {true, true, true, true}, { "Valve", "Cheater", "VAC", "Suspicious" })
+			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
 		TimMenu.NextLine()
@@ -79,6 +86,7 @@ local function DrawMenu()
 		Misc.JoinNotifications = Misc.JoinNotifications or {}
 		local JN = Misc.JoinNotifications
 		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave on Valve Join", JN.ValveAutoDisconnect)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 
 	-- Advanced Configuration Tab
@@ -87,30 +95,39 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Evidence System")
 		Advanced.Evicence_Tolerance = TimMenu.Slider("Evidence Threshold %", Advanced.Evicence_Tolerance or 50, 0, 100, 1)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Exploit Detection")
 		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke)
+		TimMenu.NextLine()
 		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp)
+		TimMenu.NextLine()
 		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 
 		TimMenu.BeginSector("Aim Detection")
 		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Movement Detection")
 		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop)
+		TimMenu.NextLine()
 		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug)
+		TimMenu.NextLine()
 		local logLevels = { "Debug", "Info", "Warning", "Error" }
 		Advanced.LogLevel = TimMenu.Combo("Log Level", Advanced.LogLevel, logLevels)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 
 	-- Notifications Tab
@@ -119,6 +136,7 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Master Switch")
 		N.Enable = TimMenu.Checkbox("Enable System-Wide Notifications", N.Enable)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
@@ -130,11 +148,14 @@ local function DrawMenu()
 			local act = { ch.LocalChat, ch.PublicChat, ch.Party, ch.Toast, ch.Console }
 			act = TimMenu.Combo("Default channels for all detections", act, channelOptions)
 			ch.LocalChat, ch.PublicChat, ch.Party, ch.Toast, ch.Console = act[1], act[2], act[3], act[4], act[5]
+			TimMenu.NextLine()
 			
 			TimMenu.Text("Suspicion Filtering:")
 			TimMenu.NextLine()
 			N.SuspicionThreshold = TimMenu.Slider("Alert Threshold %", N.SuspicionThreshold or 30, 5, 95, 5)
+			TimMenu.NextLine()
 			N.SuspicionCooldown = TimMenu.Slider("Spam Cooldown (s)", N.SuspicionCooldown or 10, 5, 120, 5)
+			TimMenu.NextLine()
 			TimMenu.EndSector()
 			TimMenu.NextLine()
 
@@ -142,7 +163,9 @@ local function DrawMenu()
 			N.Overrides = N.Overrides or {}
 			local OV = N.Overrides
 			OV.UseCheaterOverride = TimMenu.Checkbox("Unique Channels for Confirmed Cheaters", OV.UseCheaterOverride)
+			TimMenu.NextLine()
 			OV.UseValveOverride = TimMenu.Checkbox("Unique Channels for Valve Employees", OV.UseValveOverride)
+			TimMenu.NextLine()
 			TimMenu.EndSector()
 			TimMenu.NextLine()
 
@@ -151,10 +174,11 @@ local function DrawMenu()
 			Misc.JoinNotifications = Misc.JoinNotifications or {}
 			local JN = Misc.JoinNotifications
 			JN.Enable = TimMenu.Checkbox("Notify on Player Connections", JN.Enable)
+			TimMenu.NextLine()
 			
 			if JN.Enable then
 				JN.CheckCheater = TimMenu.Checkbox("Alert for Cheaters", JN.CheckCheater)
-				TimMenu.SameLine()
+				TimMenu.NextLine()
 				JN.CheckValve = TimMenu.Checkbox("Alert for Valve", JN.CheckValve)
 				TimMenu.NextLine()
 			end
@@ -167,8 +191,10 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Vote Automation")
 		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote)
+		TimMenu.NextLine()
 		if Misc.Autovote then
 			Misc.AutovoteAutoCast = TimMenu.Checkbox("Auto Cast Votes", Misc.AutovoteAutoCast)
+			TimMenu.NextLine()
 			
 			Misc.intent = Misc.intent or {}
 			local voteTargets = { "Retaliation", "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
@@ -191,6 +217,7 @@ local function DrawMenu()
 		TimMenu.BeginSector("Vote Reveal Alerts")
 		Misc.Vote_Reveal = Misc.Vote_Reveal or {}
 		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable)
+		TimMenu.NextLine()
 		
 		if Misc.Vote_Reveal.Enable then
 			Misc.Vote_Reveal.TargetTeam = Misc.Vote_Reveal.TargetTeam or { MyTeam = true, enemyTeam = true }
@@ -214,6 +241,7 @@ local function DrawMenu()
 		TimMenu.BeginSector("Class Change Alerts")
 		Misc.Class_Change_Reveal = Misc.Class_Change_Reveal or {}
 		Misc.Class_Change_Reveal.Enable = TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable)
+		TimMenu.NextLine()
 		
 		if Misc.Class_Change_Reveal.Enable then
 			Misc.Class_Change_Reveal.EnemyOnly = TimMenu.Checkbox("Enemy Team Only", Misc.Class_Change_Reveal.EnemyOnly ~= false)
