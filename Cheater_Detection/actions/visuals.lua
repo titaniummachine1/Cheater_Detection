@@ -13,7 +13,9 @@ local fontTag = draw.CreateFont("Tahoma", 12, 800, 0x200)
 local LINE_HEIGHT = 14 -- Pixels between stacked tag lines
 
 -- Safety: Polyfills for Lmaobox types if globals are missing
-local _Vector3 = Vector3 or function(x, y, z) return {x=x, y=y, z=z} end
+local _Vector3 = Vector3 or function(x, y, z)
+	return { x = x, y = y, z = z }
+end
 
 local function WorldToScreen(pos)
 	local screenPos = client.WorldToScreen(pos)
@@ -31,17 +33,17 @@ local function buildTagList(flags, score)
 	local cfg = G.Menu and G.Menu.Main and G.Menu.Main.TagFilters
 	local tags = {}
 
-	local isValve    = (flags & Constants.Flags.VALVE) ~= 0
-	local isCheater  = (flags & Constants.Flags.CHEATER) ~= 0
-	local isVac      = (flags & Constants.Flags.VAC_BANNED) ~= 0
-	local isSus      = (flags & Constants.Flags.SUSPICIOUS) ~= 0 or (score >= Constants.Threshold.SUSPICIOUS)
+	local isValve = (flags & Constants.Flags.VALVE) ~= 0
+	local isCheater = (flags & Constants.Flags.CHEATER) ~= 0
+	local isVac = (flags & Constants.Flags.VAC_BANNED) ~= 0
+	local isSus = (flags & Constants.Flags.SUSPICIOUS) ~= 0 or (score >= Constants.Threshold.SUSPICIOUS)
 
 	-- cfg is a boolean array: [1]=Valve, [2]=Cheater, [3]=VAC, [4]=Suspicious
 	-- If nil/missing, default to showing all
-	local showValve   = not cfg or cfg[1] ~= false
+	local showValve = not cfg or cfg[1] ~= false
 	local showCheater = not cfg or cfg[2] ~= false
-	local showVac     = not cfg or cfg[3] ~= false
-	local showSus     = not cfg or cfg[4] ~= false
+	local showVac = not cfg or cfg[3] ~= false
+	local showSus = not cfg or cfg[4] ~= false
 
 	if isValve and showValve then
 		tags[#tags + 1] = { text = "VALVE EMPLOYEE", r = 255, g = 215, b = 0 }
@@ -72,22 +74,33 @@ function Visuals.DrawTags()
 	end
 
 	local tagsEnabled = G.Menu and G.Menu.Main and G.Menu.Main.Cheater_Tags
-	if tagsEnabled == false then return end
+	if tagsEnabled == false then
+		return
+	end
 
-	local players = PlayerCache.GetAll()
-	for i = 1, #players do
-		local pState = players[i]
-		local ent = pState.wrap:GetRawEntity()
+	local stateTable = PlayerCache.GetActiveTable()
+	for _, pState in pairs(stateTable) do
+		local wrap = pState.wrap
+		if not wrap then goto continue end
+		local ent = wrap:GetRawEntity()
 
 		if ent and ent:IsValid() and not ent:IsDormant() and ent:IsAlive() then
 			local flags = pState.flags
 			local score = pState.score
 
 			local tagList = buildTagList(flags, score)
-			if #tagList == 0 then goto continue end
+			if #tagList == 0 then
+				goto continue
+			end
+
+			-- DEBUG: Log when tags are being drawn for a player
+			if G.Menu.Advanced.debug and ent == pLocal then
+				-- print(string.format("[Visuals] Drawing %d tags for local player", #tagList))
+			end
 
 			-- Calculate head position for the tag stack
 			local absOrigin = ent:GetAbsOrigin()
+			-- Fallback view offset if m_vecViewOffset[0] is not found
 			local viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
 			local headPos = absOrigin + viewOffset + _Vector3(0, 0, 15)
 			local x, y = WorldToScreen(headPos)
