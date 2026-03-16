@@ -149,7 +149,7 @@ local function resetVoteState()
 end
 
 local function getMenu()
-	return G.Menu and G.Menu.Misc or nil
+	return G.Menu and G.Menu.Automation or nil
 end
 
 local function isValveEmployee(steamID)
@@ -383,7 +383,7 @@ local function sendVote(voteIdx, option)
 end
 
 local function determineVoteOptionForEntity(entity)
-	local menu = getMenu()
+	local menu = G.Menu and G.Menu.Automation or nil
 	if not menu or not menu.Autovote then
 		return nil
 	end

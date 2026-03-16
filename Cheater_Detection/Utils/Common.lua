@@ -393,11 +393,30 @@ end
 
 local lastFrameTick = 0
 local FRAME_GAP_THRESHOLD = 6
+local lastFrameTime = 0
 
 function Common.IsFrameGap()
 	local currentTick = globals.TickCount()
 	local gap = currentTick - lastFrameTick
 	lastFrameTick = currentTick
+
+	-- Performance/FPS validation: If FPS is lower than tickrate, simtime is unreliable
+	local currentTime = globals.RealTime()
+	local frameTime = currentTime - lastFrameTime
+	lastFrameTime = currentTime
+
+	if frameTime > 0 then
+		local fps = 1 / frameTime
+		local tickInterval = globals.TickInterval()
+		if tickInterval > 0 then
+			local tickRate = 1 / tickInterval
+			-- If FPS drops below tickrate, we can't trust simtime deltas
+			if fps < tickRate then
+				return true
+			end
+		end
+	end
+
 	return gap > FRAME_GAP_THRESHOLD
 end
 

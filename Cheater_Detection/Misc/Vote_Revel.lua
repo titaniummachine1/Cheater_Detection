@@ -43,6 +43,11 @@ local function getConfig()
 	return G.Menu and G.Menu.Misc and G.Menu.Misc.Vote_Reveal or nil
 end
 
+local function isEnabled()
+	local cfg = getConfig()
+	return cfg and cfg.Enable
+end
+
 local function localize(key, ...)
 	local result = client.Localize(key)
 	if not result or #result == 0 then
@@ -109,20 +114,28 @@ end
 local function startVote(team, voteidx, callerIdx, dispStr, detailsStr, targetIdx)
 	local options = { "Yes", "No" }
 
+	-- For kick votes, detailsStr is the target name. If targetIdx is valid, we prefer engine name.
+	local targetName = ""
+	if targetIdx > 0 then
+		targetName = client.GetPlayerNameByIndex(targetIdx) or detailsStr
+	elseif dispStr:lower():find("kick") then
+		targetName = detailsStr
+	end
+
 	activeVote = {
 		voteIdx = voteidx,
 		team = team,
 		caller = client.GetPlayerNameByIndex(callerIdx) or "Unknown",
 		callerIdx = callerIdx,
 		reason = localize(dispStr, detailsStr),
-		targetName = targetIdx > 0 and client.GetPlayerNameByIndex(targetIdx) or "",
+		targetName = targetName,
 		targetIdx = targetIdx,
 		options = options,
 		votes = {
 			[1] = {}, -- Yes votes
 			[2] = {}, -- No votes
 		},
-		counts = { 0, 0 },
+		counts = { 0, 0, 0, 0, 0 },
 		startTime = globals.RealTime(),
 	}
 
@@ -238,8 +251,7 @@ local function drawVoteUI()
 		return
 	end
 
-	local config = getConfig()
-	if not config or not config.Enable then
+	if not isEnabled() then
 		return
 	end
 
@@ -362,9 +374,40 @@ local function drawVoteUI()
 	-- Vote count (bottom right)
 	draw.SetFont(font_small)
 	draw.Color(90, 90, 100, alpha)
-	local countText = string.format("%d/%d", activeVote.counts[1] or 0, activeVote.counts[2] or 0)
+	local yesCount = activeVote.counts[1] or 0
+	local noCount = activeVote.counts[2] or 0
+	local countText = string.format("%d/%d", yesCount, noCount)
 	local countW = draw.GetTextSize(countText)
 	draw.Text(boxX + boxW - countW - pad, boxY + boxH - 16, countText)
+
+	-- Progress Bar
+	local barH = 4
+	local barW = boxW - pad * 2
+	local barX = boxX + pad
+	local barY = boxY + boxH - 24
+	
+	-- Bar Background
+	draw.Color(30, 30, 35, alpha)
+	draw.FilledRect(barX, barY, barX + barW, barY + barH)
+
+	-- Calculate progress
+	-- TF2 vote kick usually requires a majority of connected players on the team
+	-- We'll use the counts from the message for visual feedback
+	local totalPossible = yesCount + noCount
+	if totalPossible > 0 then
+		local yesRatio = yesCount / totalPossible
+		local yesWidth = math.floor(barW * yesRatio)
+		
+		-- YES portion (Green)
+		draw.Color(70, 180, 70, alpha)
+		draw.FilledRect(barX, barY, barX + yesWidth, barY + barH)
+		
+		-- NO portion (Red) - the rest of the bar if there are NO votes
+		if noCount > 0 then
+			draw.Color(180, 70, 70, alpha)
+			draw.FilledRect(barX + yesWidth, barY, barX + barW, barY + barH)
+		end
+	end
 end
 
 --[[ Event Handlers ]]
@@ -379,7 +422,7 @@ local function handleUserMessage(msg)
 		local dispStr = msg:ReadString(64)
 		local detailsStr = msg:ReadString(64)
 		local targetPacked = msg:ReadByte()
-		local targetIdx = math.floor(targetPacked / 2) -- bit shift right by 1
+		local targetIdx = targetPacked >> 1
 
 		startVote(team, voteidx, callerIdx, dispStr, detailsStr, targetIdx)
 	elseif id == VotePass then
