@@ -302,6 +302,9 @@ function Database.LoadDatabase(silent, force)
 			Log(LogLevel.WARNING, "[DB] Resetting database base layer.")
 			G.DataBase = {}
 		else
+			-- PRE-ALLOCATION OPTIMIZATION:
+			-- Use the loaded table as the base memory for G.DataBase
+			-- Fetcher will now update this table in-place rather than creating new entries
 			G.DataBase = decodedData
 		end
 	end

@@ -41,8 +41,9 @@ local function serializeTable(tbl, level, visited)
                 table.insert(chunks, ",\n")
             end 
         elseif type(v) == "string" then 
-            -- Sanitize string: strip common malicious invisible characters (U+200B to U+200F, etc.)
-            local sanitized = v:gsub("[\226\128\139-\226\128\143]", "")
+            -- Sanitize string: Clamping to printable ASCII/regular alphabet to prevent malicious large Unicode/fonts
+            -- Also limits length to 128 chars to prevent the "5MB name" exploit
+            local sanitized = v:gsub("[^%z\32-\126]", ""):sub(1, 128)
             table.insert(chunks, string.format('"%s",\n', sanitized))
         else 
             table.insert(chunks, tostring(v) .. ",\n")

@@ -223,7 +223,8 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 
     -- Add to entries if not already there
     if existingEntries[steamID64] then
-        -- "Stealer mode" - Update entry if it has better information
+        -- IN-PLACE UPDATE OPTIMIZATION:
+        -- Data is pre-allocated from database.txt load. Update existing entry fields.
         local existingEntry = existingEntries[steamID64]
         local updated = false
 
@@ -249,19 +250,20 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
             if type(staticSource) == "string" and (staticSource:find("http") or #staticSource > 25) then
                 staticSource = "Ext"
             end
-            existingEntry.Static = staticSource
+            if existingEntry.Static ~= staticSource then
+                existingEntry.Static = staticSource
+                updated = true
+            end
         end
 
         return false, updated, false
     else
-        -- FINAL SAFETY: Never store URLs
-        if type(staticSource) == "string" and (staticSource:find("http") or #staticSource > 25) then
-            staticSource = "Ext"
-        end
+        -- Pre-allocation: Entry doesn't exist, create it in the existing table
         existingEntries[steamID64] = {
-            Name = playerName,
-            Reason = reason,
-            Static = staticSource or false
+            Name = playerName or "Unknown",
+            Reason = reason or "Unknown Source",
+            Static = staticSource or false,
+            Timestamp = os.time()
         }
         return true, false, false
     end
