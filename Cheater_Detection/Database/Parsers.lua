@@ -208,7 +208,15 @@ function Parsers.GetPlayersFromJSON(contentString)
 		return nil, "JSON decode function is unavailable"
 	end
 
-	local success, data = pcall(Json.decode, contentString)
+	-- Strip UTF-8 BOM (EF BB BF) that some GitHub raw files include
+	local stripped = contentString:gsub("^\xEF\xBB\xBF", "")
+
+	-- Skip obvious HTML error pages (CDN/proxy failures)
+	if stripped:match("^%s*<!") or stripped:match("^%s*<html") then
+		return nil, "Response is HTML (likely CDN error page), length=" .. #stripped
+	end
+
+	local success, data = pcall(Json.decode, stripped)
 
 	if not success then
 		return nil, "JSON decode error: " .. tostring(data)
@@ -221,7 +229,7 @@ function Parsers.GetPlayersFromJSON(contentString)
 	local players = data.players
 	if not players then
 		-- Fallback for root-level arrays
-		if #data > 0 and data[1].steamid then
+		if #data > 0 and data[1] and data[1].steamid then
 			players = data
 		end
 	end

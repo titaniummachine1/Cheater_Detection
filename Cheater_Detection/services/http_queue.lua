@@ -76,36 +76,17 @@ local function HttpWorker()
 						success = false
 						data = "No HTTP Library"
 					else
-						-- Always use GetAsync (non-blocking). http.Get() is synchronous and
-						-- blocks the game thread for the full HTTP round-trip, causing hitches.
-						local done = false
-						local asyncOk, asyncErr = pcall(function()
-							http.GetAsync(item.url, function(response)
-								if response and #response > 0 then
-									data = response
-									success = true
-								else
-									success = false
-									data = "GetAsync returned empty response"
-								end
-								done = true
-							end)
-						end)
-
-						if asyncOk then
-							-- Yield each tick until the callback fires (no blocking)
-							local waitStart = globals.RealTime()
-							while not done and isAlive do
-								if globals.RealTime() - waitStart > 10 then
-									success = false
-									data = "HTTP Timeout"
-									break
-								end
-								coroutine.yield()
-							end
+						-- http.GetAsync() fires its callback with an empty body in the current
+						-- Lmaobox build (confirmed: GetAsync length=0 while Get length=24966+).
+						-- Use http.Get() synchronously inside the coroutine; the coroutine yields
+						-- between queue items so the main thread hitch is one request at a time.
+						local syncOk, syncResult = pcall(http.Get, item.url)
+						if syncOk and type(syncResult) == "string" and #syncResult > 0 then
+							data = syncResult
+							success = true
 						else
 							success = false
-							data = "GetAsync failed: " .. tostring(asyncErr)
+							data = syncOk and "http.Get() returned empty response" or tostring(syncResult)
 						end
 					end
 
