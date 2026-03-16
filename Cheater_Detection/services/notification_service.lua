@@ -16,14 +16,15 @@ local Common = require("Cheater_Detection.Utils.Common")
 
 local NotificationService = {}
 
--- Global and per-player cooldown timers
-local lastNotifyTimes = {}   -- Array of timestamps for global frequency limiting
-local lastPlayerNotify = {}  -- PlayerID -> last timestamp
+-- Global rate limiter (safety net against unexpected event bursts)
+local lastNotifyTimes = {} -- Array of timestamps for global frequency limiting
 
 -- lnxLib toast helper (safe fallback if lnxLib not loaded)
 local lnxNotifs = nil
 local function TryGetLNX()
-	if lnxNotifs then return lnxNotifs end
+	if lnxNotifs then
+		return lnxNotifs
+	end
 	local ok, lnx = pcall(require, "lnxLib")
 	if ok and lnx and lnx.UI and lnx.UI.Notifications then
 		lnxNotifs = lnx.UI.Notifications
@@ -64,7 +65,7 @@ local function Dispatch(channels, colorMsg, plainMsg)
 
 	-- Party: broadcasts to your party chat only
 	if channels.Party then
-		client.Command("tf_party_chat \"" .. plainMsg .. "\"", true)
+		client.Command('tf_party_chat "' .. plainMsg .. '"', true)
 	end
 
 	-- Toast: lnxLib corner notification pop-up
@@ -78,7 +79,9 @@ end
 
 local function OnStateChange(playerState, reason)
 	local cfg = G.Menu and G.Menu.Notifications
-	if not cfg or not cfg.Enable then return end
+	if not cfg or not cfg.Enable then
+		return
+	end
 
 	local id = playerState.id
 	local name = playerState.wrap:GetName()
@@ -96,7 +99,9 @@ local function OnStateChange(playerState, reason)
 	end
 
 	-- If we already sent 10 in the last second, drop this one
-	if #lastNotifyTimes >= 10 then return end
+	if #lastNotifyTimes >= 10 then
+		return
+	end
 
 	local isCheater = (flags & Constants.Flags.CHEATER) ~= 0
 	local isValve = (flags & Constants.Flags.VALVE) ~= 0
@@ -109,16 +114,12 @@ local function OnStateChange(playerState, reason)
 
 	if not isHard then
 		local minScore = type(cfg.SuspicionThreshold) == "number" and cfg.SuspicionThreshold or 30
-		if score < minScore then return end
-
-		-- Per-player cooldown to avoid spamming the SAME player too fast
-		if lastPlayerNotify[id] and (now - lastPlayerNotify[id] < 1) then
+		if score < minScore then
 			return
 		end
 	end
 
 	table.insert(lastNotifyTimes, now)
-	lastPlayerNotify[id] = now
 
 	-- Build messages
 	local colorMsg = ""
@@ -138,14 +139,24 @@ local function OnStateChange(playerState, reason)
 		plainMsg = string.format("[BAN] %s has a Community/Trade ban!", name)
 	elseif isSus then
 		local displayScore = math.min(99, math.floor(score))
-		colorMsg = string.format("\x07FFD500[SUSPICIOUS]\x01 %s is %d%% likely cheating (%s)", name, displayScore, reason or "")
+		colorMsg = string.format(
+			"\x07FFD500[SUSPICIOUS]\x01 %s is %d%% likely cheating (%s)",
+			name,
+			displayScore,
+			reason or ""
+		)
 		plainMsg = string.format("[SUSPICIOUS] %s is %d%% likely cheating (%s)", name, displayScore, reason or "")
 	end
 
-	if colorMsg == "" then return end
+	if colorMsg == "" then
+		return
+	end
 
 	-- Cleanup self in debug mode to ensure fresh tests
-	if (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug) and id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) then
+	if
+		(G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug)
+		and id == tostring(Common.GetSteamID64(entities.GetLocalPlayer()))
+	then
 		local Database = require("Cheater_Detection.Database.Database")
 		Database.RemoveCheater(id)
 	end
@@ -157,10 +168,5 @@ end
 function NotificationService.Init()
 	EventBus.Subscribe("OnPlayerStateChange", OnStateChange)
 end
-
--- Cleanup cooldown on disconnect
-EventBus.Subscribe("OnPlayerDisconnect", function(id)
-	lastPlayerNotify[id] = nil
-end)
 
 return NotificationService

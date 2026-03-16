@@ -61,6 +61,7 @@ function Bhop.ProcessPlayer(playerState)
 						increment = 5
 					end
 
+					local oldFlags = playerState.flags
 					playerState.score = math.min(99, playerState.score + increment)
 
 					if playerState.score >= Constants.Threshold.SUSPICIOUS then
@@ -81,7 +82,9 @@ function Bhop.ProcessPlayer(playerState)
 						score = playerState.score,
 					})
 
-					EventBus.Publish("OnPlayerStateChange", playerState, reason)
+					if playerState.flags ~= oldFlags then
+						EventBus.Publish("OnPlayerStateChange", playerState, reason)
+					end
 				end
 			else
 				-- Reset if they stayed on ground too long (not a bhop chain)

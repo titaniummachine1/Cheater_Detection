@@ -100,6 +100,7 @@ function FakeLag.ProcessPlayer(playerState)
 				end
 
 				data.lastFlagTick = curTick
+				local oldFlags = playerState.flags
 				-- Lower score increment for FakeLag as requested
 				playerState.score = math.min(99, playerState.score + 5)
 
@@ -119,7 +120,9 @@ function FakeLag.ProcessPlayer(playerState)
 					score = playerState.score,
 				})
 
-				EventBus.Publish("OnPlayerStateChange", playerState, reason)
+				if playerState.flags ~= oldFlags then
+					EventBus.Publish("OnPlayerStateChange", playerState, reason)
+				end
 
 				-- Clear events to wait for next sequence
 				data.events = {}

@@ -18,10 +18,24 @@ local function OnStateChange(playerState, reason)
 	end
 
 	if (flags & Constants.Flags.CHEATER) ~= 0 then
-		client.ChatPrintf(string.format("\x07FF0000[DETECTION]\x01 Confirmed Cheater: \x0700FF00%s \x01(%s) \x07AAAAAA[%s]", name, id, reason))
+		client.ChatPrintf(
+			string.format(
+				"\x07FF0000[DETECTION]\x01 Confirmed Cheater: \x0700FF00%s \x01(%s) \x07AAAAAA[%s]",
+				name,
+				id,
+				reason
+			)
+		)
 	elseif (flags & Constants.Flags.SUSPICIOUS) ~= 0 then
 		local displayScore = math.min(99, math.floor(playerState.score))
-		client.ChatPrintf(string.format("\x07FFD500[SUSPICIOUS]\x01 %s is likely cheating \x07AAAAAA(%d%%) \x01[\x04%s\x01]", name, displayScore, reason))
+		client.ChatPrintf(
+			string.format(
+				"\x07FFD500[SUSPICIOUS]\x01 %s is likely cheating \x07AAAAAA(%d%%) \x01[\x04%s\x01]",
+				name,
+				displayScore,
+				reason
+			)
+		)
 	end
 
 	if (flags & Constants.Flags.VAC_BANNED) ~= 0 then
