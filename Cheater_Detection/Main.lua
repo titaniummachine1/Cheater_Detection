@@ -112,7 +112,8 @@ local function OnCreateMove(cmd)
 
 	for i = 1, #players do
 		local ply = players[i]
-		if ply == entities.GetLocalPlayer() then
+		local isLocalPlayer = (ply == entities.GetLocalPlayer())
+		if isLocalPlayer and not isDebugEnabled() then
 			goto continue
 		end
 
@@ -139,13 +140,7 @@ local function OnCreateMove(cmd)
 				if (cmTick - lastPStateNilLogTick) >= 132 then
 					lastPStateNilLogTick = cmTick
 					local steamID = Common.GetSteamID64(ply)
-					print(
-						string.format(
-							"[CD-CM] pState=nil idx=%d steamID=%s",
-							ply:GetIndex(),
-							tostring(steamID)
-						)
-					)
+					print(string.format("[CD-CM] pState=nil idx=%d steamID=%s", ply:GetIndex(), tostring(steamID)))
 				end
 			end
 		end

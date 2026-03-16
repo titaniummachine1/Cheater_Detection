@@ -385,12 +385,9 @@ end
 ---@return EulerAngles The player's eye angles
 function WrappedPlayer:GetEyeAngles()
 	return cacheValue(self, "eyeAngles", function()
-		-- Local player does not always expose tfnonlocaldata eye angles.
+		-- Local player: always use engine view angles, never read netprop (causes DataTable warnings).
 		if self._rawEntity:GetIndex() == client.GetLocalPlayerIndex() then
-			local viewAngles = engine.GetViewAngles()
-			if viewAngles then
-				return viewAngles
-			end
+			return engine.GetViewAngles()
 		end
 
 		local ang = self._rawEntity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
