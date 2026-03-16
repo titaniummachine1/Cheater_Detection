@@ -24,9 +24,8 @@ local Common = require("Cheater_Detection.Utils.Common")
 
 function FakeLag.ProcessPlayer(playerState)
 	assert(playerState, "FakeLag.ProcessPlayer: playerState missing")
-	if not playerState.wrap then
-		return
-	end
+	assert(playerState.wrap, "FakeLag.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
+	assert(playerState.id, "FakeLag.ProcessPlayer: playerState.id missing")
 
 	-- Check local stability to avoid false positives
 	if not Common.CheckConnectionState() or Common.IsFrameGap() then

@@ -14,82 +14,89 @@ local Bhop = {}
 local playerData = {}
 
 function Bhop.ProcessPlayer(playerState)
-    assert(playerState, "Bhop.ProcessPlayer: playerState missing")
-    if not playerState.wrap then return end
-    
-    local entity = playerState.wrap:GetRawEntity()
-    if not entity or not entity:IsValid() or not entity:IsAlive() then return end
+	assert(playerState, "Bhop.ProcessPlayer: playerState missing")
+	assert(playerState.wrap, "Bhop.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
+	assert(playerState.id, "Bhop.ProcessPlayer: playerState.id missing")
 
-    -- Skip local player unless debug mode is enabled for testing.
-    local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-    if entity == entities.GetLocalPlayer() and not isDebug then return end
+	local entity = playerState.wrap:GetRawEntity()
+	if not entity or not entity:IsValid() or not entity:IsAlive() then
+		return
+	end
 
-    local id = playerState.id
-    if not playerData[id] then
-        playerData[id] = {
-            wasOnGround = false,
-            groundTicks = 0,
-            consecutivePerfects = 0,
-        }
-    end
-    local data = playerData[id]
+	-- Skip local player unless debug mode is enabled for testing.
+	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	if entity == entities.GetLocalPlayer() and not isDebug then
+		return
+	end
 
-    local flags = entity:GetPropInt("m_fFlags")
-    local onGround = (flags & 1) ~= 0 -- FL_ONGROUND
+	local id = playerState.id
+	if not playerData[id] then
+		playerData[id] = {
+			wasOnGround = false,
+			groundTicks = 0,
+			consecutivePerfects = 0,
+		}
+	end
+	local data = playerData[id]
 
-    if onGround then
-        data.groundTicks = data.groundTicks + 1
-        data.wasOnGround = true
-    else
-        -- Transitioned from ground to air (The moment of the jump)
-        if data.wasOnGround then
-            -- Check if it was a "perfect" jump window
-            -- Note: Constants.BHOP_MAX_GROUND_TICKS is usually 1
-            if data.groundTicks > 0 and data.groundTicks <= Constants.BHOP_MAX_GROUND_TICKS then
-                data.consecutivePerfects = data.consecutivePerfects + 1
-                
-                -- Threshold for adding suspicion
-                if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
-                    local increment = 2
-                    -- Scale increment for extreme consistency
-                    if data.consecutivePerfects > 10 then increment = 5 end
-                    
-                    playerState.score = math.min(99, playerState.score + increment)
-                    
-                    if playerState.score >= Constants.Threshold.SUSPICIOUS then
-                        playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-                    end
+	local flags = entity:GetPropInt("m_fFlags")
+	local onGround = (flags & 1) ~= 0 -- FL_ONGROUND
 
-                    if playerState.score >= Constants.Threshold.HIGH_RISK then
-                        playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-                    end
+	if onGround then
+		data.groundTicks = data.groundTicks + 1
+		data.wasOnGround = true
+	else
+		-- Transitioned from ground to air (The moment of the jump)
+		if data.wasOnGround then
+			-- Check if it was a "perfect" jump window
+			-- Note: Constants.BHOP_MAX_GROUND_TICKS is usually 1
+			if data.groundTicks > 0 and data.groundTicks <= Constants.BHOP_MAX_GROUND_TICKS then
+				data.consecutivePerfects = data.consecutivePerfects + 1
 
-                    local reason = string.format("Bhop Script (%d perfect jumps)", data.consecutivePerfects)
-                    
-                    -- Persist
-                    Database.UpsertCheater(id, {
-                        name = playerState.wrap:GetName(),
-                        reason = reason,
-                        flags = playerState.flags,
-                        score = playerState.score
-                    })
-                    
-                    EventBus.Publish("OnPlayerStateChange", playerState, reason)
-                end
-            else
-                -- Reset if they stayed on ground too long (not a bhop chain)
-                data.consecutivePerfects = 0
-            end
-            
-            data.wasOnGround = false
-            data.groundTicks = 0
-        end
-    end
+				-- Threshold for adding suspicion
+				if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
+					local increment = 2
+					-- Scale increment for extreme consistency
+					if data.consecutivePerfects > 10 then
+						increment = 5
+					end
+
+					playerState.score = math.min(99, playerState.score + increment)
+
+					if playerState.score >= Constants.Threshold.SUSPICIOUS then
+						playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+					end
+
+					if playerState.score >= Constants.Threshold.HIGH_RISK then
+						playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
+					end
+
+					local reason = string.format("Bhop Script (%d perfect jumps)", data.consecutivePerfects)
+
+					-- Persist
+					Database.UpsertCheater(id, {
+						name = playerState.wrap:GetName(),
+						reason = reason,
+						flags = playerState.flags,
+						score = playerState.score,
+					})
+
+					EventBus.Publish("OnPlayerStateChange", playerState, reason)
+				end
+			else
+				-- Reset if they stayed on ground too long (not a bhop chain)
+				data.consecutivePerfects = 0
+			end
+
+			data.wasOnGround = false
+			data.groundTicks = 0
+		end
+	end
 end
 
 -- Cleanup
 EventBus.Subscribe("OnPlayerDisconnect", function(id)
-    playerData[id] = nil
+	playerData[id] = nil
 end)
 
 return Bhop

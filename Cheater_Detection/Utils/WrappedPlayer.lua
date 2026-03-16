@@ -7,7 +7,9 @@ local PlayerState = require("Cheater_Detection.Utils.PlayerState")
 local G = require("Cheater_Detection.Utils.Globals")
 
 -- Safety: Polyfill Vector3 if missing (Lmaobox usually provides it globally)
-local _Vector3 = Vector3 or function(x, y, z) return {x=x, y=y, z=z} end
+local _Vector3 = Vector3 or function(x, y, z)
+	return { x = x, y = y, z = z }
+end
 
 ---@class WrappedPlayer
 ---@field _rawEntity Entity Raw entity object
@@ -156,6 +158,7 @@ function WrappedPlayer:GetBasePlayer()
 end
 
 function WrappedPlayer:GetIndex()
+	assert(self._rawEntity, "WrappedPlayer:GetIndex: _rawEntity is nil")
 	return self._rawEntity:GetIndex()
 end
 
@@ -164,6 +167,9 @@ function WrappedPlayer:IsValid()
 end
 
 function WrappedPlayer:GetSimulationTime()
+	if not self._rawEntity or not self._rawEntity:IsValid() then
+		return nil
+	end
 	return self._rawEntity:GetPropFloat("m_flSimulationTime")
 end
 
@@ -184,34 +190,42 @@ function WrappedPlayer:GetHitboxPos(hitboxIndex)
 end
 
 function WrappedPlayer:GetPropInt(...)
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetPropInt: invalid entity")
 	return self._rawEntity:GetPropInt(...)
 end
 
 function WrappedPlayer:GetPropFloat(...)
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetPropFloat: invalid entity")
 	return self._rawEntity:GetPropFloat(...)
 end
 
 function WrappedPlayer:GetPropVector(...)
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetPropVector: invalid entity")
 	return self._rawEntity:GetPropVector(...)
 end
 
 function WrappedPlayer:GetPropBool(...)
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetPropBool: invalid entity")
 	return self._rawEntity:GetPropBool(...)
 end
 
 function WrappedPlayer:GetPropEntity(...)
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetPropEntity: invalid entity")
 	return self._rawEntity:GetPropEntity(...)
 end
 
 function WrappedPlayer:GetClass()
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetClass: invalid entity")
 	return self._rawEntity:GetClass()
 end
 
 function WrappedPlayer:GetMins()
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetMins: invalid entity")
 	return self._rawEntity:GetMins()
 end
 
 function WrappedPlayer:GetMaxs()
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:GetMaxs: invalid entity")
 	return self._rawEntity:GetMaxs()
 end
 
@@ -319,6 +333,7 @@ end
 --- Check if player is on the ground via m_fFlags
 ---@return boolean Whether the player is on the ground
 function WrappedPlayer:IsOnGround()
+	assert(self._rawEntity and self._rawEntity:IsValid(), "WrappedPlayer:IsOnGround: invalid entity")
 	local flags = self._rawEntity:GetPropInt("m_fFlags")
 	return (flags & FL_ONGROUND) ~= 0
 end
@@ -370,10 +385,24 @@ end
 ---@return EulerAngles The player's eye angles
 function WrappedPlayer:GetEyeAngles()
 	return cacheValue(self, "eyeAngles", function()
+		-- Local player does not always expose tfnonlocaldata eye angles.
+		if self._rawEntity:GetIndex() == client.GetLocalPlayerIndex() then
+			local viewAngles = engine.GetViewAngles()
+			if viewAngles then
+				return viewAngles
+			end
+		end
+
 		local ang = self._rawEntity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
 		if ang then
 			return EulerAngles(ang.x, ang.y, ang.z)
 		end
+
+		ang = self._rawEntity:GetPropVector("m_angEyeAngles[0]")
+		if ang then
+			return EulerAngles(ang.x, ang.y, ang.z)
+		end
+
 		return nil
 	end)
 end

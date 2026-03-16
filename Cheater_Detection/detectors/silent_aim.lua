@@ -15,12 +15,12 @@ local Database = require("Cheater_Detection.Database.Database")
 local SilentAim = {}
 
 -- [[ Internal Storage ]]
-local angleHistory = {}      -- string id -> array of {pitch, yaw, tick}
+local angleHistory = {} -- string id -> array of {pitch, yaw, tick}
 local verificationQueue = {} -- string id -> tickToVerify
 
 local HISTORY_MAX = 4
-local MIN_DEVIATION = 10.0   -- Degrees of error spike required to flag
-local WEIGHT_EXPONENT = 1.3  -- (error^weight) calculation
+local MIN_DEVIATION = 10.0 -- Degrees of error spike required to flag
+local WEIGHT_EXPONENT = 1.3 -- (error^weight) calculation
 
 local function lerpAngle(a, b, t)
 	local diff = (b - a + 180) % 360 - 180
@@ -34,17 +34,25 @@ local function onDamageEvent(event)
 	local eventName = event:GetName()
 	if eventName == "player_hurt" or eventName == "player_death" then
 		local attackerUID = event:GetInt("attacker")
-		if not attackerUID then return end
+		if not attackerUID then
+			return
+		end
 
 		local ply = entities.GetByUserID(attackerUID)
-		if not ply then return end
-		
+		if not ply then
+			return
+		end
+
 		local localPlayer = entities.GetLocalPlayer()
 		local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-		if not localPlayer or (localPlayer:GetIndex() == ply:GetIndex() and not isDebug) then return end
-		
+		if not localPlayer or (localPlayer:GetIndex() == ply:GetIndex() and not isDebug) then
+			return
+		end
+
 		local steamID64 = Common.GetSteamID64(ply)
-		if not steamID64 then return end
+		if not steamID64 then
+			return
+		end
 
 		-- Queue verification for the exact next tick
 		verificationQueue[steamID64] = globals.TickCount() + 1
@@ -54,12 +62,20 @@ end
 EventManager.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
 
 function SilentAim.ProcessPlayer(playerState)
+	assert(playerState, "SilentAim.ProcessPlayer: playerState missing")
+	assert(playerState.wrap, "SilentAim.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
+	assert(playerState.id, "SilentAim.ProcessPlayer: playerState.id missing")
+
 	local id = playerState.id
 	local ply = playerState.wrap:GetRawEntity()
-	if not ply or ply:IsDormant() then return end
+	if not ply or ply:IsDormant() then
+		return
+	end
 
 	local angles = playerState.wrap:GetEyeAngles()
-	if not angles then return end
+	if not angles then
+		return
+	end
 
 	local cp, cy = angles.pitch, angles.yaw
 	local curTick = globals.TickCount()
@@ -78,35 +94,35 @@ function SilentAim.ProcessPlayer(playerState)
 			local oldest = hist[1]
 			local newest = { pitch = cp, yaw = cy, tick = curTick }
 			local tickSpan = newest.tick - oldest.tick
-			
+
 			if tickSpan > 0 then
 				local maxDeviation = 0
-				
+
 				-- Check the intermediate ticks to find the flick severity
 				for i = 2, #hist do
 					local mid = hist[i]
 					local fraction = (mid.tick - oldest.tick) / tickSpan
-					
+
 					-- Prevent domain errors
 					if fraction > 0 and fraction < 1 then
 						local expectedP = oldest.pitch + (newest.pitch - oldest.pitch) * fraction
 						local expectedY = lerpAngle(oldest.yaw, newest.yaw, fraction)
-						
+
 						local errP = math.abs(mid.pitch - expectedP)
 						local errY = math.abs((mid.yaw - expectedY + 180) % 360 - 180)
-						local totalError = math.sqrt(errP^2 + errY^2)
-						
+						local totalError = math.sqrt(errP ^ 2 + errY ^ 2)
+
 						if totalError > maxDeviation then
 							maxDeviation = totalError
 						end
 					end
 				end
-				
+
 				-- 2. Evaluate Snap-Back logic
 				if maxDeviation > MIN_DEVIATION then
 					local scoreGain = maxDeviation ^ WEIGHT_EXPONENT
 					playerState.score = playerState.score + scoreGain
-					
+
 					local oldFlags = playerState.flags
 					local reason = string.format("SilentAim Spike (%.1f°)", maxDeviation)
 
