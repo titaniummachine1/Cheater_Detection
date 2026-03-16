@@ -3,11 +3,15 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local EventBus = require("Cheater_Detection.core.event_bus")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local Common = require("Cheater_Detection.Utils.Common")
 
 local WarpDT = {}
 
 local DETECTION_NAME = "warp_dt"
 local HISTORY_SIZE = 33
+
+-- If this many players burst on the same tick it is a server/network hitch, not cheating.
+local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
 
 -- Ensure history is tracking simulation time
 local registeredConsumer = false
@@ -25,21 +29,58 @@ end
 -- Per-player pattern tracking
 local playerStats = {} -- id -> { events = {tick1, tick2...} }
 
+-- Simultaneous-burst suppression: track which players burst each tick.
+-- Key = gameTick, Value = list of player ids that burst on that tick.
+-- Entries are cleared when they are more than 2 ticks old.
+local burstThisTick = {} -- [tick] -> { id1, id2, ... }
+local lastBurstCleanTick = 0
+
+local function recordBurst(tick, id)
+	if not burstThisTick[tick] then
+		burstThisTick[tick] = {}
+	end
+	burstThisTick[tick][#burstThisTick[tick] + 1] = id
+end
+
+local function isServerHitch(tick)
+	local list = burstThisTick[tick]
+	return list and #list >= SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD
+end
+
+local function cleanBurstTable(curTick)
+	if (curTick - lastBurstCleanTick) < 4 then
+		return
+	end
+	lastBurstCleanTick = curTick
+	for tick in pairs(burstThisTick) do
+		if (curTick - tick) > 3 then
+			burstThisTick[tick] = nil
+		end
+	end
+end
+
 local function timeToTicks(time)
 	return math.floor(0.5 + time / globals.TickInterval())
 end
 
-local Common = require("Cheater_Detection.Utils.Common")
+-- Returns true if our own connection looks unhealthy this tick.
+-- Uses engine-available signals: high latency or significant packet loss.
+local function isLocalConnectionUnstable()
+	local netInfo = net and net.GetAverageLatency and net.GetAverageLatency(0)
+	if netInfo and netInfo > 0.25 then -- >250 ms average RTT = we are lagging
+		return true
+	end
+	local loss = net and net.GetAverageLoss and net.GetAverageLoss(0)
+	if loss and loss > 0.05 then -- >5% packet loss
+		return true
+	end
+	return false
+end
 
 function WarpDT.ProcessPlayer(playerState)
 	assert(playerState, "WarpDT.ProcessPlayer: playerState missing")
 	assert(playerState.wrap, "WarpDT.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
 	assert(playerState.id, "WarpDT.ProcessPlayer: playerState.id missing")
-
-	-- Check local stability to avoid false positives
-	if not Common.CheckConnectionState() or Common.IsFrameGap() then
-		return
-	end
 
 	ensureConsumer()
 
@@ -51,6 +92,11 @@ function WarpDT.ProcessPlayer(playerState)
 	-- Skip bots. Skip local player unless debug mode is enabled for testing.
 	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then
+		return
+	end
+
+	-- Bail early if our own connection looks shaky — we can't trust remote sim times.
+	if isLocalConnectionUnstable() then
 		return
 	end
 
@@ -109,12 +155,22 @@ function WarpDT.ProcessPlayer(playerState)
 	end
 
 	local curTick = globals.TickCount()
+	cleanBurstTable(curTick)
 
-	-- STATE MACHINE: Simple Burst Detect
 	if burstAmount > 0 then
-		-- Warp is more "one-time" but we still want some consistency or high score
-		-- We detect a Burst and then wait for a cooldown (24 ticks) before allowing another detection for this player
+		-- Register this player as bursting this tick BEFORE the cooldown check so the
+		-- simultaneous-burst table is always populated for the hitch guard below.
+		recordBurst(curTick, id)
+
 		if not data.lastWarpTick or (curTick - data.lastWarpTick) > 24 then
+			-- If many players burst at the same tick it is a server/network hitch — skip.
+			if isServerHitch(curTick) then
+				if isDebug then
+					print(string.format("[WarpDT] server hitch suppressed burst for %s (tick=%d)", id, curTick))
+				end
+				return
+			end
+
 			data.lastWarpTick = curTick
 			table.insert(data.events, curTick)
 
