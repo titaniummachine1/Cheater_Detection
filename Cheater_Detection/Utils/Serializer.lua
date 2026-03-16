@@ -17,41 +17,49 @@ local function deepCopy(orig)
     return copy 
 end 
  
--- ---------------------------------------------------------------------- 
--- Serialize a Lua table to a readable string. 
--- Uses a visited table to avoid infinite loops on self‑references. 
--- Optimized with table.concat and basic character sanitization.
--- ---------------------------------------------------------------------- 
-local function serializeTable(tbl, level, visited) 
-    level = level or 0 
-    visited = visited or {} 
-    local indent = string.rep("    ", level) 
-    local chunks = { "{\n" }
-    
-    for k, v in pairs(tbl) do 
-        local keyRepr = (type(k) == "string") and string.format('["%s"]', k) or string.format("[%s]", k) 
-        table.insert(chunks, indent .. "    " .. keyRepr .. " = ")
+-- ----------------------------------------------------------------------
+-- Serialize a Lua table to a readable string.
+-- Uses a visited table to avoid infinite loops on self‑references.
+-- Optimized to prevent trailing commas and correctly escape strings.
+-- ----------------------------------------------------------------------
+local function serializeTable(tbl, level, visited)
+    level = level or 0
+    visited = visited or {}
+    local indent = string.rep("    ", level)
+    local innerIndent = indent .. "    "
+    local entries = {}
+
+    for k, v in pairs(tbl) do
+        local entry_chunks = {}
         
-        if type(v) == "table" then 
-            if visited[v] then 
-                table.insert(chunks, "--[[cycle]],\n")
-            else 
-                visited[v] = true 
-                table.insert(chunks, serializeTable(v, level + 1, visited))
-                table.insert(chunks, ",\n")
-            end 
-        elseif type(v) == "string" then 
-            -- Sanitize string: Clamping to printable ASCII/regular alphabet to prevent malicious large Unicode/fonts
-            -- Also limits length to 128 chars to prevent the "5MB name" exploit
-            local sanitized = v:gsub("[^%z\32-\126]", ""):sub(1, 128)
-            table.insert(chunks, string.format('"%s",\n', sanitized))
-        else 
-            table.insert(chunks, tostring(v) .. ",\n")
-        end 
-    end 
-    
-    table.insert(chunks, indent .. "}") 
-    return table.concat(chunks)
+        -- Key representation
+        local keyRepr = (type(k) == "string") and string.format('["%s"]', k) or string.format('[%s]', k)
+        table.insert(entry_chunks, innerIndent .. keyRepr .. " = ")
+
+        -- Value representation
+        if type(v) == "table" then
+            if visited[v] then
+                table.insert(entry_chunks, '"--[[cycle]]"')
+            else
+                visited[v] = true
+                table.insert(entry_chunks, serializeTable(v, level + 1, visited))
+            end
+        elseif type(v) == "string" then
+            -- Sanitize string and escape characters
+            local sanitized = v:gsub('[^%z\32-\126]', ''):sub(1, 128)
+            sanitized = sanitized:gsub('\\', '\\\\'):gsub('"', '\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
+            table.insert(entry_chunks, string.format('"%s"', sanitized))
+        else
+            table.insert(entry_chunks, tostring(v))
+        end
+        table.insert(entries, table.concat(entry_chunks))
+    end
+
+    if #entries == 0 then
+        return "{}"
+    end
+
+    return "{\n" .. table.concat(entries, ",\n") .. "\n" .. indent .. "}"
 end 
  
 -- ---------------------------------------------------------------------- 

@@ -276,24 +276,37 @@ function Database.LoadDatabase(silent, force)
 		local success, decodedData = pcall(function()
 			-- Try Lua load with return prepended (new format)
 			local chunk, err = load("return " .. content)
-			if chunk then
-				local res = chunk()
-				if res then
-					return res
-				end
+			if not chunk then
+				error("Lua parse error (prepended return): " .. tostring(err))
+			end
+			local success, result = pcall(chunk)
+			if not success then
+				error("Lua execution error (prepended return): " .. tostring(result))
+			end
+			if type(result) == "table" then
+				return result
 			end
 
 			-- Try raw Lua load (old format)
 			chunk, err = load(content)
-			if chunk then
-				local res = chunk()
-				if res then
-					return res
-				end
+			if not chunk then
+				error("Lua parse error (raw): " .. tostring(err))
+			end
+			success, result = pcall(chunk)
+			if not success then
+				error("Lua execution error (raw): " .. tostring(result))
+			end
+			if type(result) == "table" then
+				return result
 			end
 
 			-- Fallback to JSON for migration
-			return Common.Json.decode(content)
+			local decodedJson = Common.Json.decode(content)
+			if type(decodedJson) == "table" then
+				return decodedJson
+			end
+
+			error("Failed to decode content in any format.")
 		end)
 		content = nil
 
