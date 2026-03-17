@@ -227,7 +227,7 @@ local function CheckDuckSpeed(player, entity)
            
             if m_vecViewOffset == 45 then
                 tick_count = tick_count + 1
-                if tick_count >= 66 then
+                if tick_count >= math.floor(1 / globals.TickInterval() + 0.5) then
                     StrikePlayer("Duck Speed", entity)
                     tick_count = 0
                     return true
