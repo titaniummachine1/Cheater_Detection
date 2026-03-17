@@ -2,7 +2,7 @@
     Cheater Detection for Lmaobox
     Author: titaniummachine1 (https://github.com/titaniummachine1)
     Credits:
-    LNX (github.com/lnx00) for base scriptd
+    LNX (github.com/lnx00) for base script
     Muqa for visuals and design assistance
     Alchemist for testing and party callout
 ]]
@@ -18,7 +18,6 @@ assert(lnxLib.GetVersion() >= 0.981, "lnxLib version is too old, please update i
 local TF2 = lnxLib.TF2
 local Math, Conversion = lnxLib.Utils.Math, lnxLib.Utils.Conversion
 local WPlayer, WPR = TF2.WPlayer, TF2.WPlayerResource
-local Helpers = lnxLib.TF2.Helpers
 local Fonts = lnxLib.UI.Fonts
 
 ---@type boolean, ImMenu
@@ -30,7 +29,7 @@ local players = entities.FindByClass("CTFPlayer")
 
 local pLocal = entities.GetLocalPlayer()
 local WLocal = pLocal
-local latin, latout = 0, 0
+local latencyIn, latencyOut = 0, 0
 
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
 
@@ -46,7 +45,7 @@ local Menu = {
     BhopTimes = 5,
     debug = false,
     tags = true,
-    partyCallaut = true
+    partyCallout = true
 }
 
 
@@ -111,11 +110,15 @@ local status, loadedMenu = pcall(function()
     return assert(LoadCFG(string.format([[Lua %s]], Lua__fileName))) 
 end) -- Auto-load config
 
--- Function to check if all expected functions exist in the loaded config
-local function checkAllFunctionsExist(expectedMenu)
-    for key, value in pairs(loadedMenu) do
-        -- If the key from the loaded menu does not exist in the expected menu, return false
-        if expectedMenu[key] == nil then
+-- Validate that loaded config has exactly the same keys as the default config
+local function isConfigValid(loadedMenu, defaultMenu)
+    for key in pairs(defaultMenu) do
+        if loadedMenu[key] == nil then
+            return false
+        end
+    end
+    for key in pairs(loadedMenu) do
+        if defaultMenu[key] == nil then
             return false
         end
     end
@@ -124,7 +127,7 @@ end
 
 -- Execute this block only if loading the config was successful
 if status then
-    if checkAllFunctionsExist(Menu) and not input.IsButtonDown(KEY_LSHIFT) then
+    if isConfigValid(loadedMenu, Menu) and not input.IsButtonDown(KEY_LSHIFT) then
         Menu = loadedMenu
     else
         print("Config is outdated or invalid. Creating a new config.")
@@ -137,8 +140,7 @@ end
 
 
 local prevData = {
-    SimTime = {},
-    pBhop = {}
+    SimTime = {}
 } ---@type PlayerData
 
 local playerData = {
@@ -149,20 +151,29 @@ local playerData = {
     }
 }
 
+-- Persistent per-player tracking tables (indexed by entity index)
+local bhopData = {}  -- airTicks counter for bhop detection
+local duckData = {}  -- tick counter for duck-speed detection
+
+local function InitPlayerData(idx, entity)
+    playerData[idx] = {
+        entity = entity,
+        strikes = 0,
+        detected = false
+    }
+end
+
 local function StrikePlayer(reason, player)
     local idx = player:GetIndex()
 
     -- Initialize strikes if needed
     if not playerData[idx] or playerData[idx].entity == nil then
-        playerData[idx] = {
-            entity = player,
-            strikes = 0,
-            detected = false
-        }
+        InitPlayerData(idx, player)
     end
 
-    if reason == "Invalid pitch" then -- isnta detect when anty aiming(Invalid Pitch)
-        playerData[idx].strikes = Menu.StrikeLimit
+    -- Instant detection for anti-aim pitch (set to one below limit so the +1 below reaches the limit)
+    if reason == "Invalid pitch" then
+        playerData[idx].strikes = Menu.StrikeLimit - 1
     end
 
     -- Increment strikes
@@ -171,19 +182,19 @@ local function StrikePlayer(reason, player)
     -- Handle strike limit
     if playerData[idx].strikes < Menu.StrikeLimit then
         -- Print message
-        if player and playerData[idx].strikes == math.floor(Menu.StrikeLimit / 2) then -- only call the player sus if hes has been flagged half of the total amount
+        if player and playerData[idx].strikes == math.floor(Menu.StrikeLimit / 2) then -- only call the player sus if they've been flagged half of the total amount
             client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. "\x01 is \x07ffd500Suspicious \x01(\x04" .. reason.. "\x01)"))
-            
+
             if Menu.AutoMark and player ~= pLocal then
-                LastStrike = globals.TickInterval()
+                playerlist.SetPriority(player, 5)
             end
         end
     else
-            -- Print cheating message if player is detected and wanst noted before
+        -- Print cheating message if player is detected and wasn't noted before
         if player and not playerData[idx].detected then
             print(tostring("[CD] ".. player:GetName() .. " is cheating"))
                 client.ChatPrintf(tostring("\x04[CD] \x03" .. player:GetName() .. " \x01is\x07ff0019 Cheating\x01! \x01(\x04" .. reason.. "\x01)"))
-            if Menu.partyCallaut == true then
+            if Menu.partyCallout == true then
                 client.Command("say_party ".. player:GetName() .." is Cheating " .. "(".. reason.. ")",true);
             end
 
@@ -198,11 +209,10 @@ local function StrikePlayer(reason, player)
     end
 end
 
--- Detects rage pitch (looking up/down too much)
+-- Detects anti-aim pitch (invalid up/down angle)
 local function CheckAngles(player, entity)
     local angles = player:GetEyeAngles()
-    if angles.pitch == 89.000 or angles.pitch == -89.000
-    or angles.pitch >= 90 or angles.pitch <= -90 then
+    if angles.pitch >= 89 or angles.pitch <= -89 then
         StrikePlayer("Invalid pitch", entity)
         return true
     end
@@ -210,26 +220,23 @@ local function CheckAngles(player, entity)
 end
 
 
-local tick_count = 0
--- Detects rage pitch (looking up/down too much)
+-- Detects suspicious duck speed (moving too fast while crouched)
 local function CheckDuckSpeed(player, entity)
-    local angles = player:GetEyeAngles()
+    local idx = entity:GetIndex()
     local flags = player:GetPropInt("m_fFlags")
     local OnGround = flags & FL_ONGROUND == 1
     local DUCKING = flags & FL_DUCKING == 2
-    if OnGround
-    and DUCKING then -- detects fake up/down/up/fakedown pitch settigns {lbox]
-        local MaxDuckSpeed = entity:GetPropFloat("m_flMaxspeed") * 0.66 -- Update MaxSpeed based on the player's current state
+    if OnGround and DUCKING then
+        local MaxDuckSpeed = entity:GetPropFloat("m_flMaxspeed") * 0.66
 
         if entity:EstimateAbsVelocity():Length() >= MaxDuckSpeed then
-        --and clientstate:GetChokedCommands() > 12 then
-            local m_vecViewOffset = math.floor(pLocal:GetPropVector("m_vecViewOffset[0]").z) ; --check if fully crounched
-           
-            if m_vecViewOffset == 45 then
-                tick_count = tick_count + 1
-                if tick_count >= 66 then
+            local viewOffsetZ = math.floor(entity:GetPropVector("m_vecViewOffset[0]").z)
+
+            if viewOffsetZ == 45 then
+                duckData[idx] = (duckData[idx] or 0) + 1
+                if duckData[idx] >= 66 then
                     StrikePlayer("Duck Speed", entity)
-                    tick_count = 0
+                    duckData[idx] = 0
                     return true
                 end
                 return true
@@ -237,28 +244,29 @@ local function CheckDuckSpeed(player, entity)
         end
         return false
     end
+    duckData[idx] = 0
     return false
 end
 
 
-local function CheckBhop(pEntity, mData, entity)
-    if not mData[pEntity] then
-        mData[pEntity] = { pBhop = { 0, 0 }, iPlayerSuspicion = 0 }
+local function CheckBhop(entity)
+    local idx = entity:GetIndex()
+    if not bhopData[idx] then
+        bhopData[idx] = { airTicks = 0 }
     end
 
-    local flags = pEntity:GetPropInt("m_fFlags")
+    local flags = entity:GetPropInt("m_fFlags")
     local bOnGround = flags & FL_ONGROUND == 1
 
     if bOnGround then
-        mData[pEntity].pBhop[1] = 0 -- Reset the bhop count if the player is on the ground
+        bhopData[idx].airTicks = 0
     else
-        mData[pEntity].pBhop[1] = mData[pEntity].pBhop[1] + 1 -- Increment the bhop count if the player is in the air
+        bhopData[idx].airTicks = bhopData[idx].airTicks + 1
     end
 
-    if mData[pEntity].pBhop[1] >= Menu.BhopTimes then
-        mData[pEntity].iPlayerSuspicion = mData[pEntity].iPlayerSuspicion + 1 -- Increment the suspicion if the player consistently bhops
-        mData[pEntity].pBhop[1] = 0 -- Reset the bhop count
-        StrikePlayer("Bunny Hop", entity) --return true, mData[pEntity].pBhop[1] -- Return true if the suspicion threshold is reached
+    if bhopData[idx].airTicks >= Menu.BhopTimes then
+        bhopData[idx].airTicks = 0
+        StrikePlayer("Bunny Hop", entity)
         return true
     end
     return false
@@ -289,15 +297,6 @@ local function CheckChoke(player, entity)
 end
 
 
---[[local function isValidName(player, name, entity)
-
-    for i, pattern in ipairs(BOTPATTERNS) do
-      if string.find(name, pattern) then
-        StrikePlayer("Bot Name", entity, player)
-      end
-    end
-end]]
-
 local HurtVictim = nil
 local shooter = nil
 
@@ -322,37 +321,12 @@ local function event_hook(ev)
         if not attacker:IsAlive() then return end
         local pWeapon = attacker:GetPropEntity("m_hActiveWeapon")
         if pWeapon:GetWeaponProjectileType() ~= 1 then return end --skip projectile weapons
-    --print("pass")
     --update lastattacker and lastHurtVictim
     shooter = attacker
     HurtVictim = Victim
 end
 
-local lastTwoAngles = {}
-local predictedAngles = {}
-
--- Function to predict the eye angle two ticks ahead
-local function PredictEyeAngleTwoTicksAhead(idx, currentAngle)
-    if lastTwoAngles[idx] == nil then
-        lastTwoAngles[idx] = {}
-    end
-
-    -- If we don't have enough data, return nil
-    if #lastTwoAngles[idx] < 2 then
-        return nil
-    end
-
-    -- Calculate the average change in eye angles
-    local averageChange = (lastTwoAngles[idx][2] - lastTwoAngles[idx][1]) / 2
-
-    -- Predict the future eye angle
-    predictedAngles[idx] = currentAngle + averageChange * 2
-    if predictedAngles[idx] == nil then print("nil prediction") end
-    return predictedAngles[idx]
-end
-
 local lastAngles = {}
-local currentAngles = {}
 local AimbotStage = 0
 
 -- Function to check for aimbot
@@ -377,14 +351,14 @@ local function CheckAimbot()
     end
 
     local WHurtVictim = WPlayer.FromEntity(HurtVictim)
-    local WictimEyePos = WHurtVictim:GetHitboxPos(AimPos)
+    local victimEyePos = WHurtVictim:GetHitboxPos(AimPos)
 
-    local AimbotAngle = Math.PositionAngles(shooterEyePos, WictimEyePos)
+    local AimbotAngle = Math.PositionAngles(shooterEyePos, victimEyePos)
     local fov = Math.AngleFov(AimbotAngle, shootAngles)
-    print("realFov: "..fov)
+    if Menu.debug then print("realFov: "..fov) end
     if AimbotStage == 0 then
         local FovDelta = Math.AngleFov(AimbotAngle, lastAngles[idx])
-        if Menu.debug == true then print(shooter:GetName(), "Stage 0: Fov Delta ", FovDelta) end
+        if Menu.debug then print(shooter:GetName(), "Stage 0: Fov Delta ", FovDelta) end
 
         if FovDelta > Menu.Aimbotfov then
             AimbotStage = 1
@@ -393,25 +367,19 @@ local function CheckAimbot()
             return false
         end
     elseif AimbotStage == 1 then
-        -- Predict future eye angle two ticks ahead
-        local futureAngle = PredictEyeAngleTwoTicksAhead(idx, shootAngles)
-
         local FovDelta = Math.AngleFov(shootAngles, lastAngles[idx])
-        if Menu.debug == true then print(shooter:GetName(), "Stage 1: Fov Delta ", FovDelta) end
+        if Menu.debug then print(shooter:GetName(), "Stage 1: Fov Delta ", FovDelta) end
 
         if FovDelta >= 0.2 then
-            if Menu.debug == true then print(futureAngle) end
-            --if futureAngle and Math.AngleFov(shootAngles, futureAngle) < 0.4 then
-                StrikePlayer("Aimbot", shooter)
-            --end
+            StrikePlayer("Aimbot", shooter)
         end
 
         AimbotStage = 0
-        lastAngles[idx] = shootAngles -- Update the last angle for this player
+        lastAngles[idx] = shootAngles
         return true
     end
 
-    lastAngles[idx] = shootAngles -- Update the last angle for this player
+    lastAngles[idx] = shootAngles
     return true
 end
 
@@ -423,18 +391,17 @@ local function OnCreateMove(userCmd)
     WLocal = WPlayer.FromEntity(pLocal)
     players = entities.FindByClass("CTFPlayer")
 
-    latin, latout = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
+    latencyIn, latencyOut = clientstate.GetLatencyIn() * 1000, clientstate.GetLatencyOut() * 1000 -- Convert to ms
 
     local connectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[WLocal:GetIndex()]
 
     -- Get current data
     local currentData = {
-        SimTime = {},
-        pBhop = {}
+        SimTime = {}
     }
 
     local packetloss = false
-    if (latin + latout) < 200 and prevData then
+    if (latencyIn + latencyOut) < 200 and prevData then
         local localSimTime = WLocal:GetSimulationTime()
         local localOldSimTime = prevData.SimTime[WLocal:GetIndex()]
         if localOldSimTime then
@@ -452,10 +419,9 @@ local function OnCreateMove(userCmd)
         local entity = players[i]
         if entity == nil then goto continue end -- Skip if player is nil
         local idx = entity:GetIndex()
-        --print(predictViewAngle(idx, 2))
         if playerData[idx] and playerData[idx].detected == true --dont check detected players
         or entity:IsDormant()
-        or Menu.debug == false and attacker == pLocal
+        or Menu.debug == false and entity == pLocal
         or not entity:IsAlive()
         or Menu.debug == false and TF2.IsFriend(entity:GetIndex(), true)
         then goto continue end -- Skip if player is nil, dormant or dead
@@ -465,12 +431,9 @@ local function OnCreateMove(userCmd)
             if playerData[idx] then
                 playerData[idx].detected = true
             else
-                -- Initialize strikes if needed
-                playerData[idx] = {
-                    entity = entity,
-                    strikes = Menu.StrikeLimit,
-                    detected = true
-                }
+                InitPlayerData(idx, entity)
+                playerData[idx].strikes = Menu.StrikeLimit
+                playerData[idx].detected = true
             end
             goto continue
         end -- Skip local player
@@ -480,36 +443,20 @@ local function OnCreateMove(userCmd)
         local player = WPlayer.FromEntity(entity)
         currentData.SimTime[idx] = player:GetSimulationTime() --store simulation time of target players
 
-        if HurtVictim ~= nil then goto continue end --skip aimbot check if someone gets killed or damaged
+        lastAngles[idx] = player:GetEyeAngles() --store viewangles for aimbot detection
 
-        lastAngles[idx] = player:GetEyeAngles() --store viewangles of target players
+        if HurtVictim ~= nil then goto continue end --skip checks if someone gets damaged
 
-        --if isValidName(player, entity:GetName(), entity) == true then break end --detect bot names
+        if CheckAngles(player, entity) == true then goto continue end --detects rage cheaters and bots
 
-        if CheckAngles(player, entity) == true then break end --detects rage cheaters and bots
+        if CheckDuckSpeed(player, entity) == true then goto continue end --detects DuckSpeed
 
-        if CheckDuckSpeed(player, entity) == true then break end --detects DuckSpeed
+        if CheckBhop(entity) == true then goto continue end --detects rage Bhop
 
-        if CheckBhop(player, currentData, entity) == true then break end --detects rage Bhop
-
-        --local XconnectionState = entities.GetPlayerResources():GetPropDataTableInt("m_iConnectionState")[idx]
         if prevData then
             if not packetloss and connectionState == 1 or Menu.debug == true then
-                if CheckChoke(player, entity) == true then break end --detects rage Fakelag
+                if CheckChoke(player, entity) == true then goto continue end --detects rage Fakelag
             end
-        end
-
-        if not lastTwoAngles or lastTwoAngles[idx] == nil then
-            lastTwoAngles[idx] = {}
-        end
-
-        lastAngles[idx] = player:GetEyeAngles() --aimbot angle save for later
-
-        table.insert(lastTwoAngles[idx], currentAngle)
-
-        -- Keep only the last two angles
-        if #lastTwoAngles[idx] > 2 then
-            table.remove(lastTwoAngles[idx], 1)
         end
 
         ::continue::
@@ -541,14 +488,13 @@ local function doDraw()
     draw.SetFont(Fonts.Verdana)
     draw.Color(255, 255, 255, 255)
 
-    -- Inside your OnCreateMove or similar function where you check for input
-    if input.IsButtonDown(KEY_INSERT) then  -- Replace 72 with the actual key code for the button you want to use
+    if input.IsButtonDown(KEY_INSERT) then
         toggleMenu()
     end
         if Menu.tags and not engine.Con_IsVisible() and not engine.IsGameUIVisible() then
             if Menu.debug then
                 draw.Color(255, 0, 0, 255)
-                draw.Text(20, 120, "Debug Mode!!! Some Featheres Might malfunction")
+                draw.Text(20, 120, "Debug Mode!!! Some Features Might Malfunction")
             end
             draw.Color(255, 255, 255, 255)
             draw.SetFont(tahoma_bold)
@@ -608,7 +554,7 @@ local function doDraw()
             Menu.MaxTickDelta = ImMenu.Slider("Max Packet Choke", Menu.MaxTickDelta, 8, 22)
             ImMenu.EndFrame()
             
-            -- Max Tick Delta Slider
+            -- Bhop Times Slider
             ImMenu.BeginFrame(1)
             Menu.BhopTimes = ImMenu.Slider("Max Bhops", Menu.BhopTimes, 4, 15)
             ImMenu.EndFrame()
@@ -626,7 +572,7 @@ local function doDraw()
 
             -- Menu
             ImMenu.BeginFrame(1)
-            Menu.partyCallaut = ImMenu.Checkbox("Party Callout", Menu.partyCallaut)
+            Menu.partyCallout = ImMenu.Checkbox("Party Callout", Menu.partyCallout)
             Menu.debug = ImMenu.Checkbox("Debug", Menu.debug)
             ImMenu.EndFrame()
 
