@@ -3,8 +3,8 @@
      Supports stacking up to 3 tags per player, filtered by user config.
 ]]
 
-local Constants = require("Cheater_Detection.core.constants")
-local PlayerCache = require("Cheater_Detection.core.player_cache")
+local Constants = require("Cheater_Detection.Core.constants")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local G = require("Cheater_Detection.Utils.Globals")
 
 local Visuals = {}

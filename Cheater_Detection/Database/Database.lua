@@ -8,7 +8,7 @@
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
 

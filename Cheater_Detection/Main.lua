@@ -6,8 +6,8 @@
 local G = require("Cheater_Detection.Utils.Globals")
 local Config = require("Cheater_Detection.Utils.Config")
 local Events = require("Cheater_Detection.Core.Events")
-local PlayerCache = require("Cheater_Detection.core.player_cache")
-local Scheduler = require("Cheater_Detection.core.scheduler")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local Scheduler = require("Cheater_Detection.Core.scheduler")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local Common = require("Cheater_Detection.Utils.Common")
 require("Cheater_Detection.Utils.Commands")
@@ -28,11 +28,9 @@ local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 -- Actions
 local NotificationService = require("Cheater_Detection.services.notification_service")
 local Visuals = require("Cheater_Detection.actions.visuals")
-local Menu = require("Cheater_Detection.Misc.Visuals.Menu")
 
 local hasSearchedGroup = false
 local detectorErrorSeen = {}
-local lastDrawHeartbeatTick = 0
 
 local function isDebugEnabled()
 	return Common.IsDebugEnabled()

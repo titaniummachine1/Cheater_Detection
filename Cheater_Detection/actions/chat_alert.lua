@@ -3,7 +3,7 @@
 ]]
 
 local Events = require("Cheater_Detection.Core.Events")
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 
 local ChatAlert = {}
 

@@ -15,7 +15,7 @@
        PlayerCache.IsFriend(id)          → bool
 ]]
 
-local Constants   = require("Cheater_Detection.core.constants")
+local Constants   = require("Cheater_Detection.Core.constants")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local Common      = require("Cheater_Detection.Utils.Common")
 local Events      = require("Cheater_Detection.Core.Events")

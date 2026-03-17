@@ -4,7 +4,7 @@
 
 local Events = require("Cheater_Detection.Core.Events")
 local ValveData = require("Cheater_Detection.data.valve_data")
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 

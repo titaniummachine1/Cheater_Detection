@@ -3,7 +3,7 @@
      flag-update → database-persist → event-dispatch pattern.
 ]]
 
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Database  = require("Cheater_Detection.Database.Database")
 local Events    = require("Cheater_Detection.Core.Events")
 

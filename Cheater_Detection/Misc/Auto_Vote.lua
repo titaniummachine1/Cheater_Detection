@@ -7,7 +7,7 @@ local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Sources = require("Cheater_Detection.Database.Sources")
 local Logger = require("Cheater_Detection.Utils.Logger")
-local VoteReveal = require("Cheater_Detection.Misc.Vote_Revel")
+local VoteReveal = require("Cheater_Detection.Misc.Vote_Reveal")
 
 local LOG_CATEGORY = "AutoVote"
 
