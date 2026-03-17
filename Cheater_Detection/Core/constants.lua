@@ -23,16 +23,15 @@ Constants.Threshold = {
 }
 
 -- [[ Engine Constants ]]
-Constants.TICKS_PER_SECOND = 66
 Constants.DECAY_INTERVAL_SECONDS = 10 -- Base heartbeat decay interval
 
--- [[ Common Tick Durations (at 66 Hz) ]]
-Constants.Ticks = {
-	ONE_SECOND  = 66,
-	TWO_SECONDS = 132,
-	FIVE_SECONDS = 330,
-	TEN_SECONDS = 660,
-}
+-- [[ Dynamic Tick Conversion ]]
+-- Converts a duration in seconds to the equivalent tick count for the current tick rate.
+-- Formula: math.floor(seconds / globals.TickInterval() + 0.5)
+-- This ensures correctness if the server tick rate differs from the standard 66 Hz.
+function Constants.SecondsToTicks(seconds)
+	return math.floor(seconds / globals.TickInterval() + 0.5)
+end
 
 -- [[ Bhop Detection ]] 
 Constants.BHOP_MAX_GROUND_TICKS = 1 -- Frame perfect (0 or 1 tick on ground)

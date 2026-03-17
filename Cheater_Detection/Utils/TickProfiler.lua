@@ -12,11 +12,17 @@ local acc = {} -- Accumulator for rolling stats
 local display = {} -- Display entries
 local enabled = false
 local lastSnapshot = 0
-local SNAPSHOT_INTERVAL = 10 -- Update display every ~10 ticks for smoothness
+-- Update display every ~0.15 s (≈10 ticks at 66 Hz), recomputed dynamically.
+local function getSnapshotInterval()
+	return math.floor(0.15 / globals.TickInterval() + 0.5)
+end
 
 -- Configuration
 local SMOOTHING_FACTOR = 0.1 -- For EMA smoothing of display values
-local SORT_DELAY = 33 -- Re-sort every ~0.5 seconds (33 ticks)
+-- Re-sort every ~0.5 s (≈33 ticks at 66 Hz), recomputed dynamically.
+local function getSortDelay()
+	return math.floor(0.5 / globals.TickInterval() + 0.5)
+end
 local lastSortTime = 0
 
 local font = draw.CreateFont("Tahoma", 12, 600, FONTFLAG_OUTLINE)
@@ -190,7 +196,7 @@ local function buildEntries()
 	local currentTick = globals.TickCount()
 
 	-- Update smoothed values periodically
-	if currentTick - lastSnapshot >= SNAPSHOT_INTERVAL then
+	if currentTick - lastSnapshot >= getSnapshotInterval() then
 		lastSnapshot = currentTick
 
 		for name, data in pairs(acc) do
@@ -213,7 +219,7 @@ local function buildEntries()
 	end
 
 	-- Re-sort periodically to prevent jumping
-	if currentTick - lastSortTime >= SORT_DELAY then
+	if currentTick - lastSortTime >= getSortDelay() then
 		lastSortTime = currentTick
 		display = {}
 

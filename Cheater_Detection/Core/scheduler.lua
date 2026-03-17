@@ -19,12 +19,12 @@ function Scheduler.Tick()
     local currentTick = globals.TickCount()
     ticksPassed = ticksPassed + 1
 
-    if currentTick - lastHeartbeat >= (Constants.DECAY_INTERVAL_SECONDS * Constants.TICKS_PER_SECOND) then
+    if currentTick - lastHeartbeat >= Constants.SecondsToTicks(Constants.DECAY_INTERVAL_SECONDS) then
         lastHeartbeat = currentTick
         Events.Publish("DecayHeartbeat", currentTick)
     end
 
-    if (ticksPassed % Constants.TICKS_PER_SECOND) == 0 then
+    if (ticksPassed % Constants.SecondsToTicks(1)) == 0 then
         Events.Publish("OneSecondTick", currentTick)
     end
 

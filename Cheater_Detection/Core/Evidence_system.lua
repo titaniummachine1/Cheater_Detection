@@ -62,9 +62,12 @@ Evidence.Config = {
 }
 
 --[[ Private Variables ]]
-local TICKS_PER_SECOND = 66 -- TF2 tickrate
 local DECAY_BATCHES_PER_CYCLE = 6
-local DECAY_INTERVAL_TICKS = math.max(1, math.floor(TICKS_PER_SECOND / DECAY_BATCHES_PER_CYCLE))
+-- Interval in ticks between decay batches – recomputed dynamically each cycle so the
+-- rate stays correct even if the server tick rate differs from the standard 66 Hz.
+local function getDecayIntervalTicks()
+	return math.max(1, math.floor(1 / (DECAY_BATCHES_PER_CYCLE * globals.TickInterval()) + 0.5))
+end
 local DECAY_SECONDS_PER_BATCH = 1 / DECAY_BATCHES_PER_CYCLE
 local lastDecayTick = 0 -- Simple tick-based rate limiting
 
@@ -460,7 +463,7 @@ end
 --- Apply decay to all players (called per tick, internally rate-limited)
 function Evidence.ApplyDecay()
 	local currentTick = globals.TickCount()
-	if currentTick - lastDecayTick >= DECAY_INTERVAL_TICKS then
+	if currentTick - lastDecayTick >= getDecayIntervalTicks() then
 		lastDecayTick = currentTick
 		processDecayBatch()
 	end

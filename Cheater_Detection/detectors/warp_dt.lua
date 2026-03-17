@@ -9,7 +9,11 @@ local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local WarpDT = {}
 
 local DETECTION_NAME = "warp_dt"
-local HISTORY_SIZE = 33
+-- History window: ~0.5 s of simulation-time samples (≈33 ticks at 66 Hz).
+-- Recalculated dynamically so it scales with the server tick rate.
+local function getHistorySize()
+	return math.floor(0.5 / globals.TickInterval() + 0.5)
+end
 
 -- If this many players burst on the same tick it is a server/network hitch, not cheating.
 local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
@@ -21,7 +25,7 @@ local function ensureConsumer()
 		return
 	end
 	HistoryManager.RegisterConsumer(DETECTION_NAME, {
-		retentionTicks = HISTORY_SIZE,
+		retentionTicks = getHistorySize(),
 		fields = { HistoryManager.Fields.SimulationTime },
 	})
 	registeredConsumer = true
@@ -32,11 +36,16 @@ local playerStats = {} -- id -> { events = {tick1, tick2...} }
 
 -- Global hitch window: once a hitch is confirmed, suppress ALL WarpDT for this many ticks.
 -- This prevents players who arrive late to the burst tick from slipping past the threshold.
-local SERVER_HITCH_WINDOW = 66 -- 1 s at 66 tick
-local lastServerHitchTick = -SERVER_HITCH_WINDOW
+-- ~1 s window (≈66 ticks at 66 Hz), recalculated dynamically for the current tick rate.
+local function getServerHitchWindow()
+	return math.floor(1.0 / globals.TickInterval() + 0.5)
+end
+-- Initialised to a value that guarantees the hitch window is expired on the first check.
+-- Using -math.huge ensures (curTick - lastServerHitchTick) is always >= any window size.
+local lastServerHitchTick = -math.huge
 
 local function isInHitchWindow(curTick)
-	return (curTick - lastServerHitchTick) < SERVER_HITCH_WINDOW
+	return (curTick - lastServerHitchTick) < getServerHitchWindow()
 end
 
 -- Simultaneous-burst suppression: track which players burst each tick.
@@ -120,7 +129,7 @@ function WarpDT.ProcessPlayer(playerState)
 
 	local history = cacheEntry.history
 	local historyCount = HistoryManager.GetCount(history)
-	if historyCount < HISTORY_SIZE then
+	if historyCount < getHistorySize() then
 		return
 	end
 
@@ -133,7 +142,7 @@ function WarpDT.ProcessPlayer(playerState)
 		end
 	end
 
-	if #simTicks < HISTORY_SIZE then
+	if #simTicks < getHistorySize() then
 		return
 	end
 
@@ -144,11 +153,13 @@ function WarpDT.ProcessPlayer(playerState)
 	end
 
 	-- Look for a "Burst" event (large simulation time shift)
+	-- Exploits like DT/Warp usually burst ~0.273 s–0.970 s (18–64 ticks at 66 Hz) to be effective.
+	-- Standard fakelag is usually ~14–15 ticks. Thresholds scale with tick rate.
+	local burstMin = math.floor(18.0 / 66.0 / globals.TickInterval() + 0.5)
+	local burstMax = math.floor(64.0 / 66.0 / globals.TickInterval() + 0.5)
 	local burstAmount = 0
 	for _, d in ipairs(deltaTicks) do
-		-- Exploits like DT/Warp usually burst 18-24+ ticks to be effective.
-		-- Standard fakelag is usually 14-15.
-		if d > 18 and d < 64 then
+		if d > burstMin and d < burstMax then
 			burstAmount = d
 			break
 		end
@@ -167,7 +178,7 @@ function WarpDT.ProcessPlayer(playerState)
 			return
 		end
 
-		if not data.lastWarpTick or (curTick - data.lastWarpTick) > 24 then
+		if not data.lastWarpTick or (curTick - data.lastWarpTick) > math.floor(24.0 / 66.0 / globals.TickInterval() + 0.5) then
 			-- If many players burst at the same tick it is a server/network hitch — skip.
 			if isServerHitch(curTick) then
 				-- Arm the global window so latecomers this burst are also suppressed.
@@ -191,7 +202,7 @@ function WarpDT.ProcessPlayer(playerState)
 			DetectorUtils.ApplyPlayerFlag(playerState, increment, nil, reason)
 
 			-- Clean up events older than ~10 seconds
-			while #data.events > 0 and (curTick - data.events[1]) > Constants.Ticks.TEN_SECONDS do
+			while #data.events > 0 and (curTick - data.events[1]) > Constants.SecondsToTicks(10) do
 				table.remove(data.events, 1)
 			end
 
