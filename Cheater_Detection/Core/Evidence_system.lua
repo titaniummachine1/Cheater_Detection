@@ -37,7 +37,7 @@ Evidence.Config = {
 	},
 
 	-- Thresholds
-	Evicence_Tolerance = 50, -- Evidence threshold % (0–100) to mark as cheater
+	Evidence_Tolerance = 50, -- Evidence threshold % (0–100) to mark as cheater
 	MinWeightFloor = 0, -- Cannot decay below this
 
 	-- Category mappings (only implemented detections)
@@ -74,7 +74,7 @@ local decayCursor = 1
 local decayQueueDirty = true
 
 local DetectionToggles = {
-	anti_aim = "AntyAim",
+	anti_aim = "AntiAim",
 	bhop = "Bhop",
 	fake_lag = "Choke", -- Choke = Fake Lag in config
 	warp_dt = "Warp",
@@ -228,7 +228,7 @@ end
 ---@return number Current threshold value (internal 0-200 score scale)
 function Evidence.GetThreshold()
 	-- Stored as 0–100 % in the menu; multiply by 2 to map to the internal score scale
-	local pct = G.Menu.Advanced.Evicence_Tolerance
+	local pct = G.Menu.Advanced.Evidence_Tolerance
 	if type(pct) ~= "number" then
 		pct = 50 -- default 50%
 	end

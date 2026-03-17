@@ -168,11 +168,13 @@ end
 -- Main processor
 -- ──────────────────────────────────────────────────────────────────────────────
 function ValveCheck.ProcessPlayer(playerState)
-	assert(playerState, "ValveCheck.ProcessPlayer: playerState missing")
+	if not playerState or not playerState.id then
+		return
+	end
 
 	local id = playerState.id
 	local now = globals.CurTime()
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
+	local isDebug = Common.IsDebugEnabled()
 
 	-- Skip Bots (Non-SteamID64)
 	if not tostring(id):match("^7656119%d+$") or #tostring(id) ~= 17 then

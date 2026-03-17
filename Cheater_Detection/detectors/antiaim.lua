@@ -4,10 +4,8 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
-local G = require("Cheater_Detection.Utils.Globals")
-local Database = require("Cheater_Detection.Database.Database")
-local Events = require("Cheater_Detection.Core.Events")
 local Common = require("Cheater_Detection.Utils.Common")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 
 local AntiAim = {}
 
@@ -45,18 +43,24 @@ local function tryExtractPitchYaw(angleObj)
 	return pitch, yaw
 end
 
-local function traceLog(playerState, detail)
+-- Trace logging is only active in debug mode; use the shared IsDebugEnabled helper
+-- so callers don't need to gate the call themselves.
+local function traceLog(isDebug, playerState, detail)
+	if not isDebug then
+		return
+	end
 	local id = playerState and playerState.id or "nil"
 	if detail ~= nil then
 		print(string.format("[AntiAim] id=%s %s", tostring(id), tostring(detail)))
-		return
+	else
+		print(string.format("[AntiAim] id=%s", tostring(id)))
 	end
-	print(string.format("[AntiAim] id=%s", tostring(id)))
 end
 
 local function readDetectionAngles(wrap, entity, cmd, isLocalDebug)
-	assert(wrap, "readDetectionAngles: wrap missing")
-	assert(entity, "readDetectionAngles: entity missing")
+	if not wrap or not entity then
+		return nil, nil, "nil", {}
+	end
 	local candidates = {}
 
 	local function addCandidate(source, pitch, yaw)
@@ -156,19 +160,20 @@ local function formatCandidates(candidates)
 end
 
 function AntiAim.ProcessPlayer(playerState, cmd)
-	assert(playerState, "AntiAim.ProcessPlayer: playerState missing")
-	assert(playerState.wrap, "AntiAim.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
-	assert(playerState.id, "AntiAim.ProcessPlayer: playerState.id missing")
-	traceLog(playerState, "enter")
+	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
+
+	local isDebug = Common.IsDebugEnabled()
+	traceLog(isDebug, playerState, "enter")
 
 	local entity = playerState.wrap:GetRawEntity()
 	if not entity then
-		traceLog(playerState, "raw entity missing")
+		traceLog(isDebug, playerState, "raw entity missing")
 		return
 	end
-	traceLog(playerState, "raw entity ok")
+	traceLog(isDebug, playerState, "raw entity ok")
 
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = localPlayer ~= nil and entity == localPlayer
 	local skipEntity = nil
@@ -177,32 +182,33 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	end
 
 	if not Common.IsValidPlayer(entity, false, true, skipEntity) then
-		traceLog(playerState, "IsValidPlayer rejected")
+		traceLog(isDebug, playerState, "IsValidPlayer rejected")
 		return
 	end
-	traceLog(playerState, "IsValidPlayer ok")
+	traceLog(isDebug, playerState, "IsValidPlayer ok")
 
 	local simTime = playerState.wrap:GetSimulationTime()
 	if not simTime or simTime <= 0 then
-		traceLog(playerState, "invalid simTime")
+		traceLog(isDebug, playerState, "invalid simTime")
 		return
 	end
-	traceLog(playerState, string.format("simTime=%.6f", simTime))
+	traceLog(isDebug, playerState, string.format("simTime=%.6f", simTime))
 
 	local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
 	if isCheater and not isDebug then
-		traceLog(playerState, "already cheater and debug off")
+		traceLog(isDebug, playerState, "already cheater and debug off")
 		return
 	end
-	traceLog(playerState, "cheater gate ok")
+	traceLog(isDebug, playerState, "cheater gate ok")
 
 	local pitch, yaw, angleSource, candidates =
 		readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
 	if pitch == nil then
-		traceLog(playerState, "pitch nil")
+		traceLog(isDebug, playerState, "pitch nil")
 		return
 	end
 	traceLog(
+		isDebug,
 		playerState,
 		string.format(
 			"pitch=%.3f yaw=%s source=%s all=%s",
@@ -214,26 +220,12 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	)
 
 	local isInvalid = isInvalidPitchValue(pitch)
-	traceLog(playerState, string.format("isInvalid=%s", tostring(isInvalid)))
+	traceLog(isDebug, playerState, string.format("isInvalid=%s", tostring(isInvalid)))
 
 	if isInvalid then
-		traceLog(playerState, "invalid pitch hit")
-		local oldFlags = playerState.flags
-		playerState.flags = playerState.flags | Constants.Flags.CHEATER
-		playerState.score = 100
-
+		traceLog(isDebug, playerState, "invalid pitch hit")
 		local reason = string.format("Invalid Pitch (%.2f)", pitch)
-
-		Database.UpsertCheater(playerState.id, {
-			name = playerState.wrap:GetName(),
-			reason = reason,
-			flags = playerState.flags,
-			score = playerState.score,
-		})
-
-		if oldFlags ~= playerState.flags then
-			Events.Publish("OnPlayerStateChange", playerState, reason)
-		end
+		DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
 	end
 end
 

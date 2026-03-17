@@ -37,7 +37,7 @@ local lastCMTraceTick = 0 -- throttle for OnCreateMove diagnostics
 local lastPStateNilLogTick = 0
 
 local function isDebugEnabled()
-	return G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	return Common.IsDebugEnabled()
 end
 
 local function runDetector(detectorName, detectorFn, playerState, ...)
@@ -83,7 +83,7 @@ local function Init()
 
 	-- Register Decay Heartbeat
 	Events.Subscribe("DecayHeartbeat", function()
-		PlayerCache.Hearthbeat()
+		PlayerCache.Heartbeat()
 	end)
 end
 

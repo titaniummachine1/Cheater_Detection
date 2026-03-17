@@ -4,8 +4,8 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
-local G = require("Cheater_Detection.Utils.Globals")
-local Database = require("Cheater_Detection.Database.Database")
+local Common = require("Cheater_Detection.Utils.Common")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 
 local Bhop = {}
@@ -14,9 +14,9 @@ local Bhop = {}
 local playerData = {}
 
 function Bhop.ProcessPlayer(playerState)
-	assert(playerState, "Bhop.ProcessPlayer: playerState missing")
-	assert(playerState.wrap, "Bhop.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
-	assert(playerState.id, "Bhop.ProcessPlayer: playerState.id missing")
+	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
 
 	local entity = playerState.wrap:GetRawEntity()
 	if not entity or not entity:IsValid() or not entity:IsAlive() then
@@ -24,8 +24,7 @@ function Bhop.ProcessPlayer(playerState)
 	end
 
 	-- Skip local player unless debug mode is enabled for testing.
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	if entity == entities.GetLocalPlayer() and not isDebug then
+	if entity == entities.GetLocalPlayer() and not Common.IsDebugEnabled() then
 		return
 	end
 
@@ -61,30 +60,8 @@ function Bhop.ProcessPlayer(playerState)
 						increment = 5
 					end
 
-					local oldFlags = playerState.flags
-					playerState.score = math.min(99, playerState.score + increment)
-
-					if playerState.score >= Constants.Threshold.SUSPICIOUS then
-						playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-					end
-
-					if playerState.score >= Constants.Threshold.HIGH_RISK then
-						playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-					end
-
 					local reason = string.format("Bhop Script (%d perfect jumps)", data.consecutivePerfects)
-
-					-- Persist
-					Database.UpsertCheater(id, {
-						name = playerState.wrap:GetName(),
-						reason = reason,
-						flags = playerState.flags,
-						score = playerState.score,
-					})
-
-					if playerState.flags ~= oldFlags then
-						Events.Publish("OnPlayerStateChange", playerState, reason)
-					end
+					DetectorUtils.ApplyPlayerFlag(playerState, increment, nil, reason)
 				end
 			else
 				-- Reset if they stayed on ground too long (not a bhop chain)

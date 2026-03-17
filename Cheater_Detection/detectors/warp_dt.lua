@@ -1,6 +1,6 @@
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
-local Database = require("Cheater_Detection.Database.Database")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local Common = require("Cheater_Detection.Utils.Common")
@@ -74,9 +74,9 @@ local function timeToTicks(time)
 end
 
 function WarpDT.ProcessPlayer(playerState)
-	assert(playerState, "WarpDT.ProcessPlayer: playerState missing")
-	assert(playerState.wrap, "WarpDT.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
-	assert(playerState.id, "WarpDT.ProcessPlayer: playerState.id missing")
+	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
 
 	-- Menu gate: cheapest check first
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.Warp) then
@@ -96,7 +96,7 @@ function WarpDT.ProcessPlayer(playerState)
 	end
 
 	-- Skip bots. Skip local player unless debug mode is enabled for testing.
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	local isDebug = Common.IsDebugEnabled()
 	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then
 		return
 	end
@@ -185,35 +185,13 @@ function WarpDT.ProcessPlayer(playerState)
 			table.insert(data.events, curTick)
 
 			local reason = "Warp/DT (Packet Burst)"
-			local oldFlags = playerState.flags
 
 			-- Scale increment based on events (Leeway: 5 per single, 15 for repeat)
 			local increment = (#data.events >= 2) and 15 or 5
-			playerState.score = math.min(99, playerState.score + increment)
+			DetectorUtils.ApplyPlayerFlag(playerState, increment, nil, reason)
 
-			if playerState.score >= Constants.Threshold.SUSPICIOUS then
-				playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-			end
-
-			if playerState.score >= Constants.Threshold.HIGH_RISK then
-				playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-			end
-
-			Database.UpsertCheater(id, {
-				name = playerState.wrap:GetName(),
-				reason = reason,
-				flags = playerState.flags,
-				score = playerState.score,
-			})
-
-			-- Only notify when flags actually changed (new threshold crossed).
-			-- Score-only increments within the same flag level are silent.
-			if playerState.flags ~= oldFlags then
-				Events.Publish("OnPlayerStateChange", playerState, reason)
-			end
-
-			-- Clean up events older than 660 ticks (approx 10 seconds)
-			while #data.events > 0 and (curTick - data.events[1]) > 660 do
+			-- Clean up events older than ~10 seconds
+			while #data.events > 0 and (curTick - data.events[1]) > Constants.Ticks.TEN_SECONDS do
 				table.remove(data.events, 1)
 			end
 

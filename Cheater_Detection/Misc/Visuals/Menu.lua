@@ -94,7 +94,7 @@ local function DrawMenu()
 		local Advanced = G.Menu.Advanced
 
 		TimMenu.BeginSector("Evidence System")
-		Advanced.Evicence_Tolerance = TimMenu.Slider("Evidence Threshold %", Advanced.Evicence_Tolerance or 50, 0, 100, 1)
+		Advanced.Evidence_Tolerance = TimMenu.Slider("Evidence Threshold %", Advanced.Evidence_Tolerance or 50, 0, 100, 1)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
@@ -104,7 +104,7 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp == true)
 		TimMenu.NextLine()
-		Advanced.AntyAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntyAim == true)
+		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 

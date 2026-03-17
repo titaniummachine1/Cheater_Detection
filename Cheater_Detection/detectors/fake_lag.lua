@@ -4,7 +4,8 @@
 
 local Constants = require("Cheater_Detection.core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
-local Database = require("Cheater_Detection.Database.Database")
+local Common = require("Cheater_Detection.Utils.Common")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 
 local FakeLag = {}
@@ -13,19 +14,16 @@ local FakeLag = {}
 local MAX_TICK_DELTA = 15 -- Standard fakelag is ~14-15
 
 -- Per-player tracking
--- Per-player tracking
 local playerStats = {} -- id -> { lastSimTime, events = {tick1, tick2...} }
 
 local function timeToTicks(time)
 	return math.floor(time / globals.TickInterval() + 0.5)
 end
 
-local Common = require("Cheater_Detection.Utils.Common")
-
 function FakeLag.ProcessPlayer(playerState)
-	assert(playerState, "FakeLag.ProcessPlayer: playerState missing")
-	assert(playerState.wrap, "FakeLag.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
-	assert(playerState.id, "FakeLag.ProcessPlayer: playerState.id missing")
+	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
 
 	-- Menu gate: cheapest check first
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.Choke) then
@@ -43,8 +41,7 @@ function FakeLag.ProcessPlayer(playerState)
 	end
 
 	-- Skip bots. Skip local player unless debug mode is enabled for testing.
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then
+	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not Common.IsDebugEnabled()) then
 		return
 	end
 
@@ -79,8 +76,8 @@ function FakeLag.ProcessPlayer(playerState)
 	if deltaTicks >= MAX_TICK_DELTA then
 		table.insert(data.events, { tick = curTick, amount = deltaTicks })
 
-		-- Clean up events older than 330 ticks (approx 5 seconds)
-		while #data.events > 0 and (curTick - data.events[1].tick) > 330 do
+		-- Clean up events older than ~5 seconds
+		while #data.events > 0 and (curTick - data.events[1].tick) > Constants.Ticks.FIVE_SECONDS do
 			table.remove(data.events, 1)
 		end
 
@@ -105,29 +102,8 @@ function FakeLag.ProcessPlayer(playerState)
 				end
 
 				data.lastFlagTick = curTick
-				local oldFlags = playerState.flags
-				-- Lower score increment for FakeLag as requested
-				playerState.score = math.min(99, playerState.score + 5)
-
 				local reason = string.format("Fake Lag (Rhythmic choke: %d ticks)", deltaTicks)
-
-				if playerState.score >= Constants.Threshold.HIGH_RISK then
-					playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-					playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-				elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
-					playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-				end
-
-				Database.UpsertCheater(id, {
-					name = playerState.wrap:GetName(),
-					reason = reason,
-					flags = playerState.flags,
-					score = playerState.score,
-				})
-
-				if playerState.flags ~= oldFlags then
-						Events.Publish("OnPlayerStateChange", playerState, reason)
-				end
+				DetectorUtils.ApplyPlayerFlag(playerState, 5, nil, reason)
 
 				-- Clear events to wait for next sequence
 				data.events = {}

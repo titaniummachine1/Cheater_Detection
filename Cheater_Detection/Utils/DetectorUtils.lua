@@ -1,0 +1,61 @@
+--[[ Utils/DetectorUtils.lua
+     Shared helpers used by every detector to eliminate the repeated
+     flag-update → database-persist → event-dispatch pattern.
+]]
+
+local Constants = require("Cheater_Detection.core.constants")
+local Database  = require("Cheater_Detection.Database.Database")
+local Events    = require("Cheater_Detection.Core.Events")
+
+local DetectorUtils = {}
+
+--- Apply a score increment plus any appropriate flags to a player state, then
+--- persist the change to the database and fire OnPlayerStateChange when the
+--- flag set actually changes.
+---
+--- For hard detections (e.g. anti-aim, duck-speed exploit) pass
+--- `Constants.Flags.CHEATER` as `hardFlag` and `100` as `score`.
+--- For probabilistic detections pass `nil` for `hardFlag` and a small
+--- positive number for `scoreIncrement`; the SUSPICIOUS / HIGH_RISK flags
+--- are set automatically based on the resulting total score.
+---
+---@param playerState  table   The active player-cache entry for this player.
+---@param scoreIncrement number Score points to add (capped at 99 for probabilistic,
+---                             or overridden to 100 for CHEATER flag).
+---@param hardFlag     number|nil  A Constants.Flags value to force-set directly
+---                               (e.g. CHEATER).  When nil only threshold flags are applied.
+---@param reason       string  Human-readable detection reason (stored in DB).
+---@return boolean flagsChanged  True when the flag set changed (new threshold crossed).
+function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, reason)
+    local oldFlags = playerState.flags
+
+    if hardFlag then
+        playerState.flags = playerState.flags | hardFlag
+        playerState.score = 100
+    else
+        playerState.score = math.min(99, playerState.score + scoreIncrement)
+
+        if playerState.score >= Constants.Threshold.HIGH_RISK then
+            playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
+            playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+        elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
+            playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+        end
+    end
+
+    Database.UpsertCheater(playerState.id, {
+        name  = playerState.wrap:GetName(),
+        reason = reason,
+        flags = playerState.flags,
+        score = playerState.score,
+    })
+
+    local flagsChanged = playerState.flags ~= oldFlags
+    if flagsChanged then
+        Events.Publish("OnPlayerStateChange", playerState, reason)
+    end
+
+    return flagsChanged
+end
+
+return DetectorUtils
