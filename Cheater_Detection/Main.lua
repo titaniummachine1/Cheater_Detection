@@ -33,18 +33,12 @@ local Menu = require("Cheater_Detection.Misc.Visuals.Menu")
 local hasSearchedGroup = false
 local detectorErrorSeen = {}
 local lastDrawHeartbeatTick = 0
-local lastCMTraceTick = 0 -- throttle for OnCreateMove diagnostics
-local lastPStateNilLogTick = 0
 
 local function isDebugEnabled()
 	return Common.IsDebugEnabled()
 end
 
 local function runDetector(detectorName, detectorFn, playerState, ...)
-	assert(detectorName, "runDetector: detectorName missing")
-	assert(detectorFn, "runDetector: detectorFn missing")
-	assert(playerState, "runDetector: playerState missing")
-
 	local ok, err = pcall(detectorFn, playerState, ...)
 	if not ok then
 		if not detectorErrorSeen[detectorName] then
@@ -91,11 +85,7 @@ end
 local function OnCreateMove(cmd)
 	-- Definitive check if we are actually connected to a game server
 	local serverIP = engine.GetServerIP()
-	local cmTick = globals.TickCount()
 	if not serverIP then
-		if (cmTick - lastCMTraceTick) >= 300 then
-			lastCMTraceTick = cmTick
-		end
 		hasSearchedGroup = false
 		return
 	end
@@ -105,9 +95,6 @@ local function OnCreateMove(cmd)
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
-	if isDebugEnabled() and (cmTick - lastCMTraceTick) >= 132 then
-		lastCMTraceTick = cmTick
-	end
 
 	for i = 1, #players do
 		local ply = players[i]
@@ -134,13 +121,6 @@ local function OnCreateMove(cmd)
 			runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
 			runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
 			runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
-		else
-			if isDebugEnabled() and ply and ply:IsValid() then
-				if (cmTick - lastPStateNilLogTick) >= 132 then
-					lastPStateNilLogTick = cmTick
-					local steamID = Common.GetSteamID64(ply)
-				end
-			end
 		end
 
 		::continue::

@@ -9,8 +9,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 
 local Parsers = {}
 
--- Collects first 5 update samples for debug diagnosis (reset each fetch cycle)
-Parsers._updateSamples = {}
 
 -- Stats tracking for parser operations
 Parsers.ParseStats = {
@@ -32,7 +30,6 @@ function Parsers.ResetStats()
 		totalErrors = 0,
 		totalUpdated = 0,
 	}
-	Parsers._updateSamples = {}
 end
 
 -- Add stats for a source
@@ -127,22 +124,7 @@ function Parsers.PrintStatsSummary()
 		if summary then
 			print(summary) -- Keep using plain print for multi-line debug summary
 		end
-		if #Parsers._updateSamples > 0 then
-			print("[PARSER SAMPLES] First updated entries:")
-			for _, s in ipairs(Parsers._updateSamples) do
-				local parts = { "  id=" .. tostring(s.id) }
-				if s.nameChange then
-					table.insert(parts, "name: " .. s.nameChange)
-				end
-				if s.reasonChange then
-					table.insert(parts, "reason: " .. s.reasonChange)
-				end
-				if s.staticChange then
-					table.insert(parts, "static: " .. s.staticChange)
-				end
-				print(table.concat(parts, " | "))
-			end
-		end
+
 	end
 end
 
@@ -280,9 +262,6 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 		local existingEntry = existingEntries[steamID64]
 		local updName, updReason, updStatic = false, false, false
 
-		-- Capture old values before mutating (used for sample diagnostics)
-		local oldName = existingEntry.Name
-		local oldReason = existingEntry.Reason
 
 		-- If existing entry has unknown name and this one has a name
 		if
@@ -321,22 +300,6 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 
 		local updated = updName or updReason or updStatic
 
-		-- Collect diagnostics sample for the first 5 updated entries
-		if updated and #Parsers._updateSamples < 5 then
-			local sample = { id = steamID64 }
-			if updName then
-				sample.nameChange =
-					string.format("%s -> %s", tostring(oldName == nil and "nil" or oldName), tostring(playerName))
-			end
-			if updReason then
-				sample.reasonChange =
-					string.format("%s -> %s", tostring(oldReason == nil and "nil" or oldReason), tostring(reason))
-			end
-			if updStatic then
-				sample.staticChange = string.format("nil -> %s", tostring(staticSource))
-			end
-			table.insert(Parsers._updateSamples, sample)
-		end
 
 		return false, updated, false, updName, updReason, updStatic
 	else

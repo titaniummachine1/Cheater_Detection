@@ -10,6 +10,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
+local Logger = require("Cheater_Detection.Utils.Logger")
 
 --[[ Module Declaration ]]
 local Database = {
@@ -23,85 +24,25 @@ local Database = {
 		lastSave = 0,
 		lastLoaded = 0,
 		isInitialized = false,
-		suppressFullSave = false, -- Unused in simplified version
-		isSaving = false, -- Unused in simplified version
 	},
 }
 
---[[ Local Variables/Utilities ]]
-local LogLevel = {
-	ERROR = 1,
-	WARNING = 2,
-	SUCCESS = 3,
-	INFO = 4,
-	DEBUG = 5,
-}
-
-local function Log(level, message, color)
-	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	local shouldShow = isDebugMode or (level <= LogLevel.SUCCESS)
-
-	if not shouldShow then
-		return
-	end
-
-	local prefix = ""
-	local defaultColor = { 255, 255, 255, 255 }
-
-	if level == LogLevel.ERROR then
-		prefix = "[DB ERROR] "
-		color = color or { 255, 100, 100, 255 }
-	elseif level == LogLevel.WARNING then
-		prefix = "[DB WARNING] "
-		color = color or { 255, 255, 100, 255 }
-	elseif level == LogLevel.SUCCESS then
-		prefix = "[DB SUCCESS] "
-		color = color or { 0, 255, 140, 255 }
-	elseif level == LogLevel.INFO then
-		prefix = "[DB INFO] "
-		color = color or { 100, 255, 255, 255 }
-	elseif level == LogLevel.DEBUG then
-		prefix = "[DB DEBUG] "
-		color = color or { 180, 180, 180, 255 }
-	end
-
-	color = color or defaultColor
-	printc(color[1], color[2], color[3], color[4], prefix .. message)
-end
-
-local function SaveMetadata() end
-
-local function LoadMetadata() end
-
 --[[ Public Module Functions ]]
 
--- Robust SetPriority with multiple fallback methods
-function Database.SetPriority(target, priority, isInGame)
+function Database.SetPriority(target, priority)
 	if not target then
 		return false
 	end
 
-	local success = false
-	local lastError = nil
-
-	-- Method 1: Try entity (only if in-game)
-	if isInGame ~= false and type(target) == "userdata" then
-		success, lastError = pcall(playerlist.SetPriority, target, priority)
-		if success then
+	-- Try entity or numeric index directly
+	if type(target) == "userdata" or (type(target) == "number" and target < 101) then
+		if pcall(playerlist.SetPriority, target, priority) then
 			return true
 		end
 	end
 
-	-- Method 2: Try index (only if in-game)
-	if isInGame ~= false and type(target) == "number" and target < 101 then
-		success, lastError = pcall(playerlist.SetPriority, target, priority)
-		if success then
-			return true
-		end
-	end
-
-	-- Method 3: Try SteamID64
-	local steamID64 = nil
+	-- Resolve to SteamID64 and try
+	local steamID64
 	if type(target) == "string" and #target == 17 then
 		steamID64 = target
 	elseif type(target) == "userdata" then
@@ -109,30 +50,14 @@ function Database.SetPriority(target, priority, isInGame)
 	end
 
 	if steamID64 then
-		success, lastError = pcall(playerlist.SetPriority, steamID64, priority)
-		if success then
-			if priority == 10 then
-				local menuMain = G.Menu and G.Menu.Main
-				if menuMain and menuMain.AutoPriority then
-					Database.UpsertCheater(steamID64, {
-						name = "Manual Flag",
-						reason = "Manual Priority 10",
-					})
-				end
+		if pcall(playerlist.SetPriority, steamID64, priority) then
+			if priority == 10 and G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority then
+				Database.UpsertCheater(steamID64, {
+					name = "Manual Flag",
+					reason = "Manual Priority 10",
+				})
 			end
 			return true
-		end
-	end
-
-	-- Method 4: Try SteamID3 conversion
-	if steamID64 then
-		local accountID = tonumber(steamID64) - 76561197960265728
-		if accountID and accountID > 0 then
-			local steamID3 = string.format("[U:1:%d]", accountID)
-			success, lastError = pcall(playerlist.SetPriority, steamID3, priority)
-			if success then
-				return true
-			end
 		end
 	end
 
@@ -148,31 +73,13 @@ function Database.GetFilePath()
 	return "Lua Cheater_Detection/database.txt" -- Fallback
 end
 
-function Database.GetLogPath()
-	local _, fullPath = filesystem.CreateDirectory("Lua Cheater_Detection")
-	if type(fullPath) == "string" then
-		local sep = package.config:sub(1, 1) or "\\"
-		return fullPath .. sep .. "database_updates.txtl"
-	end
-	return "Lua Cheater_Detection/database_updates.txtl" -- Fallback
-end
-
--- Simplified: Just mark as dirty for future sync save
-function Database.AppendChange(steamID, data, isRemoval)
-	if not steamID then
-		return
-	end
-
-	Database.State.isDirty = true
-end
-
 function Database.SaveDatabase()
 	if not G.DataBase or not Database.State.isDirty then
 		return
 	end
 
 	local filepath = Database.GetFilePath()
-	Log(LogLevel.DEBUG, "[DB] Synchronous save to disk...")
+	Logger.Debug("Database", "[DB] Synchronous save to disk...")
 
 	local cleanedData = {}
 	for k, v in pairs(G.DataBase) do
@@ -202,9 +109,9 @@ function Database.SaveDatabase()
 		if Serializer.writeFile(filepath, encoded) then
 			Database.State.isDirty = false
 			Database.State.lastSave = os.time()
-			Log(LogLevel.SUCCESS, "Database flushed to disk: " .. filepath)
+			Logger.Info("Database", "Database flushed to disk: " .. filepath)
 		else
-			Log(LogLevel.ERROR, "[DB] Failed to write database: " .. filepath)
+			Logger.Error("Database", "[DB] Failed to write database: " .. filepath)
 		end
 	end
 end
@@ -220,7 +127,7 @@ local function OnFireEvent(event)
 
 		local isLocalDeath = victimEntity and localPlayer and victimEntity:GetIndex() == localPlayer:GetIndex()
 		if isLocalDeath then
-			Log(LogLevel.DEBUG, "[DB] Local player died, triggering save...")
+			Logger.Debug("Database", "[DB] Local player died, triggering save...")
 			Database.SaveDatabase()
 		end
 	end
@@ -232,14 +139,14 @@ local function OnFireEvent(event)
 
 		local isLocalSpawn = spawnedEntity and localPlayer and spawnedEntity:GetIndex() == localPlayer:GetIndex()
 		if isLocalSpawn then
-			Log(LogLevel.DEBUG, "[DB] Local player spawned, triggering save...")
+			Logger.Debug("Database", "[DB] Local player spawned, triggering save...")
 			Database.SaveDatabase()
 		end
 	end
 
 	-- Trigger save on map change only (not round_start — fires every round)
 	if eventName == "game_newmap" then
-		Log(LogLevel.DEBUG, "[DB] Map change, triggering save...")
+		Logger.Debug("Database", "[DB] Map change, triggering save...")
 		Database.SaveDatabase()
 	end
 end
@@ -251,11 +158,9 @@ function Database.LoadDatabase(silent, force)
 	if Database.State.isInitialized and not force then
 		return
 	end
-	LoadMetadata()
 
-	Log(LogLevel.INFO, "[DB] Loading database...")
+	Logger.Debug("Database", "[DB] Loading database...")
 	local filePath = Database.GetFilePath()
-	local logPath = Database.GetLogPath()
 
 	-- Try loading .txt first, fallback to .lua, .cfg or .json if not found (for migration)
 	local content = Serializer.readFile(filePath)
@@ -271,13 +176,13 @@ function Database.LoadDatabase(silent, force)
 				if oldFile then
 					content = oldFile:read("*a")
 					oldFile:close()
-					Log(LogLevel.INFO, "[DB] Migrating old JSON database to new format...")
+					Logger.Debug("Database", "[DB] Migrating old JSON database to new format...")
 				end
 			else
-				Log(LogLevel.INFO, "[DB] Migrating .cfg database to .txt format...")
+				Logger.Debug("Database", "[DB] Migrating .cfg database to .txt format...")
 			end
 		else
-			Log(LogLevel.INFO, "[DB] Migrating .lua database to .txt format...")
+			Logger.Debug("Database", "[DB] Migrating .lua database to .txt format...")
 		end
 	end
 
@@ -322,8 +227,8 @@ function Database.LoadDatabase(silent, force)
 		content = nil
 
 		if not success or type(decodedData) ~= "table" then
-			Log(LogLevel.ERROR, "[DB] Load Failed: " .. tostring(decodedData))
-			Log(LogLevel.WARNING, "[DB] Data might be corrupted. Resetting database base layer.")
+			Logger.Error("Database", "[DB] Load Failed: " .. tostring(decodedData))
+			Logger.Warning("Database", "[DB] Data might be corrupted. Resetting database base layer.")
 			G.DataBase = {}
 		else
 			-- PRE-ALLOCATION OPTIMIZATION:
@@ -334,7 +239,7 @@ function Database.LoadDatabase(silent, force)
 			for _ in pairs(G.DataBase) do
 				count = count + 1
 			end
-			Log(LogLevel.SUCCESS, string.format("[DB] Loaded %d entries from disk.", count))
+			Logger.Info("Database", string.format("[DB] Loaded %d entries from disk.", count))
 		end
 	end
 
@@ -353,7 +258,7 @@ function Database.LoadDatabase(silent, force)
 	end
 
 	Database.State.lastLoaded = os.time()
-	Log(LogLevel.SUCCESS, string.format("[DB] Database ready: %d entries", total - #entriesToRemove))
+	Logger.Info("Database", string.format("[DB] Database ready: %d entries", total - #entriesToRemove))
 
 	Database.SanitizeAll()
 	Database.ClearLocalPlayer()
@@ -400,7 +305,7 @@ function Database.SanitizeAll()
 	end
 
 	if sanitized > 0 then
-		Log(LogLevel.SUCCESS, string.format("[DB] Aggressively sanitized %d entries (stripped URLs)", sanitized))
+		Logger.Info("Database", string.format("[DB] Aggressively sanitized %d entries (stripped URLs)", sanitized))
 		-- isDirty is already set by UpsertCheater; save will happen on next natural trigger
 	end
 end
@@ -481,8 +386,6 @@ function Database.UpsertCheater(steamID, data)
 
 	Database.State.isDirty = true
 
-	Database.AppendChange(steamID, G.DataBase[steamID], false)
-
 	return true
 end
 
@@ -500,8 +403,7 @@ function Database.RemoveCheater(steamID)
 	if G.DataBase[steamID] then
 		G.DataBase[steamID] = nil
 		Database.State.isDirty = true
-		Log(LogLevel.INFO, "[DB] Removed cheater: " .. steamID)
-		Database.AppendChange(steamID, nil, true)
+		Logger.Debug("Database", "[DB] Removed cheater: " .. steamID)
 		return true
 	end
 	return false
