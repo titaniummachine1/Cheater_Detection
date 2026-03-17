@@ -40,10 +40,10 @@ end
 
 local Menu = {
     StrikeLimit = 5,
-    MaxTickDelta = 8,
+    MaxTickDelta = math.floor(0.12 / globals.TickInterval() + 0.5),
     Aimbotfov = 3,
     AutoMark = true,
-    BhopTimes = 5,
+    BhopTimes = math.floor(0.076 / globals.TickInterval() + 0.5),
     debug = false,
     tags = true,
     partyCallaut = true
@@ -605,12 +605,12 @@ local function doDraw()
 
             -- Max Tick Delta Slider
             ImMenu.BeginFrame(1)
-            Menu.MaxTickDelta = ImMenu.Slider("Max Packet Choke", Menu.MaxTickDelta, 8, 22)
+            Menu.MaxTickDelta = ImMenu.Slider("Max Packet Choke", Menu.MaxTickDelta, math.floor(0.12 / globals.TickInterval() + 0.5), math.floor(0.33 / globals.TickInterval() + 0.5))
             ImMenu.EndFrame()
             
             -- Max Tick Delta Slider
             ImMenu.BeginFrame(1)
-            Menu.BhopTimes = ImMenu.Slider("Max Bhops", Menu.BhopTimes, 4, 15)
+            Menu.BhopTimes = ImMenu.Slider("Max Bhops", Menu.BhopTimes, math.floor(0.06 / globals.TickInterval() + 0.5), math.floor(0.23 / globals.TickInterval() + 0.5))
             ImMenu.EndFrame()
 
             -- Aimbot FOV Slider
