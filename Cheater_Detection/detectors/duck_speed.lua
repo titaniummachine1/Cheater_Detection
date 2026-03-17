@@ -4,8 +4,8 @@
 ]]
 
 local Constants = require("Cheater_Detection.core.constants")
-local G = require("Cheater_Detection.Utils.Globals")
-local Database = require("Cheater_Detection.Database.Database")
+local Common = require("Cheater_Detection.Utils.Common")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 
 local DuckSpeed = {}
@@ -14,9 +14,9 @@ local DuckSpeed = {}
 local tickCounters = {}
 
 function DuckSpeed.ProcessPlayer(playerState)
-	assert(playerState, "DuckSpeed.ProcessPlayer: playerState missing")
-	assert(playerState.wrap, "DuckSpeed.ProcessPlayer: playerState.wrap missing id=" .. tostring(playerState.id))
-	assert(playerState.id, "DuckSpeed.ProcessPlayer: playerState.id missing")
+	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
 
 	local entity = playerState.wrap:GetRawEntity()
 	if not entity then
@@ -24,8 +24,7 @@ function DuckSpeed.ProcessPlayer(playerState)
 	end
 
 	-- Skip local player unless debug mode is enabled for testing.
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	if entity == entities.GetLocalPlayer() and not isDebug then
+	if entity == entities.GetLocalPlayer() and not Common.IsDebugEnabled() then
 		return
 	end
 
@@ -52,25 +51,9 @@ function DuckSpeed.ProcessPlayer(playerState)
 		if currentSpeed >= (maxSpeed * 0.66) then
 			tickCounters[id] = tickCounters[id] + 1
 
-			-- 2 Second Threshold (132 ticks at 66 FPS)
-			if tickCounters[id] >= 132 then
-				local oldFlags = playerState.flags
-				playerState.flags = playerState.flags | Constants.Flags.CHEATER
-				playerState.score = 100
-
-				local reason = "Duck Speed Exploit"
-
-				Database.UpsertCheater(id, {
-					name = playerState.wrap:GetName(),
-					reason = reason,
-					flags = playerState.flags,
-					score = playerState.score,
-				})
-
-				if oldFlags ~= playerState.flags then
-						Events.Publish("OnPlayerStateChange", playerState, reason)
-				end
-
+			-- 2 Second Threshold (Constants.Ticks.TWO_SECONDS ticks at 66 FPS)
+			if tickCounters[id] >= Constants.Ticks.TWO_SECONDS then
+				DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, "Duck Speed Exploit")
 				tickCounters[id] = 0 -- Reset after detection
 			end
 		else

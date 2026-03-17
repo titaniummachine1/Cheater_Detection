@@ -168,7 +168,7 @@ end
 
 -- ── Heartbeat / score decay ───────────────────────────────────────────────────
 
-function PlayerCache.Hearthbeat()
+function PlayerCache.Heartbeat()
 	for id, state in pairs(activeSet) do
 		local ply = state.wrap and state.wrap:GetRawEntity()
 		if not ply or not ply:IsValid() then

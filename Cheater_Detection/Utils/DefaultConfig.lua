@@ -18,7 +18,7 @@ local Default_Config = {
     },
 
 	Advanced = {
-		Evicence_Tolerance = 100, -- Evidence score threshold to mark as cheater
+		Evidence_Tolerance = 100, -- Evidence score threshold to mark as cheater
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false, -- Debug mode (removes self from database, enables verbose logging)
 		-- Detection toggles (only for implemented detections)
@@ -26,7 +26,7 @@ local Default_Config = {
 		Warp = true, -- Warp/DT detection
 		Bhop = true, -- Bunny hop detection
 		DuckSpeed = true, -- Duck speed detection
-		AntyAim = true, -- Anti-aim detection
+		AntiAim = true, -- Anti-aim detection
 		SilentAimbot = true, -- Silent aimbot (extrapolation) detection
 	},
 

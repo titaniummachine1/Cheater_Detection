@@ -45,7 +45,7 @@ local function DrawVisuals()
 
 		-- Check if player has suspicious evidence (at half threshold)
 		local evidenceScore = Evidence.GetEvidenceScore(steamId)
-		local threshold = G.Menu and G.Menu.Advanced and G.Menu.Advanced.Evicence_Tolerance or 100
+		local threshold = G.Menu and G.Menu.Advanced and G.Menu.Advanced.Evidence_Tolerance or 100
 		local isSuspicious = evidenceScore and evidenceScore >= math.floor(threshold / 2)
 
 		-- Determine if we should show a tag and what type

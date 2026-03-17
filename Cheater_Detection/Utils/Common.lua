@@ -109,6 +109,12 @@ local function convertSteamStringTo64(rawSteamID)
 	return nil
 end
 
+--- Returns true when debug mode is active in the menu (eliminates repeated inline checks).
+---@return boolean
+function Common.IsDebugEnabled()
+	return G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true or false
+end
+
 --[[ Inlined IsFriend (from lnxLib/TF2/TF2.lua) ]]
 function Common.IsFriend(entity, includeParty)
 	if includeParty == nil then

@@ -28,7 +28,7 @@ local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
-local Database = require("Cheater_Detection.Database.Database")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 
 local SilentAim = {}
 
@@ -41,26 +41,16 @@ local WEIGHT_EXPONENT = 1.8
 -- alignment=1 → shot_dev^2.8  (exponential — perfect snap-back confirmed)
 
 -- ── State ─────────────────────────────────────────────────────────────────────
--- Keyed by steamID64 string throughout.  No entity-index aliasing.
-
--- steamID64 -> entity  (populated by ProcessPlayer, iterated by FrameStageNotify)
-local trackedEntities = {}
-
--- steamID64 -> array of { pitch, yaw, tick }  (max HISTORY_MAX entries)
-local angleHistory = {}
-
--- steamID64 -> { shotTick, actualShotPitch, actualShotYaw,
---                predShotPitch, predShotYaw,
---                predNextPitch, predNextYaw }
-local shotPending = {}
-
--- steamID64 -> { gain, angle }  (written by stage-3, consumed by ProcessPlayer)
-local pendingScores = {}
-local pendingAngles = {}
-
--- steamID64 -> accumulated score to subtract on the next ProcessPlayer call
--- populated when the attacker kills someone (kill decay)
-local killDecays = {}
+-- Single per-player table keyed by steamID64 string.
+-- Fields:
+--   entity      - raw entity (populated by ProcessPlayer, read by FrameStageNotify)
+--   angleHistory - array of { pitch, yaw, tick }  (max HISTORY_MAX entries)
+--   shotPending  - { shotTick, actualShotPitch, actualShotYaw, predShotPitch, predShotYaw,
+--                    predNextPitch, predNextYaw } or nil
+--   pendingScore - accumulated score gain (written by stage-3, consumed by ProcessPlayer)
+--   pendingAngle - largest snap angle for the pending score
+--   killDecay    - accumulated score to subtract on the next ProcessPlayer call
+local playerData = {}
 
 -- ── Angle Math ────────────────────────────────────────────────────────────────
 local function wrapAngle(d)
@@ -73,21 +63,6 @@ local function angularDist(p1, y1, p2, y2)
 	return math.sqrt(dp * dp + dy * dy)
 end
 
--- Extrapolate 1 tick forward from the last 2 entries in hist.
-local function extrapolate1(hist)
-	local n = #hist
-	assert(n >= 2, "extrapolate1: need >= 2 history entries")
-	local prev = hist[n - 1]
-	local curr = hist[n]
-	local dtTicks = curr.tick - prev.tick
-	if dtTicks <= 0 then
-		dtTicks = 1
-	end
-	local vPitch = wrapAngle(curr.pitch - prev.pitch) / dtTicks
-	local vYaw = wrapAngle(curr.yaw - prev.yaw) / dtTicks
-	return curr.pitch + vPitch, curr.yaw + vYaw
-end
-
 -- ── Frame Stage Handler ───────────────────────────────────────────────────────
 -- FRAME_NET_UPDATE_POSTDATAUPDATE_END = 3
 -- Entity netprops have just been updated from the incoming server packet.
@@ -97,7 +72,7 @@ local STAGE_POST_DATA_END = 3
 
 local function processOnePlayer(id, ply, curTick, isDebug)
 	if not ply:IsValid() or ply:IsDormant() then
-		trackedEntities[id] = nil
+		playerData[id] = nil
 		return
 	end
 
@@ -121,11 +96,13 @@ local function processOnePlayer(id, ply, curTick, isDebug)
 		end
 	end
 
-	-- Push to history (only once per game tick)
-	if not angleHistory[id] then
-		angleHistory[id] = {}
+	local pdata = playerData[id]
+	if not pdata then
+		return
 	end
-	local hist = angleHistory[id]
+
+	-- Push to history (only once per game tick)
+	local hist = pdata.angleHistory
 	if #hist == 0 or hist[#hist].tick ~= curTick then
 		hist[#hist + 1] = { pitch = pitch, yaw = yaw, tick = curTick }
 		if #hist > HISTORY_MAX then
@@ -134,7 +111,7 @@ local function processOnePlayer(id, ply, curTick, isDebug)
 	end
 
 	-- Verify any pending shot for this player
-	local pending = shotPending[id]
+	local pending = pdata.shotPending
 	if not pending then
 		return
 	end
@@ -142,7 +119,7 @@ local function processOnePlayer(id, ply, curTick, isDebug)
 		return
 	end
 
-	shotPending[id] = nil
+	pdata.shotPending = nil
 
 	local shotDev =
 		angularDist(pending.actualShotPitch, pending.actualShotYaw, pending.predShotPitch, pending.predShotYaw)
@@ -171,9 +148,9 @@ local function processOnePlayer(id, ply, curTick, isDebug)
 		)
 	end
 
-	-- Store for ProcessPlayer to consume (no table allocation — two scalar keys)
-	pendingScores[id] = (pendingScores[id] or 0) + scoreGain
-	pendingAngles[id] = math.max(pendingAngles[id] or 0, shotDev)
+	-- Accumulate for ProcessPlayer to consume
+	pdata.pendingScore = (pdata.pendingScore or 0) + scoreGain
+	pdata.pendingAngle = math.max(pdata.pendingAngle or 0, shotDev)
 end
 
 local function onFrameStage(stage)
@@ -187,10 +164,12 @@ local function onFrameStage(stage)
 	end
 
 	local curTick = globals.TickCount()
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	local isDebug = Common.IsDebugEnabled()
 
-	for id, ply in pairs(trackedEntities) do
-		processOnePlayer(id, ply, curTick, isDebug)
+	for id, pdata in pairs(playerData) do
+		if pdata.entity then
+			processOnePlayer(id, pdata.entity, curTick, isDebug)
+		end
 	end
 end
 
@@ -215,8 +194,7 @@ local function onDamageEvent(event)
 	end
 
 	local localPlayer = entities.GetLocalPlayer()
-	local isDebug = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	if localPlayer and (localPlayer:GetIndex() == ply:GetIndex()) and not isDebug then
+	if localPlayer and (localPlayer:GetIndex() == ply:GetIndex()) and not Common.IsDebugEnabled() then
 		return
 	end
 
@@ -226,14 +204,18 @@ local function onDamageEvent(event)
 	end
 
 	local id = tostring(steamID64)
+	local pdata = playerData[id]
+	if not pdata then
+		return
+	end
 
 	-- Kill decay: every kill reduces accumulated aimbot suspicion by 5.
 	-- Applied before analysing the killing shot so legitimate aimers get credit.
 	if eventName == "player_death" then
-		killDecays[id] = (killDecays[id] or 0) + 5
+		pdata.killDecay = (pdata.killDecay or 0) + 5
 	end
 
-	local hist = angleHistory[id]
+	local hist = pdata.angleHistory
 
 	-- Need at minimum 3 entries: T-2, T-1, T (T is the shot tick)
 	if not hist or #hist < 3 then
@@ -273,9 +255,9 @@ local function onDamageEvent(event)
 	local predNextYaw = predShotYaw + vYaw
 
 	-- Only register if no pending shot already queued for a later tick
-	local existing = shotPending[id]
+	local existing = pdata.shotPending
 	if not existing or existing.shotTick < shotTick then
-		shotPending[id] = {
+		pdata.shotPending = {
 			shotTick = shotTick,
 			actualShotPitch = actualShotPitch,
 			actualShotYaw = actualShotYaw,
@@ -291,9 +273,9 @@ Events.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
 
 -- ── ProcessPlayer (called from Main.lua / CreateMove) ─────────────────────────
 function SilentAim.ProcessPlayer(playerState)
-	assert(playerState, "SilentAim.ProcessPlayer: playerState missing")
-	assert(playerState.wrap, "SilentAim.ProcessPlayer: wrap missing id=" .. tostring(playerState.id))
-	assert(playerState.id, "SilentAim.ProcessPlayer: id missing")
+	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
 
 	-- Menu gate: cheapest first
 	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
@@ -306,67 +288,54 @@ function SilentAim.ProcessPlayer(playerState)
 		return
 	end
 
-	-- Register entity so FrameStageNotify knows to track it
-	trackedEntities[id] = ply
+	-- Ensure per-player data table exists and register entity for FrameStageNotify
+	if not playerData[id] then
+		playerData[id] = {
+			entity      = ply,
+			angleHistory = {},
+			shotPending  = nil,
+			pendingScore = 0,
+			pendingAngle = 0,
+			killDecay    = 0,
+		}
+	else
+		playerData[id].entity = ply
+	end
+	local pdata = playerData[id]
 
 	-- Apply kill-based score decay accumulated between ProcessPlayer calls
-	local decay = killDecays[id]
+	local decay = pdata.killDecay
 	if decay and decay > 0 then
 		playerState.score = math.max(0, playerState.score - decay)
-		killDecays[id] = nil
+		pdata.killDecay = 0
 	end
 
 	-- Consume any score that stage-3 prepared
-	local gain = pendingScores[id]
+	local gain = pdata.pendingScore
 	if not gain or gain <= 0 then
 		return
 	end
 
-	local snapAngle = pendingAngles[id] or gain
-	pendingScores[id] = nil
-	pendingAngles[id] = nil
-
-	local oldFlags = playerState.flags
-	playerState.score = math.min(99, playerState.score + gain)
+	local snapAngle = pdata.pendingAngle or gain
+	pdata.pendingScore = 0
+	pdata.pendingAngle = 0
 
 	local reason = string.format("SilentAim Spike (%.1f°)", snapAngle)
+	local wasSuspicious = (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0
 
-	local wasSuspicious = (oldFlags & Constants.Flags.SUSPICIOUS) ~= 0
+	local flagsChanged = DetectorUtils.ApplyPlayerFlag(playerState, gain, nil, reason)
 
-	if playerState.score >= Constants.Threshold.SUSPICIOUS then
-		playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-	end
-
-	if playerState.score >= Constants.Threshold.HIGH_RISK then
-		playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-	end
-
-	if playerState.flags ~= oldFlags then
-		Database.UpsertCheater(id, {
-			name = playerState.wrap:GetName(),
-			reason = reason,
-			flags = playerState.flags,
-			score = playerState.score,
-		})
-		Events.Publish("OnPlayerStateChange", playerState, reason)
-
-		-- Dedicated event: first time this player crosses the SUSPICIOUS threshold
-		-- via aimbot detection.  Lets the real-time analyser and other modules react
-		-- without having to filter through generic OnPlayerStateChange.
-		if not wasSuspicious and (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
-			Events.Publish("OnAimbotSuspect", playerState, reason)
-		end
+	-- Dedicated event: first time this player crosses the SUSPICIOUS threshold
+	-- via aimbot detection.  Lets the real-time analyser and other modules react
+	-- without having to filter through generic OnPlayerStateChange.
+	if flagsChanged and not wasSuspicious and (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
+		Events.Publish("OnAimbotSuspect", playerState, reason)
 	end
 end
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	trackedEntities[id] = nil
-	angleHistory[id] = nil
-	shotPending[id] = nil
-	pendingScores[id] = nil
-	pendingAngles[id] = nil
-	killDecays[id] = nil
+	playerData[id] = nil
 end)
 
 return SilentAim

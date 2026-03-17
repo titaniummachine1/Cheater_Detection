@@ -26,6 +26,14 @@ Constants.Threshold = {
 Constants.TICKS_PER_SECOND = 66
 Constants.DECAY_INTERVAL_SECONDS = 10 -- Base heartbeat decay interval
 
+-- [[ Common Tick Durations (at 66 Hz) ]]
+Constants.Ticks = {
+	ONE_SECOND  = 66,
+	TWO_SECONDS = 132,
+	FIVE_SECONDS = 330,
+	TEN_SECONDS = 660,
+}
+
 -- [[ Bhop Detection ]] 
 Constants.BHOP_MAX_GROUND_TICKS = 1 -- Frame perfect (0 or 1 tick on ground)
 Constants.BHOP_MIN_CONSECUTIVE_SUCCESS = 2 -- How many times in a row it must happen before we start adding score
