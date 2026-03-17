@@ -51,8 +51,8 @@ function DuckSpeed.ProcessPlayer(playerState)
 		if currentSpeed >= (maxSpeed * 0.66) then
 			tickCounters[id] = tickCounters[id] + 1
 
-			-- 2 Second Threshold (Constants.Ticks.TWO_SECONDS ticks at 66 FPS)
-			if tickCounters[id] >= Constants.Ticks.TWO_SECONDS then
+			-- 2 Second Threshold
+			if tickCounters[id] >= Constants.SecondsToTicks(2) then
 				DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, "Duck Speed Exploit")
 				tickCounters[id] = 0 -- Reset after detection
 			end

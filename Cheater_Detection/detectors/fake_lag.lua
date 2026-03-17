@@ -10,8 +10,11 @@ local Events = require("Cheater_Detection.Core.Events")
 
 local FakeLag = {}
 
--- Constant threshold for fake lag (usually 14-15 on TF2)
-local MAX_TICK_DELTA = 15 -- Standard fakelag is ~14-15
+-- Threshold for fake lag: ~0.227 s of simulation-time delta (≈15 ticks at 66 Hz).
+-- Recalculated each check so it scales correctly with the server tick rate.
+local function getMaxTickDelta()
+	return math.floor(15.0 / 66.0 / globals.TickInterval() + 0.5)
+end
 
 -- Per-player tracking
 local playerStats = {} -- id -> { lastSimTime, events = {tick1, tick2...} }
@@ -73,11 +76,11 @@ function FakeLag.ProcessPlayer(playerState)
 	local curTick = globals.TickCount()
 
 	-- Only record events that meet the threshold
-	if deltaTicks >= MAX_TICK_DELTA then
+	if deltaTicks >= getMaxTickDelta() then
 		table.insert(data.events, { tick = curTick, amount = deltaTicks })
 
 		-- Clean up events older than ~5 seconds
-		while #data.events > 0 and (curTick - data.events[1].tick) > Constants.Ticks.FIVE_SECONDS do
+		while #data.events > 0 and (curTick - data.events[1].tick) > Constants.SecondsToTicks(5) do
 			table.remove(data.events, 1)
 		end
 
@@ -95,9 +98,9 @@ function FakeLag.ProcessPlayer(playerState)
 			end
 
 			if consistent then
-				-- 22 tick cooldown between adding weight/marking for FakeLag per suspect
+				-- ~0.333 s cooldown between adding weight/marking for FakeLag per suspect (≈22 ticks at 66 Hz)
 				local lastFlag = data.lastFlagTick or 0
-				if (curTick - lastFlag) < 22 then
+				if (curTick - lastFlag) < math.floor(22.0 / 66.0 / globals.TickInterval() + 0.5) then
 					return
 				end
 

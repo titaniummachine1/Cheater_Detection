@@ -437,7 +437,10 @@ function Common.TraceHit(result)
 end
 
 local lastFrameTick = 0
-local FRAME_GAP_THRESHOLD = 6
+-- Frame-gap threshold: ~0.091 s (≈6 ticks at 66 Hz), recomputed dynamically for the tick rate.
+local function getFrameGapThreshold()
+	return math.floor(6.0 / 66.0 / globals.TickInterval() + 0.5)
+end
 local lastFrameTime = 0
 
 function Common.IsFrameGap()
@@ -462,7 +465,7 @@ function Common.IsFrameGap()
 		end
 	end
 
-	return gap > FRAME_GAP_THRESHOLD
+	return gap > getFrameGapThreshold()
 end
 
 local E_Flows = { FLOW_OUTGOING = 0, FLOW_INCOMING = 1, MAX_FLOWS = 2 }
@@ -521,10 +524,10 @@ function Common.IsConnectionStableForDetection()
 		return false
 	end
 
-	-- Latency > ~12 ticks (180 ms at 66 Hz) means we are having a bad connection.
-	-- The old threshold of 2 ticks (30 ms) blocked detection on every internet server.
+	-- Latency threshold: ~180 ms (≈12 ticks at 66 Hz).
+	-- Latency is measured in seconds; compare directly against the equivalent time value.
 	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
-	if latency > 12 * tickInterval then
+	if latency > math.floor(12.0 / 66.0 / tickInterval + 0.5) * tickInterval then
 		return false
 	end
 
