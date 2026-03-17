@@ -3,7 +3,7 @@
      Must be grounded and fully crouched for 2 seconds to avoid false positives.
 ]]
 
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")

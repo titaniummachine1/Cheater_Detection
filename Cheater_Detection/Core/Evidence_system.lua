@@ -56,7 +56,7 @@ Evidence.Config = {
 		-- Movement detection methods
 		Movement = {
 			"bhop",
-			"Duck_Speed",
+			"duck_speed",
 		},
 	},
 }
@@ -81,7 +81,7 @@ local DetectionToggles = {
 	bhop = "Bhop",
 	fake_lag = "Choke", -- Choke = Fake Lag in config
 	warp_dt = "Warp",
-	Duck_Speed = "DuckSpeed",
+	duck_speed = "DuckSpeed",
 	silent_aimbot = "SilentAimbot",
 	manual_priority = "AutoFlagPriorityTen",
 }

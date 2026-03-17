@@ -25,7 +25,7 @@
 ]]
 
 local Events = require("Cheater_Detection.Core.Events")
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")

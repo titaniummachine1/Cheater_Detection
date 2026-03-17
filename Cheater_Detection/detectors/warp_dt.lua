@@ -1,4 +1,4 @@
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")

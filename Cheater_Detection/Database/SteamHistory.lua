@@ -11,7 +11,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Database = require("Cheater_Detection.Database.Database")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Json = Common.Json
 
 --[[ Constants ]]

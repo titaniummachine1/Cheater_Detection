@@ -3,7 +3,7 @@
      Triggering this marks the player as CHEATER immediately.
 ]]
 
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 

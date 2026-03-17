@@ -3,7 +3,7 @@
      A perfect jump is landing and leaving the ground within 1-2 ticks.
 ]]
 
-local Constants = require("Cheater_Detection.core.constants")
+local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
