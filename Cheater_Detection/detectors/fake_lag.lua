@@ -10,14 +10,51 @@ local Events = require("Cheater_Detection.Core.Events")
 
 local FakeLag = {}
 
--- Threshold for fake lag: ~0.227 s of simulation-time delta (≈15 ticks at 66 Hz).
--- Recalculated each check so it scales correctly with the server tick rate.
+-- Cached sv_maxunlag value (seconds). TF2 default is 0.2 s.
+-- Refreshed once per map change, round start, or local-player respawn so that
+-- the threshold always matches the server's actual lag-compensation window.
+local svMaxUnlag = 0.2
+
+local function refreshCvarCache()
+	local val = engine.GetConVar("sv_maxunlag")
+	if type(val) == "number" and val > 0 then
+		svMaxUnlag = val
+	else
+		print(string.format("[FakeLag] sv_maxunlag unavailable, using default %.2f s", svMaxUnlag))
+	end
+end
+
+-- Seed the cache immediately so any per-tick detections before the first
+-- game event already use the real server value (important on script reload).
+refreshCvarCache()
+
+-- Convert the cached sv_maxunlag seconds to the equivalent tick count for the
+-- current server tick rate using the standard formula.
 local function getMaxTickDelta()
-	return math.floor(15.0 / 66.0 / globals.TickInterval() + 0.5)
+	return math.floor(svMaxUnlag / globals.TickInterval() + 0.5)
 end
 
 -- Per-player tracking
 local playerStats = {} -- id -> { lastSimTime, events = {tick1, tick2...} }
+
+-- Refresh the CVar cache whenever the server/round context changes.
+-- Registered for specific events to avoid unnecessary overhead.
+local function onMapOrRoundRefresh(_event)
+	refreshCvarCache()
+end
+
+local function onPlayerSpawnRefresh(event)
+	-- Only refresh when the local player (re)spawns; other spawns are irrelevant.
+	local spawnedEntity = entities.GetByUserID(event:GetInt("userid"))
+	local localPlayer = entities.GetLocalPlayer()
+	if spawnedEntity and localPlayer and spawnedEntity:GetIndex() == localPlayer:GetIndex() then
+		refreshCvarCache()
+	end
+end
+
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Map",   onMapOrRoundRefresh, "game_newmap")
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Round", onMapOrRoundRefresh, "teamplay_round_start")
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Spawn", onPlayerSpawnRefresh, "player_spawn")
 
 local function timeToTicks(time)
 	return math.floor(time / globals.TickInterval() + 0.5)
