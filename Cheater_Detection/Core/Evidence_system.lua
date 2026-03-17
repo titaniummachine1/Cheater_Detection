@@ -86,18 +86,6 @@ local DetectionToggles = {
 	manual_priority = "AutoFlagPriorityTen",
 }
 
-local function clearArray(tbl)
-	for i = #tbl, 1, -1 do
-		tbl[i] = nil
-	end
-end
-
-local function clearMap(tbl)
-	for key in pairs(tbl) do
-		tbl[key] = nil
-	end
-end
-
 local function isDetectionEnabled(detectionName)
 	local menu = G.Menu and G.Menu.Advanced
 	if not menu then
@@ -112,8 +100,8 @@ local function isDetectionEnabled(detectionName)
 end
 
 local function refreshDecayQueue()
-	clearArray(decayQueue)
-	clearMap(decayQueueIndex)
+	for i = #decayQueue, 1, -1 do decayQueue[i] = nil end
+	for k in pairs(decayQueueIndex) do decayQueueIndex[k] = nil end
 	decayCursor = 1
 	decayQueueDirty = false
 
@@ -185,10 +173,6 @@ local function getOrCreateEvidence(steamID)
 		}
 	end
 	return evidenceStore[steamID]
-end
-
-local function initPlayerEvidence(steamID)
-	return getOrCreateEvidence(steamID)
 end
 
 local function recalcTotalScore(evidence)
@@ -514,8 +498,6 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
 		return
 	end
-
-	initPlayerEvidence(steamID)
 
 	local evidence = getOrCreateEvidence(steamID)
 	if not evidence then

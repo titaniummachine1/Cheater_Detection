@@ -1,76 +1,16 @@
 ---@diagnostic disable: undefined-global, undefined-field
 --[[ Cheater Detection - Database Fetcher - Coroutine Async Version ]]
 local Common = require("Cheater_Detection.Utils.Common")
--- [[ Imported by: Main.lua ]]
 local G = require("Cheater_Detection.Utils.Globals")
--- [[ Imported by: None ]]
 local Json = Common.Json
--- [[ Imported by: Fetcher.lua (indirectly via Common) ]]
 local Database = require("Cheater_Detection.Database.Database") -- For SaveDatabase
--- [[ Imported by: Fetcher.lua ]]
 local Sources = require("Cheater_Detection.Database.Sources") -- Require Sources
--- [[ Imported by: Fetcher.lua ]]
 local Parsers = require("Cheater_Detection.Database.Parsers") -- Require Parsers
--- [[ Imported by: Fetcher.lua ]]
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
+local Logger = require("Cheater_Detection.Utils.Logger")
 
 local Fetcher = {}
-
--- Define LogLevel locally within Fetcher
-local LogLevel = {
-	ERROR = 1,
-	WARNING = 2,
-	SUCCESS = 3,
-	INFO = 4,
-	DEBUG = 5,
-}
-
--- Local Log function for Fetcher module (Defined early)
-local function Log(level, message, color)
-	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-
-	-- Determine if the message should be shown
-	local shouldShow = false
-	if isDebugMode then
-		shouldShow = true -- Show all levels in debug mode
-	elseif level <= LogLevel.SUCCESS then
-		shouldShow = true -- Show ERROR, WARNING, SUCCESS in non-debug mode
-	end
-
-	if not shouldShow then
-		return
-	end
-
-	local prefix = ""
-	local defaultColor = { 255, 255, 255, 255 }
-
-	if level == LogLevel.ERROR then
-		prefix = "[FETCHER ERROR] "
-		color = color or { 255, 100, 100, 255 } -- Red
-	elseif level == LogLevel.WARNING then
-		prefix = "[FETCHER WARNING] "
-		color = color or { 255, 255, 100, 255 } -- Yellow
-	elseif level == LogLevel.SUCCESS then
-		prefix = "[FETCHER SUCCESS] "
-		color = color or { 0, 255, 140, 255 } -- Bright Green
-	elseif level == LogLevel.INFO then
-		if not isDebugMode then
-			return
-		end
-		prefix = "[FETCHER INFO] "
-		color = color or { 100, 255, 255, 255 } -- Cyan
-	elseif level == LogLevel.DEBUG then
-		if not isDebugMode then
-			return
-		end
-		prefix = "[FETCHER DEBUG] "
-		color = color or { 180, 180, 180, 255 } -- Grey
-	end
-
-	color = color or defaultColor
-	printc(color[1], color[2], color[3], color[4], prefix .. message)
-end
 
 ---- State tracking
 Fetcher.State = {
@@ -153,7 +93,7 @@ function Fetcher.Start()
 		return
 	end
 
-	Log(LogLevel.INFO, "[FETCHER] Starting stutter-free state-machine fetch")
+	Logger.Debug("Fetcher", "[FETCHER] Starting stutter-free state-machine fetch")
 	Parsers.ResetStats()
 
 	local state = Fetcher.State
@@ -174,7 +114,6 @@ function Fetcher.Start()
 	state.onlineEnqueued = false
 	state.onlinePendingCount = 0
 	state.onlineResponses = {}
-	Database.State.suppressFullSave = true
 end
 
 -- Core Tick function (called every frame from Draw/Scheduler)
@@ -196,10 +135,10 @@ function Fetcher.Tick()
 	-- STATE: LOCAL_SCAN
 	--------------------------------------------------------
 	if state.mode == "LOCAL_SCAN" then
-		Log(LogLevel.INFO, "[FETCHER] Scanning for local imports...")
+		Logger.Debug("Fetcher", "[FETCHER] Scanning for local imports...")
 		local importFolderName = "Lua Cheater_Detection/imports"
 		if not filesystem then
-			Log(LogLevel.ERROR, "[FETCHER] filesystem API unavailable, skipping local scan")
+			Logger.Error("Fetcher", "[FETCHER] filesystem API unavailable, skipping local scan")
 			state.mode = "ONLINE_FETCH"
 			return
 		end
@@ -270,7 +209,7 @@ function Fetcher.Tick()
 		local sep = package.config:sub(1, 1) or "/"
 		local fullPath = state.fullImportPath .. sep .. fileName
 
-		Log(LogLevel.INFO, "[FETCHER] Reading local file: " .. fileName)
+		Logger.Debug("Fetcher", "[FETCHER] Reading local file: " .. fileName)
 
 		-- Use Serializer.readFile
 		local content = Serializer.readFile(fullPath)
@@ -309,7 +248,7 @@ function Fetcher.Tick()
 
 			-- FALLBACK: If JSON decode returned a number, it's likely a raw list of IDs
 			if not players and err and err:find("returned number") then
-				Log(LogLevel.DEBUG, "[FETCHER] Local file appears to be raw IDs, switching to incremental raw parser")
+				Logger.Debug("Fetcher", "[FETCHER] Local file appears to be raw IDs, switching to incremental raw parser")
 				state.rawIterator = content:gmatch("[%w%[%]:_]+")
 				state.playersToProcess = {}
 				state.entryIdx = 1
@@ -326,12 +265,12 @@ function Fetcher.Tick()
 				state.activeSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
 				state.mode = "LOCAL_PARSE"
 			else
-				Log(LogLevel.WARNING, "[FETCHER] Parse error in " .. fileName .. ": " .. tostring(err))
+				Logger.Warning("Fetcher", "[FETCHER] Parse error in " .. fileName .. ": " .. tostring(err))
 				state.fileIdx = state.fileIdx + 1
 				state.mode = "LOCAL_READ"
 			end
 		else
-			Log(LogLevel.WARNING, "[FETCHER] Failed to read or empty local file: " .. fileName)
+			Logger.Warning("Fetcher", "[FETCHER] Failed to read or empty local file: " .. fileName)
 			state.fileIdx = state.fileIdx + 1
 			state.mode = "LOCAL_READ"
 		end
@@ -343,7 +282,7 @@ function Fetcher.Tick()
 		local it = state.rawIterator
 		local source = state.rawPendingSource
 		if not it or not source then
-			Log(LogLevel.ERROR, "[FETCHER] RAW_INCREMENTAL state reached without iterator/source")
+			Logger.Error("Fetcher", "[FETCHER] RAW_INCREMENTAL state reached without iterator/source")
 			state.mode = "ONLINE_FETCH"
 			return
 		end
@@ -381,7 +320,7 @@ function Fetcher.Tick()
 	elseif state.mode == "LOCAL_PARSE" or state.mode == "ONLINE_PARSE" then
 		local players = state.playersToProcess
 		if not players then
-			Log(LogLevel.ERROR, "[FETCHER] playersToProcess missing in PARSE state")
+			Logger.Error("Fetcher", "[FETCHER] playersToProcess missing in PARSE state")
 			state.results.errors = state.results.errors + 1
 			state.mode = "FINISH"
 			return
@@ -393,7 +332,7 @@ function Fetcher.Tick()
 		local isDirtyBefore = Database.State.isDirty
 		local source = state.activeSource
 		if not source then
-			Log(LogLevel.ERROR, "[FETCHER] activeSource missing in PARSE state")
+			Logger.Error("Fetcher", "[FETCHER] activeSource missing in PARSE state")
 			state.results.errors = state.results.errors + 1
 			state.mode = "FINISH"
 			return
@@ -408,7 +347,7 @@ function Fetcher.Tick()
 
 		local s = state.currentSourceStats
 		if not s then
-			Log(LogLevel.ERROR, "[FETCHER] currentSourceStats missing in PARSE state")
+			Logger.Error("Fetcher", "[FETCHER] currentSourceStats missing in PARSE state")
 			state.results.errors = state.results.errors + 1
 			state.mode = "FINISH"
 			return
@@ -458,7 +397,7 @@ function Fetcher.Tick()
 		if state.entryIdx >= #players then
 			local s = state.currentSourceStats
 			if not s or not source then
-				Log(LogLevel.ERROR, "[FETCHER] stats/source missing at PARSE end")
+				Logger.Error("Fetcher", "[FETCHER] stats/source missing at PARSE end")
 				state.mode = "FINISH"
 				return
 			end
@@ -505,13 +444,13 @@ function Fetcher.Tick()
 		state.onlineResponses = {}
 
 		for _, source in ipairs(state.activeSources) do
-			Log(LogLevel.INFO, "[FETCHER] Fetching online source: " .. source.name)
+			Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
 			local fetchUrl = proxyGitHubUrl(source.url)
 			local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
 			if enqueued then
 				state.onlinePendingCount = state.onlinePendingCount + 1
 			else
-				Log(LogLevel.WARNING, "[FETCHER] Failed to queue source: " .. source.name)
+				Logger.Warning("Fetcher", "[FETCHER] Failed to queue source: " .. source.name)
 				state.results.errors = state.results.errors + 1
 			end
 		end
@@ -540,13 +479,13 @@ function Fetcher.Tick()
 		local responseError = responsePacket and responsePacket.error or nil
 
 		if responseError then
-			Log(LogLevel.WARNING, "[FETCHER] Failed to fetch " .. (source and source.name or "unknown source"))
+			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. (source and source.name or "unknown source"))
 			state.results.errors = state.results.errors + 1
 			return
 		end
 
 		if not source then
-			Log(LogLevel.ERROR, "[FETCHER] Missing source after HTTP response")
+			Logger.Error("Fetcher", "[FETCHER] Missing source after HTTP response")
 			state.results.errors = state.results.errors + 1
 			return
 		end
@@ -554,7 +493,7 @@ function Fetcher.Tick()
 		if response and response ~= "" then
 			-- Basic HTML check
 			if response:match("<html") or response:match("<HTML") then
-				Log(LogLevel.WARNING, "[FETCHER] HTML Error page from " .. source.name)
+				Logger.Warning("Fetcher", "[FETCHER] HTML Error page from " .. source.name)
 				state.results.errors = state.results.errors + 1
 				return
 			end
@@ -565,7 +504,7 @@ function Fetcher.Tick()
 			if source.parser == "tf2db" then
 				players, err = Parsers.GetPlayersFromJSON(response)
 			elseif source.parser == "raw" then
-				Log(LogLevel.DEBUG, "[FETCHER] Online source is raw IDs, switching to incremental raw parser")
+				Logger.Debug("Fetcher", "[FETCHER] Online source is raw IDs, switching to incremental raw parser")
 				state.rawIterator = response:gmatch("[%w%[%]:_]+")
 				state.playersToProcess = {}
 				state.entryIdx = 1
@@ -585,11 +524,11 @@ function Fetcher.Tick()
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 				state.mode = "ONLINE_PARSE"
 			else
-				Log(LogLevel.WARNING, "[FETCHER] Parse error in " .. source.name .. ": " .. tostring(err))
+				Logger.Warning("Fetcher", "[FETCHER] Parse error in " .. source.name .. ": " .. tostring(err))
 				state.results.errors = state.results.errors + 1
 			end
 		else
-			Log(LogLevel.WARNING, "[FETCHER] Failed to fetch " .. source.name)
+			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. source.name)
 			state.results.errors = state.results.errors + 1
 		end
 
@@ -609,7 +548,7 @@ function Fetcher.ImportLocal(isAsync)
 		Fetcher.Start() -- Redirect to the safe state machine
 	else
 		-- Sync version only for small internal calls (unused normally now)
-		Log(LogLevel.WARNING, "[FETCHER] Sync ImportLocal is deprecated. Use async.")
+		Logger.Warning("Fetcher", "[FETCHER] Sync ImportLocal is deprecated. Use async.")
 	end
 end
 
@@ -619,8 +558,8 @@ function Fetcher.FinishFetch()
 	local results = Fetcher.State.results
 
 	if isDebugMode then
-		Log(
-			LogLevel.INFO,
+		Logger.Debug(
+			"Fetcher",
 			string.format(
 				"Fetch completed in %.2f seconds. Total Added: %d, Total Updated: %d, Errors: %d",
 				elapsedTime,
@@ -648,16 +587,15 @@ function Fetcher.FinishFetch()
 	end
 
 	Fetcher.State.isRunning = false
-	Database.State.suppressFullSave = false
 	if Database.State.isDirty then
 		Database.SaveDatabase()
 	end
-	Log(LogLevel.DEBUG, "Fetch process finished")
+	Logger.Debug("Fetcher", "Fetch process finished")
 end
 
 function Fetcher.GetStatus()
 	return { running = Fetcher.State.isRunning, mode = Fetcher.State.mode }
 end
 
-Log(LogLevel.DEBUG, "[FETCHER] >>> Module execution finished. Returning Fetcher table.")
+Logger.Debug("Fetcher", "[FETCHER] >>> Module execution finished. Returning Fetcher table.")
 return Fetcher
