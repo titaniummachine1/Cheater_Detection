@@ -215,15 +215,12 @@ function Common.IsCheater(playerInfo)
 	local steamId = nil
 
 	if type(playerInfo) == "number" and playerInfo < 101 then
-		-- Assuming playerInfo is the index
-		local targetIndex = playerInfo
-		local targetPlayer = nil
-
-		-- Find the player with the same index
-		for _, player in ipairs(G.players) do
-			if player:GetIndex() == targetIndex then
-				targetPlayer = player
-				break
+		-- playerInfo is a player index; resolve to SteamID64 via entity
+		local ent = entities.GetByIndex(playerInfo)
+		if ent then
+			steamId = Common.GetSteamID64(ent)
+			if type(steamId) ~= "string" then
+				steamId = nil
 			end
 		end
 	elseif type(playerInfo) == "string" then

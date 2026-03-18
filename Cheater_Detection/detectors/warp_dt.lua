@@ -31,6 +31,15 @@ local function ensureConsumer()
 	registeredConsumer = true
 end
 
+-- Burst detection window: DT/Warp exploits typically shift simulation time by
+-- 18–64 ticks at 66 Hz (≈0.273–0.970 s). Constants are in 66 Hz ticks; they are
+-- converted to the actual server tick rate dynamically at runtime.
+local BURST_MIN_TICKS_66HZ = 18.0
+local BURST_MAX_TICKS_66HZ = 64.0
+
+-- Per-player cooldown between consecutive warp events (~0.364 s ≈ 24 ticks at 66 Hz).
+local WARP_COOLDOWN_TICKS_66HZ = 24.0
+
 -- Per-player pattern tracking
 local playerStats = {} -- id -> { events = {tick1, tick2...} }
 
@@ -155,8 +164,8 @@ function WarpDT.ProcessPlayer(playerState)
 	-- Look for a "Burst" event (large simulation time shift)
 	-- Exploits like DT/Warp usually burst ~0.273 s–0.970 s (18–64 ticks at 66 Hz) to be effective.
 	-- Standard fakelag is usually ~14–15 ticks. Thresholds scale with tick rate.
-	local burstMin = math.floor(18.0 / 66.0 / globals.TickInterval() + 0.5)
-	local burstMax = math.floor(64.0 / 66.0 / globals.TickInterval() + 0.5)
+	local burstMin = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+	local burstMax = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	local burstAmount = 0
 	for _, d in ipairs(deltaTicks) do
 		if d > burstMin and d < burstMax then
@@ -178,7 +187,7 @@ function WarpDT.ProcessPlayer(playerState)
 			return
 		end
 
-		if not data.lastWarpTick or (curTick - data.lastWarpTick) > math.floor(24.0 / 66.0 / globals.TickInterval() + 0.5) then
+		if not data.lastWarpTick or (curTick - data.lastWarpTick) > math.floor(WARP_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5) then
 			-- If many players burst at the same tick it is a server/network hitch — skip.
 			if isServerHitch(curTick) then
 				-- Arm the global window so latecomers this burst are also suppressed.

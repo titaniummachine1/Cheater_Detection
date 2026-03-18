@@ -44,7 +44,7 @@ local function DrawVisuals()
 		local isCheater = Evidence.IsMarkedCheater(steamId)
 
 		-- Check if player has suspicious evidence (at half threshold)
-		local evidenceScore = Evidence.GetEvidenceScore(steamId)
+		local evidenceScore = Evidence.GetScore(steamId)
 		local threshold = G.Menu and G.Menu.Advanced and G.Menu.Advanced.Evidence_Tolerance or 100
 		local isSuspicious = evidenceScore and evidenceScore >= math.floor(threshold / 2)
 

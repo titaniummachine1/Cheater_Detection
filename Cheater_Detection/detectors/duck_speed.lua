@@ -10,6 +10,9 @@ local Events = require("Cheater_Detection.Core.Events")
 
 local DuckSpeed = {}
 
+-- View offset Z when fully crouched in TF2 (engine constant)
+local FULLY_CROUCHED_VIEW_OFFSET_Z = 45
+
 -- State storage for tick accumulation
 local tickCounters = {}
 
@@ -40,7 +43,7 @@ function DuckSpeed.ProcessPlayer(playerState)
 
 	-- Get View Offset (Fully crouched check)
 	local viewOffsetZ = entity:GetPropVector("localdata", "m_vecViewOffset[0]").z
-	local isFullyCrouched = (math.floor(viewOffsetZ) == 45)
+	local isFullyCrouched = (math.floor(viewOffsetZ) == FULLY_CROUCHED_VIEW_OFFSET_Z)
 
 	if onGround and ducking and isFullyCrouched then
 		-- Calculate Max Speed

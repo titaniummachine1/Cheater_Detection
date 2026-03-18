@@ -64,8 +64,6 @@ local function SendAlert(outputConfig, messageConfig)
 	end
 
 	local sentToExternalChannel = false
-	local allowParty = messageConfig.allowParty
-	if allowParty == nil then allowParty = true end
 
 	if allowParty and outputConfig.Party then
 		SendPartyChatMessage(messageColored)

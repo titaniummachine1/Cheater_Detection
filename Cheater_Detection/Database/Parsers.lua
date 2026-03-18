@@ -110,12 +110,6 @@ function Parsers.GetStatsSummary()
 end
 
 -- Formats and prints a statistics bundle for all parsing operations
---[[ DEPRECATED: Printing is now handled by Fetcher using GetStatsSummary and Database.Log
-function Parsers.PrintStatsSummary()
-	print(Parsers.GetStatsSummary())
-end
-]]
--- Restore the function
 function Parsers.PrintStatsSummary()
 	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	-- Only print the summary if in debug mode
