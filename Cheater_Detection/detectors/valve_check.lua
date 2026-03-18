@@ -203,7 +203,7 @@ function ValveCheck.ProcessPlayer(playerState)
 	local now = globals.CurTime()
 	local isDebug = Common.IsDebugEnabled()
 	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
-	local useSteamHistory = SteamHistory.HasKey and SteamHistory.HasKey()
+	local useSteamHistory = SteamHistory.IsEnabled and SteamHistory.IsEnabled()
 	runDeferredSweep()
 
 	-- Skip Bots (Non-SteamID64)
@@ -318,8 +318,16 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	if useSteamHistory then
-		if checkFlags.steamHistoryChecked then
-			checkFlags.valveGroupChecked = true
+		if not checkFlags.valveGroupChecked then
+			if SteamLookup.IsGroupMemberID64(id) then
+				checkFlags.valveGroupChecked = true
+				applyValveFlag(playerState, "Valve Steam Group Member")
+			elseif SteamLookup.IsGroupFetchComplete and SteamLookup.IsGroupFetchComplete() then
+				checkFlags.valveGroupChecked = true
+			end
+		end
+
+		if checkFlags.steamHistoryChecked and checkFlags.valveGroupChecked then
 			checkFlags.vacBanChecked = true
 			checkFlags.commBanChecked = true
 			playerState.flags = playerState.flags | Constants.Flags.CHECKED

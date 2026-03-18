@@ -98,6 +98,12 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	if not hasSearchedGroup then
+		SteamLookup.RefreshValveGroup()
+		hasSearchedGroup = true
+	end
+	SteamLookup.TickGroupFetch()
+
 	-- Auto-fetching is disabled per user request.
 	-- Use the menu to manually refresh sources if needed.
 
@@ -167,6 +173,7 @@ local function OnFireGameEvent(event)
 		-- Decay is handled globally by heartbeat now
 	elseif name == "game_newmap" or name == "teamplay_round_start" then
 		-- Reset all "checked" states on map change so we re-verify everyone
+		hasSearchedGroup = false
 		PlayerCache.ResetCheckedState()
 		PlayerCache.Cleanup()
 	end

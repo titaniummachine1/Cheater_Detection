@@ -302,6 +302,7 @@ local function setSteamHistoryChecks(steamID, entry)
 	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
 	checkFlags.steamHistoryChecked = true
 
+	local hasEntry = entry ~= nil
 	local responseHasVac =
 		entry
 		and (
@@ -354,6 +355,13 @@ local function setSteamHistoryChecks(steamID, entry)
 		if isCommBanned then
 			playerState.flags = playerState.flags | Constants.Flags.COMM_BANNED
 		end
+	end
+
+	-- In a successful batch, a missing player entry means "not found/clean" for this source.
+	-- Mark both checks as completed so detectors do not fall back to per-player profile HTTP.
+	if not hasEntry then
+		checkFlags.vacBanChecked = true
+		checkFlags.commBanChecked = true
 	end
 	if checkFlags.vacBanChecked and checkFlags.commBanChecked then
 		playerState.externalChecked = true
@@ -714,6 +722,11 @@ end
 function SteamHistory.HasKey()
 	local cfg = getConfig()
 	return cfg and cfg.ApiKey and cfg.ApiKey ~= ""
+end
+
+function SteamHistory.IsEnabled()
+	local scannerEnabled = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.SteamHistory
+	return scannerEnabled == true and SteamHistory.HasKey() and not state.temporarilyDisabled
 end
 
 function SteamHistory.IsTemporarilyDisabled()
