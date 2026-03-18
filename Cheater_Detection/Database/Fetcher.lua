@@ -64,7 +64,12 @@ local function ShouldRelaxFrameLimits()
 	local aliveOk, alive = pcall(function()
 		return localPlayer:IsAlive()
 	end)
-	return not (aliveOk and alive)
+	-- Only relax when we can positively confirm the player is dead.
+	-- If the IsAlive() call itself errors, keep throttle active (assume alive).
+	if not aliveOk then
+		return false
+	end
+	return not alive
 end
 
 local function checkRequirements()
@@ -373,7 +378,9 @@ function Fetcher.Tick()
 
 		for i = startIdx, #players do
 			count = count + 1
-			state.entryIdx = i
+			-- Advance entryIdx to the next entry to process so that on the
+			-- following tick we resume from here, not re-process entry i.
+			state.entryIdx = i + 1
 
 			local player = players[i]
 			s.processed = s.processed + 1
@@ -412,7 +419,7 @@ function Fetcher.Tick()
 			end
 		end
 
-		if state.entryIdx >= #players then
+		if state.entryIdx > #players then
 			if not s or not source then
 				Logger.Error("Fetcher", "[FETCHER] stats/source missing at PARSE end")
 				state.mode = "FINISH"

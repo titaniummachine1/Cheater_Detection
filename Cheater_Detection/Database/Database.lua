@@ -132,18 +132,6 @@ local function OnFireEvent(event)
 		end
 	end
 
-	-- Trigger save when local player spawns (respawn after death)
-	if eventName == "player_spawn" then
-		local spawnedID = event:GetInt("userid")
-		local spawnedEntity = entities.GetByUserID(spawnedID)
-
-		local isLocalSpawn = spawnedEntity and localPlayer and spawnedEntity:GetIndex() == localPlayer:GetIndex()
-		if isLocalSpawn then
-			Logger.Debug("Database", "[DB] Local player spawned, triggering save...")
-			Database.SaveDatabase()
-		end
-	end
-
 	-- Trigger save on map change only (not round_start — fires every round)
 	if eventName == "game_newmap" then
 		Logger.Debug("Database", "[DB] Map change, triggering save...")
