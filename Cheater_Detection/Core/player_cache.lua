@@ -3,7 +3,7 @@
      Replaces separate FastPlayers + PlayerCache split.
 
      Detector API (CreateMove loop):
-       PlayerCache.Get(ply)       → { id, wrap, flags, score, externalChecked, isFriend, history, current }
+       PlayerCache.Get(ply)       → { id, wrap, flags, score, externalChecked, checkFlags, isFriend, history, current }
        PlayerCache.GetByID(id)    → same state table, lookup by steamID64 string
 
      View API (render / misc path — replaces FastPlayers):
@@ -103,6 +103,32 @@ end
 
 -- ── Detector API ──────────────────────────────────────────────────────────────
 
+local function newCheckFlags()
+	return {
+		valveID64Checked = false,
+		valveSteam2Checked = false,
+		valveItemBadgeChecked = false,
+		valveGroupChecked = false,
+		vacBanChecked = false,
+		commBanChecked = false,
+		steamHistoryChecked = false,
+		profileLookupQueued = false,
+	}
+end
+
+---Ensure per-check flags table exists for a player state.
+---@param state table
+---@return table
+function PlayerCache.EnsureCheckFlags(state)
+	if not state then
+		return newCheckFlags()
+	end
+	if type(state.checkFlags) ~= "table" then
+		state.checkFlags = newCheckFlags()
+	end
+	return state.checkFlags
+end
+
 ---Get or create active state for a player (CreateMove / detector path)
 ---@param ply Entity
 ---@return table|nil
@@ -138,6 +164,7 @@ function PlayerCache.Get(ply)
 			flags           = initFlags,
 			score           = initScore,
 			externalChecked = false,
+			checkFlags      = newCheckFlags(),
 			isFriend        = Common.IsFriend and Common.IsFriend(ply, true) or false,
 			lastUpdate      = globals.TickCount(),
 		}
@@ -198,6 +225,9 @@ end
 function PlayerCache.ResetCheckedState()
 	for _, state in pairs(activeSet) do
 		state.externalChecked = false
+		state.itemChecked = false
+		state.profileChecked = false
+		state.checkFlags = newCheckFlags()
 	end
 end
 

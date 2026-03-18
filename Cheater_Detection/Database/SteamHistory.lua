@@ -278,6 +278,98 @@ local function flagPlayer(steamID, context, entry)
 	})
 end
 
+local function toBool(value)
+	if value == true then
+		return true
+	end
+	if type(value) == "number" then
+		return value ~= 0
+	end
+	if type(value) == "string" then
+		local lowered = value:lower()
+		return lowered == "1" or lowered == "true" or lowered == "yes" or lowered == "banned"
+	end
+	return false
+end
+
+local function setSteamHistoryChecks(steamID, entry)
+	local playerState = PlayerCache.GetByID(steamID)
+	if not playerState then
+		return
+	end
+
+	local oldFlags = playerState.flags
+	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
+	checkFlags.steamHistoryChecked = true
+
+	local responseHasVac =
+		entry
+		and (
+			entry.VACBanned ~= nil
+			or entry.vacBanned ~= nil
+			or entry.vacbanned ~= nil
+			or entry.NumberOfVACBans ~= nil
+			or entry.numberOfVACBans ~= nil
+		)
+	local responseHasComm =
+		entry
+		and (
+			entry.CommunityBanned ~= nil
+			or entry.communityBanned ~= nil
+			or entry.EconomyBan ~= nil
+			or entry.economyBan ~= nil
+			or entry.tradeBanned ~= nil
+		)
+
+	local isVacBanned = false
+	local isCommBanned = false
+	if entry then
+		isVacBanned = toBool(entry.VACBanned)
+			or toBool(entry.vacBanned)
+			or toBool(entry.vacbanned)
+			or tonumber(entry.NumberOfVACBans or entry.numberOfVACBans or 0) > 0
+		isCommBanned = toBool(entry.CommunityBanned)
+			or toBool(entry.communityBanned)
+			or toBool(entry.tradeBanned)
+			or (
+				type(entry.EconomyBan) == "string"
+				and entry.EconomyBan ~= ""
+				and entry.EconomyBan:lower() ~= "none"
+			)
+			or (
+				type(entry.economyBan) == "string"
+				and entry.economyBan ~= ""
+				and entry.economyBan:lower() ~= "none"
+			)
+	end
+
+	if responseHasVac then
+		checkFlags.vacBanChecked = true
+		if isVacBanned then
+			playerState.flags = playerState.flags | Constants.Flags.VAC_BANNED
+		end
+	end
+	if responseHasComm then
+		checkFlags.commBanChecked = true
+		if isCommBanned then
+			playerState.flags = playerState.flags | Constants.Flags.COMM_BANNED
+		end
+	end
+	if checkFlags.vacBanChecked and checkFlags.commBanChecked then
+		playerState.externalChecked = true
+		playerState.flags = playerState.flags | Constants.Flags.CHECKED
+	end
+
+	if playerState.flags ~= oldFlags and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0 then
+		Database.UpsertCheater(steamID, {
+			name = playerState.wrap and playerState.wrap:GetName() or resolveName(steamID, nil, entry),
+			reason = isVacBanned and "SteamHistory VAC Ban" or "SteamHistory Community/Trade Ban",
+			flags = playerState.flags,
+			score = playerState.score or 0,
+		})
+	end
+end
+
 local function handleError(message, contexts)
 	state.errorCount = state.errorCount + 1
 	state.consecutiveFailures = state.consecutiveFailures + 1
@@ -394,6 +486,7 @@ local function handleBatchResponse(ids, contexts, responseTable)
 		state.scanned[steamID] = true
 		local entry = responseMap[steamID]
 		local context = contexts[steamID] or {}
+		setSteamHistoryChecks(steamID, entry)
 		if entry and matchesKeyword(entry.BanReason or "") then
 			flagged = flagged + 1
 			flagPlayer(steamID, context, entry)
@@ -573,6 +666,19 @@ local function onGameEvent(event)
 		onPlayerTeam(event)
 	elseif name == "game_newmap" or name == "teamplay_round_start" then
 		resetState(true)
+	elseif name == "player_spawn" or name == "player_death" then
+		if not state.enabled then
+			return
+		end
+		local localPlayer = entities.GetLocalPlayer()
+		if not localPlayer then
+			return
+		end
+		local userID = event:GetInt("userid")
+		local ent = entities.GetByUserID(userID)
+		if ent and ent:GetIndex() == localPlayer:GetIndex() then
+			queueCurrentPlayers()
+		end
 	end
 end
 
@@ -624,6 +730,7 @@ function SteamHistory.QueueRescan()
 	state.temporarilyDisabled = false
 	state.currentBatchSize = MAX_BATCH -- Reset to maximum
 	state.rateLimitedRecently = false
+	queueCurrentPlayers()
 	printInfo(
 		{ 0, 200, 255, 255 },
 		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", MAX_BATCH)
