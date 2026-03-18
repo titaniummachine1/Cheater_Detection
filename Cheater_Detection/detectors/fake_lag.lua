@@ -34,6 +34,9 @@ local function getMaxTickDelta()
 	return math.floor(svMaxUnlag / globals.TickInterval() + 0.5)
 end
 
+-- Minimum ticks between consecutive fake-lag flag events per player (~0.333 s ≈ 22 ticks at 66 Hz).
+local FAKELAG_COOLDOWN_TICKS_66HZ = 22.0
+
 -- Per-player tracking
 local playerStats = {} -- id -> { lastSimTime, events = {tick1, tick2...} }
 
@@ -137,7 +140,7 @@ function FakeLag.ProcessPlayer(playerState)
 			if consistent then
 				-- ~0.333 s cooldown between adding weight/marking for FakeLag per suspect (≈22 ticks at 66 Hz)
 				local lastFlag = data.lastFlagTick or 0
-				if (curTick - lastFlag) < math.floor(22.0 / 66.0 / globals.TickInterval() + 0.5) then
+				if (curTick - lastFlag) < math.floor(FAKELAG_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5) then
 					return
 				end
 

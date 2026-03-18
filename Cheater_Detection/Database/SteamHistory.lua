@@ -97,10 +97,6 @@ local function getPlayerNameBySteamID(steamID)
 	for _, player in ipairs(PlayerCache.GetAll(true)) do
 		local id = normalizeSteamID64(player:GetSteamID64())
 		if id == steamID then
-			local info = player:GetInfo()
-			if info and info.Name and info.Name ~= "" then
-				return info.Name
-			end
 			local name = player:GetName()
 			if name and name ~= "" then
 				return name

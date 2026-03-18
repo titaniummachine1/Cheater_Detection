@@ -143,9 +143,8 @@ function WrappedPlayer:GetRawEntity()
 	return self._rawEntity
 end
 
---- Resets per-tick cache (No-op now, handled by timestamps)
+--- Resets per-tick cache (no-op: per-tick expiry is handled by timestamps)
 function WrappedPlayer:ResetCache()
-	-- No-op: We use timestamps now
 end
 
 function WrappedPlayer:GetBasePlayer()
@@ -428,20 +427,6 @@ function WrappedPlayer:SetPriority(level)
 	end
 	local success = pcall(playerlist.SetPriority, self._rawEntity, level)
 	return success
-end
-
-function WrappedPlayer:IsCheater()
-	local info = self:GetInfo()
-	return info and info.IsCheater or false
-end
-
-function WrappedPlayer:MarkCheater(reason)
-	local info = self:GetInfo()
-	if not info then
-		return
-	end
-	info.IsCheater = true
-	info.CheaterReason = reason or info.CheaterReason
 end
 
 function WrappedPlayer.PruneInactive(currentTick)

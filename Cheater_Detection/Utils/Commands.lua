@@ -63,8 +63,8 @@ local function setupSteamHistory()
 
         -- Persist the change
         local Config = require("Cheater_Detection.Utils.Config")
-        if Config and Config.SaveCFG then
-            Config.SaveCFG()
+        if Config and Config.CreateCFG then
+            Config.CreateCFG()
         end
 
 		printc(0, 255, 140, 255, "[SteamHistory] API key stored and module enabled!")

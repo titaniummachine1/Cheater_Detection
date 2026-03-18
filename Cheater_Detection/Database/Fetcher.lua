@@ -395,7 +395,6 @@ function Fetcher.Tick()
 		end
 
 		if state.entryIdx >= #players then
-			local s = state.currentSourceStats
 			if not s or not source then
 				Logger.Error("Fetcher", "[FETCHER] stats/source missing at PARSE end")
 				state.mode = "FINISH"
