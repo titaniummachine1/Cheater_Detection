@@ -323,7 +323,7 @@ function Database.ClearLocalPlayer()
 	if localPlayer then
 		local mySteamID = Common.GetSteamID64(localPlayer)
 		if mySteamID then
-			Database.SetPriority(localPlayer, 0, true)
+			Database.SetPriority(localPlayer, 0)
 			if G.DataBase[mySteamID] then
 				G.DataBase[mySteamID] = nil
 				Database.State.isDirty = true
