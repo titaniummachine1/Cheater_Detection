@@ -36,9 +36,14 @@ function Database.SetPriority(target, priority)
 
 	-- Try entity or numeric index directly
 	if type(target) == "userdata" or (type(target) == "number" and target < 101) then
-		if pcall(playerlist.SetPriority, target, priority) then
+		local ok, err = pcall(playerlist.SetPriority, target, priority)
+		if ok then
 			return true
 		end
+		Logger.Error(
+			"Database",
+			string.format("[DB] SetPriority(entity/index) failed for target=%s priority=%s err=%s", tostring(target), tostring(priority), tostring(err))
+		)
 	end
 
 	-- Resolve to SteamID64 and try
@@ -50,7 +55,8 @@ function Database.SetPriority(target, priority)
 	end
 
 	if steamID64 then
-		if pcall(playerlist.SetPriority, steamID64, priority) then
+		local ok, err = pcall(playerlist.SetPriority, steamID64, priority)
+		if ok then
 			if priority == 10 and G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority then
 				Database.UpsertCheater(steamID64, {
 					name = "Manual Flag",
@@ -59,6 +65,10 @@ function Database.SetPriority(target, priority)
 			end
 			return true
 		end
+		Logger.Error(
+			"Database",
+			string.format("[DB] SetPriority(steamID64) failed for id=%s priority=%s err=%s", tostring(steamID64), tostring(priority), tostring(err))
+		)
 	end
 
 	return false

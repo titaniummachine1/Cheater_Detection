@@ -4,6 +4,8 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local ValveData = require("Cheater_Detection.data.valve_data")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
+local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
+local Config = require("Cheater_Detection.Utils.Config")
 
 local Commands = {}
 local registered = {}
@@ -56,13 +58,11 @@ local function setupSteamHistory()
 		shell.Enable = true -- Enable it automatically when key is set
         
 		-- Force update in the module itself
-		local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 		if SteamHistory and SteamHistory.OnApiKeyUpdated then
 			SteamHistory.OnApiKeyUpdated()
 		end
 
         -- Persist the change
-        local Config = require("Cheater_Detection.Utils.Config")
         if Config and Config.CreateCFG then
             Config.CreateCFG()
         end

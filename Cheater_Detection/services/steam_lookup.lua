@@ -84,7 +84,26 @@ end
 function SteamLookup.CheckProfileAsync(steamID64, callback)
 	local url = "https://steamcommunity.com/profiles/" .. steamID64 .. "/?xml=1"
 	HttpQueue.Enqueue(url, function(data)
+		if type(callback) ~= "function" then
+			print("[SteamLookup] CheckProfileAsync called without valid callback")
+			return
+		end
+
 		if not data or data == "" then
+			print(string.format("[SteamLookup] Empty profile response for %s", tostring(steamID64)))
+			callback(nil)
+			return
+		end
+
+		if type(data) ~= "string" then
+			print(string.format("[SteamLookup] Invalid profile response type for %s: %s", tostring(steamID64), type(data)))
+			callback(nil)
+			return
+		end
+
+		if data:find("<html", 1, true) or data:find("<title", 1, true) then
+			print(string.format("[SteamLookup] HTML/error profile response for %s", tostring(steamID64)))
+			callback(nil)
 			return
 		end
 

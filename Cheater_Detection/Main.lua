@@ -12,8 +12,10 @@ local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local Common = require("Cheater_Detection.Utils.Common")
 require("Cheater_Detection.Utils.Commands")
 require("Cheater_Detection.Misc.ChatPrefix")
+require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
+local Fetcher = require("Cheater_Detection.Database.Fetcher")
 
 -- Detectors
 local ValveCheck = require("Cheater_Detection.detectors.valve_check")
@@ -61,11 +63,7 @@ local function Init()
 	-- Populate global menu config before anything else
 	Config.LoadCFG()
 
-	-- Require the Menu at the end of initialization
-	require("Cheater_Detection.Misc.Visuals.Menu")
-
 	-- Automate Database Fetch (Local then Online) - Respects AutoSync setting
-	local Fetcher = require("Cheater_Detection.Database.Fetcher")
 	if G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false then
 		Fetcher.Start() -- Begin async local import followed by online sync
 	else
