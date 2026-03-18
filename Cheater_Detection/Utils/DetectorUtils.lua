@@ -30,6 +30,10 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
     local oldFlags = playerState.flags
 
     if hardFlag then
+        if (hardFlag & Constants.Flags.CHEATER) ~= 0 then
+            playerState.flags = playerState.flags & ~Constants.Flags.SUSPICIOUS
+            playerState.flags = playerState.flags & ~Constants.Flags.HIGH_RISK
+        end
         playerState.flags = playerState.flags | hardFlag
         playerState.score = 100
     else
