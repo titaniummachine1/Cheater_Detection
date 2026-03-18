@@ -16,7 +16,7 @@ local FakeLag = {}
 local svMaxUnlag = 0.2
 
 local function refreshCvarCache()
-	local val = engine.GetConVar("sv_maxunlag")
+	local val = client.GetConVar("sv_maxunlag")
 	if type(val) == "number" and val > 0 then
 		svMaxUnlag = val
 	else
