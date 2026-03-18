@@ -6,6 +6,7 @@
 local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
+local G = require("Cheater_Detection.Utils.Globals")
 
 local AntiAim = {}
 
@@ -14,6 +15,16 @@ local function isInvalidPitchValue(pitch)
 		return false
 	end
 	return pitch > 89.0 or pitch < -89.0
+end
+
+local function isCorruptedAngleValue(value)
+	if type(value) ~= "number" then
+		return true
+	end
+	if value ~= value or value == math.huge or value == -math.huge then
+		return true
+	end
+	return math.abs(value) > 10000
 end
 
 local function toNumber(v)
@@ -67,6 +78,12 @@ local function readDetectionAngles(wrap, entity, cmd, isLocalDebug)
 		local p = toNumber(pitch)
 		local y = toNumber(yaw)
 		if p == nil then
+			return
+		end
+		if isCorruptedAngleValue(p) then
+			return
+		end
+		if y ~= nil and isCorruptedAngleValue(y) then
 			return
 		end
 		candidates[#candidates + 1] = {
@@ -161,6 +178,10 @@ end
 
 function AntiAim.ProcessPlayer(playerState, cmd)
 	if not playerState or not playerState.wrap or not playerState.id then
+		return
+	end
+
+	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then
 		return
 	end
 

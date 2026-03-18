@@ -11,6 +11,7 @@ local Scheduler = require("Cheater_Detection.Core.scheduler")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local Common = require("Cheater_Detection.Utils.Common")
 require("Cheater_Detection.Utils.Commands")
+require("Cheater_Detection.Misc.ChatPrefix")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
 
@@ -81,9 +82,20 @@ end
 
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
+	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
+		hasSearchedGroup = false
+		return
+	end
+
 	-- Definitive check if we are actually connected to a game server
 	local serverIP = engine.GetServerIP()
 	if not serverIP then
+		hasSearchedGroup = false
+		return
+	end
+
+	local localPlayer = entities.GetLocalPlayer()
+	if not localPlayer or not localPlayer:IsValid() then
 		hasSearchedGroup = false
 		return
 	end
@@ -96,7 +108,7 @@ local function OnCreateMove(cmd)
 
 	for i = 1, #players do
 		local ply = players[i]
-		local isLocalPlayer = (ply == entities.GetLocalPlayer())
+		local isLocalPlayer = (ply == localPlayer)
 		if isLocalPlayer and not isDebugEnabled() then
 			goto continue
 		end
