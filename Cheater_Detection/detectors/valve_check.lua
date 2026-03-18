@@ -2,12 +2,12 @@
      Valve Employee Detector
 
      Detection Layers:
-        1. SteamID64 static list (instant)
+       1. SteamID64 static list (instant)
        2. Item badge / Valve-quality item (run via deferred checks)
-        3. Async Steam Group + ban profile check
-           - Retried every PROFILE_RECHECK_INTERVAL seconds if not yet confirmed
-           - A failed/empty HTTP response does NOT permanently set externalChecked;
-             the player will be re-queued on the next interval.
+       3. Async Steam Group + ban profile check
+          - Retried every PROFILE_RECHECK_INTERVAL seconds if not yet confirmed
+          - A failed/empty HTTP response does NOT permanently set externalChecked;
+            the player will be re-queued on the next interval.
 
      Console debug output (requires G.Menu.Advanced.debug = true):
        Logs every check attempt, result, and skip reason.
@@ -199,7 +199,7 @@ function ValveCheck.ProcessPlayer(playerState)
 		return
 	end
 
-	local id = playerState.id
+	local id = tostring(playerState.id)
 	local now = globals.CurTime()
 	local isDebug = Common.IsDebugEnabled()
 	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
@@ -207,7 +207,7 @@ function ValveCheck.ProcessPlayer(playerState)
 	runDeferredSweep()
 
 	-- Skip Bots (Non-SteamID64)
-	if not tostring(id):match("^7656119%d+$") or #tostring(id) ~= 17 then
+	if not id:match("^7656119%d+$") or #id ~= 17 then
 		return
 	end
 

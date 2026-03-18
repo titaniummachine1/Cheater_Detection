@@ -287,7 +287,7 @@ local function toBool(value)
 	end
 	if type(value) == "string" then
 		local lowered = value:lower()
-		return lowered == "1" or lowered == "true" or lowered == "yes" or lowered == "banned"
+		return lowered == "1" or lowered == "true"
 	end
 	return false
 end
