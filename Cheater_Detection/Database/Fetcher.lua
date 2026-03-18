@@ -53,6 +53,25 @@ local function proxyGitHubUrl(url)
 	return url
 end
 
+-- Returns true when frame-time budget restrictions on the fetcher can be
+-- relaxed: either the local player is dead (no active gameplay to stutter)
+-- or we are not connected to a game at all.
+local function ShouldRelaxFrameLimits()
+	local ok, localPlayer = pcall(entities.GetLocalPlayer)
+	if not ok or not localPlayer then
+		return true -- not in a game → safe to run freely
+	end
+	local aliveOk, alive = pcall(function()
+		return localPlayer:IsAlive()
+	end)
+	-- Only relax when we can positively confirm the player is dead.
+	-- If the IsAlive() call itself errors, keep throttle active (assume alive).
+	if not aliveOk then
+		return false
+	end
+	return not alive
+end
+
 local function checkRequirements()
 	if type(G) ~= "table" or type(G.DataBase) ~= "table" then
 		return false
@@ -288,7 +307,9 @@ function Fetcher.Tick()
 		end
 
 		local count = 0
-		local limit = 500 -- Parse 500 words per frame (very fast)
+		-- When the local player is dead there is no gameplay to protect from
+		-- frame spikes, so process the entire iterator in one go.
+		local limit = ShouldRelaxFrameLimits() and math.huge or 500
 
 		while count < limit do
 			local word = it()
@@ -327,7 +348,9 @@ function Fetcher.Tick()
 		end
 		local startIdx = state.entryIdx
 		local count = 0
-		local chunkSize = 20 -- STRICT 20 entries per frame to eliminate stutters
+		-- When the local player is dead there is no active gameplay, so we can
+		-- process the entire list without worrying about frame-time spikes.
+		local chunkSize = ShouldRelaxFrameLimits() and math.huge or 20
 
 		local isDirtyBefore = Database.State.isDirty
 		local source = state.activeSource
@@ -355,7 +378,9 @@ function Fetcher.Tick()
 
 		for i = startIdx, #players do
 			count = count + 1
-			state.entryIdx = i
+			-- Advance entryIdx to the next entry to process so that on the
+			-- following tick we resume from here, not re-process entry i.
+			state.entryIdx = i + 1
 
 			local player = players[i]
 			s.processed = s.processed + 1
@@ -394,7 +419,7 @@ function Fetcher.Tick()
 			end
 		end
 
-		if state.entryIdx >= #players then
+		if state.entryIdx > #players then
 			if not s or not source then
 				Logger.Error("Fetcher", "[FETCHER] stats/source missing at PARSE end")
 				state.mode = "FINISH"
