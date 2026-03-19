@@ -112,8 +112,11 @@ function Database.GetFilePath()
 	return "Lua Cheater_Detection/database.txt" -- Fallback
 end
 
-function Database.SaveDatabase()
-	if not G.DataBase or not Database.State.isDirty then
+function Database.SaveDatabase(force)
+	if not G.DataBase then
+		return
+	end
+	if not force and not Database.State.isDirty then
 		return
 	end
 
@@ -463,18 +466,17 @@ function Database.RemoveCheater(steamID)
 end
 
 function Database.ForceSave()
-	Database.State.isDirty = true
-	Database.SaveDatabase()
+	Database.SaveDatabase(true)
 	return true
 end
 
 local function DatabaseAutoSaveOnUnload()
-	if not G.DataBase or not Database.State.isDirty then
+	if not G.DataBase then
 		return
 	end
 
 	-- Simple synchronous save on unload
-	Database.SaveDatabase()
+	Database.SaveDatabase(true)
 end
 
 callbacks.Unregister("Unload", "DatabaseAutoSaveOnUnload") -- Ensure no duplicates
