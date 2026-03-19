@@ -27,6 +27,25 @@ local Database = {
 	},
 }
 
+local HARD_PRIORITY_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
+local LOCAL_DEAD_SAVE_INTERVAL = 3
+
+local function ReapplyDetectedPriorities()
+	if not G.DataBase then
+		return
+	end
+	if not (G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority) then
+		return
+	end
+
+	for steamID, entry in pairs(G.DataBase) do
+		local flags = type(entry) == "table" and tonumber(entry.Flags or 0) or 0
+		if type(steamID) == "string" and (flags & HARD_PRIORITY_FLAGS) ~= 0 then
+			pcall(playerlist.SetPriority, steamID, 10)
+		end
+	end
+end
+
 --[[ Public Module Functions ]]
 
 function Database.SetPriority(target, priority)
@@ -42,7 +61,12 @@ function Database.SetPriority(target, priority)
 		end
 		Logger.Error(
 			"Database",
-			string.format("[DB] SetPriority(entity/index) failed for target=%s priority=%s err=%s", tostring(target), tostring(priority), tostring(err))
+			string.format(
+				"[DB] SetPriority(entity/index) failed for target=%s priority=%s err=%s",
+				tostring(target),
+				tostring(priority),
+				tostring(err)
+			)
 		)
 	end
 
@@ -67,7 +91,12 @@ function Database.SetPriority(target, priority)
 		end
 		Logger.Error(
 			"Database",
-			string.format("[DB] SetPriority(steamID64) failed for id=%s priority=%s err=%s", tostring(steamID64), tostring(priority), tostring(err))
+			string.format(
+				"[DB] SetPriority(steamID64) failed for id=%s priority=%s err=%s",
+				tostring(steamID64),
+				tostring(priority),
+				tostring(err)
+			)
 		)
 	end
 
@@ -90,6 +119,7 @@ function Database.SaveDatabase()
 
 	local filepath = Database.GetFilePath()
 	Logger.Debug("Database", "[DB] Synchronous save to disk...")
+	ReapplyDetectedPriorities()
 
 	local cleanedData = {}
 	for k, v in pairs(G.DataBase) do
@@ -142,15 +172,40 @@ local function OnFireEvent(event)
 		end
 	end
 
-	-- Trigger save on map change only (not round_start — fires every round)
-	if eventName == "game_newmap" then
-		Logger.Debug("Database", "[DB] Map change, triggering save...")
+	if eventName == "game_newmap" or eventName == "teamplay_round_start" or eventName == "round_end" then
+		Logger.Debug("Database", "[DB] Session boundary event, triggering save...")
 		Database.SaveDatabase()
 	end
 end
 
 callbacks.Unregister("FireGameEvent", "Database_Events")
 callbacks.Register("FireGameEvent", "Database_Events", OnFireEvent)
+
+local function OnCreateMoveAutoSave()
+	if not Database.State.isDirty then
+		return
+	end
+
+	local localPlayer = entities.GetLocalPlayer()
+	if not localPlayer or not localPlayer:IsValid() then
+		return
+	end
+
+	if localPlayer:IsAlive() then
+		return
+	end
+
+	local now = os.time()
+	if Database.State.lastSave ~= 0 and (now - Database.State.lastSave) < LOCAL_DEAD_SAVE_INTERVAL then
+		return
+	end
+
+	Logger.Debug("Database", "[DB] Local player is dead, triggering save...")
+	Database.SaveDatabase()
+end
+
+callbacks.Unregister("CreateMove", "Database_LocalDeadAutoSave")
+callbacks.Register("CreateMove", "Database_LocalDeadAutoSave", OnCreateMoveAutoSave)
 
 function Database.LoadDatabase(silent, force)
 	if Database.State.isInitialized and not force then
