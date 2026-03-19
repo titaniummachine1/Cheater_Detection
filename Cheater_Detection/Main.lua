@@ -203,6 +203,10 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	if valveDisconnectTriggered then
+		return
+	end
+
 	if not hasSearchedGroup then
 		SteamLookup.RefreshValveGroup()
 		hasSearchedGroup = true
@@ -241,6 +245,9 @@ local function OnCreateMove(cmd)
 			runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
 			runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
 			enforceValveAutoDisconnect(pState)
+			if valveDisconnectTriggered then
+				return
+			end
 		end
 
 		::continue::
