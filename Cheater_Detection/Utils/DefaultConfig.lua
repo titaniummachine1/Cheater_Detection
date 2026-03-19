@@ -9,13 +9,13 @@ local Default_Config = {
 		Chat_Prefix = true,
 		Cheater_Tags = true,
 		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
-        AutoSync = true, -- Automatically fetch databases on startup
+		AutoSync = true, -- Automatically fetch databases on startup
 	},
 
-    Scanner = {
-        SteamHistory = false,
-        ValveCheck = true,
-    },
+	Scanner = {
+		SteamHistory = false,
+		ValveCheck = true,
+	},
 
 	Advanced = {
 		Evidence_Tolerance = 100, -- Evidence score threshold to mark as cheater
@@ -34,11 +34,29 @@ local Default_Config = {
 		Enable = true,
 		SuspicionCooldown = 10, -- Seconds between per-player suspicion update notifications
 		Channels = {
-			LocalChat  = true,  -- Only you see it (client.ChatPrintf)
+			LocalChat = true, -- Only you see it (client.ChatPrintf)
 			PublicChat = false, -- Entire server sees it (say)
-			Party      = false, -- Your party only (say_party)
-			Toast      = true,  -- lnxLib corner pop-up
-			Console    = true,  -- Console print
+			Party = false, -- Your party only (say_party)
+			Toast = true, -- lnxLib corner pop-up
+			Console = true, -- Console print
+		},
+		Overrides = {
+			UseCheaterOverride = false,
+			Cheater = {
+				LocalChat = true,
+				PublicChat = false,
+				Party = false,
+				Toast = true,
+				Console = true,
+			},
+			UseValveOverride = false,
+			Valve = {
+				LocalChat = true,
+				PublicChat = false,
+				Party = false,
+				Toast = true,
+				Console = true,
+			},
 		},
 		SuspicionThreshold = 30, -- Only notify above this %
 	},
@@ -84,25 +102,28 @@ local Default_Config = {
 			ValveAutoDisconnect = false,
 			-- Default output channels (used if no override)
 			DefaultOutput = {
+				LocalChat = true,
 				PublicChat = false,
-				PartyChat = false,
-				ClientChat = true,
+				Party = false,
+				Toast = false,
 				Console = true,
 			},
 			-- Cheater-specific overrides
 			UseCheaterOverride = false,
 			CheaterOverride = {
+				LocalChat = true,
 				PublicChat = false,
-				PartyChat = false,
-				ClientChat = true,
+				Party = false,
+				Toast = false,
 				Console = true,
 			},
 			-- Valve employee-specific overrides
 			UseValveOverride = false,
 			ValveOverride = {
+				LocalChat = true,
 				PublicChat = false,
-				PartyChat = true,
-				ClientChat = true,
+				Party = true,
+				Toast = false,
 				Console = true,
 			},
 		},

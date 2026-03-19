@@ -113,10 +113,26 @@ local function SendAlert(outputConfig, messageConfig)
 end
 
 local function GetEffectiveOutput(defaultOutput, overrideOutput, useOverride)
-	if useOverride and overrideOutput then
-		return overrideOutput
+	local function normalizeOutput(output)
+		if not output then
+			return nil
+		end
+		if output.LocalChat == nil and output.ClientChat ~= nil then
+			output.LocalChat = output.ClientChat
+		end
+		if output.Party == nil and output.PartyChat ~= nil then
+			output.Party = output.PartyChat
+		end
+		if output.Toast == nil then
+			output.Toast = false
+		end
+		return output
 	end
-	return defaultOutput
+
+	if useOverride and overrideOutput then
+		return normalizeOutput(overrideOutput)
+	end
+	return normalizeOutput(defaultOutput)
 end
 
 local function GetJoinNotificationsConfig()
