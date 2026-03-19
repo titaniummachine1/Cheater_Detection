@@ -10,7 +10,6 @@ local isProcessing = false
 local lastRequestTime = 0
 local isAlive = true -- Set to false on unload to guard in-flight callbacks
 local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
-local currentCoroutine = nil
 
 local function IsGitHubLikeURL(url)
 	if type(url) ~= "string" then
@@ -52,69 +51,61 @@ end
 -- Force initialization on module load
 InitializeHTTP()
 
---[[ Internal Coroutine Worker ]]
-local function HttpWorker()
-	while isAlive do
-		if #queue > 0 then
-			local now = globals.RealTime()
-			local item = queue[1]
-			local requiredDelay = REQUEST_DELAY
-			if item and (item.noDelay or IsGitHubLikeURL(item.url)) then
-				requiredDelay = 0
+local function ProcessNextRequest()
+	if isProcessing or #queue == 0 then
+		return
+	end
+
+	local now = globals.RealTime()
+	local item = queue[1]
+	local requiredDelay = REQUEST_DELAY
+	if item and (item.noDelay or IsGitHubLikeURL(item.url)) then
+		requiredDelay = 0
+	end
+	if (now - lastRequestTime) < requiredDelay then
+		return
+	end
+
+	item = table.remove(queue, 1)
+	if not item or type(item.callback) ~= "function" then
+		return
+	end
+
+	isProcessing = true
+	lastRequestTime = now
+
+	local success = false
+	local data = nil
+
+	if not InitializeHTTP() then
+		print("[HTTP QUEUE ERROR] http library unavailable")
+		data = "No HTTP Library"
+	else
+		local syncOk, syncResult = pcall(http.Get, item.url)
+		if syncOk and type(syncResult) == "string" and #syncResult > 0 then
+			data = syncResult
+			success = true
+		else
+			data = syncOk and "http.Get() returned empty response" or tostring(syncResult)
+		end
+	end
+
+	if isAlive then
+		if success then
+			local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
+			if not cbStatus then
+				print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
 			end
-			if (now - lastRequestTime) >= requiredDelay then
-				item = table.remove(queue, 1)
-				if item and type(item.callback) == "function" then
-					isProcessing = true
-					lastRequestTime = now
-
-					local success, data = false, nil
-
-					-- Ensure HTTP is initialized before request
-					if not InitializeHTTP() then
-						print("[HTTP QUEUE ERROR] http library unavailable")
-						success = false
-						data = "No HTTP Library"
-					else
-						-- http.GetAsync() fires its callback with an empty body in the current
-						-- Lmaobox build (confirmed: GetAsync length=0 while Get length=24966+).
-						-- Use http.Get() synchronously inside the coroutine; the coroutine yields
-						-- between queue items so the main thread hitch is one request at a time.
-						local syncOk, syncResult = pcall(http.Get, item.url)
-						if syncOk and type(syncResult) == "string" and #syncResult > 0 then
-							data = syncResult
-							success = true
-						else
-							success = false
-							data = syncOk and "http.Get() returned empty response" or tostring(syncResult)
-						end
-					end
-
-					if not isAlive then
-						break
-					end
-
-					if success then
-						local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
-						if not cbStatus then
-							print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-						end
-					else
-						print("[HTTP QUEUE ERROR] Request failed: " .. tostring(data))
-						local cbStatus, cbErr = pcall(item.callback, nil, tostring(data), item.context)
-						if not cbStatus then
-							print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-						end
-					end
-
-					isProcessing = false
-				end
+		else
+			print("[HTTP QUEUE ERROR] Request failed: " .. tostring(data))
+			local cbStatus, cbErr = pcall(item.callback, nil, tostring(data), item.context)
+			if not cbStatus then
+				print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
 			end
 		end
-
-		::next_loop::
-		coroutine.yield() -- Wait for next tick
 	end
+
+	isProcessing = false
 end
 
 --[[ Public API ]]
@@ -142,18 +133,7 @@ function HttpQueue.Tick()
 	if not isAlive then
 		return
 	end
-
-	-- Initialize or restart coroutine if needed
-	if not currentCoroutine or coroutine.status(currentCoroutine) == "dead" then
-		currentCoroutine = coroutine.create(HttpWorker)
-	end
-
-	-- Resume worker
-	local ok, err = coroutine.resume(currentCoroutine)
-	if not ok then
-		print("[HTTP QUEUE ERROR] Worker failed: " .. tostring(err))
-		currentCoroutine = nil
-	end
+	ProcessNextRequest()
 end
 
 --[[ Cleanup ]]
@@ -163,7 +143,6 @@ callbacks.Register("Unload", "HttpQueue_Unload", function()
 	isAlive = false
 	queue = {}
 	isProcessing = false
-	currentCoroutine = nil
 end)
 
 return HttpQueue
