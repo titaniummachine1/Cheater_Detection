@@ -19,20 +19,17 @@ else
 end
 
 local function EditNotificationChannels(label, channels)
-	local options = { "Local Chat", "Public Chat", "Party", "Toast", "Console" }
-	local values = {
-		channels.LocalChat == true,
-		channels.PublicChat == true,
-		channels.Party == true,
-		channels.Toast == true,
-		channels.Console == true,
-	}
-	values = TimMenu.Combo(label, values, options)
-	channels.LocalChat = values[1]
-	channels.PublicChat = values[2]
-	channels.Party = values[3]
-	channels.Toast = values[4]
-	channels.Console = values[5]
+	TimMenu.Text(label)
+	TimMenu.NextLine()
+	channels.LocalChat = TimMenu.Checkbox("Local Chat", channels.LocalChat == true)
+	TimMenu.NextLine()
+	channels.PublicChat = TimMenu.Checkbox("Public Chat", channels.PublicChat == true)
+	TimMenu.NextLine()
+	channels.Party = TimMenu.Checkbox("Party", channels.Party == true)
+	TimMenu.NextLine()
+	channels.Toast = TimMenu.Checkbox("Toast", channels.Toast == true)
+	TimMenu.NextLine()
+	channels.Console = TimMenu.Checkbox("Console", channels.Console == true)
 	TimMenu.NextLine()
 	return channels
 end
@@ -176,7 +173,8 @@ local function DrawMenu()
 
 		if N.Enable then
 			TimMenu.BeginSector("Global Output Settings")
-			N.Channels = N.Channels or { LocalChat = true, PublicChat = false, Party = false, Toast = true, Console = true }
+			N.Channels = N.Channels
+				or { LocalChat = true, PublicChat = false, Party = false, Toast = true, Console = true }
 			EditNotificationChannels("Default channels for all detections", N.Channels)
 
 			TimMenu.Text("Suspicion Filtering:")
@@ -191,7 +189,8 @@ local function DrawMenu()
 			TimMenu.BeginSector("Conditional Overrides")
 			N.Overrides = N.Overrides or {}
 			local OV = N.Overrides
-			OV.Cheater = OV.Cheater or { LocalChat = true, PublicChat = false, Party = false, Toast = true, Console = true }
+			OV.Cheater = OV.Cheater
+				or { LocalChat = true, PublicChat = false, Party = false, Toast = true, Console = true }
 			OV.Valve = OV.Valve or { LocalChat = true, PublicChat = false, Party = false, Toast = true, Console = true }
 			OV.UseCheaterOverride =
 				TimMenu.Checkbox("Unique Channels for Confirmed Cheaters", OV.UseCheaterOverride == true)
