@@ -7,8 +7,6 @@ local Common = {
 	PR = nil,
 }
 
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-
 Common.Json = require("Cheater_Detection.Libs.Json")
 local G = require("Cheater_Detection.Utils.Globals")
 
@@ -290,6 +288,7 @@ end
 
 -- Legacy shim; new code should use HistoryManager.Push directly
 function Common.pushHistory(player)
+	local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 	HistoryManager.Push(player)
 end
 
