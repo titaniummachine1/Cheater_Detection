@@ -152,6 +152,7 @@ end
 -- [[ Initialization ]]
 local function Init()
 	Events.Reset()
+	JoinNotifications.Init()
 	NotificationService.Init()
 
 	-- Populate global menu config before anything else

@@ -5,12 +5,30 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Database = require("Cheater_Detection.Database.Database")
 local Sources = require("Cheater_Detection.Database.Sources")
 local Common = require("Cheater_Detection.Utils.Common")
+local Constants = require("Cheater_Detection.Core.constants")
+local Events = require("Cheater_Detection.Core.Events")
 
 --[[ Module Declaration ]]
 local JoinNotifications = {}
 
 --[[ State ]]
 local hasValidatedOnLoad = false
+local sentAlerts = {}
+local OnPlayerStateChange
+
+local function resetSentAlerts()
+	sentAlerts = {}
+end
+
+local function getSentAlertState(steamID64)
+	if not sentAlerts[steamID64] then
+		sentAlerts[steamID64] = {
+			valve = false,
+			cheater = false,
+		}
+	end
+	return sentAlerts[steamID64]
+end
 
 local function NormalizeSteamID64(rawID)
 	if not rawID then
@@ -114,6 +132,10 @@ local function GetJoinNotificationsConfig()
 	return config
 end
 
+local function IsRuntimeCheaterFlag(flags)
+	return (flags & (Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0
+end
+
 local function DispatchCheaterAlert(config, params)
 	if not config or not config.CheckCheater then
 		return false
@@ -182,6 +204,12 @@ function JoinNotifications.SendValveAlert(params)
 	return DispatchValveAlert(config, params or {})
 end
 
+function JoinNotifications.Init()
+	resetSentAlerts()
+	Events.Subscribe("OnPlayerStateChange", OnPlayerStateChange)
+	return true
+end
+
 -- Check all players currently in the game for Valve employees and cheaters
 -- If Valve found and auto-disconnect enabled, leave server
 local function ValidateAllPlayers()
@@ -195,6 +223,7 @@ local function ValidateAllPlayers()
 		if player and player:IsValid() then
 			local steamID64 = NormalizeSteamID64(Common.GetSteamID64(player))
 			if steamID64 then
+				local sentState = getSentAlertState(steamID64)
 				-- Check Valve employee first (higher priority)
 				if config.CheckValve and Sources.IsValveEmployee(steamID64) then
 					local alertSent = DispatchValveAlert(config, {
@@ -202,6 +231,7 @@ local function ValidateAllPlayers()
 						tail = config.ValveAutoDisconnect and "is in the server - Leaving game" or "is in the server",
 						allowParty = false,
 					})
+					sentState.valve = alertSent == true
 					if alertSent and config.ValveAutoDisconnect then
 						client.Command("disconnect", true)
 						return
@@ -215,9 +245,53 @@ local function ValidateAllPlayers()
 							reason = cheaterData.Reason,
 							allowParty = false,
 						})
+						sentState.cheater = true
 					end
 				end
 			end
+		end
+	end
+end
+
+OnPlayerStateChange = function(playerState, reason)
+	local config = GetJoinNotificationsConfig()
+	if not config or not playerState or not playerState.id then
+		return
+	end
+
+	local steamID64 = NormalizeSteamID64(playerState.id)
+	if not steamID64 then
+		return
+	end
+
+	local sentState = getSentAlertState(steamID64)
+	local flags = tonumber(playerState.flags or 0) or 0
+	local playerName = (playerState.wrap and playerState.wrap.GetName and playerState.wrap:GetName()) or steamID64
+
+	if config.CheckValve and (flags & Constants.Flags.VALVE) ~= 0 and not sentState.valve then
+		local alertSent = DispatchValveAlert(config, {
+			name = playerName,
+			tail = config.ValveAutoDisconnect and "is in the server - Leaving game" or "is in the server",
+			allowParty = false,
+		})
+		sentState.valve = alertSent == true
+		if alertSent and config.ValveAutoDisconnect then
+			client.Command("disconnect", true)
+		end
+		return
+	end
+
+	if config.CheckCheater and IsRuntimeCheaterFlag(flags) and not sentState.cheater then
+		local dbEntry = Database.GetCheater(steamID64)
+		local alertReason = reason or (dbEntry and dbEntry.Reason) or "Unknown"
+		local alertSent = DispatchCheaterAlert(config, {
+			name = playerName,
+			reason = alertReason,
+			tail = string.format("is in the server (Suspected of: %s)", alertReason),
+			allowParty = false,
+		})
+		if alertSent then
+			sentState.cheater = true
 		end
 	end
 end
@@ -294,6 +368,7 @@ local function OnPlayerDisconnect(event)
 	if not steamID64 then
 		return
 	end
+	sentAlerts[steamID64] = nil
 
 	-- Don't show disconnect messages for Valve employees (we left the game)
 	-- Only check cheaters
@@ -318,6 +393,8 @@ local function OnGameEvent(event)
 		OnPlayerConnect(event)
 	elseif eventName == "player_disconnect" then
 		OnPlayerDisconnect(event)
+	elseif eventName == "game_newmap" or eventName == "teamplay_round_start" then
+		resetSentAlerts()
 	end
 end
 
