@@ -13,8 +13,8 @@ assert(globals, "http_test: globals missing")
 
 local CONFIG = {
     MODE = "staircase",       -- sequential | burst | staircase | plateau
-    URL_MODE = "round_robin", -- round_robin | fixed
-    FIXED_URL_INDEX = 2,
+    URL_MODE = "fixed",       -- round_robin | fixed
+    FIXED_URL_INDEX = 1,
     WAIT_FOR_SAFE_WINDOW = false,
     AUTO_START_DELAY = 2.0,
     ROUND_DELAY = 5.0,
@@ -26,7 +26,7 @@ local CONFIG = {
     BURST_COUNT = 6,
     PLATEAU_BURST = 6,
     PLATEAU_ROUNDS = 12,
-    STAIRCASE_STEPS = { 2, 3, 4, 5, 6 },
+    STAIRCASE_STEPS = { 1, 2, 3 },
     MAX_CALLBACK_SLOTS = 32,
     SOURCES = {
         {
@@ -69,6 +69,12 @@ local State = {
     roundDispatched = false,
     requestsSent = 0,
     requestsCompleted = 0,
+    requestsOk = 0,
+    requestsShort = 0,
+    requestsEmpty = 0,
+    requestsTimeout = 0,
+    requestsDispatchError = 0,
+    requestsDropped = 0,
     requestsFailed = 0,
     inFlight = 0,
     peakInFlight = 0,
@@ -145,6 +151,12 @@ local function ResetState()
     State.roundDispatched = false
     State.requestsSent = 0
     State.requestsCompleted = 0
+    State.requestsOk = 0
+    State.requestsShort = 0
+    State.requestsEmpty = 0
+    State.requestsTimeout = 0
+    State.requestsDispatchError = 0
+    State.requestsDropped = 0
     State.requestsFailed = 0
     State.inFlight = 0
     State.peakInFlight = 0
@@ -216,10 +228,16 @@ end
 
 local function FinishExperiment(reason)
     Log(string.format(
-        "finish reason=%s sent=%d ok=%d fail=%d peak=%d last_dispatch=%s last_complete=%s",
+        "finish reason=%s sent=%d callbacks=%d ok=%d short=%d empty=%d timeout=%d dispatch=%d dropped=%d fail=%d peak=%d last_dispatch=%s last_complete=%s",
         tostring(reason),
         State.requestsSent,
         State.requestsCompleted,
+        State.requestsOk,
+        State.requestsShort,
+        State.requestsEmpty,
+        State.requestsTimeout,
+        State.requestsDispatchError,
+        State.requestsDropped,
         State.requestsFailed,
         State.peakInFlight,
         State.lastDispatchLabel,
@@ -234,6 +252,16 @@ local function AbortExperimentOnFailure(request, status)
     end
     if not CONFIG.STOP_ON_FIRST_BAD then
         return false
+    end
+
+    if State.inFlight > 0 then
+        State.requestsDropped = State.requestsDropped + State.inFlight
+        Log(string.format(
+            "abort after first bad response: remaining_inflight=%d callbacks will be discarded",
+            State.inFlight
+        ))
+    else
+        Log("abort after first bad response: no remaining inflight callbacks")
     end
 
     LogRoundSummary("first bad response")
@@ -311,7 +339,12 @@ local function RecordCompletion(request, status, value, now)
 end
 
 HandleAsyncResponse = function(slot, data)
-    if not State.isAlive or not State.isRunning then
+    if not State.isAlive then
+        return
+    end
+
+    if not State.isRunning then
+        Log("callback ignored after experiment finished slot=" .. tostring(slot))
         return
     end
 
@@ -327,6 +360,8 @@ HandleAsyncResponse = function(slot, data)
     local expectedBytes = source.expectedBytes or 0
 
     if type(data) ~= "string" or #data == 0 then
+        State.requestsCompleted = State.requestsCompleted + 1
+        State.requestsEmpty = State.requestsEmpty + 1
         State.requestsFailed = State.requestsFailed + 1
         RecordCompletion(request, "empty", 0, now)
         return
@@ -334,10 +369,13 @@ HandleAsyncResponse = function(slot, data)
 
     State.requestsCompleted = State.requestsCompleted + 1
     if expectedBytes > 0 and #data < math.floor(expectedBytes * CONFIG.FULL_RESPONSE_RATIO) then
+        State.requestsShort = State.requestsShort + 1
+        State.requestsFailed = State.requestsFailed + 1
         RecordCompletion(request, "short", FormatRatio(#data, expectedBytes), now)
         return
     end
 
+    State.requestsOk = State.requestsOk + 1
     RecordCompletion(request, "ok", FormatRatio(#data, expectedBytes), now)
 end
 
@@ -382,6 +420,7 @@ local function DispatchAsyncRequest(requestIndex)
     local ok, err = pcall(http.GetAsync, source.url, SlotCallbacks[slot])
     if not ok then
         State.pendingBySlot[slot] = nil
+        State.requestsDispatchError = State.requestsDispatchError + 1
         State.requestsFailed = State.requestsFailed + 1
         RecordCompletion(request, "dispatch_error", tostring(err), globals.RealTime())
     end
@@ -395,6 +434,7 @@ local function PollTimeouts()
             local age = now - request.startedAt
             if age >= CONFIG.REQUEST_TIMEOUT then
                 State.pendingBySlot[slot] = nil
+                State.requestsTimeout = State.requestsTimeout + 1
                 State.requestsFailed = State.requestsFailed + 1
                 RecordCompletion(request, "timeout", string.format("%.2fs", age), now)
             end
