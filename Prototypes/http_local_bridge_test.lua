@@ -24,6 +24,9 @@ else
     error("http_local_bridge_test: JSON module missing (Json or Cheater_Detection.Libs.Json)")
 end
 
+local optionalHttpRequireOk, optionalHttpRequireResult = pcall(require, "http")
+local optionalCommonRequireOk, optionalCommonRequireResult = pcall(require, "Cheater_Detection.Utils.Common")
+
 local CONFIG = {
     bridgeHost = "127.0.0.1",
     bridgePort = 17354,
@@ -42,6 +45,7 @@ local CONFIG = {
 }
 
 local BRIDGE_BASE = "http://" .. CONFIG.bridgeHost .. ":" .. tostring(CONFIG.bridgePort)
+local didLogHttpAvailability = false
 
 local function Log(message)
     print(string.format("[LOCAL-BRIDGE] %s", tostring(message)))
@@ -120,34 +124,51 @@ end
 local function ResolveHttpGet()
     local httpTable = http
     if httpTable ~= nil and type(httpTable.Get) == "function" then
-        return httpTable.Get
+        return httpTable.Get, "global http.Get"
+    end
+    if httpTable ~= nil and type(httpTable.get) == "function" then
+        return httpTable.get, "global http.get"
     end
 
     local requiredHttp = nil
-    local requireOk, requireResult = pcall(require, "http")
-    if requireOk and (type(requireResult) == "table" or type(requireResult) == "userdata") then
-        requiredHttp = requireResult
+    if optionalHttpRequireOk and (type(optionalHttpRequireResult) == "table" or type(optionalHttpRequireResult) == "userdata") then
+        requiredHttp = optionalHttpRequireResult
     end
 
     if requiredHttp ~= nil and type(requiredHttp.Get) == "function" then
         http = requiredHttp
-        return requiredHttp.Get
+        return requiredHttp.Get, "require('http').Get"
+    end
+    if requiredHttp ~= nil and type(requiredHttp.get) == "function" then
+        http = requiredHttp
+        return requiredHttp.get, "require('http').get"
     end
 
-    local commonOk, commonModule = pcall(require, "Cheater_Detection.Utils.Common")
-    if commonOk and type(commonModule) == "table" then
-        local commonHttp = commonModule.http
+    if optionalCommonRequireOk and type(optionalCommonRequireResult) == "table" then
+        local commonHttp = optionalCommonRequireResult.http
         if commonHttp ~= nil and type(commonHttp.Get) == "function" then
             http = commonHttp
-            return commonHttp.Get
+            return commonHttp.Get, "Common.http.Get"
+        end
+        if commonHttp ~= nil and type(commonHttp.get) == "function" then
+            http = commonHttp
+            return commonHttp.get, "Common.http.get"
         end
     end
 
-    return nil
+    return nil, "none"
 end
 
 local function HttpJson(path)
-    local httpGet = ResolveHttpGet()
+    local httpGet, source = ResolveHttpGet()
+    if not didLogHttpAvailability then
+        didLogHttpAvailability = true
+        if httpGet ~= nil then
+            Log("http availability: " .. tostring(source))
+        else
+            Log("http availability: missing (global/require/Common all unavailable)")
+        end
+    end
     if httpGet == nil then
         return nil, "http.Get unavailable"
     end
