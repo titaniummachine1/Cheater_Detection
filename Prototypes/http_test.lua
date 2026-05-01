@@ -12,15 +12,16 @@ assert(callbacks, "http_test: callbacks missing")
 assert(globals, "http_test: globals missing")
 
 local CONFIG = {
-    MODE = "staircase",       -- sequential | burst | staircase | plateau
-    URL_MODE = "fixed",       -- round_robin | fixed
+    MODE = "source_scan", -- sequential | burst | staircase | plateau | source_scan
+    URL_MODE = "fixed",   -- round_robin | fixed
     FIXED_URL_INDEX = 1,
     WAIT_FOR_SAFE_WINDOW = false,
     AUTO_START_DELAY = 2.0,
     ROUND_DELAY = 5.0,
     REQUEST_TIMEOUT = 12.0,
     FULL_RESPONSE_RATIO = 0.90,
-    STOP_ON_FIRST_BAD = true,
+    STOP_ON_FIRST_BAD = false,
+    SCAN_REPEATS = 2,
     SEQUENTIAL_COUNT = 12,
     SEQUENTIAL_DELAY = 0.0,
     BURST_COUNT = 6,
@@ -67,6 +68,8 @@ local State = {
     mode = CONFIG.MODE,
     roundIndex = 1,
     roundDispatched = false,
+    scanSourceIndex = 1,
+    scanRepeatIndex = 1,
     requestsSent = 0,
     requestsCompleted = 0,
     requestsOk = 0,
@@ -149,6 +152,8 @@ local function ResetState()
     State.mode = CONFIG.MODE
     State.roundIndex = 1
     State.roundDispatched = false
+    State.scanSourceIndex = 1
+    State.scanRepeatIndex = 1
     State.requestsSent = 0
     State.requestsCompleted = 0
     State.requestsOk = 0
@@ -169,6 +174,12 @@ end
 local function GetSourceForRequest(requestIndex)
     local sources = CONFIG.SOURCES
     assert(type(sources) == "table" and #sources > 0, "http_test: CONFIG.SOURCES missing")
+
+    if State.mode == "source_scan" then
+        local scanSource = sources[State.scanSourceIndex]
+        assert(scanSource, "http_test: scanSourceIndex invalid")
+        return scanSource
+    end
 
     if CONFIG.URL_MODE == "fixed" then
         local fixedSource = sources[CONFIG.FIXED_URL_INDEX]
@@ -198,6 +209,9 @@ local function GetCurrentRoundBurst()
     end
     if State.mode == "staircase" then
         return CONFIG.STAIRCASE_STEPS[State.roundIndex] or 0
+    end
+    if State.mode == "source_scan" then
+        return 1
     end
     return 1
 end
@@ -299,6 +313,22 @@ local function AdvanceRound(now, reason)
         State.nextActionAt = now + CONFIG.ROUND_DELAY
         if State.roundIndex > CONFIG.PLATEAU_ROUNDS then
             FinishExperiment("plateau complete")
+        end
+        return
+    end
+
+    if State.mode == "source_scan" then
+        local sourceCount = #CONFIG.SOURCES
+        State.scanSourceIndex = State.scanSourceIndex + 1
+        if State.scanSourceIndex > sourceCount then
+            State.scanSourceIndex = 1
+            State.scanRepeatIndex = State.scanRepeatIndex + 1
+        end
+        State.roundIndex = State.roundIndex + 1
+        State.roundDispatched = false
+        State.nextActionAt = now + CONFIG.ROUND_DELAY
+        if State.scanRepeatIndex > CONFIG.SCAN_REPEATS then
+            FinishExperiment("source_scan complete")
         end
     end
 end
@@ -449,7 +479,7 @@ local function StartExperiment()
     State.nextActionAt = State.startedAt + CONFIG.AUTO_START_DELAY
     Log("============================================================")
     Log(string.format(
-        "start mode=%s url_mode=%s fixed_url=%d safe_window=%s start_delay=%.2f timeout=%.2f full_ratio=%.2f stop_on_first_bad=%s",
+        "start mode=%s url_mode=%s fixed_url=%d safe_window=%s start_delay=%.2f timeout=%.2f full_ratio=%.2f stop_on_first_bad=%s scan_repeats=%d",
         CONFIG.MODE,
         CONFIG.URL_MODE,
         CONFIG.FIXED_URL_INDEX,
@@ -457,7 +487,8 @@ local function StartExperiment()
         CONFIG.AUTO_START_DELAY,
         CONFIG.REQUEST_TIMEOUT,
         CONFIG.FULL_RESPONSE_RATIO,
-        tostring(CONFIG.STOP_ON_FIRST_BAD)
+        tostring(CONFIG.STOP_ON_FIRST_BAD),
+        CONFIG.SCAN_REPEATS
     ))
     if CONFIG.MODE == "sequential" then
         Log(string.format("sequential count=%d delay=%.2f", CONFIG.SEQUENTIAL_COUNT, CONFIG.SEQUENTIAL_DELAY))
@@ -465,6 +496,8 @@ local function StartExperiment()
         Log(string.format("burst count=%d", CONFIG.BURST_COUNT))
     elseif CONFIG.MODE == "plateau" then
         Log(string.format("plateau burst=%d rounds=%d", CONFIG.PLATEAU_BURST, CONFIG.PLATEAU_ROUNDS))
+    elseif CONFIG.MODE == "source_scan" then
+        Log(string.format("source_scan sources=%d repeats=%d", #CONFIG.SOURCES, CONFIG.SCAN_REPEATS))
     else
         Log("staircase steps=" .. table.concat(CONFIG.STAIRCASE_STEPS, ","))
     end
@@ -494,7 +527,19 @@ local function TickBurstLike(now)
     end
 
     local burst = GetCurrentRoundBurst()
-    Log(string.format("starting round=%d burst=%d", State.roundIndex, burst))
+    if State.mode == "source_scan" then
+        local source = CONFIG.SOURCES[State.scanSourceIndex]
+        Log(string.format(
+            "starting round=%d repeat=%d source_index=%d source=%s burst=%d",
+            State.roundIndex,
+            State.scanRepeatIndex,
+            State.scanSourceIndex,
+            source and source.name or "unknown",
+            burst
+        ))
+    else
+        Log(string.format("starting round=%d burst=%d", State.roundIndex, burst))
+    end
     for requestIndex = 1, burst do
         DispatchAsyncRequest(requestIndex)
     end
