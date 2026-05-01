@@ -1,64 +1,47 @@
 --[[
-Tiny local-bridge HTTP prototype.
+Local bridge client plus continuous stress test.
 
-Usage model:
-1) Start bridge server on PC:
-   python Prototypes/local_http_bridge_server.py
-2) In Lua, call Bridge.Start(url)
-3) Poll Bridge.Poll(id) in a callback
+Bridge API:
+- Bridge.Probe() -> alive, err
+- Bridge.CanUse() -> boolean
+- Bridge.Start(url) -> requestId, err
+- Bridge.Receive(id) -> data, finished, err
 
-This lets Lua do short localhost blocking http.Get calls while the bridge performs
-remote HTTP in background threads.
+Pending receive returns nil, false, nil.
+Successful receive returns data, true, nil.
+Failed receive returns nil, true, err.
 ]]
 
-local function LoadJsonModule()
-    local okLocal, moduleLocal = pcall(require, "Json")
-    if okLocal and type(moduleLocal) == "table" and type(moduleLocal.decode) == "function" then
-        return moduleLocal
-    end
+assert(http and type(http.Get) == "function", "http_local_bridge_test: http.Get missing")
+assert(callbacks and type(callbacks.Register) == "function", "http_local_bridge_test: callbacks missing")
+assert(globals and type(globals.RealTime) == "function", "http_local_bridge_test: globals missing")
 
-    local okMain, moduleMain = pcall(require, "Cheater_Detection.Libs.Json")
-    if okMain and type(moduleMain) == "table" and type(moduleMain.decode) == "function" then
-        return moduleMain
-    end
+local localJsonOk, localJson = pcall(require, "Json")
+local mainJsonOk, mainJson = pcall(require, "Cheater_Detection.Libs.Json")
 
-    error("http_local_bridge_test: JSON module missing (Prototypes.Json or Cheater_Detection.Libs.Json)")
+local Json = nil
+if localJsonOk and type(localJson) == "table" and type(localJson.decode) == "function" then
+    Json = localJson
+elseif mainJsonOk and type(mainJson) == "table" and type(mainJson.decode) == "function" then
+    Json = mainJson
+else
+    error("http_local_bridge_test: JSON module missing (Json or Cheater_Detection.Libs.Json)")
 end
 
-local Json = LoadJsonModule()
-
-local BRIDGE_HOST = "127.0.0.1"
-local BRIDGE_PORT = 17354
-local BRIDGE_BASE = "http://" .. BRIDGE_HOST .. ":" .. tostring(BRIDGE_PORT)
-
-local POLL_INTERVAL = 0.00
-local REQUEST_TIMEOUT_MS = 12000
-local REQUEST_MAX_BYTES = 2 * 1024 * 1024
-local START_RETRY_DELAY = 0.50
-local ERROR_LOG_COOLDOWN = 1.50
-local STATUS_LOG_INTERVAL = 2.00
-local TARGET_URL = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids"
-
-local State = {
-    pendingId = nil,
-    nextPollAt = 0.0,
-    nextStartAttemptAt = 0.0,
-    lastErrorLogAt = -9999.0,
-    runStartedAt = 0.0,
-    lastStatusLogAt = 0.0,
-    startedAt = 0.0,
-    totalSubmitted = 0,
-    totalCompleted = 0,
-    totalSuccess = 0,
-    totalFailed = 0,
-    totalTransient = 0,
-    totalBytes = 0,
-    totalLatency = 0.0,
-    maxLatency = 0.0,
-    frameSamples = 0,
-    totalFrameTime = 0.0,
-    maxFrameTime = 0.0,
+local CONFIG = {
+    bridgeHost = "127.0.0.1",
+    bridgePort = 17354,
+    protocol = "local-http-bridge-v1",
+    targetUrl = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
+    pollInterval = 0.0,
+    requestTimeoutMs = 12000,
+    requestMaxBytes = 2 * 1024 * 1024,
+    startRetryDelay = 0.50,
+    statusLogInterval = 2.00,
+    errorLogCooldown = 1.50,
 }
+
+local BRIDGE_BASE = "http://" .. CONFIG.bridgeHost .. ":" .. tostring(CONFIG.bridgePort)
 
 local function Log(message)
     print(string.format("[LOCAL-BRIDGE] %s", tostring(message)))
@@ -66,96 +49,117 @@ end
 
 local function UrlEncode(value)
     assert(type(value) == "string", "UrlEncode: value must be string")
-    local encoded = string.gsub(value, "([^%w%-_%.~])", function(ch)
-        return string.format("%%%02X", string.byte(ch))
+    return string.gsub(value, "([^%w%-_%.~])", function(character)
+        return string.format("%%%02X", string.byte(character))
     end)
-    return encoded
 end
 
-local function DecodeJson(body)
+local function DecodeBody(body)
     if type(body) ~= "string" then
-        return false, nil, "response body is not string"
+        return nil, "response body is not string"
     end
-
     if body == "" then
-        return false, nil, "empty response from bridge"
+        return nil, "empty response from bridge"
     end
 
     local ok, decoded = pcall(Json.decode, body)
     if not ok or type(decoded) ~= "table" then
-        local preview = string.sub(body, 1, 96)
-        return false, nil, "invalid json from bridge: " .. tostring(preview)
+        return nil, "invalid json from bridge: " .. tostring(string.sub(body, 1, 96))
     end
 
-    return true, decoded, nil
+    return decoded, nil
 end
 
-local Bridge = {}
-
-function Bridge.Health()
-    local body = http.Get(BRIDGE_BASE .. "/health")
-    local ok, decoded, err = DecodeJson(body)
-    if not ok then
-        return false, nil, err
-    end
-    return decoded.ok == true, decoded, nil
+local function HttpJson(path)
+    local body = http.Get(BRIDGE_BASE .. path)
+    return DecodeBody(body)
 end
 
-function Bridge.Start(url)
+local Bridge = {
+    state = {
+        alive = false,
+        protocol = nil,
+        lastError = nil,
+        lastProbeAt = 0.0,
+    },
+}
+
+function Bridge.Probe()
+    local response, err = HttpJson("/health")
+    local payload = response or {}
+    local alive = payload.ok == true and payload.alive == true and payload.protocol == CONFIG.protocol
+
+    Bridge.state.alive = alive
+    Bridge.state.protocol = payload.protocol
+    Bridge.state.lastProbeAt = globals.RealTime()
+    Bridge.state.lastError = alive and nil or (err or payload.error or "bridge offline")
+
+    return alive, Bridge.state.lastError
+end
+
+function Bridge.IsAlive()
+    return Bridge.state.alive == true
+end
+
+function Bridge.CanUse()
+    return Bridge.IsAlive()
+end
+
+function Bridge.Start(url, timeoutMs, maxBytes)
     assert(type(url) == "string" and url ~= "", "Bridge.Start: url missing")
 
-    local endpoint = string.format(
-        "%s/submit?url=%s&timeout_ms=%d&max_bytes=%d",
-        BRIDGE_BASE,
+    local requestTimeoutMs = timeoutMs or CONFIG.requestTimeoutMs
+    local requestMaxBytes = maxBytes or CONFIG.requestMaxBytes
+    local path = string.format(
+        "/submit?url=%s&timeout_ms=%d&max_bytes=%d",
         UrlEncode(url),
-        REQUEST_TIMEOUT_MS,
-        REQUEST_MAX_BYTES
+        requestTimeoutMs,
+        requestMaxBytes
     )
 
-    local body = http.Get(endpoint)
-    local ok, decoded, err = DecodeJson(body)
-    if not ok then
-        return false, nil, err
+    local response, err = HttpJson(path)
+    local payload = response or {}
+    local requestId = payload.id
+
+    if payload.ok ~= true or type(requestId) ~= "string" then
+        return nil, err or payload.error or "bridge submit failed"
     end
 
-    if decoded.ok ~= true or type(decoded.id) ~= "string" then
-        return false, nil, decoded.error or "bridge submit failed"
-    end
-
-    return true, decoded.id, nil
+    return requestId, nil
 end
 
-function Bridge.Poll(id)
-    assert(type(id) == "string" and id ~= "", "Bridge.Poll: id missing")
+function Bridge.Receive(id)
+    assert(type(id) == "string" and id ~= "", "Bridge.Receive: id missing")
 
-    local endpoint = string.format("%s/result?id=%s", BRIDGE_BASE, UrlEncode(id))
-    local body = http.Get(endpoint)
-    local ok, decoded, err = DecodeJson(body)
-    if not ok then
-        return false, true, nil, err
+    local response, err = HttpJson("/result?id=" .. UrlEncode(id))
+    if response == nil then
+        return nil, false, err
     end
 
-    if decoded.ok ~= true then
-        return false, true, nil, decoded.error or "bridge result failed"
+    local payload = response or {}
+    if payload.ok ~= true then
+        return nil, true, payload.error or "bridge result failed"
     end
 
-    if decoded.done ~= true then
-        return true, false, nil, nil
+    if payload.done ~= true then
+        return nil, false, nil
     end
 
-    if decoded.success == true then
-        return true, true, decoded.data, nil
+    if payload.success == true then
+        if type(payload.data) == "string" then
+            return payload.data, true, nil
+        end
+        return nil, true, "bridge success missing data"
     end
 
-    return false, true, nil, decoded.error or "remote request failed"
+    return nil, true, payload.error or "remote request failed"
 end
 
-local function IsTransientBridgeError(err)
+local function IsTransientError(err)
     if type(err) ~= "string" then
-        return true
+        return false
     end
-
-    if string.find(err, "invalid json from bridge", 1, true) then
+    if string.find(err, "bridge", 1, true) then
         return true
     end
     if string.find(err, "response body is not string", 1, true) then
@@ -164,28 +168,36 @@ local function IsTransientBridgeError(err)
     if string.find(err, "empty response from bridge", 1, true) then
         return true
     end
-
     return false
 end
 
-local function LogErrorRateLimited(message)
-    local now = globals.RealTime()
-    if now - State.lastErrorLogAt < ERROR_LOG_COOLDOWN then
+local Stress = {
+    pendingId = nil,
+    requestStartedAt = 0.0,
+    nextStartAt = 0.0,
+    nextPollAt = 0.0,
+    lastErrorLogAt = -9999.0,
+    runStartedAt = 0.0,
+    lastStatusAt = 0.0,
+    submitted = 0,
+    resolved = 0,
+    success = 0,
+    failed = 0,
+    retry = 0,
+    bytes = 0,
+    latencySum = 0.0,
+    latencyMax = 0.0,
+    frameCount = 0,
+    frameSum = 0.0,
+    frameMax = 0.0,
+}
+
+local function LogErrorRateLimited(message, now)
+    if now - Stress.lastErrorLogAt < CONFIG.errorLogCooldown then
         return
     end
-    State.lastErrorLogAt = now
+    Stress.lastErrorLogAt = now
     Log(message)
-end
-
-local function EnsureRunStarted()
-    if State.runStartedAt > 0 then
-        return
-    end
-
-    local now = globals.RealTime()
-    State.runStartedAt = now
-    State.lastStatusLogAt = now
-    Log("stress test started")
 end
 
 local function UpdateFrameStats()
@@ -194,147 +206,130 @@ local function UpdateFrameStats()
         return
     end
 
-    State.frameSamples = State.frameSamples + 1
-    State.totalFrameTime = State.totalFrameTime + frameTime
-    if frameTime > State.maxFrameTime then
-        State.maxFrameTime = frameTime
+    Stress.frameCount = Stress.frameCount + 1
+    Stress.frameSum = Stress.frameSum + frameTime
+    if frameTime > Stress.frameMax then
+        Stress.frameMax = frameTime
     end
 end
 
-local function LogStatus()
-    if State.runStartedAt <= 0 then
+local function EnsureRunStarted(now)
+    if Stress.runStartedAt > 0 then
         return
     end
 
-    local now = globals.RealTime()
-    if now - State.lastStatusLogAt < STATUS_LOG_INTERVAL then
+    Stress.runStartedAt = now
+    Stress.lastStatusAt = now
+    Log("stress test started")
+end
+
+local function StartStressRequest(now)
+    if Stress.pendingId ~= nil or now < Stress.nextStartAt then
         return
     end
 
-    local elapsed = now - State.runStartedAt
-    if elapsed <= 0 then
+    if not Bridge.CanUse() then
+        local alive, probeErr = Bridge.Probe()
+        if not alive then
+            Stress.retry = Stress.retry + 1
+            Stress.nextStartAt = now + CONFIG.startRetryDelay
+            LogErrorRateLimited("bridge offline: " .. tostring(probeErr), now)
+            return
+        end
+    end
+
+    local requestId, err = Bridge.Start(CONFIG.targetUrl)
+    if requestId == nil then
+        Stress.retry = Stress.retry + 1
+        Stress.nextStartAt = now + CONFIG.startRetryDelay
+        LogErrorRateLimited("submit retry: " .. tostring(err), now)
         return
     end
 
-    local avgLatencyMs = 0.0
-    if State.totalCompleted > 0 then
-        avgLatencyMs = (State.totalLatency / State.totalCompleted) * 1000.0
+    Stress.pendingId = requestId
+    Stress.requestStartedAt = now
+    Stress.nextPollAt = now + CONFIG.pollInterval
+    Stress.submitted = Stress.submitted + 1
+end
+
+local function PollStressRequest(now)
+    if Stress.pendingId == nil or now < Stress.nextPollAt then
+        return
     end
 
-    local avgFrameMs = 0.0
-    if State.frameSamples > 0 then
-        avgFrameMs = (State.totalFrameTime / State.frameSamples) * 1000.0
+    Stress.nextPollAt = now + CONFIG.pollInterval
+
+    local data, finished, err = Bridge.Receive(Stress.pendingId)
+    if not finished then
+        if err ~= nil then
+            Stress.retry = Stress.retry + 1
+            LogErrorRateLimited("poll retry: " .. tostring(err), now)
+        end
+        return
     end
 
-    local rps = State.totalCompleted / elapsed
-    local maxFrameMs = State.maxFrameTime * 1000.0
-    local maxLatencyMs = State.maxLatency * 1000.0
+    Stress.resolved = Stress.resolved + 1
+    local latency = now - Stress.requestStartedAt
+    if latency > 0 then
+        Stress.latencySum = Stress.latencySum + latency
+        if latency > Stress.latencyMax then
+            Stress.latencyMax = latency
+        end
+    end
+
+    if type(data) == "string" then
+        Stress.success = Stress.success + 1
+        Stress.bytes = Stress.bytes + #data
+    else
+        Stress.failed = Stress.failed + 1
+        if IsTransientError(err) then
+            Stress.retry = Stress.retry + 1
+        end
+        LogErrorRateLimited("request failed: " .. tostring(err), now)
+    end
+
+    Stress.pendingId = nil
+    Stress.requestStartedAt = 0.0
+end
+
+local function LogStatus(now)
+    if now - Stress.lastStatusAt < CONFIG.statusLogInterval then
+        return
+    end
+
+    local elapsed = now - Stress.runStartedAt
+    local avgLatencyMs = Stress.resolved > 0 and (Stress.latencySum / Stress.resolved) * 1000.0 or 0.0
+    local avgFrameMs = Stress.frameCount > 0 and (Stress.frameSum / Stress.frameCount) * 1000.0 or 0.0
+    local rps = elapsed > 0 and (Stress.resolved / elapsed) or 0.0
 
     Log(string.format(
-        "status sec=%.1f submitted=%d completed=%d ok=%d fail=%d transient=%d rps=%.2f avg_latency_ms=%.2f max_latency_ms=%.2f avg_frame_ms=%.3f max_frame_ms=%.3f bytes=%d pending=%s",
+        "status sec=%.1f alive=%s submitted=%d resolved=%d ok=%d fail=%d retry=%d rps=%.2f avg_latency_ms=%.2f max_latency_ms=%.2f avg_frame_ms=%.3f max_frame_ms=%.3f bytes=%d pending=%s",
         elapsed,
-        State.totalSubmitted,
-        State.totalCompleted,
-        State.totalSuccess,
-        State.totalFailed,
-        State.totalTransient,
+        tostring(Bridge.CanUse()),
+        Stress.submitted,
+        Stress.resolved,
+        Stress.success,
+        Stress.failed,
+        Stress.retry,
         rps,
         avgLatencyMs,
-        maxLatencyMs,
+        Stress.latencyMax * 1000.0,
         avgFrameMs,
-        maxFrameMs,
-        State.totalBytes,
-        tostring(State.pendingId ~= nil)
+        Stress.frameMax * 1000.0,
+        Stress.bytes,
+        tostring(Stress.pendingId ~= nil)
     ))
 
-    State.lastStatusLogAt = now
-end
-
-local function StartDemoRequest()
-    if State.pendingId then
-        return
-    end
-
-    local now = globals.RealTime()
-    if now < State.nextStartAttemptAt then
-        return
-    end
-
-    local healthy, _, healthErr = Bridge.Health()
-    if not healthy then
-        State.nextStartAttemptAt = now + START_RETRY_DELAY
-        LogErrorRateLimited("bridge not ready: " .. tostring(healthErr))
-        return
-    end
-
-    local ok, requestId, err = Bridge.Start(TARGET_URL)
-    if not ok then
-        State.nextStartAttemptAt = now + START_RETRY_DELAY
-        if IsTransientBridgeError(err) then
-            State.totalTransient = State.totalTransient + 1
-            LogErrorRateLimited("bridge transient submit error; retrying: " .. tostring(err))
-        else
-            State.totalFailed = State.totalFailed + 1
-            LogErrorRateLimited("submit failed: " .. tostring(err))
-        end
-        return
-    end
-
-    State.pendingId = requestId
-    State.startedAt = now
-    State.nextPollAt = State.startedAt + POLL_INTERVAL
-    State.totalSubmitted = State.totalSubmitted + 1
-end
-
-local function PollDemoRequest()
-    if not State.pendingId then
-        return
-    end
-
-    local now = globals.RealTime()
-    if now < State.nextPollAt then
-        return
-    end
-
-    State.nextPollAt = now + POLL_INTERVAL
-
-    local ok, done, data, err = Bridge.Poll(State.pendingId)
-    if not done then
-        return
-    end
-
-    State.totalCompleted = State.totalCompleted + 1
-    local latency = now - State.startedAt
-    if latency > 0 then
-        State.totalLatency = State.totalLatency + latency
-        if latency > State.maxLatency then
-            State.maxLatency = latency
-        end
-    end
-
-    if ok then
-        local length = type(data) == "string" and #data or 0
-        State.totalSuccess = State.totalSuccess + 1
-        State.totalBytes = State.totalBytes + length
-    else
-        State.totalFailed = State.totalFailed + 1
-        if IsTransientBridgeError(err) then
-            State.totalTransient = State.totalTransient + 1
-        end
-        LogErrorRateLimited(string.format("poll failed id=%s err=%s", State.pendingId, tostring(err)))
-    end
-
-    State.pendingId = nil
-    State.startedAt = 0.0
+    Stress.lastStatusAt = now
 end
 
 local function OnDraw()
-    EnsureRunStarted()
+    local now = globals.RealTime()
+    EnsureRunStarted(now)
     UpdateFrameStats()
-
-    PollDemoRequest()
-    StartDemoRequest()
-    LogStatus()
+    PollStressRequest(now)
+    StartStressRequest(now)
+    LogStatus(now)
 end
 
 callbacks.Unregister("Draw", "local_bridge_test_draw")
@@ -342,4 +337,5 @@ callbacks.Register("Draw", "local_bridge_test_draw", OnDraw)
 
 return {
     Bridge = Bridge,
+    Stress = Stress,
 }
