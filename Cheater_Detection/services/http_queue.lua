@@ -3,7 +3,11 @@
      Refactored to be robust and use the best available HTTP method.
 ]]
 
+local Common = require("Cheater_Detection.Utils.Common")
+
 local HttpQueue = {}
+
+local Json = Common and Common.Json or nil
 
 local queue = {}
 local isProcessing = false
@@ -20,6 +24,327 @@ local activeNextRetry = 0
 local activeLastError = ""
 local activeAttemptCount = 0
 local activeAttemptInFlight = false
+local activeTransport = nil
+local activeBridgeRequestId = nil
+
+local BRIDGE_PROTOCOL = "local-http-bridge-v1"
+local BRIDGE_BASE = "http://127.0.0.1:17354"
+local BRIDGE_STALL_LIMIT = 0.20
+local BRIDGE_REMOTE_TIMEOUT_MS = 12000
+local BRIDGE_REMOTE_MAX_BYTES = 2 * 1024 * 1024
+local BRIDGE_POLL_INTERVAL = 0.0
+local BRIDGE_RETRY_INITIAL = 1.0
+local BRIDGE_RETRY_MAX = 60.0
+
+local bridgeState = {
+	alive = false,
+	protocol = nil,
+	lastError = "",
+	lastProbeAt = 0,
+	nextProbeAt = 0,
+	retryDelay = BRIDGE_RETRY_INITIAL,
+	blockedUntilSafeWindow = false,
+}
+
+local FinishActiveRequest
+
+local function Now()
+	local globalsTable = globals
+	if globalsTable and type(globalsTable.RealTime) == "function" then
+		local ok, value = pcall(globalsTable.RealTime)
+		if ok and type(value) == "number" then
+			return value
+		end
+	end
+	return os.clock()
+end
+
+local function CanRunBlockingHTTPNow()
+	local ok, localPlayer = pcall(entities.GetLocalPlayer)
+	if not ok or not localPlayer then
+		return true
+	end
+
+	local aliveOk, alive = pcall(function()
+		return localPlayer:IsAlive()
+	end)
+	if not aliveOk then
+		return false
+	end
+
+	return not alive
+end
+
+local function ClampBridgeRetryDelay(delay)
+	if type(delay) ~= "number" then
+		return BRIDGE_RETRY_INITIAL
+	end
+	if delay < BRIDGE_RETRY_INITIAL then
+		return BRIDGE_RETRY_INITIAL
+	end
+	if delay > BRIDGE_RETRY_MAX then
+		return BRIDGE_RETRY_MAX
+	end
+	return delay
+end
+
+local function UrlEncode(value)
+	if type(value) ~= "string" then
+		return nil
+	end
+	return string.gsub(value, "([^%w%-_%.~])", function(character)
+		return string.format("%%%02X", string.byte(character))
+	end)
+end
+
+local function DecodeBridgePayload(body)
+	if type(body) ~= "string" then
+		return nil, "bridge response body is not string"
+	end
+	if body == "" then
+		return nil, "empty response from bridge"
+	end
+	if type(Json) ~= "table" or type(Json.decode) ~= "function" then
+		return nil, "bridge json decoder missing"
+	end
+
+	local ok, decoded = pcall(Json.decode, body)
+	if not ok or type(decoded) ~= "table" then
+		return nil, "invalid json from bridge"
+	end
+
+	return decoded, nil
+end
+
+local function MarkBridgeOffline(errorMessage, now, blockUntilSafeWindow)
+	local currentTime = type(now) == "number" and now or Now()
+	bridgeState.alive = false
+	bridgeState.protocol = nil
+	bridgeState.lastError = errorMessage or "bridge offline"
+	bridgeState.lastProbeAt = currentTime
+	bridgeState.nextProbeAt = currentTime + ClampBridgeRetryDelay(bridgeState.retryDelay)
+	bridgeState.retryDelay = ClampBridgeRetryDelay(bridgeState.retryDelay * 2.0)
+	if blockUntilSafeWindow then
+		bridgeState.blockedUntilSafeWindow = true
+	end
+end
+
+local function MarkBridgeAlive(protocol, now)
+	bridgeState.alive = true
+	bridgeState.protocol = protocol
+	bridgeState.lastError = ""
+	bridgeState.lastProbeAt = type(now) == "number" and now or Now()
+	bridgeState.nextProbeAt = bridgeState.lastProbeAt
+	bridgeState.retryDelay = BRIDGE_RETRY_INITIAL
+	bridgeState.blockedUntilSafeWindow = false
+end
+
+local function RefreshBridgeSafeWindowGate()
+	if bridgeState.blockedUntilSafeWindow and CanRunBlockingHTTPNow() then
+		bridgeState.blockedUntilSafeWindow = false
+	end
+end
+
+local function BridgeGet(path)
+	local httpTable = http
+	if httpTable == nil or type(httpTable.Get) ~= "function" then
+		return nil, "http.Get unavailable", false
+	end
+
+	local startedAt = Now()
+	local ok, bodyOrErr = pcall(httpTable.Get, BRIDGE_BASE .. path)
+	local elapsed = Now() - startedAt
+	local stalled = elapsed > BRIDGE_STALL_LIMIT
+	if stalled then
+		return nil, string.format("bridge call stalled for %.3fs", elapsed), true
+	end
+	if not ok then
+		return nil, tostring(bodyOrErr), false
+	end
+
+	return bodyOrErr, nil, false
+end
+
+local function BridgeJson(path)
+	local body, err, stalled = BridgeGet(path)
+	if body == nil then
+		return nil, err, stalled
+	end
+
+	local payload, decodeErr = DecodeBridgePayload(body)
+	if payload == nil then
+		return nil, decodeErr, stalled
+	end
+
+	return payload, nil, stalled
+end
+
+local function ProbeBridge(now)
+	local currentTime = type(now) == "number" and now or Now()
+	RefreshBridgeSafeWindowGate()
+	if bridgeState.blockedUntilSafeWindow and not CanRunBlockingHTTPNow() then
+		return false, bridgeState.lastError ~= "" and bridgeState.lastError or "bridge offline"
+	end
+	if currentTime < bridgeState.nextProbeAt then
+		return false, bridgeState.lastError ~= "" and bridgeState.lastError or "bridge offline"
+	end
+
+	local payload, err, stalled = BridgeJson("/health")
+	if payload and payload.ok == true and payload.alive == true and payload.protocol == BRIDGE_PROTOCOL then
+		MarkBridgeAlive(payload.protocol, currentTime)
+		return true, nil
+	end
+
+	local errorMessage = err
+	if errorMessage == nil and payload and type(payload.error) == "string" then
+		errorMessage = payload.error
+	end
+	MarkBridgeOffline(errorMessage or "bridge offline", currentTime, stalled)
+	return false, bridgeState.lastError
+end
+
+local function CanUseBridgeTransport()
+	RefreshBridgeSafeWindowGate()
+	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL and
+	not bridgeState.blockedUntilSafeWindow
+end
+
+local function StartBridgeRequest(item, now)
+	local encodedUrl = UrlEncode(item.url)
+	if encodedUrl == nil then
+		return false, "bridge url encode failed"
+	end
+
+	local timeoutMs = item.bridgeTimeoutMs or BRIDGE_REMOTE_TIMEOUT_MS
+	local maxBytes = item.bridgeMaxBytes or BRIDGE_REMOTE_MAX_BYTES
+	local path = string.format(
+		"/submit?url=%s&timeout_ms=%d&max_bytes=%d",
+		encodedUrl,
+		timeoutMs,
+		maxBytes
+	)
+
+	local payload, err, stalled = BridgeJson(path)
+	if not payload or payload.ok ~= true or type(payload.id) ~= "string" then
+		local errorMessage = err
+		if errorMessage == nil and payload and type(payload.error) == "string" then
+			errorMessage = payload.error
+		end
+		MarkBridgeOffline(errorMessage or "bridge submit failed", now, stalled)
+		return false, bridgeState.lastError
+	end
+
+	activeTransport = "bridge"
+	activeBridgeRequestId = payload.id
+	activeNextRetry = now + BRIDGE_POLL_INTERVAL
+	activeLastError = ""
+	return true, nil
+end
+
+local function FallbackToBlockingTransport(now, errorMessage)
+	activeTransport = "blocking"
+	activeBridgeRequestId = nil
+	activeNextRetry = type(now) == "number" and now or Now()
+	activeLastError = errorMessage or activeLastError
+	activeAttemptInFlight = false
+end
+
+local function PollBridgeResult(now)
+	if type(activeBridgeRequestId) ~= "string" or activeBridgeRequestId == "" then
+		FallbackToBlockingTransport(now, "bridge request id missing")
+		return
+	end
+
+	local encodedId = UrlEncode(activeBridgeRequestId)
+	if encodedId == nil then
+		FallbackToBlockingTransport(now, "bridge request id encode failed")
+		return
+	end
+
+	local payload, err, stalled = BridgeJson("/result?id=" .. encodedId)
+	if payload == nil then
+		MarkBridgeOffline(err or "bridge result failed", now, stalled)
+		FallbackToBlockingTransport(now, bridgeState.lastError)
+		return
+	end
+	if payload.ok ~= true then
+		local errorMessage = type(payload.error) == "string" and payload.error or "bridge result failed"
+		MarkBridgeOffline(errorMessage, now, stalled)
+		FallbackToBlockingTransport(now, bridgeState.lastError)
+		return
+	end
+	if payload.done ~= true then
+		activeNextRetry = now + BRIDGE_POLL_INTERVAL
+		return
+	end
+
+	local item = activeItem
+	activeTransport = nil
+	activeBridgeRequestId = nil
+	if payload.success == true and type(payload.data) == "string" then
+		FinishActiveRequest(item, payload.data, nil)
+		return
+	end
+	FinishActiveRequest(item, nil, payload.error or "remote request failed")
+end
+
+local function ResetActiveRequestState()
+	isProcessing = false
+	activeItem = nil
+	activeAttemptInFlight = false
+	activeNextRetry = 0
+	activeLastError = ""
+	activeAttemptCount = 0
+	activeDeadline = 0
+	activeTransport = nil
+	activeBridgeRequestId = nil
+end
+
+FinishActiveRequest = function(item, responseBody, errorMessage)
+	local cbStatus, cbErr = pcall(item.callback, responseBody, errorMessage, item.context)
+	if not cbStatus then
+		print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
+	end
+	ResetActiveRequestState()
+end
+
+local function DispatchBlockingAttempt()
+	if activeAttemptInFlight or not activeItem then
+		return
+	end
+
+	if not CanRunBlockingHTTPNow() then
+		return
+	end
+
+	activeAttemptCount = activeAttemptCount + 1
+	activeAttemptInFlight = true
+	local item = activeItem
+	local httpTable = http
+	if httpTable == nil or type(httpTable.Get) ~= "function" then
+		activeAttemptInFlight = false
+		activeLastError = "http.Get unavailable"
+		activeNextRetry = Now() + REQUEST_RETRY_INTERVAL
+		return
+	end
+
+	local ok, dataOrErr = pcall(httpTable.Get, item.url)
+	activeAttemptInFlight = false
+
+	if not ok then
+		activeLastError = "Get call failed: " .. tostring(dataOrErr)
+		activeNextRetry = Now() + REQUEST_RETRY_INTERVAL
+		return
+	end
+
+	if type(dataOrErr) == "string" and #dataOrErr > 0 then
+		FinishActiveRequest(item, dataOrErr, nil)
+		return
+	end
+
+	activeLastError = "Get returned empty/invalid response"
+	activeNextRetry = Now() + REQUEST_RETRY_INTERVAL
+end
 
 local function IsGitHubLikeURL(url)
 	if type(url) ~= "string" then
@@ -36,21 +361,10 @@ end
 
 -- Try to ensure http library is available
 local function InitializeHTTP()
-	-- 1. Check global http (highest priority)
-	if http and (type(http) == "userdata" or type(http) == "table") then
+	if http and (type(http) == "userdata" or type(http) == "table") and type(http.Get) == "function" then
 		return true
 	end
-
-	-- 2. Try to require "http"
-	local status, lib = pcall(require, "http")
-	if status and (type(lib) == "userdata" or type(lib) == "table") then
-		http = lib
-		return true
-	end
-
-	-- 3. Check if it's in Common fallback
-	local commonStatus, Common = pcall(require, "Cheater_Detection.Utils.Common")
-	if commonStatus and Common and Common.http then
+	if Common and Common.http and type(Common.http.Get) == "function" then
 		http = Common.http
 		return true
 	end
@@ -66,13 +380,24 @@ local function ProcessNextRequest()
 		return
 	end
 
-	local now = globals.RealTime()
+	local now = Now()
 	local item = queue[1]
 	local requiredDelay = REQUEST_DELAY
 	if item and (item.noDelay or IsGitHubLikeURL(item.url)) then
 		requiredDelay = 0
 	end
 	if (now - lastRequestTime) < requiredDelay then
+		return
+	end
+
+	local canRunBlocking = CanRunBlockingHTTPNow()
+	local canUseBridge = CanUseBridgeTransport()
+	if not canUseBridge and canRunBlocking then
+		ProbeBridge(now)
+		canUseBridge = CanUseBridgeTransport()
+	end
+
+	if not canUseBridge and not canRunBlocking then
 		return
 	end
 
@@ -90,62 +415,27 @@ local function ProcessNextRequest()
 	activeLastError = ""
 	activeAttemptCount = 0
 	activeAttemptInFlight = false
-	local myToken = activeToken
+	activeTransport = nil
+	activeBridgeRequestId = nil
 
 	if not InitializeHTTP() then
-		local cbStatus, cbErr = pcall(item.callback, nil, "No HTTP Library", item.context)
-		if not cbStatus then
-			print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-		end
-		isProcessing = false
-		activeItem = nil
-		activeAttemptInFlight = false
+		FinishActiveRequest(item, nil, "No HTTP Library")
 		return
 	end
 
-	local function dispatchAsyncAttempt()
-		if activeAttemptInFlight then
+	if canUseBridge then
+		local started, bridgeErr = StartBridgeRequest(item, now)
+		if started then
 			return
 		end
-
-		activeAttemptCount = activeAttemptCount + 1
-		activeAttemptInFlight = true
-		local asyncOk, asyncErr = pcall(function()
-			http.GetAsync(item.url, function(data)
-				-- Ignore stale callback from timed-out or superseded request.
-				if myToken ~= activeToken then
-					return
-				end
-
-				activeAttemptInFlight = false
-
-				if type(data) == "string" and #data > 0 then
-					local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
-					if not cbStatus then
-						print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-					end
-					isProcessing = false
-					activeItem = nil
-					activeAttemptInFlight = false
-					activeNextRetry = 0
-					activeLastError = ""
-					return
-				end
-
-				-- Empty payload is treated as "not ready yet" in this runtime.
-				activeLastError = "GetAsync returned empty/invalid response"
-				activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
-			end)
-		end)
-
-		if not asyncOk then
-			activeAttemptInFlight = false
-			activeLastError = "GetAsync call failed: " .. tostring(asyncErr)
-			activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
+		if not CanRunBlockingHTTPNow() then
+			FallbackToBlockingTransport(now, bridgeErr)
+			return
 		end
 	end
 
-	dispatchAsyncAttempt()
+	activeTransport = "blocking"
+	DispatchBlockingAttempt()
 end
 
 --[[ Public API ]]
@@ -165,15 +455,30 @@ function HttpQueue.Enqueue(url, callback, context, options)
 		return false
 	end
 	local noDelay = false
+	local bridgeTimeoutMs = nil
+	local bridgeMaxBytes = nil
 	if type(options) == "table" and options.noDelay == true then
 		noDelay = true
+	end
+	if type(options) == "table" and type(options.bridgeTimeoutMs) == "number" then
+		bridgeTimeoutMs = math.floor(options.bridgeTimeoutMs)
+	end
+	if type(options) == "table" and type(options.bridgeMaxBytes) == "number" then
+		bridgeMaxBytes = math.floor(options.bridgeMaxBytes)
 	end
 
 	if STRICT_SINGLE_FLIGHT and HttpQueue.IsBusy() then
 		return false
 	end
 
-	table.insert(queue, { url = url, callback = callback, context = context, noDelay = noDelay })
+	table.insert(queue, {
+		url = url,
+		callback = callback,
+		context = context,
+		noDelay = noDelay,
+		bridgeTimeoutMs = bridgeTimeoutMs,
+		bridgeMaxBytes = bridgeMaxBytes,
+	})
 	return true
 end
 
@@ -183,7 +488,10 @@ function HttpQueue.Tick()
 		return
 	end
 
-	if isProcessing and activeItem and globals.RealTime() >= activeDeadline then
+	local now = Now()
+	RefreshBridgeSafeWindowGate()
+
+	if isProcessing and activeItem and now >= activeDeadline then
 		local timedOutItem = activeItem
 		local err = "HTTP request timed out after "
 		err = err .. tostring(REQUEST_TIMEOUT) .. "s"
@@ -192,55 +500,12 @@ function HttpQueue.Tick()
 		end
 		err = err .. " attempts=" .. tostring(activeAttemptCount)
 		print("[HTTP QUEUE ERROR] " .. err .. " url=" .. tostring(timedOutItem.url))
-		local cbStatus, cbErr = pcall(timedOutItem.callback, nil, err, timedOutItem.context)
-		if not cbStatus then
-			print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-		end
 		activeToken = activeToken + 1
-		isProcessing = false
-		activeItem = nil
-		activeAttemptInFlight = false
-		activeNextRetry = 0
-		activeLastError = ""
-		activeAttemptCount = 0
-	elseif
-		isProcessing
-		and activeItem
-		and (not activeAttemptInFlight)
-		and globals.RealTime() >= activeNextRetry
-	then
-		-- Re-dispatch async call until we get non-empty payload or timeout.
-		activeAttemptCount = activeAttemptCount + 1
-		activeAttemptInFlight = true
-		local myToken = activeToken
-		local item = activeItem
-		local asyncOk, asyncErr = pcall(function()
-			http.GetAsync(item.url, function(data)
-				if myToken ~= activeToken then
-					return
-				end
-				activeAttemptInFlight = false
-				if type(data) == "string" and #data > 0 then
-					local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
-					if not cbStatus then
-						print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-					end
-					isProcessing = false
-					activeItem = nil
-					activeAttemptInFlight = false
-					activeNextRetry = 0
-					activeLastError = ""
-					return
-				end
-				activeLastError = "GetAsync returned empty/invalid response"
-				activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
-			end)
-		end)
-		if not asyncOk then
-			activeAttemptInFlight = false
-			activeLastError = "GetAsync call failed: " .. tostring(asyncErr)
-			activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
-		end
+		FinishActiveRequest(timedOutItem, nil, err)
+	elseif isProcessing and activeItem and activeTransport == "bridge" and now >= activeNextRetry then
+		PollBridgeResult(now)
+	elseif isProcessing and activeItem and activeTransport == "blocking" and (not activeAttemptInFlight) and now >= activeNextRetry then
+		DispatchBlockingAttempt()
 	end
 
 	ProcessNextRequest()
@@ -248,8 +513,7 @@ end
 
 --[[ Cleanup ]]
 
-callbacks.Unregister("Unload", "HttpQueue_Unload")
-callbacks.Register("Unload", "HttpQueue_Unload", function()
+local function OnHttpQueueUnload()
 	isAlive = false
 	queue = {}
 	isProcessing = false
@@ -258,6 +522,10 @@ callbacks.Register("Unload", "HttpQueue_Unload", function()
 	activeNextRetry = 0
 	activeLastError = ""
 	activeAttemptCount = 0
-end)
+	activeDeadline = 0
+end
+
+callbacks.Unregister("Unload", "HttpQueue_Unload")
+callbacks.Register("Unload", "HttpQueue_Unload", OnHttpQueueUnload)
 
 return HttpQueue

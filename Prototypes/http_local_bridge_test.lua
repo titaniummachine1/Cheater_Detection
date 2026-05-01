@@ -11,11 +11,7 @@ Pending receive returns nil, false, nil.
 Successful receive returns data, true, nil.
 Failed receive returns nil, true, err.
 ]]
-
-assert(http and type(http.Get) == "function", "http_local_bridge_test: http.Get missing")
-assert(callbacks and type(callbacks.Register) == "function", "http_local_bridge_test: callbacks missing")
-assert(globals and type(globals.RealTime) == "function", "http_local_bridge_test: globals missing")
-
+--do not assert glboaly defined stuff please in environment
 local localJsonOk, localJson = pcall(require, "Json")
 local mainJsonOk, mainJson = pcall(require, "Cheater_Detection.Libs.Json")
 
@@ -33,10 +29,13 @@ local CONFIG = {
     bridgePort = 17354,
     protocol = "local-http-bridge-v1",
     targetUrl = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
+    bridgeStallLimit = 0.20,
     pollInterval = 0.0,
     requestTimeoutMs = 12000,
     requestMaxBytes = 2 * 1024 * 1024,
     startRetryDelay = 0.50,
+    offlineRetryDelay = 15.00,
+    offlineRetryMaxDelay = 60.00,
     statusLogInterval = 2.00,
     errorLogCooldown = 1.50,
 }
@@ -48,10 +47,57 @@ local function Log(message)
 end
 
 local function UrlEncode(value)
-    assert(type(value) == "string", "UrlEncode: value must be string")
+    if type(value) ~= "string" then
+        return nil
+    end
     return string.gsub(value, "([^%w%-_%.~])", function(character)
         return string.format("%%%02X", string.byte(character))
     end)
+end
+
+local function Now()
+    local globalsTable = globals
+    if globalsTable ~= nil and type(globalsTable.RealTime) == "function" then
+        local ok, value = pcall(globalsTable.RealTime)
+        if ok and type(value) == "number" then
+            return value
+        end
+    end
+    return os.clock()
+end
+
+local function ClampOfflineRetryDelay(delay)
+    if type(delay) ~= "number" then
+        return CONFIG.offlineRetryDelay
+    end
+    if delay < CONFIG.offlineRetryDelay then
+        return CONFIG.offlineRetryDelay
+    end
+    if delay > CONFIG.offlineRetryMaxDelay then
+        return CONFIG.offlineRetryMaxDelay
+    end
+    return delay
+end
+
+local function CanRunBlockingBridgeNow()
+    local entitiesTable = entities
+    if entitiesTable == nil or type(entitiesTable.GetLocalPlayer) ~= "function" then
+        return true
+    end
+
+    local ok, localPlayer = pcall(entitiesTable.GetLocalPlayer)
+    if not ok or localPlayer == nil then
+        return true
+    end
+
+    local aliveOk, alive = pcall(function()
+        return localPlayer:IsAlive()
+    end)
+    if not aliveOk then
+        return false
+    end
+
+    return not alive
 end
 
 local function DecodeBody(body)
@@ -71,7 +117,21 @@ local function DecodeBody(body)
 end
 
 local function HttpJson(path)
-    local body = http.Get(BRIDGE_BASE .. path)
+    local httpTable = http
+    if httpTable == nil or type(httpTable.Get) ~= "function" then
+        return nil, "http.Get unavailable"
+    end
+
+    local startedAt = Now()
+    local ok, body = pcall(httpTable.Get, BRIDGE_BASE .. path)
+    local elapsed = Now() - startedAt
+    if elapsed > CONFIG.bridgeStallLimit then
+        return nil, string.format("bridge call stalled for %.3fs", elapsed)
+    end
+    if not ok then
+        return nil, tostring(body)
+    end
+
     return DecodeBody(body)
 end
 
@@ -81,20 +141,73 @@ local Bridge = {
         protocol = nil,
         lastError = nil,
         lastProbeAt = 0.0,
+        nextProbeAt = 0.0,
+        retryDelay = CONFIG.offlineRetryDelay,
+        blockedUntilSafeWindow = false,
     },
 }
 
-function Bridge.Probe()
+function Bridge.MarkOffline(err, now, delay, blockUntilSafeWindow)
+    local offlineAt = type(now) == "number" and now or Now()
+    local retryDelay = ClampOfflineRetryDelay(delay or Bridge.state.retryDelay)
+
+    Bridge.state.alive = false
+    Bridge.state.protocol = nil
+    Bridge.state.lastError = err or "bridge offline"
+    Bridge.state.lastProbeAt = offlineAt
+    Bridge.state.nextProbeAt = offlineAt + retryDelay
+
+    if delay == nil then
+        Bridge.state.retryDelay = ClampOfflineRetryDelay(retryDelay * 2.0)
+    else
+        Bridge.state.retryDelay = ClampOfflineRetryDelay(delay)
+    end
+
+    if blockUntilSafeWindow then
+        Bridge.state.blockedUntilSafeWindow = true
+    end
+end
+
+function Bridge.Probe(now, force)
+    local probeNow = type(now) == "number" and now or Now()
+    local safeWindow = CanRunBlockingBridgeNow()
+
+    if Bridge.state.blockedUntilSafeWindow and safeWindow then
+        Bridge.state.blockedUntilSafeWindow = false
+    end
+    if not safeWindow and Bridge.state.alive ~= true then
+        return false, Bridge.state.lastError or "bridge offline"
+    end
+    if Bridge.state.blockedUntilSafeWindow and not safeWindow then
+        return false, Bridge.state.lastError or "bridge offline"
+    end
+    if force ~= true and probeNow < Bridge.state.nextProbeAt then
+        return false, Bridge.state.lastError or "bridge offline"
+    end
+
     local response, err = HttpJson("/health")
     local payload = response or {}
     local alive = payload.ok == true and payload.alive == true and payload.protocol == CONFIG.protocol
 
-    Bridge.state.alive = alive
-    Bridge.state.protocol = payload.protocol
-    Bridge.state.lastProbeAt = globals.RealTime()
-    Bridge.state.lastError = alive and nil or (err or payload.error or "bridge offline")
+    if alive then
+        Bridge.state.alive = true
+        Bridge.state.protocol = payload.protocol
+        Bridge.state.lastProbeAt = probeNow
+        Bridge.state.lastError = nil
+        Bridge.state.nextProbeAt = probeNow
+        Bridge.state.retryDelay = CONFIG.offlineRetryDelay
+        Bridge.state.blockedUntilSafeWindow = false
+        return true, nil
+    end
 
-    return alive, Bridge.state.lastError
+    if err == "http.Get unavailable" then
+        Bridge.MarkOffline(err, probeNow, CONFIG.offlineRetryMaxDelay, true)
+    else
+        local shouldBlockUntilSafeWindow = type(err) == "string" and string.find(err, "stalled", 1, true) ~= nil
+        Bridge.MarkOffline(err or payload.error or "bridge offline", probeNow, nil, shouldBlockUntilSafeWindow)
+    end
+
+    return false, Bridge.state.lastError
 end
 
 function Bridge.IsAlive()
@@ -106,18 +219,30 @@ function Bridge.CanUse()
 end
 
 function Bridge.Start(url, timeoutMs, maxBytes)
-    assert(type(url) == "string" and url ~= "", "Bridge.Start: url missing")
+    if type(url) ~= "string" or url == "" then
+        return nil, "url missing"
+    end
 
     local requestTimeoutMs = timeoutMs or CONFIG.requestTimeoutMs
     local requestMaxBytes = maxBytes or CONFIG.requestMaxBytes
+    local encodedUrl = UrlEncode(url)
+    if encodedUrl == nil then
+        return nil, "url encode failed"
+    end
     local path = string.format(
         "/submit?url=%s&timeout_ms=%d&max_bytes=%d",
-        UrlEncode(url),
+        encodedUrl,
         requestTimeoutMs,
         requestMaxBytes
     )
 
     local response, err = HttpJson(path)
+    if response == nil then
+        local shouldBlockUntilSafeWindow = type(err) == "string" and string.find(err, "stalled", 1, true) ~= nil
+        Bridge.MarkOffline(err, nil, nil, shouldBlockUntilSafeWindow)
+        return nil, Bridge.state.lastError
+    end
+
     local payload = response or {}
     local requestId = payload.id
 
@@ -129,11 +254,20 @@ function Bridge.Start(url, timeoutMs, maxBytes)
 end
 
 function Bridge.Receive(id)
-    assert(type(id) == "string" and id ~= "", "Bridge.Receive: id missing")
+    if type(id) ~= "string" or id == "" then
+        return nil, true, "id missing"
+    end
 
-    local response, err = HttpJson("/result?id=" .. UrlEncode(id))
+    local encodedId = UrlEncode(id)
+    if encodedId == nil then
+        return nil, true, "id encode failed"
+    end
+
+    local response, err = HttpJson("/result?id=" .. encodedId)
     if response == nil then
-        return nil, false, err
+        local shouldBlockUntilSafeWindow = type(err) == "string" and string.find(err, "stalled", 1, true) ~= nil
+        Bridge.MarkOffline(err, nil, nil, shouldBlockUntilSafeWindow)
+        return nil, true, Bridge.state.lastError
     end
 
     local payload = response or {}
@@ -201,7 +335,14 @@ local function LogErrorRateLimited(message, now)
 end
 
 local function UpdateFrameStats()
-    local frameTime = globals.FrameTime()
+    local frameTime = 0.0
+    local globalsTable = globals
+    if globalsTable ~= nil and type(globalsTable.FrameTime) == "function" then
+        local ok, value = pcall(globalsTable.FrameTime)
+        if ok and type(value) == "number" then
+            frameTime = value
+        end
+    end
     if type(frameTime) ~= "number" or frameTime < 0 then
         return
     end
@@ -229,10 +370,16 @@ local function StartStressRequest(now)
     end
 
     if not Bridge.CanUse() then
-        local alive, probeErr = Bridge.Probe()
+        local alive, probeErr = Bridge.Probe(now)
         if not alive then
             Stress.retry = Stress.retry + 1
-            Stress.nextStartAt = now + CONFIG.startRetryDelay
+            if type(Bridge.state.nextProbeAt) == "number" and Bridge.state.nextProbeAt > now then
+                Stress.nextStartAt = Bridge.state.nextProbeAt
+            elseif not CanRunBlockingBridgeNow() then
+                Stress.nextStartAt = now + CONFIG.startRetryDelay
+            else
+                Stress.nextStartAt = now + CONFIG.offlineRetryDelay
+            end
             LogErrorRateLimited("bridge offline: " .. tostring(probeErr), now)
             return
         end
@@ -241,7 +388,13 @@ local function StartStressRequest(now)
     local requestId, err = Bridge.Start(CONFIG.targetUrl)
     if requestId == nil then
         Stress.retry = Stress.retry + 1
-        Stress.nextStartAt = now + CONFIG.startRetryDelay
+        if Bridge.CanUse() then
+            Stress.nextStartAt = now + CONFIG.startRetryDelay
+        elseif type(Bridge.state.nextProbeAt) == "number" and Bridge.state.nextProbeAt > now then
+            Stress.nextStartAt = Bridge.state.nextProbeAt
+        else
+            Stress.nextStartAt = now + CONFIG.offlineRetryDelay
+        end
         LogErrorRateLimited("submit retry: " .. tostring(err), now)
         return
     end
@@ -324,7 +477,7 @@ local function LogStatus(now)
 end
 
 local function OnDraw()
-    local now = globals.RealTime()
+    local now = Now()
     EnsureRunStarted(now)
     UpdateFrameStats()
     PollStressRequest(now)
