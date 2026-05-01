@@ -34,6 +34,9 @@ Fetcher.State = {
 	localFiles = {},
 	fileIdx = 0,
 	playersToProcess = nil,
+	rawText = nil, -- raw response text to parse incrementally
+	rawPos = 1, -- current byte position in rawText
+	rawPendingSource = nil,
 	pendingResponse = nil,
 	pendingResponseReady = false,
 	pendingSource = nil,
@@ -132,6 +135,9 @@ function Fetcher.Start()
 	state.fileIdx = 1
 	state.entryIdx = 1
 	state.pendingSource = nil
+	state.rawText = nil
+	state.rawPos = 1
+	state.rawPendingSource = nil
 	state.pendingResponse = nil
 	state.pendingResponseReady = false
 	state.waitEndTime = 0
@@ -275,19 +281,15 @@ function Fetcher.Tick()
 
 			-- FALLBACK: If JSON decode returned a number, it's likely a raw list of IDs
 			if not players and err and err:find("returned number") then
-				Logger.Debug("Fetcher", "[FETCHER] Local file appears to be raw IDs, parsing directly")
-				local rawPlayers = {}
-				for word in content:gmatch("[%w%[%]:_]+") do
-					local sid64 = Parsers.GetSteamID64(word)
-					if sid64 then
-						table.insert(rawPlayers, { steamid = sid64, attributes = { fileName } })
-					end
-				end
-				state.playersToProcess = rawPlayers
+				Logger.Debug("Fetcher", "[FETCHER] Local file appears to be raw IDs, parsing incrementally")
+				state.rawText = content
+				state.rawPos = 1
+				state.rawPendingSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
+				state.playersToProcess = {}
 				state.entryIdx = 1
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
-				state.activeSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
-				state.mode = "LOCAL_PARSE"
+				state.nextMode = "LOCAL_PARSE"
+				state.mode = "RAW_INCREMENTAL"
 				return
 			end
 
@@ -306,6 +308,50 @@ function Fetcher.Tick()
 			Logger.Warning("Fetcher", "[FETCHER] Failed to read or empty local file: " .. fileName)
 			state.fileIdx = state.fileIdx + 1
 			state.mode = "LOCAL_READ"
+		end
+
+		--------------------------------------------------------
+		-- STATE: RAW_INCREMENTAL
+		-- Parses a raw SteamID64 text blob N tokens per tick using
+		-- string.find + position counter (no closure / coroutine).
+		--------------------------------------------------------
+	elseif state.mode == "RAW_INCREMENTAL" then
+		local rawText = state.rawText
+		local source = state.rawPendingSource
+		assert(rawText, "RAW_INCREMENTAL: rawText missing")
+		assert(source, "RAW_INCREMENTAL: rawPendingSource missing")
+
+		local TOKENS_PER_TICK = ShouldRelaxFrameLimits() and 5000 or 500
+		local pos = state.rawPos
+		local count = 0
+		local len = #rawText
+		local label = source.name or source.cause or "Raw List"
+
+		while count < TOKENS_PER_TICK and pos <= len do
+			local s, e = rawText:find("[%w%[%]:_]+", pos)
+			if not s then
+				pos = len + 1
+				break
+			end
+			local word = rawText:sub(s, e)
+			pos = e + 1
+			count = count + 1
+			local sid64 = Parsers.GetSteamID64(word)
+			if sid64 then
+				table.insert(state.playersToProcess, { steamid = sid64, attributes = { label } })
+			end
+		end
+
+		state.rawPos = pos
+
+		if pos > len then
+			-- Done — hand off to parse state
+			state.activeSource = source
+			state.entryIdx = 1
+			state.rawText = nil
+			state.rawPendingSource = nil
+			state.mode = state.nextMode or "LOCAL_PARSE"
+			state.nextMode = nil
 		end
 
 		--------------------------------------------------------
@@ -524,19 +570,15 @@ function Fetcher.Tick()
 			if source.parser == "tf2db" then
 				players, err = Parsers.GetPlayersFromJSON(response)
 			elseif source.parser == "raw" then
-				Logger.Debug("Fetcher", "[FETCHER] Online source is raw IDs, parsing directly")
-				local rawPlayers = {}
-				for word in response:gmatch("[%w%[%]:_]+") do
-					local sid64 = Parsers.GetSteamID64(word)
-					if sid64 then
-						table.insert(rawPlayers, { steamid = sid64, attributes = { source.name or source.cause or "Raw List" } })
-					end
-				end
-				state.playersToProcess = rawPlayers
+				Logger.Debug("Fetcher", "[FETCHER] Online source is raw IDs, parsing incrementally")
+				state.rawText = response
+				state.rawPos = 1
+				state.rawPendingSource = source
+				state.playersToProcess = {}
 				state.entryIdx = 1
-				state.activeSource = source
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
-				state.mode = "ONLINE_PARSE"
+				state.nextMode = "ONLINE_PARSE"
+				state.mode = "RAW_INCREMENTAL"
 				return
 			else
 				err = "Unknown parser type: " .. tostring(source.parser)
