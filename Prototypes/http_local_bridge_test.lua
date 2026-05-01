@@ -11,12 +11,8 @@ This lets Lua do short localhost blocking http.Get calls while the bridge perfor
 remote HTTP in background threads.
 ]]
 
-assert(http, "http_local_bridge_test: http library missing")
-assert(callbacks, "http_local_bridge_test: callbacks missing")
-assert(globals, "http_local_bridge_test: globals missing")
-
 local function LoadJsonModule()
-    local okLocal, moduleLocal = pcall(require, "Prototypes.Json")
+    local okLocal, moduleLocal = pcall(require, "Json")
     if okLocal and type(moduleLocal) == "table" and type(moduleLocal.decode) == "function" then
         return moduleLocal
     end
@@ -38,10 +34,14 @@ local BRIDGE_BASE = "http://" .. BRIDGE_HOST .. ":" .. tostring(BRIDGE_PORT)
 local POLL_INTERVAL = 0.10
 local REQUEST_TIMEOUT_MS = 12000
 local REQUEST_MAX_BYTES = 2 * 1024 * 1024
+local START_RETRY_DELAY = 0.50
+local ERROR_LOG_COOLDOWN = 1.50
 
 local State = {
     pendingId = nil,
     nextPollAt = 0.0,
+    nextStartAttemptAt = 0.0,
+    lastErrorLogAt = -9999.0,
     startedAt = 0.0,
     completed = false,
 }
@@ -63,9 +63,14 @@ local function DecodeJson(body)
         return false, nil, "response body is not string"
     end
 
+    if body == "" then
+        return false, nil, "empty response from bridge"
+    end
+
     local ok, decoded = pcall(Json.decode, body)
     if not ok or type(decoded) ~= "table" then
-        return false, nil, "invalid json from bridge"
+        local preview = string.sub(body, 1, 96)
+        return false, nil, "invalid json from bridge: " .. tostring(preview)
     end
 
     return true, decoded, nil
@@ -131,15 +136,59 @@ function Bridge.Poll(id)
     return false, true, nil, decoded.error or "remote request failed"
 end
 
+local function IsTransientBridgeError(err)
+    if type(err) ~= "string" then
+        return true
+    end
+
+    if string.find(err, "invalid json from bridge", 1, true) then
+        return true
+    end
+    if string.find(err, "response body is not string", 1, true) then
+        return true
+    end
+    if string.find(err, "empty response from bridge", 1, true) then
+        return true
+    end
+
+    return false
+end
+
+local function LogErrorRateLimited(message)
+    local now = globals.RealTime()
+    if now - State.lastErrorLogAt < ERROR_LOG_COOLDOWN then
+        return
+    end
+    State.lastErrorLogAt = now
+    Log(message)
+end
+
 local function StartDemoRequest()
     if State.pendingId then
+        return
+    end
+
+    local now = globals.RealTime()
+    if now < State.nextStartAttemptAt then
+        return
+    end
+
+    local healthy, _, healthErr = Bridge.Health()
+    if not healthy then
+        State.nextStartAttemptAt = now + START_RETRY_DELAY
+        LogErrorRateLimited("bridge not ready: " .. tostring(healthErr))
         return
     end
 
     local targetUrl = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids"
     local ok, requestId, err = Bridge.Start(targetUrl)
     if not ok then
-        Log("submit failed: " .. tostring(err))
+        State.nextStartAttemptAt = now + START_RETRY_DELAY
+        if IsTransientBridgeError(err) then
+            LogErrorRateLimited("bridge transient submit error; retrying: " .. tostring(err))
+        else
+            LogErrorRateLimited("submit failed: " .. tostring(err))
+        end
         return
     end
 
