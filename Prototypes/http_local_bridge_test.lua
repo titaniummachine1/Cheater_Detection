@@ -28,6 +28,7 @@ local CONFIG = {
     bridgeHost = "127.0.0.1",
     bridgePort = 17354,
     protocol = "local-http-bridge-v1",
+    assumeBridgeAliveOnLoad = true,
     targetUrl = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
     bridgeStallLimit = 0.20,
     pollInterval = 0.0,
@@ -137,8 +138,8 @@ end
 
 local Bridge = {
     state = {
-        alive = false,
-        protocol = nil,
+        alive = CONFIG.assumeBridgeAliveOnLoad == true,
+        protocol = CONFIG.assumeBridgeAliveOnLoad == true and CONFIG.protocol or nil,
         lastError = nil,
         lastProbeAt = 0.0,
         nextProbeAt = 0.0,
@@ -362,6 +363,9 @@ local function EnsureRunStarted(now)
     Stress.runStartedAt = now
     Stress.lastStatusAt = now
     Log("stress test started")
+    if CONFIG.assumeBridgeAliveOnLoad == true then
+        Log("startup mode: optimistic bridge alive")
+    end
 end
 
 local function StartStressRequest(now)
