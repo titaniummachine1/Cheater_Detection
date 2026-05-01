@@ -1,24 +1,31 @@
 {
-    "editor.formatOnSave": true,
-        "Lua.diagnostics.enable": true,
-        "Lua.diagnostics.workspaceDelay": 0,
-        "Lua.hint.enable": true,
-    "[lua]": {
-      "editor.defaultFormatter": "JohnnyMorganz.stylua", 
-      // Or if using LuaFormat: "editor.defaultFormatter": "koihik.vscode-lua-format",
-      "editor.formatOnSave": true
-    },
-    "stylua.searchParentDirectories": true,
-    "emeraldwalk.runonsave": {
-        "commands": [
-            {
-                "match": "\\.lua$",
-                "isAsync": true,
-                "cmd": "\"${workspaceFolder}\\BundleAndDeploy.bat\"",
-                "message": "Attempting to run default build task for ${fileBasename}...",
-                "autoShowOutputPanel": "error"
-            }
-        ]
-    },
-    "stylua.targetReleaseVersion": "latest"
+  "Lua.runtime.version": "Lua 5.4",
+  "Lua.workspace.library": [
+    "C:/gitProjects/Lmaobox-Annotations/library"
+  ],
+  "Lua.workspace.checkThirdParty": true,
+  "files.autoSave": "onFocusChange",
+  "achilleshr.runonsave": {
+    "autoSave": true,
+    "onSave": true,
+    "commands": [
+      {
+        "match": ".*\\.lua$",
+        "isAsync": false,
+        "cmd": "node \"${workspaceFolder}\\bundle.js\"",
+        "autoShowOutputPanel": "always"
+      }
+    ]
+  },
+  "emeraldwalk.runonsave": {
+    "autoSave": true,
+    "commands": [
+      {
+        "match": ".*\\.lua$",
+        "isAsync": false,
+        "cmd": "node \"${workspaceFolder}\\bundle.js\"",
+        "autoShowOutputPanel": "always"
+      }
+    ]
+  }
 }
