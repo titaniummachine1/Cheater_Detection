@@ -117,14 +117,43 @@ local function DecodeBody(body)
     return decoded, nil
 end
 
-local function HttpJson(path)
+local function ResolveHttpGet()
     local httpTable = http
-    if httpTable == nil or type(httpTable.Get) ~= "function" then
+    if httpTable ~= nil and type(httpTable.Get) == "function" then
+        return httpTable.Get
+    end
+
+    local requiredHttp = nil
+    local requireOk, requireResult = pcall(require, "http")
+    if requireOk and (type(requireResult) == "table" or type(requireResult) == "userdata") then
+        requiredHttp = requireResult
+    end
+
+    if requiredHttp ~= nil and type(requiredHttp.Get) == "function" then
+        http = requiredHttp
+        return requiredHttp.Get
+    end
+
+    local commonOk, commonModule = pcall(require, "Cheater_Detection.Utils.Common")
+    if commonOk and type(commonModule) == "table" then
+        local commonHttp = commonModule.http
+        if commonHttp ~= nil and type(commonHttp.Get) == "function" then
+            http = commonHttp
+            return commonHttp.Get
+        end
+    end
+
+    return nil
+end
+
+local function HttpJson(path)
+    local httpGet = ResolveHttpGet()
+    if httpGet == nil then
         return nil, "http.Get unavailable"
     end
 
     local startedAt = Now()
-    local ok, body = pcall(httpTable.Get, BRIDGE_BASE .. path)
+    local ok, body = pcall(httpGet, BRIDGE_BASE .. path)
     local elapsed = Now() - startedAt
     if elapsed > CONFIG.bridgeStallLimit then
         return nil, string.format("bridge call stalled for %.3fs", elapsed)
