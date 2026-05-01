@@ -56,16 +56,16 @@ local function setupSteamHistory()
 
 		shell.ApiKey = key
 		shell.Enable = true -- Enable it automatically when key is set
-        
+
 		-- Force update in the module itself
 		if SteamHistory and SteamHistory.OnApiKeyUpdated then
 			SteamHistory.OnApiKeyUpdated()
 		end
 
-        -- Persist the change
-        if Config and Config.CreateCFG then
-            Config.CreateCFG()
-        end
+		-- Persist the change
+		if Config and Config.CreateCFG then
+			Config.CreateCFG()
+		end
 
 		printc(0, 255, 140, 255, "[SteamHistory] API key stored and module enabled!")
 	end)
@@ -88,10 +88,10 @@ local function setupDiagnostics()
 			return
 		end
 
-		local steam2  = info.SteamID or "nil"
+		local steam2 = info.SteamID or "nil"
 		local steam64 = steam.ToSteamID64 and steam.ToSteamID64(steam2) or "conversion unavailable"
-		local userID  = tostring(info.UserID)
-		local isBot   = tostring(info.IsBot)
+		local userID = tostring(info.UserID)
+		local isBot = tostring(info.IsBot)
 
 		printc(100, 220, 255, 255, "[CD] Local player diagnostic:")
 		printc(200, 200, 200, 255, string.format("  Steam2  : %s", steam2))
@@ -101,20 +101,26 @@ local function setupDiagnostics()
 
 		-- Check against both valve lists (same logic as valve_check layer 1)
 		local idStr = tostring(steam64)
-		local inValveData     = ValveData.KnownSteamID64s[idStr] == true
+		local inValveData = ValveData.KnownSteamID64s[idStr] == true
 		local inValveEmployees = type(ValveEmployees.List) == "table" and (ValveEmployees.List[idStr] ~= nil)
 
-		local matchColor = (inValveData or inValveEmployees) and {100, 255, 100, 255} or {255, 100, 100, 255}
-		printc(matchColor[1], matchColor[2], matchColor[3], matchColor[4], string.format(
-			"  valve_data.lua match    : %s",    tostring(inValveData)
-		))
-		printc(matchColor[1], matchColor[2], matchColor[3], matchColor[4], string.format(
-			"  ValveEmployees.lua match: %s",    tostring(inValveEmployees)
-		))
+		local matchColor = (inValveData or inValveEmployees) and { 100, 255, 100, 255 } or { 255, 100, 100, 255 }
+		printc(
+			matchColor[1],
+			matchColor[2],
+			matchColor[3],
+			matchColor[4],
+			string.format("  valve_data.lua match    : %s", tostring(inValveData))
+		)
+		printc(
+			matchColor[1],
+			matchColor[2],
+			matchColor[3],
+			matchColor[4],
+			string.format("  ValveEmployees.lua match: %s", tostring(inValveEmployees))
+		)
 		if not inValveData and not inValveEmployees then
-			printc(255, 200, 100, 255, string.format(
-				"  !! Add \"%s\" to Database/ValveEmployees.lua", idStr
-			))
+			printc(255, 200, 100, 255, string.format('  !! Add "%s" to Database/ValveEmployees.lua', idStr))
 		end
 	end)
 end

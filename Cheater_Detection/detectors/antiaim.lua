@@ -157,25 +157,6 @@ local function readDetectionAngles(wrap, entity, cmd, isLocalDebug)
 	return first.pitch, first.yaw, first.source, candidates
 end
 
-local function formatCandidates(candidates)
-	if not candidates or #candidates == 0 then
-		return "sources=nil"
-	end
-
-	local parts = {}
-	for i = 1, #candidates do
-		local candidate = candidates[i]
-		parts[#parts + 1] = string.format(
-			"%s=%.3f/%s",
-			candidate.source,
-			candidate.pitch,
-			type(candidate.yaw) == "number" and string.format("%.3f", candidate.yaw) or "nil"
-		)
-	end
-
-	return table.concat(parts, " | ")
-end
-
 function AntiAim.ProcessPlayer(playerState, cmd)
 	if not playerState or not playerState.wrap or not playerState.id then
 		return
@@ -186,14 +167,10 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	end
 
 	local isDebug = Common.IsDebugEnabled()
-	traceLog(isDebug, playerState, "enter")
-
 	local entity = playerState.wrap:GetRawEntity()
 	if not entity then
-		traceLog(isDebug, playerState, "raw entity missing")
 		return
 	end
-	traceLog(isDebug, playerState, "raw entity ok")
 
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = localPlayer ~= nil and entity == localPlayer
@@ -203,48 +180,38 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	end
 
 	if not Common.IsValidPlayer(entity, false, true, skipEntity) then
-		traceLog(isDebug, playerState, "IsValidPlayer rejected")
 		return
 	end
-	traceLog(isDebug, playerState, "IsValidPlayer ok")
 
 	local simTime = playerState.wrap:GetSimulationTime()
 	if not simTime or simTime <= 0 then
-		traceLog(isDebug, playerState, "invalid simTime")
 		return
 	end
-	traceLog(isDebug, playerState, string.format("simTime=%.6f", simTime))
 
 	local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
 	if isCheater and not isDebug then
-		traceLog(isDebug, playerState, "already cheater and debug off")
 		return
 	end
-	traceLog(isDebug, playerState, "cheater gate ok")
 
 	local pitch, yaw, angleSource, candidates =
 		readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
 	if pitch == nil then
-		traceLog(isDebug, playerState, "pitch nil")
 		return
 	end
-	traceLog(
-		isDebug,
-		playerState,
-		string.format(
-			"pitch=%.3f yaw=%s source=%s all=%s",
-			pitch,
-			yaw ~= nil and string.format("%.3f", yaw) or "nil",
-			tostring(angleSource),
-			formatCandidates(candidates)
-		)
-	)
 
 	local isInvalid = isInvalidPitchValue(pitch)
-	traceLog(isDebug, playerState, string.format("isInvalid=%s", tostring(isInvalid)))
 
 	if isInvalid then
-		traceLog(isDebug, playerState, "invalid pitch hit")
+		traceLog(
+			isDebug,
+			playerState,
+			string.format(
+				"invalid pitch hit pitch=%.3f yaw=%s source=%s",
+				pitch,
+				yaw ~= nil and string.format("%.3f", yaw) or "nil",
+				tostring(angleSource)
+			)
+		)
 		local reason = string.format("Invalid Pitch (%.2f)", pitch)
 		DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
 	end

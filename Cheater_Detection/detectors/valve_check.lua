@@ -56,7 +56,8 @@ local function runDeferredSweep()
 	deferredSweepRequested = false
 	for id, state in pairs(PlayerCache.GetActiveTable()) do
 		local checkFlags = PlayerCache.EnsureCheckFlags(state)
-		if not checkFlags.valveItemBadgeChecked
+		if
+			not checkFlags.valveItemBadgeChecked
 			or not checkFlags.valveGroupChecked
 			or not checkFlags.vacBanChecked
 			or not checkFlags.commBanChecked
@@ -259,7 +260,8 @@ function ValveCheck.ProcessPlayer(playerState)
 	checkFlags.valveID64Checked = true
 
 	-- Keep heavy checks event-driven to avoid intrusive per-frame cost.
-	if not deferredQueue[id]
+	if
+		not deferredQueue[id]
 		and (
 			not checkFlags.valveItemBadgeChecked
 			or not checkFlags.valveGroupChecked

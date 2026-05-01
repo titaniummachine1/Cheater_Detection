@@ -55,7 +55,7 @@ local function onPlayerSpawnRefresh(event)
 	end
 end
 
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Map",   onMapOrRoundRefresh, "game_newmap")
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Map", onMapOrRoundRefresh, "game_newmap")
 Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Round", onMapOrRoundRefresh, "teamplay_round_start")
 Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Spawn", onPlayerSpawnRefresh, "player_spawn")
 
@@ -140,7 +140,9 @@ function FakeLag.ProcessPlayer(playerState)
 			if consistent then
 				-- ~0.333 s cooldown between adding weight/marking for FakeLag per suspect (≈22 ticks at 66 Hz)
 				local lastFlag = data.lastFlagTick or 0
-				if (curTick - lastFlag) < math.floor(FAKELAG_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5) then
+				if
+					(curTick - lastFlag) < math.floor(FAKELAG_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+				then
 					return
 				end
 

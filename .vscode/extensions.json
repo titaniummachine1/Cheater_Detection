@@ -1,9 +1,6 @@
 {
-    "recommendations": [
-        "emeraldwalk.RunOnSave",
-        "sumneko.lua",
-        "rc.lmaobox-lua-api-snippets",
-        "gccfeli.vscode-lua",
-        "notnoobmaster.lua-beautifier"
-    ]
+  "recommendations": [
+    "sumneko.lua",
+    "achilleshr.runonsave"
+  ]
 }

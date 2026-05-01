@@ -247,22 +247,31 @@ local function flagPlayer(steamID, context, entry)
 	-- Hard evidence decision:
 	-- If the ban reason explicitly mentions cheats/hacks, we mark as CHEATER immediately.
 	local lowerReason = reason:lower()
-	local isHardEvidence = lowerReason:find("aimbot") or lowerReason:find("cheat") or lowerReason:find("hack") or lowerReason:find("smac")
+	local isHardEvidence = lowerReason:find("aimbot")
+		or lowerReason:find("cheat")
+		or lowerReason:find("hack")
+		or lowerReason:find("smac")
 
 	local formattedReason = string.format("SteamHistory (%s)", reason)
 	local flags = 0
 	if isHardEvidence then
 		flags = Constants.Flags.CHEATER
-		printInfo({ 255, 50, 50, 255 }, string.format("[SteamHistory] %s flagged as CHEATER (Reason: %s)", name, reason))
+		printInfo(
+			{ 255, 50, 50, 255 },
+			string.format("[SteamHistory] %s flagged as CHEATER (Reason: %s)", name, reason)
+		)
 	else
 		flags = Constants.Flags.SUSPICIOUS
-		printInfo({ 255, 120, 120, 255 }, string.format("[SteamHistory] %s flagged as SUSPICIOUS (Reason: %s)", name, reason))
+		printInfo(
+			{ 255, 120, 120, 255 },
+			string.format("[SteamHistory] %s flagged as SUSPICIOUS (Reason: %s)", name, reason)
+		)
 	end
 
 	Database.UpsertCheater(steamID, {
 		name = name,
 		reason = formattedReason,
-		flags = flags
+		flags = flags,
 	})
 
 	-- Set priority 10 if AutoPriority enabled
@@ -303,8 +312,7 @@ local function setSteamHistoryChecks(steamID, entry)
 	checkFlags.steamHistoryChecked = true
 
 	local hasEntry = entry ~= nil
-	local responseHasVac =
-		entry
+	local responseHasVac = entry
 		and (
 			entry.VACBanned ~= nil
 			or entry.vacBanned ~= nil
@@ -312,8 +320,7 @@ local function setSteamHistoryChecks(steamID, entry)
 			or entry.NumberOfVACBans ~= nil
 			or entry.numberOfVACBans ~= nil
 		)
-	local responseHasComm =
-		entry
+	local responseHasComm = entry
 		and (
 			entry.CommunityBanned ~= nil
 			or entry.communityBanned ~= nil
@@ -332,16 +339,8 @@ local function setSteamHistoryChecks(steamID, entry)
 		isCommBanned = toBool(entry.CommunityBanned)
 			or toBool(entry.communityBanned)
 			or toBool(entry.tradeBanned)
-			or (
-				type(entry.EconomyBan) == "string"
-				and entry.EconomyBan ~= ""
-				and entry.EconomyBan:lower() ~= "none"
-			)
-			or (
-				type(entry.economyBan) == "string"
-				and entry.economyBan ~= ""
-				and entry.economyBan:lower() ~= "none"
-			)
+			or (type(entry.EconomyBan) == "string" and entry.EconomyBan ~= "" and entry.EconomyBan:lower() ~= "none")
+			or (type(entry.economyBan) == "string" and entry.economyBan ~= "" and entry.economyBan:lower() ~= "none")
 	end
 
 	if responseHasVac then
@@ -368,7 +367,10 @@ local function setSteamHistoryChecks(steamID, entry)
 		playerState.flags = playerState.flags | Constants.Flags.CHECKED
 	end
 
-	if playerState.flags ~= oldFlags and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0 then
+	if
+		playerState.flags ~= oldFlags
+		and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0
+	then
 		Database.UpsertCheater(steamID, {
 			name = playerState.wrap and playerState.wrap:GetName() or resolveName(steamID, nil, entry),
 			reason = isVacBanned and "SteamHistory VAC Ban" or "SteamHistory Community/Trade Ban",
@@ -562,9 +564,18 @@ local function requestBatch()
 			end
 
 			-- Detect HTML error pages before trying to JSON-decode
-			if body:match("<html>") or body:match("<title>") or body:match("429") or body:match("502") or body:match("503") or body:match("504") then
+			if
+				body:match("<html>")
+				or body:match("<title>")
+				or body:match("429")
+				or body:match("502")
+				or body:match("503")
+				or body:match("504")
+			then
 				local errorMsg = "API returned HTML (likely down)"
-				if body:match("429") then errorMsg = "Rate limited (429)" end
+				if body:match("429") then
+					errorMsg = "Rate limited (429)"
+				end
 				handleError(errorMsg, contexts)
 				return
 			end

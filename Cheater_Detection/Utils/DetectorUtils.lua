@@ -4,8 +4,8 @@
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
-local Database  = require("Cheater_Detection.Database.Database")
-local Events    = require("Cheater_Detection.Core.Events")
+local Database = require("Cheater_Detection.Database.Database")
+local Events = require("Cheater_Detection.Core.Events")
 
 local DetectorUtils = {}
 
@@ -27,39 +27,39 @@ local DetectorUtils = {}
 ---@param reason       string  Human-readable detection reason (stored in DB).
 ---@return boolean flagsChanged  True when the flag set changed (new threshold crossed).
 function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, reason)
-    local oldFlags = playerState.flags
+	local oldFlags = playerState.flags
 
-    if hardFlag then
-        if (hardFlag & Constants.Flags.CHEATER) ~= 0 then
-            playerState.flags = playerState.flags & ~Constants.Flags.SUSPICIOUS
-            playerState.flags = playerState.flags & ~Constants.Flags.HIGH_RISK
-        end
-        playerState.flags = playerState.flags | hardFlag
-        playerState.score = 100
-    else
-        playerState.score = math.min(99, playerState.score + scoreIncrement)
+	if hardFlag then
+		if (hardFlag & Constants.Flags.CHEATER) ~= 0 then
+			playerState.flags = playerState.flags & ~Constants.Flags.SUSPICIOUS
+			playerState.flags = playerState.flags & ~Constants.Flags.HIGH_RISK
+		end
+		playerState.flags = playerState.flags | hardFlag
+		playerState.score = 100
+	else
+		playerState.score = math.min(99, playerState.score + scoreIncrement)
 
-        if playerState.score >= Constants.Threshold.HIGH_RISK then
-            playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
-            playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-        elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
-            playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
-        end
-    end
+		if playerState.score >= Constants.Threshold.HIGH_RISK then
+			playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
+			playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+		elseif playerState.score >= Constants.Threshold.SUSPICIOUS then
+			playerState.flags = playerState.flags | Constants.Flags.SUSPICIOUS
+		end
+	end
 
-    Database.UpsertCheater(playerState.id, {
-        name  = playerState.wrap:GetName(),
-        reason = reason,
-        flags = playerState.flags,
-        score = playerState.score,
-    })
+	Database.UpsertCheater(playerState.id, {
+		name = playerState.wrap:GetName(),
+		reason = reason,
+		flags = playerState.flags,
+		score = playerState.score,
+	})
 
-    local flagsChanged = playerState.flags ~= oldFlags
-    if flagsChanged then
-        Events.Publish("OnPlayerStateChange", playerState, reason)
-    end
+	local flagsChanged = playerState.flags ~= oldFlags
+	if flagsChanged then
+		Events.Publish("OnPlayerStateChange", playerState, reason)
+	end
 
-    return flagsChanged
+	return flagsChanged
 end
 
 return DetectorUtils

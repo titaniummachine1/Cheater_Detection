@@ -1,0 +1,31 @@
+{
+    "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
+    "Lua.runtime.version": "Lua 5.4.7",
+    "Lua.runtime.path": [
+        "?.lua",
+        "?/init.lua",
+        "?/?.lua"
+    ],
+    "Lua.workspace.library": [
+        "c:/Users/Terminatort8000/AppData/Local/Programs/Windsurf/lualibry/Lmaobox-Annotations-master/library",
+        "${workspace}/types"
+    ],
+    "Lua.workspace.ignoreDir": [
+        "build",
+        ".git"
+    ],
+    "Lua.workspace.workspaceRoot": "${workspace}/src",
+    "Lua.workspace.checkThirdParty": false,
+    "Lua.diagnostics.disable": [
+        "unused-local",
+        "unused-function"
+    ],
+    "Lua.completion.enable": true,
+    "Lua.completion.callSnippet": "Both",
+    "Lua.completion.keywordSnippet": "Both",
+    "Lua.hint.enable": true,
+    "Lua.hint.paramName": "All",
+    "Lua.hint.setType": true,
+    "Lua.hint.arrayIndex": "Enable",
+    "Lua.telemetry.enable": false
+}

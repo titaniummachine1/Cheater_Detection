@@ -29,6 +29,7 @@ local Database = {
 
 local HARD_PRIORITY_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 local LOCAL_DEAD_SAVE_INTERVAL = 3
+local MIN_NONFORCED_SAVE_INTERVAL = 20
 
 local function ReapplyDetectedPriorities()
 	if not G.DataBase then
@@ -119,6 +120,12 @@ function Database.SaveDatabase(force)
 	if not force and not Database.State.isDirty then
 		return
 	end
+	if not force and Database.State.lastSave ~= 0 then
+		local elapsed = os.time() - Database.State.lastSave
+		if elapsed < MIN_NONFORCED_SAVE_INTERVAL then
+			return
+		end
+	end
 
 	local filepath = Database.GetFilePath()
 	Logger.Debug("Database", "[DB] Synchronous save to disk...")
@@ -170,8 +177,7 @@ local function OnFireEvent(event)
 
 		local isLocalDeath = victimEntity and localPlayer and victimEntity:GetIndex() == localPlayer:GetIndex()
 		if isLocalDeath then
-			Logger.Debug("Database", "[DB] Local player died, triggering save...")
-			Database.SaveDatabase()
+			Logger.Debug("Database", "[DB] Local player died, save deferred by autosave throttle")
 		end
 	end
 

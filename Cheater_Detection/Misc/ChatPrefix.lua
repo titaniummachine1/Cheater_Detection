@@ -127,6 +127,7 @@ local function OnUserMessage(msg)
 		return
 	end
 
+	local startBit = bf:GetCurBit()
 	bf:SetCurBit(0)
 
 	-- Read chat data (TF2's actual SayText2 structure)
@@ -140,6 +141,7 @@ local function OnUserMessage(msg)
 	-- Get player entity
 	local player = GetPlayerFromName(playerName)
 	if not player then
+		bf:SetCurBit(startBit)
 		return
 	end
 
@@ -182,6 +184,9 @@ local function OnUserMessage(msg)
 		bf:SetCurBit(0)
 		return
 	end
+
+	-- No rewrite for this message; restore cursor so the engine can parse normally.
+	bf:SetCurBit(startBit)
 end
 
 --[[ Callbacks ]]
