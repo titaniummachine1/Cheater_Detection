@@ -4,13 +4,14 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Json = Common.Json
 local Database = require("Cheater_Detection.Database.Database") -- For SaveDatabase
-local Sources = require("Cheater_Detection.Database.Sources") -- Require Sources
-local Parsers = require("Cheater_Detection.Database.Parsers") -- Require Parsers
+local Sources = require("Cheater_Detection.Database.Sources")   -- Require Sources
+local Parsers = require("Cheater_Detection.Database.Parsers")   -- Require Parsers
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
 local Fetcher = {}
+local MAX_JSON_NIL_RETRIES = 6
 
 ---- State tracking
 Fetcher.State = {
@@ -40,6 +41,7 @@ Fetcher.State = {
 	onlineEnqueued = false,
 	onlinePendingCount = 0,
 	onlineResponses = {},
+	onlineNilRetryCount = {},
 }
 
 -- Bypasses GitHub blocks
@@ -133,6 +135,7 @@ function Fetcher.Start()
 	state.onlineEnqueued = false
 	state.onlinePendingCount = 0
 	state.onlineResponses = {}
+	state.onlineNilRetryCount = {}
 end
 
 -- Core Tick function (called every frame from Draw/Scheduler)
@@ -214,9 +217,9 @@ function Fetcher.Tick()
 			state.mode = "ONLINE_FETCH"
 		end
 
-	--------------------------------------------------------
-	-- STATE: LOCAL_READ
-	--------------------------------------------------------
+		--------------------------------------------------------
+		-- STATE: LOCAL_READ
+		--------------------------------------------------------
 	elseif state.mode == "LOCAL_READ" then
 		local fileName = state.localFiles[state.fileIdx]
 		if not fileName then
@@ -267,7 +270,10 @@ function Fetcher.Tick()
 
 			-- FALLBACK: If JSON decode returned a number, it's likely a raw list of IDs
 			if not players and err and err:find("returned number") then
-				Logger.Debug("Fetcher", "[FETCHER] Local file appears to be raw IDs, switching to incremental raw parser")
+				Logger.Debug(
+					"Fetcher",
+					"[FETCHER] Local file appears to be raw IDs, switching to incremental raw parser"
+				)
 				state.rawIterator = content:gmatch("[%w%[%]:_]+")
 				state.playersToProcess = {}
 				state.entryIdx = 1
@@ -294,9 +300,9 @@ function Fetcher.Tick()
 			state.mode = "LOCAL_READ"
 		end
 
-	--------------------------------------------------------
-	-- STATE: RAW_INCREMENTAL
-	--------------------------------------------------------
+		--------------------------------------------------------
+		-- STATE: RAW_INCREMENTAL
+		--------------------------------------------------------
 	elseif state.mode == "RAW_INCREMENTAL" then
 		local it = state.rawIterator
 		local source = state.rawPendingSource
@@ -335,9 +341,9 @@ function Fetcher.Tick()
 			count = count + 1
 		end
 
-	--------------------------------------------------------
-	-- STATE: LOCAL_PARSE / ONLINE_PARSE (Merged Logic)
-	--------------------------------------------------------
+		--------------------------------------------------------
+		-- STATE: LOCAL_PARSE / ONLINE_PARSE (Merged Logic)
+		--------------------------------------------------------
 	elseif state.mode == "LOCAL_PARSE" or state.mode == "ONLINE_PARSE" then
 		local players = state.playersToProcess
 		if not players then
@@ -444,14 +450,15 @@ function Fetcher.Tick()
 				state.fileIdx = state.fileIdx + 1
 				state.mode = "LOCAL_READ"
 			else
-				state.mode = "ONLINE_WAIT_RESPONSE"
+				state.sourceIdx = state.sourceIdx + 1
+				state.mode = "ONLINE_FETCH"
 			end
 			state.playersToProcess = nil
 		end
 
-	--------------------------------------------------------
-	-- STATE: ONLINE_FETCH
-	--------------------------------------------------------
+		--------------------------------------------------------
+		-- STATE: ONLINE_FETCH
+		--------------------------------------------------------
 	elseif state.mode == "ONLINE_FETCH" then
 		if state.onlineEnqueued then
 			state.mode = "ONLINE_WAIT_RESPONSE"
@@ -467,33 +474,38 @@ function Fetcher.Tick()
 		state.onlinePendingCount = 0
 		state.onlineResponses = {}
 
-		for _, source in ipairs(state.activeSources) do
-			Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
-			local fetchUrl = proxyGitHubUrl(source.url)
-			local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
-			if enqueued then
-				state.onlinePendingCount = state.onlinePendingCount + 1
-			else
-				Logger.Warning("Fetcher", "[FETCHER] Failed to queue source: " .. source.name)
-				state.results.errors = state.results.errors + 1
-			end
-		end
-
-		if state.onlinePendingCount <= 0 then
+		if state.sourceIdx > #state.activeSources then
 			state.mode = "FINISH"
 			return
 		end
 
+		local source = state.activeSources[state.sourceIdx]
+		if type(source) ~= "table" then
+			Logger.Warning("Fetcher", "[FETCHER] Invalid source at index " .. tostring(state.sourceIdx))
+			state.results.errors = state.results.errors + 1
+			state.sourceIdx = state.sourceIdx + 1
+			state.mode = "ONLINE_FETCH"
+			return
+		end
+
+		Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
+		local fetchUrl = proxyGitHubUrl(source.url)
+		local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
+		if not enqueued then
+			-- Strict queue mode can reject while another module is using HTTP.
+			-- Stay on ONLINE_FETCH and retry this same source next tick.
+			return
+		end
+
+		state.onlinePendingCount = 1
+
 		state.mode = "ONLINE_WAIT_RESPONSE"
 
-	--------------------------------------------------------
-	-- STATE: ONLINE_WAIT_RESPONSE
-	--------------------------------------------------------
+		--------------------------------------------------------
+		-- STATE: ONLINE_WAIT_RESPONSE
+		--------------------------------------------------------
 	elseif state.mode == "ONLINE_WAIT_RESPONSE" then
 		if #state.onlineResponses == 0 then
-			if state.onlinePendingCount <= 0 then
-				state.mode = "FINISH"
-			end
 			return
 		end
 
@@ -501,24 +513,39 @@ function Fetcher.Tick()
 		local source = responsePacket and responsePacket.source or nil
 		local response = responsePacket and responsePacket.body or nil
 		local responseError = responsePacket and responsePacket.error or nil
+		local sourceName = (type(source) == "table" and source.name) or tostring(source)
+
+		if type(source) ~= "table" then
+			Logger.Warning("Fetcher", "[FETCHER] Invalid source context from HTTP queue: " .. sourceName)
+			state.results.errors = state.results.errors + 1
+			state.sourceIdx = state.sourceIdx + 1
+			state.mode = "ONLINE_FETCH"
+			return
+		end
 
 		if responseError then
-			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. (source and source.name or "unknown source"))
+			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName)
 			state.results.errors = state.results.errors + 1
+			state.sourceIdx = state.sourceIdx + 1
+			state.mode = "ONLINE_FETCH"
 			return
 		end
 
 		if not source then
 			Logger.Error("Fetcher", "[FETCHER] Missing source after HTTP response")
 			state.results.errors = state.results.errors + 1
+			state.sourceIdx = state.sourceIdx + 1
+			state.mode = "ONLINE_FETCH"
 			return
 		end
 
 		if response and response ~= "" then
 			-- Basic HTML check
 			if response:match("<html") or response:match("<HTML") then
-				Logger.Warning("Fetcher", "[FETCHER] HTML Error page from " .. source.name)
+				Logger.Warning("Fetcher", "[FETCHER] HTML Error page from " .. sourceName)
 				state.results.errors = state.results.errors + 1
+				state.sourceIdx = state.sourceIdx + 1
+				state.mode = "ONLINE_FETCH"
 				return
 			end
 
@@ -542,23 +569,69 @@ function Fetcher.Tick()
 			end
 
 			if players then
+				state.onlineNilRetryCount[sourceName] = 0
 				state.playersToProcess = players
 				state.entryIdx = 1
 				state.activeSource = source
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 				state.mode = "ONLINE_PARSE"
 			else
-				Logger.Warning("Fetcher", "[FETCHER] Parse error in " .. source.name .. ": " .. tostring(err))
-				state.results.errors = state.results.errors + 1
+				local errText = tostring(err)
+				if errText:find("JSON decode returned nil", 1, true) then
+					local retryCount = (state.onlineNilRetryCount[sourceName] or 0) + 1
+					state.onlineNilRetryCount[sourceName] = retryCount
+
+					if retryCount <= MAX_JSON_NIL_RETRIES then
+						local fetchUrl = proxyGitHubUrl(source.url)
+						local reEnqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
+						if reEnqueued then
+							state.onlinePendingCount = state.onlinePendingCount + 1
+							Logger.Debug(
+								"Fetcher",
+								string.format(
+									"[FETCHER] %s parse returned nil, retrying async fetch (%d/%d)",
+									sourceName,
+									retryCount,
+									MAX_JSON_NIL_RETRIES
+								)
+							)
+						else
+							Logger.Warning("Fetcher", "[FETCHER] Retry enqueue failed for " .. sourceName)
+							state.sourceIdx = state.sourceIdx + 1
+							state.results.errors = state.results.errors + 1
+							state.mode = "ONLINE_FETCH"
+						end
+					else
+						Logger.Warning(
+							"Fetcher",
+							string.format(
+								"[FETCHER] Parse error in %s after %d retries: %s",
+								sourceName,
+								retryCount - 1,
+								errText
+							)
+						)
+						state.sourceIdx = state.sourceIdx + 1
+						state.results.errors = state.results.errors + 1
+						state.mode = "ONLINE_FETCH"
+					end
+				else
+					Logger.Warning("Fetcher", "[FETCHER] Parse error in " .. sourceName .. ": " .. errText)
+					state.sourceIdx = state.sourceIdx + 1
+					state.results.errors = state.results.errors + 1
+					state.mode = "ONLINE_FETCH"
+				end
 			end
 		else
-			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. source.name)
+			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName)
+			state.sourceIdx = state.sourceIdx + 1
 			state.results.errors = state.results.errors + 1
+			state.mode = "ONLINE_FETCH"
 		end
 
-	--------------------------------------------------------
-	-- STATE: FINISH
-	--------------------------------------------------------
+		--------------------------------------------------------
+		-- STATE: FINISH
+		--------------------------------------------------------
 	elseif state.mode == "FINISH" then
 		Fetcher.FinishFetch()
 		state.isRunning = false

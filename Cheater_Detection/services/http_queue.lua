@@ -12,6 +12,7 @@ local isAlive = true      -- Set to false on unload to guard in-flight callbacks
 local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
 local REQUEST_TIMEOUT = 30.0
 local REQUEST_RETRY_INTERVAL = 0.25
+local STRICT_SINGLE_FLIGHT = true
 local activeToken = 0
 local activeDeadline = 0
 local activeItem = nil
@@ -149,6 +150,10 @@ end
 
 --[[ Public API ]]
 
+function HttpQueue.IsBusy()
+	return isProcessing or activeAttemptInFlight or #queue > 0
+end
+
 function HttpQueue.Enqueue(url, callback, context, options)
 	if type(callback) ~= "function" then
 		print(
@@ -163,6 +168,11 @@ function HttpQueue.Enqueue(url, callback, context, options)
 	if type(options) == "table" and options.noDelay == true then
 		noDelay = true
 	end
+
+	if STRICT_SINGLE_FLIGHT and HttpQueue.IsBusy() then
+		return false
+	end
+
 	table.insert(queue, { url = url, callback = callback, context = context, noDelay = noDelay })
 	return true
 end
