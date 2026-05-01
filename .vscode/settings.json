@@ -12,7 +12,7 @@
       {
         "match": ".*\\.lua$",
         "isAsync": false,
-        "cmd": "if (Test-Path \"${workspaceFolder}\\bundle-and-deploy.js\") { node \"${workspaceFolder}\\bundle-and-deploy.js\" }",
+        "cmd": "cmd /c if exist \"${workspaceFolder}\\bundle-and-deploy.js\" node \"${workspaceFolder}\\bundle-and-deploy.js\"",
         "autoShowOutputPanel": "always"
       }
     ]
@@ -23,7 +23,7 @@
       {
         "match": ".*\\.lua$",
         "isAsync": false,
-        "cmd": "if (Test-Path \"${workspaceFolder}\\bundle-and-deploy.js\") { node \"${workspaceFolder}\\bundle-and-deploy.js\" }",
+        "cmd": "cmd /c if exist \"${workspaceFolder}\\bundle-and-deploy.js\" node \"${workspaceFolder}\\bundle-and-deploy.js\"",
         "autoShowOutputPanel": "always"
       }
     ]
