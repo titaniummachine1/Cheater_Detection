@@ -31,19 +31,33 @@ local BRIDGE_HOST = "127.0.0.1"
 local BRIDGE_PORT = 17354
 local BRIDGE_BASE = "http://" .. BRIDGE_HOST .. ":" .. tostring(BRIDGE_PORT)
 
-local POLL_INTERVAL = 0.10
+local POLL_INTERVAL = 0.00
 local REQUEST_TIMEOUT_MS = 12000
 local REQUEST_MAX_BYTES = 2 * 1024 * 1024
 local START_RETRY_DELAY = 0.50
 local ERROR_LOG_COOLDOWN = 1.50
+local STATUS_LOG_INTERVAL = 2.00
+local TARGET_URL = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids"
 
 local State = {
     pendingId = nil,
     nextPollAt = 0.0,
     nextStartAttemptAt = 0.0,
     lastErrorLogAt = -9999.0,
+    runStartedAt = 0.0,
+    lastStatusLogAt = 0.0,
     startedAt = 0.0,
-    completed = false,
+    totalSubmitted = 0,
+    totalCompleted = 0,
+    totalSuccess = 0,
+    totalFailed = 0,
+    totalTransient = 0,
+    totalBytes = 0,
+    totalLatency = 0.0,
+    maxLatency = 0.0,
+    frameSamples = 0,
+    totalFrameTime = 0.0,
+    maxFrameTime = 0.0,
 }
 
 local function Log(message)
@@ -163,6 +177,79 @@ local function LogErrorRateLimited(message)
     Log(message)
 end
 
+local function EnsureRunStarted()
+    if State.runStartedAt > 0 then
+        return
+    end
+
+    local now = globals.RealTime()
+    State.runStartedAt = now
+    State.lastStatusLogAt = now
+    Log("stress test started")
+end
+
+local function UpdateFrameStats()
+    local frameTime = globals.FrameTime()
+    if type(frameTime) ~= "number" or frameTime < 0 then
+        return
+    end
+
+    State.frameSamples = State.frameSamples + 1
+    State.totalFrameTime = State.totalFrameTime + frameTime
+    if frameTime > State.maxFrameTime then
+        State.maxFrameTime = frameTime
+    end
+end
+
+local function LogStatus()
+    if State.runStartedAt <= 0 then
+        return
+    end
+
+    local now = globals.RealTime()
+    if now - State.lastStatusLogAt < STATUS_LOG_INTERVAL then
+        return
+    end
+
+    local elapsed = now - State.runStartedAt
+    if elapsed <= 0 then
+        return
+    end
+
+    local avgLatencyMs = 0.0
+    if State.totalCompleted > 0 then
+        avgLatencyMs = (State.totalLatency / State.totalCompleted) * 1000.0
+    end
+
+    local avgFrameMs = 0.0
+    if State.frameSamples > 0 then
+        avgFrameMs = (State.totalFrameTime / State.frameSamples) * 1000.0
+    end
+
+    local rps = State.totalCompleted / elapsed
+    local maxFrameMs = State.maxFrameTime * 1000.0
+    local maxLatencyMs = State.maxLatency * 1000.0
+
+    Log(string.format(
+        "status sec=%.1f submitted=%d completed=%d ok=%d fail=%d transient=%d rps=%.2f avg_latency_ms=%.2f max_latency_ms=%.2f avg_frame_ms=%.3f max_frame_ms=%.3f bytes=%d pending=%s",
+        elapsed,
+        State.totalSubmitted,
+        State.totalCompleted,
+        State.totalSuccess,
+        State.totalFailed,
+        State.totalTransient,
+        rps,
+        avgLatencyMs,
+        maxLatencyMs,
+        avgFrameMs,
+        maxFrameMs,
+        State.totalBytes,
+        tostring(State.pendingId ~= nil)
+    ))
+
+    State.lastStatusLogAt = now
+end
+
 local function StartDemoRequest()
     if State.pendingId then
         return
@@ -180,27 +267,27 @@ local function StartDemoRequest()
         return
     end
 
-    local targetUrl = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids"
-    local ok, requestId, err = Bridge.Start(targetUrl)
+    local ok, requestId, err = Bridge.Start(TARGET_URL)
     if not ok then
         State.nextStartAttemptAt = now + START_RETRY_DELAY
         if IsTransientBridgeError(err) then
+            State.totalTransient = State.totalTransient + 1
             LogErrorRateLimited("bridge transient submit error; retrying: " .. tostring(err))
         else
+            State.totalFailed = State.totalFailed + 1
             LogErrorRateLimited("submit failed: " .. tostring(err))
         end
         return
     end
 
     State.pendingId = requestId
-    State.startedAt = globals.RealTime()
+    State.startedAt = now
     State.nextPollAt = State.startedAt + POLL_INTERVAL
-    State.completed = false
-    Log("submitted id=" .. requestId)
+    State.totalSubmitted = State.totalSubmitted + 1
 end
 
 local function PollDemoRequest()
-    if not State.pendingId or State.completed then
+    if not State.pendingId then
         return
     end
 
@@ -216,23 +303,38 @@ local function PollDemoRequest()
         return
     end
 
-    State.completed = true
+    State.totalCompleted = State.totalCompleted + 1
+    local latency = now - State.startedAt
+    if latency > 0 then
+        State.totalLatency = State.totalLatency + latency
+        if latency > State.maxLatency then
+            State.maxLatency = latency
+        end
+    end
 
     if ok then
         local length = type(data) == "string" and #data or 0
-        Log(string.format("success id=%s bytes=%d", State.pendingId, length))
+        State.totalSuccess = State.totalSuccess + 1
+        State.totalBytes = State.totalBytes + length
     else
-        Log(string.format("failed id=%s err=%s", State.pendingId, tostring(err)))
+        State.totalFailed = State.totalFailed + 1
+        if IsTransientBridgeError(err) then
+            State.totalTransient = State.totalTransient + 1
+        end
+        LogErrorRateLimited(string.format("poll failed id=%s err=%s", State.pendingId, tostring(err)))
     end
+
+    State.pendingId = nil
+    State.startedAt = 0.0
 end
 
 local function OnDraw()
-    if not State.pendingId then
-        StartDemoRequest()
-        return
-    end
+    EnsureRunStarted()
+    UpdateFrameStats()
 
     PollDemoRequest()
+    StartDemoRequest()
+    LogStatus()
 end
 
 callbacks.Unregister("Draw", "local_bridge_test_draw")
