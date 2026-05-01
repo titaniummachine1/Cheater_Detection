@@ -8,8 +8,17 @@ local HttpQueue = {}
 local queue = {}
 local isProcessing = false
 local lastRequestTime = 0
-local isAlive = true -- Set to false on unload to guard in-flight callbacks
+local isAlive = true      -- Set to false on unload to guard in-flight callbacks
 local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
+local REQUEST_TIMEOUT = 30.0
+local REQUEST_RETRY_INTERVAL = 0.25
+local activeToken = 0
+local activeDeadline = 0
+local activeItem = nil
+local activeNextRetry = 0
+local activeLastError = ""
+local activeAttemptCount = 0
+local activeAttemptInFlight = false
 
 local function IsGitHubLikeURL(url)
 	if type(url) ~= "string" then
@@ -73,39 +82,69 @@ local function ProcessNextRequest()
 
 	isProcessing = true
 	lastRequestTime = now
-
-	local success = false
-	local data = nil
+	activeToken = activeToken + 1
+	activeDeadline = now + REQUEST_TIMEOUT
+	activeItem = item
+	activeNextRetry = now
+	activeLastError = ""
+	activeAttemptCount = 0
+	activeAttemptInFlight = false
+	local myToken = activeToken
 
 	if not InitializeHTTP() then
-		print("[HTTP QUEUE ERROR] http library unavailable")
-		data = "No HTTP Library"
-	else
-		local syncOk, syncResult = pcall(http.Get, item.url)
-		if syncOk and type(syncResult) == "string" and #syncResult > 0 then
-			data = syncResult
-			success = true
-		else
-			data = syncOk and "http.Get() returned empty response" or tostring(syncResult)
+		local cbStatus, cbErr = pcall(item.callback, nil, "No HTTP Library", item.context)
+		if not cbStatus then
+			print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
+		end
+		isProcessing = false
+		activeItem = nil
+		activeAttemptInFlight = false
+		return
+	end
+
+	local function dispatchAsyncAttempt()
+		if activeAttemptInFlight then
+			return
+		end
+
+		activeAttemptCount = activeAttemptCount + 1
+		activeAttemptInFlight = true
+		local asyncOk, asyncErr = pcall(function()
+			http.GetAsync(item.url, function(data)
+				-- Ignore stale callback from timed-out or superseded request.
+				if myToken ~= activeToken then
+					return
+				end
+
+				activeAttemptInFlight = false
+
+				if type(data) == "string" and #data > 0 then
+					local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
+					if not cbStatus then
+						print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
+					end
+					isProcessing = false
+					activeItem = nil
+					activeAttemptInFlight = false
+					activeNextRetry = 0
+					activeLastError = ""
+					return
+				end
+
+				-- Empty payload is treated as "not ready yet" in this runtime.
+				activeLastError = "GetAsync returned empty/invalid response"
+				activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
+			end)
+		end)
+
+		if not asyncOk then
+			activeAttemptInFlight = false
+			activeLastError = "GetAsync call failed: " .. tostring(asyncErr)
+			activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
 		end
 	end
 
-	if isAlive then
-		if success then
-			local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
-			if not cbStatus then
-				print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-			end
-		else
-			print("[HTTP QUEUE ERROR] Request failed: " .. tostring(data))
-			local cbStatus, cbErr = pcall(item.callback, nil, tostring(data), item.context)
-			if not cbStatus then
-				print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
-			end
-		end
-	end
-
-	isProcessing = false
+	dispatchAsyncAttempt()
 end
 
 --[[ Public API ]]
@@ -114,9 +153,9 @@ function HttpQueue.Enqueue(url, callback, context, options)
 	if type(callback) ~= "function" then
 		print(
 			"[HTTP QUEUE ERROR] Enqueue callback must be function, got: "
-				.. tostring(type(callback))
-				.. " url="
-				.. tostring(url)
+			.. tostring(type(callback))
+			.. " url="
+			.. tostring(url)
 		)
 		return false
 	end
@@ -133,6 +172,67 @@ function HttpQueue.Tick()
 	if not isAlive then
 		return
 	end
+
+	if isProcessing and activeItem and globals.RealTime() >= activeDeadline then
+		local timedOutItem = activeItem
+		local err = "HTTP request timed out after "
+		err = err .. tostring(REQUEST_TIMEOUT) .. "s"
+		if activeLastError ~= "" then
+			err = err .. " (last error: " .. activeLastError .. ")"
+		end
+		err = err .. " attempts=" .. tostring(activeAttemptCount)
+		print("[HTTP QUEUE ERROR] " .. err .. " url=" .. tostring(timedOutItem.url))
+		local cbStatus, cbErr = pcall(timedOutItem.callback, nil, err, timedOutItem.context)
+		if not cbStatus then
+			print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
+		end
+		activeToken = activeToken + 1
+		isProcessing = false
+		activeItem = nil
+		activeAttemptInFlight = false
+		activeNextRetry = 0
+		activeLastError = ""
+		activeAttemptCount = 0
+	elseif
+		isProcessing
+		and activeItem
+		and (not activeAttemptInFlight)
+		and globals.RealTime() >= activeNextRetry
+	then
+		-- Re-dispatch async call until we get non-empty payload or timeout.
+		activeAttemptCount = activeAttemptCount + 1
+		activeAttemptInFlight = true
+		local myToken = activeToken
+		local item = activeItem
+		local asyncOk, asyncErr = pcall(function()
+			http.GetAsync(item.url, function(data)
+				if myToken ~= activeToken then
+					return
+				end
+				activeAttemptInFlight = false
+				if type(data) == "string" and #data > 0 then
+					local cbStatus, cbErr = pcall(item.callback, data, nil, item.context)
+					if not cbStatus then
+						print("[HTTP QUEUE ERROR] Callback failed: " .. tostring(cbErr))
+					end
+					isProcessing = false
+					activeItem = nil
+					activeAttemptInFlight = false
+					activeNextRetry = 0
+					activeLastError = ""
+					return
+				end
+				activeLastError = "GetAsync returned empty/invalid response"
+				activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
+			end)
+		end)
+		if not asyncOk then
+			activeAttemptInFlight = false
+			activeLastError = "GetAsync call failed: " .. tostring(asyncErr)
+			activeNextRetry = globals.RealTime() + REQUEST_RETRY_INTERVAL
+		end
+	end
+
 	ProcessNextRequest()
 end
 
@@ -143,6 +243,11 @@ callbacks.Register("Unload", "HttpQueue_Unload", function()
 	isAlive = false
 	queue = {}
 	isProcessing = false
+	activeItem = nil
+	activeAttemptInFlight = false
+	activeNextRetry = 0
+	activeLastError = ""
+	activeAttemptCount = 0
 end)
 
 return HttpQueue
