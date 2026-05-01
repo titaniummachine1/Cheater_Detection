@@ -12,7 +12,7 @@ assert(callbacks, "http_test: callbacks missing")
 assert(globals, "http_test: globals missing")
 
 local CONFIG = {
-    MODE = "plateau", -- sequential | burst | staircase | plateau
+    MODE = "staircase",       -- sequential | burst | staircase | plateau
     URL_MODE = "round_robin", -- round_robin | fixed
     FIXED_URL_INDEX = 2,
     WAIT_FOR_SAFE_WINDOW = false,
@@ -20,12 +20,13 @@ local CONFIG = {
     ROUND_DELAY = 5.0,
     REQUEST_TIMEOUT = 12.0,
     FULL_RESPONSE_RATIO = 0.90,
+    STOP_ON_FIRST_BAD = true,
     SEQUENTIAL_COUNT = 12,
     SEQUENTIAL_DELAY = 0.0,
     BURST_COUNT = 6,
     PLATEAU_BURST = 6,
     PLATEAU_ROUNDS = 12,
-    STAIRCASE_STEPS = { 1, 2, 3, 4, 5, 6, 7, 8 },
+    STAIRCASE_STEPS = { 2, 3, 4, 5, 6 },
     MAX_CALLBACK_SLOTS = 32,
     SOURCES = {
         {
@@ -35,12 +36,14 @@ local CONFIG = {
         },
         {
             name = "TF2BD Official",
-            url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
+            url =
+            "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
             expectedBytes = 176230,
         },
         {
             name = "MegaScaterbomb",
-            url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
+            url =
+            "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
             expectedBytes = 1224603,
         },
         {
@@ -225,6 +228,25 @@ local function FinishExperiment(reason)
     ResetState()
 end
 
+local function AbortExperimentOnFailure(request, status)
+    if status == "ok" then
+        return false
+    end
+    if not CONFIG.STOP_ON_FIRST_BAD then
+        return false
+    end
+
+    LogRoundSummary("first bad response")
+    FinishExperiment(string.format(
+        "first bad response status=%s label=%s source=%s round=%d",
+        status,
+        request.label,
+        request.source.name,
+        State.roundIndex
+    ))
+    return true
+end
+
 local function AdvanceRound(now, reason)
     LogRoundSummary(reason)
 
@@ -270,6 +292,10 @@ local function RecordCompletion(request, status, value, now)
         tostring(value),
         State.inFlight
     ))
+
+    if AbortExperimentOnFailure(request, status) then
+        return
+    end
 
     if State.mode == "sequential" then
         if State.requestsSent >= CONFIG.SEQUENTIAL_COUNT and State.inFlight == 0 then
@@ -383,14 +409,15 @@ local function StartExperiment()
     State.nextActionAt = State.startedAt + CONFIG.AUTO_START_DELAY
     Log("============================================================")
     Log(string.format(
-        "start mode=%s url_mode=%s fixed_url=%d safe_window=%s start_delay=%.2f timeout=%.2f full_ratio=%.2f",
+        "start mode=%s url_mode=%s fixed_url=%d safe_window=%s start_delay=%.2f timeout=%.2f full_ratio=%.2f stop_on_first_bad=%s",
         CONFIG.MODE,
         CONFIG.URL_MODE,
         CONFIG.FIXED_URL_INDEX,
         tostring(CONFIG.WAIT_FOR_SAFE_WINDOW),
         CONFIG.AUTO_START_DELAY,
         CONFIG.REQUEST_TIMEOUT,
-        CONFIG.FULL_RESPONSE_RATIO
+        CONFIG.FULL_RESPONSE_RATIO,
+        tostring(CONFIG.STOP_ON_FIRST_BAD)
     ))
     if CONFIG.MODE == "sequential" then
         Log(string.format("sequential count=%d delay=%.2f", CONFIG.SEQUENTIAL_COUNT, CONFIG.SEQUENTIAL_DELAY))
