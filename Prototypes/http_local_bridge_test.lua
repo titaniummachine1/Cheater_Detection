@@ -121,13 +121,30 @@ local function DecodeBody(body)
     return decoded, nil
 end
 
+local function TryGetFunctionField(target, fieldName)
+    if target == nil or type(fieldName) ~= "string" then
+        return nil
+    end
+
+    local ok, value = pcall(function()
+        return target[fieldName]
+    end)
+    if not ok or type(value) ~= "function" then
+        return nil
+    end
+
+    return value
+end
+
 local function ResolveHttpGet()
     local httpTable = http
-    if httpTable ~= nil and type(httpTable.Get) == "function" then
-        return httpTable.Get, "global http.Get"
+    local globalGet = TryGetFunctionField(httpTable, "Get")
+    if globalGet ~= nil then
+        return globalGet, "global http.Get"
     end
-    if httpTable ~= nil and type(httpTable.get) == "function" then
-        return httpTable.get, "global http.get"
+    local globalGetLower = TryGetFunctionField(httpTable, "get")
+    if globalGetLower ~= nil then
+        return globalGetLower, "global http.get"
     end
 
     local requiredHttp = nil
@@ -135,24 +152,28 @@ local function ResolveHttpGet()
         requiredHttp = optionalHttpRequireResult
     end
 
-    if requiredHttp ~= nil and type(requiredHttp.Get) == "function" then
+    local requiredGet = TryGetFunctionField(requiredHttp, "Get")
+    if requiredGet ~= nil then
         http = requiredHttp
-        return requiredHttp.Get, "require('http').Get"
+        return requiredGet, "require('http').Get"
     end
-    if requiredHttp ~= nil and type(requiredHttp.get) == "function" then
+    local requiredGetLower = TryGetFunctionField(requiredHttp, "get")
+    if requiredGetLower ~= nil then
         http = requiredHttp
-        return requiredHttp.get, "require('http').get"
+        return requiredGetLower, "require('http').get"
     end
 
     if optionalCommonRequireOk and type(optionalCommonRequireResult) == "table" then
         local commonHttp = optionalCommonRequireResult.http
-        if commonHttp ~= nil and type(commonHttp.Get) == "function" then
+        local commonGet = TryGetFunctionField(commonHttp, "Get")
+        if commonGet ~= nil then
             http = commonHttp
-            return commonHttp.Get, "Common.http.Get"
+            return commonGet, "Common.http.Get"
         end
-        if commonHttp ~= nil and type(commonHttp.get) == "function" then
+        local commonGetLower = TryGetFunctionField(commonHttp, "get")
+        if commonGetLower ~= nil then
             http = commonHttp
-            return commonHttp.get, "Common.http.get"
+            return commonGetLower, "Common.http.get"
         end
     end
 
