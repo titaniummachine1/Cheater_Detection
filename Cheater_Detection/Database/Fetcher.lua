@@ -13,6 +13,9 @@ local Logger = require("Cheater_Detection.Utils.Logger")
 local Fetcher = {}
 -- Stability-first mode: do not hammer the same source on nil JSON payloads.
 local MAX_JSON_NIL_RETRIES = 0
+-- Seconds to wait between sequential online source fetches to avoid
+-- hammering http.GetAsync and destabilising the engine HTTP subsystem.
+local INTER_SOURCE_DELAY = 3.0
 
 ---- State tracking
 Fetcher.State = {
@@ -43,6 +46,7 @@ Fetcher.State = {
 	onlinePendingCount = 0,
 	onlineResponses = {},
 	onlineNilRetryCount = {},
+	lastOnlineFetchTime = 0,
 }
 
 -- Bypasses GitHub blocks
@@ -137,6 +141,7 @@ function Fetcher.Start()
 	state.onlinePendingCount = 0
 	state.onlineResponses = {}
 	state.onlineNilRetryCount = {}
+	state.lastOnlineFetchTime = 0
 end
 
 -- Core Tick function (called every frame from Draw/Scheduler)
@@ -466,13 +471,20 @@ function Fetcher.Tick()
 			return
 		end
 
-		state.onlinePendingCount = 0
-		state.onlineResponses = {}
-
 		if state.sourceIdx > #state.activeSources then
 			state.mode = "FINISH"
 			return
 		end
+
+		-- Inter-source cooldown: give the engine HTTP subsystem time to breathe
+		-- between sequential GetAsync calls to avoid engine instability.
+		local now = globals.RealTime()
+		if (now - state.lastOnlineFetchTime) < INTER_SOURCE_DELAY then
+			return
+		end
+
+		state.onlinePendingCount = 0
+		state.onlineResponses = {}
 
 		local source = state.activeSources[state.sourceIdx]
 		if type(source) ~= "table" then
@@ -492,6 +504,7 @@ function Fetcher.Tick()
 			return
 		end
 
+		state.lastOnlineFetchTime = globals.RealTime()
 		state.onlinePendingCount = 1
 
 		state.mode = "ONLINE_WAIT_RESPONSE"
