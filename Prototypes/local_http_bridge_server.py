@@ -78,6 +78,16 @@ def send_json(handler: BaseHTTPRequestHandler, payload: Payload, status_code: in
     handler.wfile.write(body)
 
 
+def send_text(handler: BaseHTTPRequestHandler, text: str, status_code: int = 200) -> None:
+    body = text.encode("utf-8", errors="replace")
+    handler.send_response(status_code)
+    handler.send_header("Content-Type", "text/plain; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 def fetch_url(url: str, timeout_ms: int, max_bytes: int) -> tuple[bool, str | None, str | None]:
     timeout_seconds = timeout_ms / 1000.0
     request = Request(url, headers={"User-Agent": "LocalLuaBridge/1.0"})
@@ -155,6 +165,44 @@ class BridgeHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
 
+        if parsed.path == "/health_txt":
+            send_text(self, f"ok|{PROTOCOL}\n")
+            return
+
+        if parsed.path == "/submit_txt":
+            url = first_value(query, "url")
+            if not url:
+                send_text(self, "err|missing url\n", 400)
+                return
+
+            timeout_ms = clamp_int(first_value(query, "timeout_ms"), DEFAULT_TIMEOUT_MS, 100, MAX_TIMEOUT_MS)
+            max_bytes = clamp_int(first_value(query, "max_bytes"), DEFAULT_MAX_BYTES, 1024, MAX_MAX_BYTES)
+            job_id = create_job(url, timeout_ms, max_bytes)
+            send_text(self, f"ok|{job_id}\n")
+            return
+
+        if parsed.path == "/result_txt":
+            job_id = first_value(query, "id")
+            if not job_id:
+                send_text(self, "err|missing id\n", 400)
+                return
+
+            job = read_job(job_id)
+            if job is None:
+                send_text(self, "err|unknown id\n", 404)
+                return
+
+            if not job.done:
+                send_text(self, "pending\n")
+                return
+
+            if job.success and job.data is not None:
+                send_text(self, f"ok|{len(job.data)}\n{job.data}")
+                return
+
+            send_text(self, f"err|{job.error or 'remote request failed'}\n")
+            return
+
         if parsed.path == "/health":
             send_json(self, {"ok": True, "alive": True, "protocol": PROTOCOL, "error": None})
             return
@@ -205,7 +253,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), BridgeHandler)
     print(f"[bridge] listening on http://{HOST}:{PORT}")
-    print("[bridge] endpoints: /health /submit /result")
+    print("[bridge] endpoints: /health /submit /result /health_txt /submit_txt /result_txt")
     server.serve_forever()
 
 
