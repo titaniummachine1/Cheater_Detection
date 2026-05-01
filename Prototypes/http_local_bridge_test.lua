@@ -136,6 +136,24 @@ local function TryGetFunctionField(target, fieldName)
     return value
 end
 
+local function WrapMethodCall(target, method)
+    if type(method) ~= "function" then
+        return nil
+    end
+    return function(url)
+        return method(target, url)
+    end
+end
+
+local function WrapDirectCall(func)
+    if type(func) ~= "function" then
+        return nil
+    end
+    return function(url)
+        return func(url)
+    end
+end
+
 local function ResolveHttpGet()
     local httpTable = http
     local globalGet = TryGetFunctionField(httpTable, "Get")
@@ -145,6 +163,26 @@ local function ResolveHttpGet()
     local globalGetLower = TryGetFunctionField(httpTable, "get")
     if globalGetLower ~= nil then
         return globalGetLower, "global http.get"
+    end
+    local globalRequest = TryGetFunctionField(httpTable, "Request")
+    if globalRequest ~= nil then
+        local wrapped = WrapMethodCall(httpTable, globalRequest)
+        if wrapped ~= nil then
+            return wrapped, "global http:Request"
+        end
+    end
+    local globalFetch = TryGetFunctionField(httpTable, "Fetch")
+    if globalFetch ~= nil then
+        local wrapped = WrapMethodCall(httpTable, globalFetch)
+        if wrapped ~= nil then
+            return wrapped, "global http:Fetch"
+        end
+    end
+    if type(httpTable) == "function" then
+        local wrapped = WrapDirectCall(httpTable)
+        if wrapped ~= nil then
+            return wrapped, "global http(url)"
+        end
     end
 
     local requiredHttp = nil
@@ -162,6 +200,29 @@ local function ResolveHttpGet()
         http = requiredHttp
         return requiredGetLower, "require('http').get"
     end
+    local requiredRequest = TryGetFunctionField(requiredHttp, "Request")
+    if requiredRequest ~= nil then
+        http = requiredHttp
+        local wrapped = WrapMethodCall(requiredHttp, requiredRequest)
+        if wrapped ~= nil then
+            return wrapped, "require('http'):Request"
+        end
+    end
+    local requiredFetch = TryGetFunctionField(requiredHttp, "Fetch")
+    if requiredFetch ~= nil then
+        http = requiredHttp
+        local wrapped = WrapMethodCall(requiredHttp, requiredFetch)
+        if wrapped ~= nil then
+            return wrapped, "require('http'):Fetch"
+        end
+    end
+    if type(requiredHttp) == "function" then
+        local wrapped = WrapDirectCall(requiredHttp)
+        if wrapped ~= nil then
+            http = requiredHttp
+            return wrapped, "require('http')(url)"
+        end
+    end
 
     if optionalCommonRequireOk and type(optionalCommonRequireResult) == "table" then
         local commonHttp = optionalCommonRequireResult.http
@@ -174,6 +235,29 @@ local function ResolveHttpGet()
         if commonGetLower ~= nil then
             http = commonHttp
             return commonGetLower, "Common.http.get"
+        end
+        local commonRequest = TryGetFunctionField(commonHttp, "Request")
+        if commonRequest ~= nil then
+            http = commonHttp
+            local wrapped = WrapMethodCall(commonHttp, commonRequest)
+            if wrapped ~= nil then
+                return wrapped, "Common.http:Request"
+            end
+        end
+        local commonFetch = TryGetFunctionField(commonHttp, "Fetch")
+        if commonFetch ~= nil then
+            http = commonHttp
+            local wrapped = WrapMethodCall(commonHttp, commonFetch)
+            if wrapped ~= nil then
+                return wrapped, "Common.http:Fetch"
+            end
+        end
+        if type(commonHttp) == "function" then
+            local wrapped = WrapDirectCall(commonHttp)
+            if wrapped ~= nil then
+                http = commonHttp
+                return wrapped, "Common.http(url)"
+            end
         end
     end
 
