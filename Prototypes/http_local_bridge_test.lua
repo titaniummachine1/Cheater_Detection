@@ -15,7 +15,21 @@ assert(http, "http_local_bridge_test: http library missing")
 assert(callbacks, "http_local_bridge_test: callbacks missing")
 assert(globals, "http_local_bridge_test: globals missing")
 
-local Json = require("Cheater_Detection.Libs.Json")
+local function LoadJsonModule()
+    local okLocal, moduleLocal = pcall(require, "Prototypes.Json")
+    if okLocal and type(moduleLocal) == "table" and type(moduleLocal.decode) == "function" then
+        return moduleLocal
+    end
+
+    local okMain, moduleMain = pcall(require, "Cheater_Detection.Libs.Json")
+    if okMain and type(moduleMain) == "table" and type(moduleMain.decode) == "function" then
+        return moduleMain
+    end
+
+    error("http_local_bridge_test: JSON module missing (Prototypes.Json or Cheater_Detection.Libs.Json)")
+end
+
+local Json = LoadJsonModule()
 
 local BRIDGE_HOST = "127.0.0.1"
 local BRIDGE_PORT = 17354
