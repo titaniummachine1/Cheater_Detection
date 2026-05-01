@@ -460,17 +460,11 @@ function Fetcher.Tick()
 		-- STATE: ONLINE_FETCH
 		--------------------------------------------------------
 	elseif state.mode == "ONLINE_FETCH" then
-		if state.onlineEnqueued then
-			state.mode = "ONLINE_WAIT_RESPONSE"
-			return
-		end
-
 		if not state.activeSources or #state.activeSources == 0 then
 			state.mode = "FINISH"
 			return
 		end
 
-		state.onlineEnqueued = true
 		state.onlinePendingCount = 0
 		state.onlineResponses = {}
 
