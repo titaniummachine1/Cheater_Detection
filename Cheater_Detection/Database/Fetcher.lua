@@ -11,7 +11,8 @@ local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
 local Fetcher = {}
-local MAX_JSON_NIL_RETRIES = 6
+-- Stability-first mode: do not hammer the same source on nil JSON payloads.
+local MAX_JSON_NIL_RETRIES = 0
 
 ---- State tracking
 Fetcher.State = {
@@ -599,7 +600,7 @@ function Fetcher.Tick()
 						Logger.Warning(
 							"Fetcher",
 							string.format(
-								"[FETCHER] Parse error in %s after %d retries: %s",
+								"[FETCHER] Parse error in %s after %d retries: %s -- source skipped for stability",
 								sourceName,
 								retryCount - 1,
 								errText
