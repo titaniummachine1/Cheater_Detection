@@ -26,6 +26,7 @@ local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 
 local ValveCheck = {}
+local VERBOSE_DEBUG_LOGS = false
 
 -- How often (seconds) to re-attempt the async profile check per player
 local PROFILE_RECHECK_INTERVAL = 120 -- Re-verify every 2 minutes
@@ -240,7 +241,7 @@ function ValveCheck.ProcessPlayer(playerState)
 		Logger.Debug(
 			"ValveCheck",
 			string.format(
-				"Processing ID=%s Name=%s  inKnownList=%s",
+				"Start ID=%s Name=%s inKnownList=%s",
 				tostring(id),
 				playerState.wrap:GetName(),
 				tostring(isKnownValveID64(id))
@@ -297,7 +298,7 @@ function ValveCheck.ProcessPlayer(playerState)
 		checkFlags.valveItemBadgeChecked = true
 		playerState.itemChecked = true
 		if ply then
-			if isDebug then
+			if isDebug and VERBOSE_DEBUG_LOGS then
 				Logger.Debug("ValveCheck", id .. " – running item/badge check")
 			end
 			local found, reason = checkPlayerItems(ply)
@@ -310,10 +311,6 @@ function ValveCheck.ProcessPlayer(playerState)
 				checkFlags.commBanChecked = true
 				applyValveFlag(playerState, reason)
 				return
-			else
-				if isDebug then
-					Logger.Debug("ValveCheck", id .. " – item/badge: no match")
-				end
 			end
 		end
 	end
@@ -344,7 +341,7 @@ function ValveCheck.ProcessPlayer(playerState)
 		if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
 			lastProfileCheck[id] = now
 			checkFlags.profileLookupQueued = true
-			if isDebug then
+			if isDebug and VERBOSE_DEBUG_LOGS then
 				Logger.Debug("ValveCheck", id .. " – queuing async profile check")
 			end
 
@@ -360,7 +357,7 @@ function ValveCheck.ProcessPlayer(playerState)
 					return
 				end
 
-				if isDebug then
+				if isDebug and VERBOSE_DEBUG_LOGS then
 					Logger.Debug(
 						"ValveCheck",
 						string.format(
