@@ -396,7 +396,7 @@ local function drawVoteUI()
 	local barW = boxW - pad * 2
 	local barX = boxX + pad
 	local barY = boxY + boxH - 24
-	
+
 	-- Bar Background
 	draw.Color(30, 30, 35, alpha)
 	draw.FilledRect(barX, barY, barX + barW, barY + barH)
@@ -408,11 +408,11 @@ local function drawVoteUI()
 	if totalPossible > 0 then
 		local yesRatio = yesCount / totalPossible
 		local yesWidth = math.floor(barW * yesRatio)
-		
+
 		-- YES portion (Green)
 		draw.Color(70, 180, 70, alpha)
 		draw.FilledRect(barX, barY, barX + yesWidth, barY + barH)
-		
+
 		-- NO portion (Red) - the rest of the bar if there are NO votes
 		if noCount > 0 then
 			draw.Color(180, 70, 70, alpha)
@@ -456,7 +456,19 @@ end
 local function handleGameEvent(event)
 	local eventName = event:GetName()
 
-	if eventName == "vote_cast" then
+	if eventName == "vote_started" then
+		-- Fallback for servers/builds where VoteStart usermessage is not delivered reliably.
+		local team = event:GetInt("team")
+		local voteidx = event:GetInt("voteidx")
+		local callerIdx = event:GetInt("entityid")
+		local dispStr = event:GetString("issue") or "#TF_vote_kick_player_other"
+		local detailsStr = event:GetString("param1") or ""
+		local targetIdx = event:GetInt("target")
+
+		if voteidx and voteidx > 0 then
+			startVote(team, voteidx, callerIdx, dispStr, detailsStr, targetIdx)
+		end
+	elseif eventName == "vote_cast" then
 		local option = event:GetInt("vote_option")
 		local team = event:GetInt("team")
 		local playerIdx = event:GetInt("entityid")
