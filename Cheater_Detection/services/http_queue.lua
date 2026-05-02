@@ -48,6 +48,7 @@ local bridgeState = {
 local lastLoggedTransportMode = "startup"
 local lastLoggedBridgeAlive = BRIDGE_ASSUME_HEALTHY_ON_LOAD
 local lastLoggedBridgeError = ""
+local startupBridgeProbePending = not BRIDGE_ASSUME_HEALTHY_ON_LOAD
 
 local FinishActiveRequest
 
@@ -506,9 +507,11 @@ function HttpQueue.Tick()
 	local now = Now()
 	local didNetworkOp = false
 	RefreshBridgeSafeWindowGate()
+	local shouldProbeOnStartup = startupBridgeProbePending and now >= bridgeState.nextProbeAt
 	-- Only probe bridge in unintrusive windows: http.Get is synchronous and stalls
 	-- for ~2s when the server is not listening, which freezes TF2 during gameplay.
-	if (not isProcessing) and now >= bridgeState.nextProbeAt and CanRunBlockingHTTPNow() then
+	if (not isProcessing) and (shouldProbeOnStartup or (now >= bridgeState.nextProbeAt and CanRunBlockingHTTPNow())) then
+		startupBridgeProbePending = false
 		ProbeBridge(now)
 		didNetworkOp = true
 	end
