@@ -14,7 +14,7 @@ local Fetcher = {}
 -- Stability-first mode: do not hammer the same source on nil JSON payloads.
 local MAX_JSON_NIL_RETRIES = 0
 -- Seconds to wait between sequential online source fetches to avoid
--- hammering http.GetAsync and destabilising the engine HTTP subsystem.
+-- hammering the HTTP subsystem when safe-window blocking requests run.
 local INTER_SOURCE_DELAY = 3.0
 
 ---- State tracking
@@ -328,7 +328,7 @@ function Fetcher.Tick()
 		local label = source.name or source.cause or "Raw List"
 
 		while count < TOKENS_PER_TICK and pos <= len do
-			local s, e = rawText:find("[%w%[%]:_]+", pos)
+			local s, e = rawText:find("[%w%[%]%:_]+", pos)
 			if not s then
 				pos = len + 1
 				break
@@ -502,7 +502,6 @@ function Fetcher.Tick()
 			return
 		end
 
-		Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
 		local fetchUrl = proxyGitHubUrl(source.url)
 		local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
 		if not enqueued then
@@ -511,6 +510,7 @@ function Fetcher.Tick()
 			return
 		end
 
+		Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
 		state.lastOnlineFetchTime = globals.RealTime()
 		state.onlinePendingCount = 1
 
