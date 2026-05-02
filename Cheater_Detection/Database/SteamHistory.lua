@@ -27,7 +27,8 @@ local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0
 local MAX_BATCH = 100
 local MIN_INTERVAL = 0.35 -- Dense scan cadence while still pacing API requests
 local ACTIVE_SWEEP_INTERVAL = 2.0
-local PROGRESS_LOG_INTERVAL = 3.0
+local PROGRESS_LOG_INTERVAL_ACTIVE = 1.0
+local PROGRESS_LOG_INTERVAL_IDLE = 3.0
 local DISABLED_LOG_INTERVAL = 10.0
 
 --[[ Internal State ]]
@@ -54,6 +55,8 @@ local state = {
 	completionAnnounced = false,
 	lastDisabledLogTime = 0,
 	lastDisabledReason = "",
+	lastBatchSummary = "",
+	lastBatchSummaryTime = 0,
 }
 
 --[[ Helper Functions ]]
@@ -166,6 +169,8 @@ local function resetState(clearScanned)
 	state.completionAnnounced = false
 	state.lastDisabledLogTime = 0
 	state.lastDisabledReason = ""
+	state.lastBatchSummary = ""
+	state.lastBatchSummaryTime = 0
 end
 
 local function getInactiveReason()
@@ -236,8 +241,17 @@ local function logProgress(force)
 	local scannedCount = countEntries(state.scanned)
 	local totalTargets, checkedTargets = countActiveProgress()
 	local inFlight = state.scanning == true and 1 or 0
+	local isActive = pendingCount > 0 or inFlight > 0
+	local interval = isActive and PROGRESS_LOG_INTERVAL_ACTIVE or PROGRESS_LOG_INTERVAL_IDLE
+	local phase = "idle"
+	if inFlight > 0 then
+		phase = "scanning"
+	elseif pendingCount > 0 then
+		phase = "queued"
+	end
 	local snapshot = string.format(
-		"pending=%d inflight=%d checked=%d/%d scanned=%d",
+		"phase=%s pending=%d inflight=%d checked=%d/%d scanned=%d",
+		phase,
 		pendingCount,
 		inFlight,
 		checkedTargets,
@@ -257,13 +271,27 @@ local function logProgress(force)
 		state.completionAnnounced = false
 	end
 
-	if force or (now - state.lastProgressLogTime) >= PROGRESS_LOG_INTERVAL then
+	if force or (now - state.lastProgressLogTime) >= interval then
 		if force or snapshot ~= state.lastProgressSnapshot then
 			printInfo({ 120, 220, 255, 255 }, "[SteamHistory] Progress: " .. snapshot)
 			state.lastProgressSnapshot = snapshot
 		end
 		state.lastProgressLogTime = now
 	end
+end
+
+local function logBatchSummary(flagged, passed)
+	local now = globals.RealTime()
+	local summary = string.format("flagged=%d clean=%d", flagged, passed)
+	if summary == state.lastBatchSummary and (now - state.lastBatchSummaryTime) < 1.0 then
+		return
+	end
+	state.lastBatchSummary = summary
+	state.lastBatchSummaryTime = now
+	printInfo(
+		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
+		string.format("[SteamHistory] Batch done: %d flagged, %d clean", flagged, passed)
+	)
 end
 
 local function queueActivePlayerStates()
@@ -634,10 +662,7 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	end
 
 	local passed = #ids - flagged
-	printInfo(
-		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
-		string.format("[SteamHistory] Batch: %d flagged, %d clean", flagged, passed)
-	)
+	logBatchSummary(flagged, passed)
 
 	-- Success! Reset error count and consecutive failures
 	state.errorCount = 0
@@ -679,6 +704,10 @@ local function requestBatch()
 
 	state.scanning = true
 	state.lastBatchTime = globals.RealTime()
+	printInfo(
+		{ 120, 220, 255, 255 },
+		string.format("[SteamHistory] Batch start: %d players", #ids)
+	)
 
 	local url = string.format(API_TEMPLATE, cfg.ApiKey, table.concat(ids, ","))
 
