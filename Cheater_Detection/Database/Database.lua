@@ -31,6 +31,7 @@ local HARD_PRIORITY_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED
 local LOCAL_DEAD_SAVE_INTERVAL = 3
 local MIN_NONFORCED_SAVE_INTERVAL = 20
 local EFFECTIVE_DEAD_AUTOSAVE_INTERVAL = math.max(LOCAL_DEAD_SAVE_INTERVAL, MIN_NONFORCED_SAVE_INTERVAL)
+local ALIVE_IDLE_SAVE_INTERVAL = 45
 
 local function ReapplyDetectedPriorities()
 	if not G.DataBase then
@@ -182,6 +183,16 @@ local function OnFireEvent(event)
 		end
 	end
 
+	if eventName == "player_spawn" and Database.State.isDirty then
+		local spawnUserID = event:GetInt("userid")
+		local spawnEntity = entities.GetByUserID(spawnUserID)
+		local isLocalSpawn = spawnEntity and localPlayer and spawnEntity:GetIndex() == localPlayer:GetIndex()
+		if isLocalSpawn then
+			Logger.Debug("Database", "[DB] Local player spawned, force-saving dirty database...")
+			Database.SaveDatabase(true)
+		end
+	end
+
 	if eventName == "game_newmap" or eventName == "teamplay_round_start" or eventName == "round_end" then
 		Logger.Debug("Database", "[DB] Session boundary event, triggering save...")
 		Database.SaveDatabase()
@@ -202,6 +213,15 @@ local function OnCreateMoveAutoSave()
 	end
 
 	if localPlayer:IsAlive() then
+		local aliveNow = os.time()
+		if Database.State.lastSave ~= 0 and (aliveNow - Database.State.lastSave) < ALIVE_IDLE_SAVE_INTERVAL then
+			return
+		end
+		Logger.Debug(
+			"Database",
+			string.format("[DB] Alive idle autosave (interval=%ds)...", ALIVE_IDLE_SAVE_INTERVAL)
+		)
+		Database.SaveDatabase()
 		return
 	end
 
