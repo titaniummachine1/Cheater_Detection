@@ -20,6 +20,14 @@ local fetchState = {
 }
 local MAX_FETCH_PAGES = 3
 
+local function countLoadedIDs()
+	local count = 0
+	for _ in pairs(autoFetchedID64s) do
+		count = count + 1
+	end
+	return count
+end
+
 --- Parse <steamID64> tags from Valve Group XML (stores as s64 string)
 local function parseGroupXML(xml)
 	if not xml or #xml == 0 then
@@ -72,13 +80,34 @@ function SteamLookup.TickGroupFetch()
 end
 
 --- Kick off the group fetch on startup
-function SteamLookup.RefreshValveGroup()
+function SteamLookup.RefreshValveGroup(force)
+	local forceRefresh = force == true
+	if not forceRefresh then
+		if fetchState.inProgress or fetchState.done then
+			return false
+		end
+
+		local cachedCount = countLoadedIDs()
+		if cachedCount > 0 then
+			fetchState.done = true
+			fetchState.inProgress = false
+			fetchState.nextPage = MAX_FETCH_PAGES + 1
+			fetchState.totalFetched = cachedCount
+			fetchState.cooldownUntil = 0
+			print(string.format("[SteamLookup] Reusing cached Valve group IDs: %d loaded.", cachedCount))
+			return false
+		end
+	else
+		autoFetchedID64s = {}
+	end
+
 	fetchState.done = false
 	fetchState.inProgress = false
 	fetchState.nextPage = 1
 	fetchState.totalFetched = 0
 	fetchState.cooldownUntil = 0
 	SteamLookup.TickGroupFetch()
+	return true
 end
 
 --- Check if a SteamID64 was fetched from the Valve Steam Group
