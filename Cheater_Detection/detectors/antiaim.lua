@@ -12,6 +12,7 @@ local AntiAim = {}
 
 local lastInvalidPitchLogAt = {}
 local MAX_LEGAL_PITCH = 89.30
+local MAX_SANE_ABS_ANGLE = 540
 
 local function isInvalidPitchValue(pitch)
 	if type(pitch) ~= "number" then
@@ -27,7 +28,7 @@ local function isCorruptedAngleValue(value)
 	if value ~= value or value == math.huge or value == -math.huge then
 		return true
 	end
-	return math.abs(value) > 10000
+	return math.abs(value) > MAX_SANE_ABS_ANGLE
 end
 
 local function toNumber(v)
@@ -205,6 +206,11 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local isInvalid = isInvalidPitchValue(pitch)
 
 	if isInvalid then
+		-- Entity state can change between early validation and angle reads.
+		-- Re-check here to avoid flagging stale dormant/dead snapshots.
+		if (not entity:IsValid()) or entity:IsDormant() or (not entity:IsAlive()) then
+			return
+		end
 		local now = globals.RealTime()
 		local lastLog = lastInvalidPitchLogAt[playerState.id] or 0
 		local cooldownExpired = (now - lastLog) >= 10.0
