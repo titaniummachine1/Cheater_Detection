@@ -26,6 +26,7 @@ local KEYWORDS = {
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
 local MAX_BATCH = 100
 local MIN_INTERVAL = 0.35 -- Dense scan cadence while still pacing API requests
+local ACTIVE_SWEEP_INTERVAL = 2.0
 
 --[[ Internal State ]]
 local state = {
@@ -45,6 +46,7 @@ local state = {
 	-- Adaptive batch size
 	currentBatchSize = MAX_BATCH,
 	rateLimitedRecently = false,
+	lastActiveSweepTime = 0,
 }
 
 --[[ Helper Functions ]]
@@ -151,6 +153,22 @@ local function resetState(clearScanned)
 	state.scanning = false
 	state.errorCount = 0
 	state.nextRetryTime = 0
+	state.lastActiveSweepTime = 0
+end
+
+local function queueActivePlayerStates()
+	local queued = 0
+	for steamID, playerState in pairs(PlayerCache.GetActiveTable()) do
+		local id = normalizeSteamID64(steamID)
+		if id then
+			local wrap = playerState and playerState.wrap
+			local name = wrap and wrap.GetName and wrap:GetName() or nil
+			if queueSteamID(id, { name = name }) then
+				queued = queued + 1
+			end
+		end
+	end
+	return queued
 end
 
 local function queueCurrentPlayers()
@@ -276,7 +294,7 @@ local function flagPlayer(steamID, context, entry)
 
 	-- Set priority 10 if AutoPriority enabled
 	if G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority then
-		Database.SetPriority(steamID, 10, true)
+		Database.SetPriority(steamID, 10)
 	end
 
 	JoinNotifications.SendCheaterAlert({
@@ -725,6 +743,11 @@ local function onCreateMove()
 		state.initialQueued = true
 	end
 
+	if globals.RealTime() - state.lastActiveSweepTime >= ACTIVE_SWEEP_INTERVAL then
+		queueActivePlayerStates()
+		state.lastActiveSweepTime = globals.RealTime()
+	end
+
 	if state.scanning then
 		return
 	end
@@ -769,6 +792,16 @@ function SteamHistory.QueueRescan()
 		{ 0, 200, 255, 255 },
 		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", MAX_BATCH)
 	)
+end
+
+function SteamHistory.QueuePlayerCheck(steamID, name)
+	if not refreshEnabled() then
+		return false
+	end
+	if state.temporarilyDisabled then
+		return false
+	end
+	return queueSteamID(steamID, { name = name })
 end
 
 --[[ Callback Registration ]]

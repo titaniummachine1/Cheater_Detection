@@ -316,6 +316,10 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	if useSteamHistory then
+		if not checkFlags.steamHistoryChecked and SteamHistory.QueuePlayerCheck then
+			SteamHistory.QueuePlayerCheck(id, playerState.wrap and playerState.wrap:GetName() or id)
+		end
+
 		if not checkFlags.valveGroupChecked then
 			if SteamLookup.IsGroupMemberID64(id) then
 				checkFlags.valveGroupChecked = true
@@ -325,9 +329,12 @@ function ValveCheck.ProcessPlayer(playerState)
 			end
 		end
 
-		if checkFlags.steamHistoryChecked and checkFlags.valveGroupChecked then
-			checkFlags.vacBanChecked = true
-			checkFlags.commBanChecked = true
+		if
+			checkFlags.steamHistoryChecked
+			and checkFlags.valveGroupChecked
+			and checkFlags.vacBanChecked
+			and checkFlags.commBanChecked
+		then
 			playerState.flags = playerState.flags | Constants.Flags.CHECKED
 			playerState.externalChecked = true
 			deferredQueue[id] = nil
