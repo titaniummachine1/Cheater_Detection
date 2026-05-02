@@ -73,6 +73,7 @@ local Default_Config = {
 		},
 		Vote_Reveal = {
 			Enable = true,
+			Indicator = true,
 			TargetTeam = {
 				MyTeam = true,
 				enemyTeam = true,

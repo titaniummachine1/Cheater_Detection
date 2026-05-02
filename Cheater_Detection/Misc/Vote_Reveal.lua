@@ -50,7 +50,13 @@ end
 
 local function isIndicatorEnabled()
 	local cfg = getConfig()
-	return cfg and cfg.Indicator
+	if not cfg then
+		return false
+	end
+	if cfg.Indicator == nil then
+		return true
+	end
+	return cfg.Indicator == true
 end
 
 local function localize(key, ...)
