@@ -1,5 +1,10 @@
 {
   "Lua.runtime.version": "Lua 5.4",
+  "code-runner.respectShebang": false,
+  "code-runner.executorMap": {
+    "python": "python -u"
+  },
+  "code-runner.runInTerminal": true,
   "Lua.workspace.library": [
     "C:/gitProjects/Lmaobox-Annotations/library"
   ],
