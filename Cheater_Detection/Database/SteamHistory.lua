@@ -174,12 +174,18 @@ local function syncServerBoundaryState()
 	end
 
 	if serverIP ~= state.currentServerIP then
-		if state.currentServerIP ~= "" then
+		local oldServerIP = state.currentServerIP
+		-- Only hard-reset when leaving a server or switching between two active servers.
+		-- Entering a server from main menu should not reset again because disconnect path
+		-- already cleared per-match state.
+		if oldServerIP ~= "" and serverIP == "" then
+			resetState(true)
+			state.scanning = false
+		elseif oldServerIP ~= "" and serverIP ~= "" and oldServerIP ~= serverIP then
 			printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Server changed - resetting per-match scan state")
+			resetState(true)
+			state.scanning = false
 		end
-		state.currentServerIP = serverIP
-		resetState(true)
-		state.scanning = false
 		state.currentServerIP = serverIP
 	end
 
@@ -856,6 +862,9 @@ local function onGameEvent(event)
 	elseif name == "game_newmap" or name == "teamplay_round_start" then
 		resetState(true)
 	elseif name == "player_spawn" or name == "player_death" then
+		if state.scanning or next(state.inFlight) ~= nil then
+			return
+		end
 		if not state.enabled then
 			return
 		end
