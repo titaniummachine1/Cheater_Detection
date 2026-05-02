@@ -124,6 +124,48 @@ end
 
 local steamIDCache = {}
 
+local function trimString(value)
+	if type(value) ~= "string" then
+		return nil
+	end
+	local trimmed = value:match("^%s*(.-)%s*$")
+	if not trimmed or trimmed == "" then
+		return nil
+	end
+	return trimmed
+end
+
+local function containsPlain(haystack, needle)
+	if type(haystack) ~= "string" or type(needle) ~= "string" then
+		return false
+	end
+	return haystack:find(needle, 1, true) ~= nil
+end
+
+local function buildReasonFromAttributes(attributes, fallbackReason)
+	local defaultReason = fallbackReason or "Unknown Source"
+	if type(attributes) ~= "table" or #attributes == 0 then
+		return defaultReason
+	end
+
+	local first = trimString(attributes[1])
+	if not first then
+		return defaultReason
+	end
+
+	first = first:gsub("^%l", string.upper)
+
+	for i = 2, #attributes do
+		local extra = trimString(attributes[i])
+		if extra and not containsPlain(first, extra) then
+			-- Keep it compact but preserve community-ban provenance tags.
+			return first .. " - " .. extra
+		end
+	end
+
+	return first
+end
+
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
 function Parsers.GetSteamID64(input)
@@ -241,13 +283,7 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 		end
 	end
 
-	-- Get the first attribute as the reason
-	local reason = defaultReason or "Unknown Source"
-	if player.attributes and #player.attributes > 0 then
-		-- Use first attribute, capitalized
-		local firstAttribute = player.attributes[1]
-		reason = firstAttribute:gsub("^%l", string.upper) -- Capitalize first letter
-	end
+	local reason = buildReasonFromAttributes(player.attributes, defaultReason)
 
 	-- Add to entries if not already there
 	if existingEntries[steamID64] then
@@ -267,14 +303,22 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 			updName = true
 		end
 
-		-- If existing entry has unknown reason and this one has a reason
-		if
-			(existingEntry.Reason == "Unknown Source" or existingEntry.Reason == nil)
-			and reason
-			and reason ~= "Unknown Source"
-		then
-			existingEntry.Reason = reason
-			updReason = true
+		-- Merge in better/missing reason context from incoming lists.
+		if reason and reason ~= "Unknown Source" then
+			local existingReason = existingEntry.Reason
+			if existingReason == nil or existingReason == "Unknown Source" then
+				existingEntry.Reason = reason
+				updReason = true
+			elseif not containsPlain(existingReason, reason) then
+				local mergedReason = existingReason
+				if #existingReason < 220 then
+					mergedReason = existingReason .. " | " .. reason
+				end
+				if mergedReason ~= existingReason then
+					existingEntry.Reason = mergedReason
+					updReason = true
+				end
+			end
 		end
 
 		-- Mark as static if this is an external source
