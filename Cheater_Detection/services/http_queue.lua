@@ -42,7 +42,6 @@ local bridgeState = {
 	lastError = "",
 	lastProbeAt = 0,
 	nextProbeAt = 0,
-	blockedUntilSafeWindow = false,
 }
 
 local lastLoggedTransportMode = "startup"
@@ -143,9 +142,6 @@ local function MarkBridgeOffline(errorMessage, now, blockUntilSafeWindow)
 	bridgeState.lastError = errorMessage or "bridge offline"
 	bridgeState.lastProbeAt = currentTime
 	bridgeState.nextProbeAt = currentTime + BRIDGE_HEALTH_CHECK_INTERVAL
-	if blockUntilSafeWindow then
-		bridgeState.blockedUntilSafeWindow = true
-	end
 	LogBridgeState(false, bridgeState.lastError)
 end
 
@@ -155,14 +151,11 @@ local function MarkBridgeAlive(protocol, now)
 	bridgeState.lastError = ""
 	bridgeState.lastProbeAt = type(now) == "number" and now or Now()
 	bridgeState.nextProbeAt = bridgeState.lastProbeAt + BRIDGE_HEALTH_CHECK_INTERVAL
-	bridgeState.blockedUntilSafeWindow = false
 	LogBridgeState(true, nil)
 end
 
 local function RefreshBridgeSafeWindowGate()
-	if bridgeState.blockedUntilSafeWindow and CanRunBlockingHTTPNow() then
-		bridgeState.blockedUntilSafeWindow = false
-	end
+	-- Legacy no-op: bridge recovery is now allowed while alive.
 end
 
 local function DirectHttpGet(url)
@@ -209,12 +202,6 @@ end
 local function ProbeBridge(now)
 	local currentTime = type(now) == "number" and now or Now()
 	RefreshBridgeSafeWindowGate()
-	if not CanRunBlockingHTTPNow() then
-		return bridgeState.alive == true, bridgeState.lastError ~= "" and bridgeState.lastError or nil
-	end
-	if bridgeState.blockedUntilSafeWindow and not CanRunBlockingHTTPNow() then
-		return false, bridgeState.lastError ~= "" and bridgeState.lastError or "bridge offline"
-	end
 	if currentTime < bridgeState.nextProbeAt then
 		return bridgeState.alive == true, bridgeState.lastError ~= "" and bridgeState.lastError or nil
 	end
@@ -235,8 +222,7 @@ end
 
 local function CanUseBridgeTransport()
 	RefreshBridgeSafeWindowGate()
-	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL and
-		not bridgeState.blockedUntilSafeWindow
+	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL
 end
 
 local function StartBridgeRequest(item, now)
