@@ -51,6 +51,7 @@ local state = {
 	completionAnnounced = false,
 	lastDisabledLogTime = 0,
 	lastDisabledReason = "",
+	currentServerIP = "",
 }
 
 --[[ Helper Functions ]]
@@ -161,6 +162,26 @@ local function resetState(clearScanned)
 	state.completionAnnounced = false
 	state.lastDisabledLogTime = 0
 	state.lastDisabledReason = ""
+	state.currentServerIP = ""
+end
+
+local function syncServerBoundaryState()
+	local serverIP = engine.GetServerIP()
+	if not serverIP or serverIP == "" then
+		serverIP = ""
+	end
+
+	if serverIP ~= state.currentServerIP then
+		if state.currentServerIP ~= "" then
+			printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Server changed - resetting per-match scan state")
+		end
+		state.currentServerIP = serverIP
+		resetState(true)
+		state.scanning = false
+		state.currentServerIP = serverIP
+	end
+
+	return serverIP ~= ""
 end
 
 local function getInactiveReason()
@@ -845,6 +866,11 @@ local function onGameEvent(event)
 end
 
 local function onCreateMove()
+	local inServer = syncServerBoundaryState()
+	if not inServer then
+		return
+	end
+
 	if not refreshEnabled() then
 		logInactiveReason(false)
 		return
