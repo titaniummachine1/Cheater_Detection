@@ -9,7 +9,7 @@ local Default_Config = {
 		Chat_Prefix = true,
 		Cheater_Tags = true,
 		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
-		AutoSync = true, -- Automatically fetch databases on startup
+		AutoSync = true,                   -- Automatically fetch databases on startup
 	},
 
 	Scanner = {
@@ -18,16 +18,16 @@ local Default_Config = {
 	},
 
 	Advanced = {
-		Evidence_Tolerance = 100, -- Evidence score threshold to mark as cheater
+		Evidence_Tolerance = 100,           -- Evidence score threshold to mark as cheater
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
-		debug = false, -- Debug mode (removes self from database, enables verbose logging)
+		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
 		-- Detection toggles (only for implemented detections)
-		Choke = true, -- Fake Lag detection
-		Warp = true, -- Warp/DT detection
-		Bhop = true, -- Bunny hop detection
-		DuckSpeed = true, -- Duck speed detection
-		AntiAim = true, -- Anti-aim detection
-		SilentAimbot = true, -- Silent aimbot (extrapolation) detection
+		Choke = true,                       -- Fake Lag detection
+		Warp = true,                        -- Warp/DT detection
+		Bhop = true,                        -- Bunny hop detection
+		DuckSpeed = true,                   -- Duck speed detection
+		AntiAim = true,                     -- Anti-aim detection
+		SilentAimbot = true,                -- Silent aimbot (extrapolation) detection
 	},
 
 	Notifications = {
