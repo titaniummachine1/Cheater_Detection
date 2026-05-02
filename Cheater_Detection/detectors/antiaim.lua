@@ -11,7 +11,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local AntiAim = {}
 
 local lastInvalidPitchLogAt = {}
-local MAX_LEGAL_PITCH = 89.29
+local MAX_LEGAL_PITCH = 89.30
 
 local function isInvalidPitchValue(pitch)
 	if type(pitch) ~= "number" then
@@ -221,7 +221,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 				)
 			)
 		end
-		local reason = string.format("Invalid Pitch (%.2f)", pitch)
+		local reason = string.format("Invalid Pitch (%.3f)", pitch)
 		DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
 	end
 end
