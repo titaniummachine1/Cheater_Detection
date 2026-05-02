@@ -11,12 +11,13 @@ local G = require("Cheater_Detection.Utils.Globals")
 local AntiAim = {}
 
 local lastInvalidPitchLogAt = {}
+local MAX_LEGAL_PITCH = 89.29
 
 local function isInvalidPitchValue(pitch)
 	if type(pitch) ~= "number" then
 		return false
 	end
-	return pitch > 89.0 or pitch < -89.0
+	return pitch > MAX_LEGAL_PITCH or pitch < -MAX_LEGAL_PITCH
 end
 
 local function isCorruptedAngleValue(value)

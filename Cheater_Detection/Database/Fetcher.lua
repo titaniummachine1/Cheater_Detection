@@ -459,6 +459,19 @@ function Fetcher.Tick()
 			state.results.total_updated = state.results.total_updated + s.updated
 			state.results.errors = state.results.errors + s.errors
 
+			Logger.Debug(
+				"Fetcher",
+				string.format(
+					"[FETCHER] Source done: %s processed=%d added=%d updated=%d existing=%d errors=%d",
+					tostring(source.name),
+					s.processed,
+					s.added,
+					s.updated,
+					s.existing,
+					s.errors
+				)
+			)
+
 			if state.mode == "LOCAL_PARSE" then
 				state.fileIdx = state.fileIdx + 1
 				state.mode = "LOCAL_READ"
@@ -681,7 +694,17 @@ function Fetcher.FinishFetch()
 				results.errors
 			)
 		)
-		Parsers.PrintStatsSummary()
+		Logger.Debug(
+			"Fetcher",
+			string.format(
+				"[FETCHER] Totals processed=%d added=%d updated=%d existing=%d errors=%d",
+				Parsers.ParseStats.totalProcessed or 0,
+				Parsers.ParseStats.totalAdded or 0,
+				Parsers.ParseStats.totalUpdated or 0,
+				Parsers.ParseStats.totalExisting or 0,
+				Parsers.ParseStats.totalErrors or 0
+			)
+		)
 	else
 		printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
 		printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
