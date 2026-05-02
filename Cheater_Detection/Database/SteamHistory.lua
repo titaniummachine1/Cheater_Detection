@@ -34,6 +34,7 @@ local state = {
 	enabled = false,
 	initialQueued = false,
 	pending = {},
+	inFlight = {},
 	scanned = {},
 	lastBatchTime = 0,
 	scanning = false,
@@ -129,7 +130,7 @@ local function queueSteamID(steamID, context)
 	if steamID == IGNORED_ID then
 		return false
 	end
-	if state.scanned[steamID] or state.pending[steamID] then
+	if state.scanned[steamID] or state.pending[steamID] or state.inFlight[steamID] then
 		return false
 	end
 
@@ -150,6 +151,7 @@ end
 
 local function resetState(clearScanned)
 	state.pending = {}
+	state.inFlight = {}
 	if clearScanned then
 		state.scanned = {}
 	end
@@ -329,6 +331,7 @@ local function popBatch()
 		ids[#ids + 1] = steamID
 		contexts[steamID] = ctx
 		state.pending[steamID] = nil
+		state.inFlight[steamID] = true
 		if #ids >= batchSize then
 			break
 		end
@@ -600,6 +603,7 @@ local function handleError(message, contexts)
 	-- Requeue items
 	if contexts then
 		for steamID, ctx in pairs(contexts) do
+			state.inFlight[steamID] = nil
 			state.pending[steamID] = ctx
 		end
 	end
@@ -642,6 +646,7 @@ local function handleBatchResponse(ids, contexts, responseTable)
 		if type(steamID) ~= "string" then
 			steamID = tostring(steamID)
 		end
+		state.inFlight[steamID] = nil
 		state.scanned[steamID] = true
 		local entry = responseMap[steamID]
 		local context = contexts[steamID] or {}
@@ -756,6 +761,7 @@ local function requestBatch()
 		state.scanning = false
 		for i = 1, #ids do
 			local steamID = ids[i]
+			state.inFlight[steamID] = nil
 			if steamID and not state.pending[steamID] then
 				state.pending[steamID] = contexts[steamID] or { queuedAt = globals.RealTime() }
 			end
