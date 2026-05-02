@@ -44,6 +44,7 @@ local function setupSteamHistory()
 	Commands.Register("steamhistory", function(args)
 		G.Menu = G.Menu or {}
 		G.Menu.Misc = G.Menu.Misc or {}
+		G.Menu.Scanner = G.Menu.Scanner or {}
 		G.Menu.Misc.SteamHistory = G.Menu.Misc.SteamHistory or {}
 		local shell = G.Menu.Misc.SteamHistory
 
@@ -56,6 +57,8 @@ local function setupSteamHistory()
 
 		shell.ApiKey = key
 		shell.Enable = true -- Enable it automatically when key is set
+		-- SteamHistory.IsEnabled() uses Scanner.SteamHistory as the runtime gate.
+		G.Menu.Scanner.SteamHistory = true
 
 		-- Force update in the module itself
 		if SteamHistory and SteamHistory.OnApiKeyUpdated then
@@ -68,6 +71,21 @@ local function setupSteamHistory()
 		end
 
 		printc(0, 255, 140, 255, "[SteamHistory] API key stored and module enabled!")
+	end)
+
+	Commands.Register("steamhistory_status", function(_args)
+		local hasKey = SteamHistory and SteamHistory.HasKey and SteamHistory.HasKey() or false
+		local enabled = SteamHistory and SteamHistory.IsEnabled and SteamHistory.IsEnabled() or false
+		local tempDisabled = SteamHistory and SteamHistory.IsTemporarilyDisabled and SteamHistory.IsTemporarilyDisabled() or
+		false
+
+		printc(100, 220, 255, 255, "[SteamHistory] Status:")
+		printc(200, 200, 200, 255, string.format("  hasKey           : %s", tostring(hasKey)))
+		printc(200, 200, 200, 255,
+			string.format("  scannerEnabled   : %s",
+				tostring(G.Menu and G.Menu.Scanner and G.Menu.Scanner.SteamHistory == true)))
+		printc(200, 200, 200, 255, string.format("  temporarilyOff   : %s", tostring(tempDisabled)))
+		printc(200, 200, 200, 255, string.format("  effectiveEnabled : %s", tostring(enabled)))
 	end)
 end
 
