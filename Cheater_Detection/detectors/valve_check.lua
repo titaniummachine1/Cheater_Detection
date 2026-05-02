@@ -180,13 +180,9 @@ local function checkPlayerItems(ply)
 		local okEnt, ent = pcall(ply.GetEntityForLoadoutSlot, ply, slot)
 		if okEnt and ent then
 			local okQ, quality = pcall(ent.GetPropInt, ent, "m_iEntityQuality")
-			local okD, defIdx = pcall(ent.GetPropInt, ent, "m_iItemDefinitionIndex")
 
 			if okQ and quality == ValveData.QualityID then
 				return true, "Valve-Quality Item (slot " .. slot .. ")"
-			end
-			if okD and defIdx == ValveData.BadgeDefIndex then
-				return true, "Valve Employee Badge (slot " .. slot .. ")"
 			end
 		end
 	end
