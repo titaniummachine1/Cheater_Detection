@@ -118,7 +118,6 @@ function Parsers.PrintStatsSummary()
 		if summary then
 			print(summary) -- Keep using plain print for multi-line debug summary
 		end
-
 	end
 end
 
