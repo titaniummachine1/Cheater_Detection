@@ -12,9 +12,9 @@ local Json = Common and Common.Json or nil
 local queue = {}
 local isProcessing = false
 local lastRequestTime = 0
-local isAlive = true      -- Set to false on unload to guard in-flight callbacks
-local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
-local REQUEST_TIMEOUT = 30.0
+local isAlive = true          -- Set to false on unload to guard in-flight callbacks
+local REQUEST_DELAY = 1.2     -- 1.2s delay between requests (GitHub safety)
+local REQUEST_TIMEOUT = 120.0 -- Give enough time for a player to reach an unintrusive window
 local REQUEST_RETRY_INTERVAL = 0.25
 local STRICT_SINGLE_FLIGHT = false
 local activeToken = 0
@@ -33,8 +33,9 @@ local BRIDGE_STALL_LIMIT = 0.20
 local BRIDGE_REMOTE_TIMEOUT_MS = 12000
 local BRIDGE_REMOTE_MAX_BYTES = 2 * 1024 * 1024
 local BRIDGE_POLL_INTERVAL = 0.0
-local BRIDGE_ASSUME_HEALTHY_ON_LOAD = true
+local BRIDGE_ASSUME_HEALTHY_ON_LOAD = false
 local BRIDGE_HEALTH_CHECK_INTERVAL = 10.0
+local BRIDGE_STALL_PROBE_INTERVAL = 120.0 -- After a stall (server not listening), wait much longer before retrying
 
 local bridgeState = {
 	alive = BRIDGE_ASSUME_HEALTHY_ON_LOAD,
@@ -135,13 +136,16 @@ local function LogBridgeState(alive, detail)
 	print("[HTTP QUEUE] bridge offline")
 end
 
-local function MarkBridgeOffline(errorMessage, now, blockUntilSafeWindow)
+local function MarkBridgeOffline(errorMessage, now, stalled)
 	local currentTime = type(now) == "number" and now or Now()
 	bridgeState.alive = false
 	bridgeState.protocol = nil
 	bridgeState.lastError = errorMessage or "bridge offline"
 	bridgeState.lastProbeAt = currentTime
-	bridgeState.nextProbeAt = currentTime + BRIDGE_HEALTH_CHECK_INTERVAL
+	-- A stall means the server is not listening at all; back off much longer to avoid
+	-- repeated 2-second freezes from synchronous http.Get calls to a closed port.
+	local probeInterval = stalled and BRIDGE_STALL_PROBE_INTERVAL or BRIDGE_HEALTH_CHECK_INTERVAL
+	bridgeState.nextProbeAt = currentTime + probeInterval
 	LogBridgeState(false, bridgeState.lastError)
 end
 
@@ -502,12 +506,17 @@ function HttpQueue.Tick()
 	local now = Now()
 	local didNetworkOp = false
 	RefreshBridgeSafeWindowGate()
-	if (not isProcessing) and now >= bridgeState.nextProbeAt then
+	-- Only probe bridge in unintrusive windows: http.Get is synchronous and stalls
+	-- for ~2s when the server is not listening, which freezes TF2 during gameplay.
+	if (not isProcessing) and now >= bridgeState.nextProbeAt and CanRunBlockingHTTPNow() then
 		ProbeBridge(now)
 		didNetworkOp = true
 	end
 
-	if isProcessing and activeItem and now >= activeDeadline then
+	-- Only time out an item if at least one real attempt has been made.
+	-- Items with 0 attempts are waiting for an unintrusive window; timing them out
+	-- would discard requests that haven't had a chance to run yet.
+	if isProcessing and activeItem and now >= activeDeadline and activeAttemptCount > 0 then
 		local timedOutItem = activeItem
 		local err = "HTTP request timed out after "
 		err = err .. tostring(REQUEST_TIMEOUT) .. "s"
