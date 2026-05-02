@@ -205,7 +205,6 @@ function ValveCheck.ProcessPlayer(playerState)
 	local isDebug = Common.IsDebugEnabled()
 	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
 	local useSteamHistory = SteamHistory.IsEnabled and SteamHistory.IsEnabled()
-	runDeferredSweep()
 
 	-- Skip Bots (Non-SteamID64)
 	if not id:match("^7656119%d+$") or #id ~= 17 then
@@ -427,5 +426,10 @@ Events.Register("FireGameEvent", "ValveCheck_NewMapSweep", onRoundOrMap, "game_n
 Events.Register("FireGameEvent", "ValveCheck_RoundStartSweep", onRoundOrMap, "teamplay_round_start")
 Events.Register("FireGameEvent", "ValveCheck_LocalSpawnSweep", onLocalSpawnOrDeath, "player_spawn")
 Events.Register("FireGameEvent", "ValveCheck_LocalDeathSweep", onLocalSpawnOrDeath, "player_death")
+
+-- Public tick: call once per frame from Scheduler, not once per player
+function ValveCheck.Tick()
+	runDeferredSweep()
+end
 
 return ValveCheck

@@ -14,6 +14,7 @@ local ticksPassed = 0
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")
+local ValveCheck = require("Cheater_Detection.detectors.valve_check")
 
 function Scheduler.Tick()
     local currentTick = globals.TickCount()
@@ -34,6 +35,10 @@ function Scheduler.Tick()
 
     if SteamLookup and SteamLookup.TickGroupFetch then
         SteamLookup.TickGroupFetch()
+    end
+
+    if ValveCheck and ValveCheck.Tick then
+        ValveCheck.Tick()
     end
 
     if Fetcher and Fetcher.Tick then
