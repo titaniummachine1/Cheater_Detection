@@ -32,6 +32,17 @@ local LOCAL_DEAD_SAVE_INTERVAL = 3
 local MIN_NONFORCED_SAVE_INTERVAL = 20
 local EFFECTIVE_DEAD_AUTOSAVE_INTERVAL = math.max(LOCAL_DEAD_SAVE_INTERVAL, MIN_NONFORCED_SAVE_INTERVAL)
 local ALIVE_IDLE_SAVE_INTERVAL = 45
+local SLOW_SAVE_WARN_SECONDS = 0.015
+
+local function nowSeconds()
+	if globals and type(globals.RealTime) == "function" then
+		local ok, t = pcall(globals.RealTime)
+		if ok and type(t) == "number" then
+			return t
+		end
+	end
+	return os.clock()
+end
 
 local function ReapplyDetectedPriorities()
 	if not G.DataBase then
@@ -116,6 +127,7 @@ function Database.GetFilePath()
 end
 
 function Database.SaveDatabase(force)
+	local saveStartedAt = nowSeconds()
 	if not G.DataBase then
 		return
 	end
@@ -162,6 +174,13 @@ function Database.SaveDatabase(force)
 			Database.State.isDirty = false
 			Database.State.lastSave = os.time()
 			Logger.Info("Database", "Database flushed to disk: " .. filepath)
+			local elapsed = nowSeconds() - saveStartedAt
+			if elapsed >= SLOW_SAVE_WARN_SECONDS then
+				Logger.Warning(
+					"Database",
+					string.format("[DB] Slow synchronous save detected: %.1f ms", elapsed * 1000)
+				)
+			end
 		else
 			Logger.Error("Database", "[DB] Failed to write database: " .. filepath)
 		end
