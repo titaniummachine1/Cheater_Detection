@@ -40,6 +40,7 @@ local hasSearchedGroup = false
 local detectorErrorSeen = {}
 local valveDisconnectTriggered = false
 local wasInServer = false
+local cleanedFriendIDs = {}
 
 local function isValveAutoDisconnectEnabled()
 	local menu = G.Menu
@@ -127,6 +128,7 @@ end
 local function resetRuntimeSessionState()
 	hasSearchedGroup = false
 	valveDisconnectTriggered = false
+	cleanedFriendIDs = {}
 	PlayerCache.ResetCheckedState()
 	PlayerCache.Cleanup()
 end
@@ -215,7 +217,7 @@ local function OnCreateMove(cmd)
 		SteamLookup.RefreshValveGroup()
 		hasSearchedGroup = true
 	end
-	SteamLookup.TickGroupFetch()
+	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 
 	-- Auto-fetching is disabled per user request.
 	-- Use the menu to manually refresh sources if needed.
@@ -234,10 +236,12 @@ local function OnCreateMove(cmd)
 		local pState = PlayerCache.Get(ply)
 		if pState then
 			-- In normal mode: exclude local player's friends and party members.
-			-- Also clean them from DB so they are never flagged in the local player's eyes.
+			-- Clean them from DB once on first encounter, not every tick.
 			if not isDebug and pState.isFriend then
-				if pState.id and pState.id:match("^7656119%d+$") then
-					Database.RemoveCheater(pState.id)
+				local friendID = pState.id
+				if friendID and friendID:match("^7656119%d+$") and not cleanedFriendIDs[friendID] then
+					cleanedFriendIDs[friendID] = true
+					Database.RemoveCheater(friendID)
 				end
 				goto continue
 			end

@@ -32,6 +32,10 @@ function Scheduler.Tick()
         HttpQueue.Tick()
     end
 
+    if SteamLookup and SteamLookup.TickGroupFetch then
+        SteamLookup.TickGroupFetch()
+    end
+
     if Fetcher and Fetcher.Tick then
         local ok, err = pcall(Fetcher.Tick)
         if not ok then

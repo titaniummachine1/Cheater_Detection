@@ -33,7 +33,7 @@ local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local SilentAim = {}
 
 -- ── Tuning ────────────────────────────────────────────────────────────────────
-local HISTORY_MAX = 4 -- Pre-shot ticks to retain
+local HISTORY_MAX = 4        -- Pre-shot ticks to retain
 local MIN_SNAP_DEGREES = 8.0 -- Smaller snaps are ignored (noise floor)
 local WEIGHT_EXPONENT = 1.8
 -- score = shot_dev ^ (1 + alignment * WEIGHT_EXPONENT)
@@ -124,11 +124,14 @@ local function processOnePlayer(id, ply, curTick, isDebug)
 	local shotDev =
 		angularDist(pending.actualShotPitch, pending.actualShotYaw, pending.predShotPitch, pending.predShotYaw)
 
-	if shotDev < MIN_SNAP_DEGREES then
+	if not (shotDev == shotDev) or shotDev == math.huge or shotDev < MIN_SNAP_DEGREES then
 		return
 	end
 
 	local returnDev = angularDist(pitch, yaw, pending.predNextPitch, pending.predNextYaw)
+	if not (returnDev == returnDev) or returnDev == math.huge then
+		return
+	end
 
 	-- alignment: 1 = T+1 angle returned perfectly to predicted path (strong confirm)
 	--            0 = T+1 angle is as far away as the shot itself (noise / natural move)
@@ -291,7 +294,7 @@ function SilentAim.ProcessPlayer(playerState)
 	-- Ensure per-player data table exists and register entity for FrameStageNotify
 	if not playerData[id] then
 		playerData[id] = {
-			entity      = ply,
+			entity       = ply,
 			angleHistory = {},
 			shotPending  = nil,
 			pendingScore = 0,
