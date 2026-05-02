@@ -33,16 +33,15 @@ local BRIDGE_STALL_LIMIT = 0.20
 local BRIDGE_REMOTE_TIMEOUT_MS = 12000
 local BRIDGE_REMOTE_MAX_BYTES = 2 * 1024 * 1024
 local BRIDGE_POLL_INTERVAL = 0.0
-local BRIDGE_RETRY_INITIAL = 1.0
-local BRIDGE_RETRY_MAX = 60.0
+local BRIDGE_ASSUME_HEALTHY_ON_LOAD = true
+local BRIDGE_HEALTH_CHECK_INTERVAL = 10.0
 
 local bridgeState = {
-	alive = false,
-	protocol = nil,
+	alive = BRIDGE_ASSUME_HEALTHY_ON_LOAD,
+	protocol = BRIDGE_ASSUME_HEALTHY_ON_LOAD and BRIDGE_PROTOCOL or nil,
 	lastError = "",
 	lastProbeAt = 0,
-	nextProbeAt = 0,
-	retryDelay = BRIDGE_RETRY_INITIAL,
+	nextProbeAt = BRIDGE_HEALTH_CHECK_INTERVAL,
 	blockedUntilSafeWindow = false,
 }
 
@@ -73,19 +72,6 @@ local function CanRunBlockingHTTPNow()
 	end
 
 	return not alive
-end
-
-local function ClampBridgeRetryDelay(delay)
-	if type(delay) ~= "number" then
-		return BRIDGE_RETRY_INITIAL
-	end
-	if delay < BRIDGE_RETRY_INITIAL then
-		return BRIDGE_RETRY_INITIAL
-	end
-	if delay > BRIDGE_RETRY_MAX then
-		return BRIDGE_RETRY_MAX
-	end
-	return delay
 end
 
 local function UrlEncode(value)
@@ -122,8 +108,7 @@ local function MarkBridgeOffline(errorMessage, now, blockUntilSafeWindow)
 	bridgeState.protocol = nil
 	bridgeState.lastError = errorMessage or "bridge offline"
 	bridgeState.lastProbeAt = currentTime
-	bridgeState.nextProbeAt = currentTime + ClampBridgeRetryDelay(bridgeState.retryDelay)
-	bridgeState.retryDelay = ClampBridgeRetryDelay(bridgeState.retryDelay * 2.0)
+	bridgeState.nextProbeAt = currentTime + BRIDGE_HEALTH_CHECK_INTERVAL
 	if blockUntilSafeWindow then
 		bridgeState.blockedUntilSafeWindow = true
 	end
@@ -134,8 +119,7 @@ local function MarkBridgeAlive(protocol, now)
 	bridgeState.protocol = protocol
 	bridgeState.lastError = ""
 	bridgeState.lastProbeAt = type(now) == "number" and now or Now()
-	bridgeState.nextProbeAt = bridgeState.lastProbeAt
-	bridgeState.retryDelay = BRIDGE_RETRY_INITIAL
+	bridgeState.nextProbeAt = bridgeState.lastProbeAt + BRIDGE_HEALTH_CHECK_INTERVAL
 	bridgeState.blockedUntilSafeWindow = false
 end
 
@@ -182,11 +166,14 @@ end
 local function ProbeBridge(now)
 	local currentTime = type(now) == "number" and now or Now()
 	RefreshBridgeSafeWindowGate()
+	if not CanRunBlockingHTTPNow() then
+		return bridgeState.alive == true, bridgeState.lastError ~= "" and bridgeState.lastError or nil
+	end
 	if bridgeState.blockedUntilSafeWindow and not CanRunBlockingHTTPNow() then
 		return false, bridgeState.lastError ~= "" and bridgeState.lastError or "bridge offline"
 	end
 	if currentTime < bridgeState.nextProbeAt then
-		return false, bridgeState.lastError ~= "" and bridgeState.lastError or "bridge offline"
+		return bridgeState.alive == true, bridgeState.lastError ~= "" and bridgeState.lastError or nil
 	end
 
 	local payload, err, stalled = BridgeJson("/health")
@@ -238,6 +225,7 @@ local function StartBridgeRequest(item, now)
 	activeBridgeRequestId = payload.id
 	activeNextRetry = now + BRIDGE_POLL_INTERVAL
 	activeLastError = ""
+	MarkBridgeAlive(bridgeState.protocol or BRIDGE_PROTOCOL, now)
 	return true, nil
 end
 
@@ -273,6 +261,7 @@ local function PollBridgeResult(now)
 		FallbackToBlockingTransport(now, bridgeState.lastError)
 		return
 	end
+	MarkBridgeAlive(bridgeState.protocol or BRIDGE_PROTOCOL, now)
 	if payload.done ~= true then
 		activeNextRetry = now + BRIDGE_POLL_INTERVAL
 		return
@@ -392,7 +381,7 @@ local function ProcessNextRequest()
 
 	local canRunBlocking = CanRunBlockingHTTPNow()
 	local canUseBridge = CanUseBridgeTransport()
-	if not canUseBridge and canRunBlocking then
+	if not canUseBridge and canRunBlocking and now >= bridgeState.nextProbeAt then
 		ProbeBridge(now)
 		canUseBridge = CanUseBridgeTransport()
 	end
@@ -490,6 +479,9 @@ function HttpQueue.Tick()
 
 	local now = Now()
 	RefreshBridgeSafeWindowGate()
+	if (not isProcessing) and now >= bridgeState.nextProbeAt then
+		ProbeBridge(now)
+	end
 
 	if isProcessing and activeItem and now >= activeDeadline then
 		local timedOutItem = activeItem
