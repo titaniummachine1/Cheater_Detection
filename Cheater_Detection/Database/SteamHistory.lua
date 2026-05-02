@@ -28,6 +28,7 @@ local MAX_BATCH = 100
 local MIN_INTERVAL = 0.35 -- Dense scan cadence while still pacing API requests
 local ACTIVE_SWEEP_INTERVAL = 2.0
 local PROGRESS_LOG_INTERVAL = 3.0
+local DISABLED_LOG_INTERVAL = 10.0
 
 --[[ Internal State ]]
 local state = {
@@ -51,6 +52,8 @@ local state = {
 	lastProgressLogTime = 0,
 	lastProgressSnapshot = "",
 	completionAnnounced = false,
+	lastDisabledLogTime = 0,
+	lastDisabledReason = "",
 }
 
 --[[ Helper Functions ]]
@@ -161,6 +164,38 @@ local function resetState(clearScanned)
 	state.lastProgressLogTime = 0
 	state.lastProgressSnapshot = ""
 	state.completionAnnounced = false
+	state.lastDisabledLogTime = 0
+	state.lastDisabledReason = ""
+end
+
+local function getInactiveReason()
+	local cfg = getConfig()
+	local scannerEnabled = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.SteamHistory == true
+	if not scannerEnabled then
+		return "toggle_off"
+	end
+	if not cfg or type(cfg.ApiKey) ~= "string" or cfg.ApiKey == "" then
+		return "missing_api_key"
+	end
+	if state.temporarilyDisabled then
+		return "temporarily_disabled"
+	end
+	return "inactive"
+end
+
+local function logInactiveReason(force)
+	local now = globals.RealTime()
+	local reason = getInactiveReason()
+	if force or (now - state.lastDisabledLogTime) >= DISABLED_LOG_INTERVAL then
+		if force or reason ~= state.lastDisabledReason then
+			printInfo({ 200, 200, 200, 255 }, "[SteamHistory] Inactive: " .. reason)
+			if reason == "missing_api_key" then
+				printInfo({ 255, 120, 120, 255 }, "[SteamHistory] Set key via console: steamhistory <your_key>")
+			end
+		end
+		state.lastDisabledLogTime = now
+		state.lastDisabledReason = reason
+	end
 end
 
 local function countEntries(map)
@@ -806,10 +841,12 @@ end
 
 local function onCreateMove()
 	if not refreshEnabled() then
+		logInactiveReason(false)
 		return
 	end
 
 	if state.temporarilyDisabled then
+		logInactiveReason(false)
 		return
 	end
 
