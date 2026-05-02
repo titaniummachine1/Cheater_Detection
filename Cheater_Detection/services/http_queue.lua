@@ -41,7 +41,7 @@ local bridgeState = {
 	protocol = BRIDGE_ASSUME_HEALTHY_ON_LOAD and BRIDGE_PROTOCOL or nil,
 	lastError = "",
 	lastProbeAt = 0,
-	nextProbeAt = BRIDGE_HEALTH_CHECK_INTERVAL,
+	nextProbeAt = 0,
 	blockedUntilSafeWindow = false,
 }
 
@@ -129,21 +129,28 @@ local function RefreshBridgeSafeWindowGate()
 	end
 end
 
-local function BridgeGet(path)
-	local httpTable = http
-	if httpTable == nil or type(httpTable.Get) ~= "function" then
-		return nil, "http.Get unavailable", false
-	end
+local function DirectHttpGet(url)
+	return http.Get(url)
+end
 
+local function HttpGet(url)
+	local ok, bodyOrErr = pcall(DirectHttpGet, url)
+	if not ok then
+		return nil, tostring(bodyOrErr)
+	end
+	return bodyOrErr, nil
+end
+
+local function BridgeGet(path)
 	local startedAt = Now()
-	local ok, bodyOrErr = pcall(httpTable.Get, BRIDGE_BASE .. path)
+	local bodyOrErr, err = HttpGet(BRIDGE_BASE .. path)
 	local elapsed = Now() - startedAt
 	local stalled = elapsed > BRIDGE_STALL_LIMIT
 	if stalled then
 		return nil, string.format("bridge call stalled for %.3fs", elapsed), true
 	end
-	if not ok then
-		return nil, tostring(bodyOrErr), false
+	if err ~= nil then
+		return nil, err, false
 	end
 
 	return bodyOrErr, nil, false
@@ -193,7 +200,7 @@ end
 local function CanUseBridgeTransport()
 	RefreshBridgeSafeWindowGate()
 	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL and
-	not bridgeState.blockedUntilSafeWindow
+		not bridgeState.blockedUntilSafeWindow
 end
 
 local function StartBridgeRequest(item, now)
@@ -309,19 +316,11 @@ local function DispatchBlockingAttempt()
 	activeAttemptCount = activeAttemptCount + 1
 	activeAttemptInFlight = true
 	local item = activeItem
-	local httpTable = http
-	if httpTable == nil or type(httpTable.Get) ~= "function" then
-		activeAttemptInFlight = false
-		activeLastError = "http.Get unavailable"
-		activeNextRetry = Now() + REQUEST_RETRY_INTERVAL
-		return
-	end
-
-	local ok, dataOrErr = pcall(httpTable.Get, item.url)
+	local dataOrErr, err = HttpGet(item.url)
 	activeAttemptInFlight = false
 
-	if not ok then
-		activeLastError = "Get call failed: " .. tostring(dataOrErr)
+	if err ~= nil then
+		activeLastError = "Get call failed: " .. tostring(err)
 		activeNextRetry = Now() + REQUEST_RETRY_INTERVAL
 		return
 	end
@@ -347,22 +346,6 @@ local function IsGitHubLikeURL(url)
 	end
 	return false
 end
-
--- Try to ensure http library is available
-local function InitializeHTTP()
-	if http and (type(http) == "userdata" or type(http) == "table") and type(http.Get) == "function" then
-		return true
-	end
-	if Common and Common.http and type(Common.http.Get) == "function" then
-		http = Common.http
-		return true
-	end
-
-	return false
-end
-
--- Force initialization on module load
-InitializeHTTP()
 
 local function ProcessNextRequest()
 	if isProcessing or #queue == 0 then
@@ -407,11 +390,6 @@ local function ProcessNextRequest()
 	activeTransport = nil
 	activeBridgeRequestId = nil
 
-	if not InitializeHTTP() then
-		FinishActiveRequest(item, nil, "No HTTP Library")
-		return
-	end
-
 	if canUseBridge then
 		local started, bridgeErr = StartBridgeRequest(item, now)
 		if started then
@@ -431,6 +409,14 @@ end
 
 function HttpQueue.IsBusy()
 	return isProcessing or activeAttemptInFlight or #queue > 0
+end
+
+function HttpQueue.IsBridgeAlive()
+	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL
+end
+
+function HttpQueue.IsBridgeConfirmed()
+	return HttpQueue.IsBridgeAlive() and bridgeState.lastProbeAt > 0
 end
 
 function HttpQueue.Enqueue(url, callback, context, options)

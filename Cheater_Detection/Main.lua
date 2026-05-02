@@ -32,6 +32,7 @@ local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 
 -- Actions
 local NotificationService = require("Cheater_Detection.services.notification_service")
+local BridgePrompt = require("Cheater_Detection.services.bridge_prompt")
 local Visuals = require("Cheater_Detection.actions.visuals")
 
 local hasSearchedGroup = false
@@ -154,6 +155,7 @@ local function Init()
 	Events.Reset()
 	JoinNotifications.Init()
 	NotificationService.Init()
+	BridgePrompt.Init()
 
 	-- Populate global menu config before anything else
 	Config.LoadCFG()
@@ -257,6 +259,7 @@ end
 
 local function OnDraw()
 	Scheduler.Tick()
+	BridgePrompt.Draw()
 	Visuals.DrawTags()
 end
 
