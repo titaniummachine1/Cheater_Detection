@@ -307,7 +307,7 @@ local function OnFireGameEvent(event)
 		end
 	elseif name == "player_death" then
 		-- Decay is handled globally by heartbeat now
-	elseif name == "game_newmap" or name == "teamplay_round_start" then
+	elseif name == "game_newmap" then
 		-- Reset all "checked" states on map change so we re-verify everyone
 		persistActiveSessionPlayers()
 		resetRuntimeSessionState()

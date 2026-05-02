@@ -859,7 +859,7 @@ local function onGameEvent(event)
 	local name = event:GetName()
 	if name == "player_team" then
 		onPlayerTeam(event)
-	elseif name == "game_newmap" or name == "teamplay_round_start" then
+	elseif name == "game_newmap" then
 		resetState(true)
 	elseif name == "player_spawn" or name == "player_death" then
 		if state.scanning or next(state.inFlight) ~= nil then
