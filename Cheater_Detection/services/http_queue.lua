@@ -16,7 +16,7 @@ local isAlive = true      -- Set to false on unload to guard in-flight callbacks
 local REQUEST_DELAY = 1.2 -- 1.2s delay between requests (GitHub safety)
 local REQUEST_TIMEOUT = 30.0
 local REQUEST_RETRY_INTERVAL = 0.25
-local STRICT_SINGLE_FLIGHT = true
+local STRICT_SINGLE_FLIGHT = false
 local activeToken = 0
 local activeDeadline = 0
 local activeItem = nil
@@ -456,10 +456,14 @@ function HttpQueue.Enqueue(url, callback, context, options)
 		return false
 	end
 	local noDelay = false
+	local highPriority = false
 	local bridgeTimeoutMs = nil
 	local bridgeMaxBytes = nil
 	if type(options) == "table" and options.noDelay == true then
 		noDelay = true
+	end
+	if type(options) == "table" and options.highPriority == true then
+		highPriority = true
 	end
 	if type(options) == "table" and type(options.bridgeTimeoutMs) == "number" then
 		bridgeTimeoutMs = math.floor(options.bridgeTimeoutMs)
@@ -472,14 +476,20 @@ function HttpQueue.Enqueue(url, callback, context, options)
 		return false
 	end
 
-	table.insert(queue, {
+	local item = {
 		url = url,
 		callback = callback,
 		context = context,
 		noDelay = noDelay,
 		bridgeTimeoutMs = bridgeTimeoutMs,
 		bridgeMaxBytes = bridgeMaxBytes,
-	})
+	}
+
+	if highPriority then
+		table.insert(queue, 1, item)
+	else
+		table.insert(queue, item)
+	end
 	return true
 end
 

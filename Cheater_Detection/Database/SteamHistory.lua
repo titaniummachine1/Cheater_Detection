@@ -25,7 +25,7 @@ local KEYWORDS = {
 
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
 local MAX_BATCH = 100
-local MIN_INTERVAL = 2.0 -- Increased interval to avoid rate limits with larger batches
+local MIN_INTERVAL = 0.35 -- Dense scan cadence while still pacing API requests
 
 --[[ Internal State ]]
 local state = {
@@ -556,7 +556,7 @@ local function requestBatch()
 
 	-- Use HttpQueue to avoid blocking during network I/O.
 	-- The inner pcall guarantees state.scanning is always reset even on an unhandled Lua error.
-	HttpQueue.Enqueue(url, function(body)
+	local enqueued = HttpQueue.Enqueue(url, function(body)
 		local ok, err = pcall(function()
 			if type(body) ~= "string" or body == "" then
 				handleError("HTTP Request failed (empty/invalid response)", contexts)
@@ -596,7 +596,17 @@ local function requestBatch()
 			state.scanning = false
 			printc(255, 80, 80, 255, "[SteamHistory] Unexpected batch callback error: " .. tostring(err))
 		end
-	end)
+	end, nil, { noDelay = true, highPriority = true })
+
+	if not enqueued then
+		state.scanning = false
+		for i = 1, #ids do
+			local steamID = ids[i]
+			if steamID and not state.pending[steamID] then
+				state.pending[steamID] = contexts[steamID] or { queuedAt = globals.RealTime() }
+			end
+		end
+	end
 end
 
 local function refreshEnabled()

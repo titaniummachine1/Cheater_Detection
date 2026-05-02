@@ -56,14 +56,19 @@ function SteamLookup.TickGroupFetch()
 	local page = fetchState.nextPage
 	local url = "https://steamcommunity.com/gid/" .. ValveData.GroupID .. "/memberslistxml/?xml=1&p=" .. page
 
-	HttpQueue.Enqueue(url, function(data)
+	local enqueued = HttpQueue.Enqueue(url, function(data)
 		local found = parseGroupXML(data or "")
 		fetchState.totalFetched = fetchState.totalFetched + found
 		fetchState.nextPage = page + 1
 		fetchState.inProgress = false
 		fetchState.cooldownUntil = globals.RealTime() + 3.0
 		print(string.format("[SteamLookup] Page %d: +%d Valve group IDs", page, found))
-	end)
+	end, nil, { noDelay = true, highPriority = true })
+
+	if not enqueued then
+		fetchState.inProgress = false
+		fetchState.cooldownUntil = globals.RealTime() + 0.25
+	end
 end
 
 --- Kick off the group fetch on startup
@@ -94,7 +99,7 @@ end
 --- Async profile check for specific group membership or bans
 function SteamLookup.CheckProfileAsync(steamID64, callback)
 	local url = "https://steamcommunity.com/profiles/" .. steamID64 .. "/?xml=1"
-	HttpQueue.Enqueue(url, function(data)
+	local enqueued = HttpQueue.Enqueue(url, function(data)
 		if type(callback) ~= "function" then
 			print("[SteamLookup] CheckProfileAsync called without valid callback")
 			return
@@ -127,7 +132,11 @@ function SteamLookup.CheckProfileAsync(steamID64, callback)
 		}
 
 		callback(result)
-	end)
+	end, nil, { noDelay = true, highPriority = true })
+
+	if not enqueued and type(callback) == "function" then
+		callback(nil)
+	end
 end
 
 return SteamLookup
