@@ -27,6 +27,7 @@ local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0
 local MAX_BATCH = 100
 local MIN_INTERVAL = 0.35 -- Dense scan cadence while still pacing API requests
 local ACTIVE_SWEEP_INTERVAL = 2.0
+local PROGRESS_LOG_INTERVAL = 3.0
 
 --[[ Internal State ]]
 local state = {
@@ -47,6 +48,9 @@ local state = {
 	currentBatchSize = MAX_BATCH,
 	rateLimitedRecently = false,
 	lastActiveSweepTime = 0,
+	lastProgressLogTime = 0,
+	lastProgressSnapshot = "",
+	completionAnnounced = false,
 }
 
 --[[ Helper Functions ]]
@@ -154,6 +158,77 @@ local function resetState(clearScanned)
 	state.errorCount = 0
 	state.nextRetryTime = 0
 	state.lastActiveSweepTime = 0
+	state.lastProgressLogTime = 0
+	state.lastProgressSnapshot = ""
+	state.completionAnnounced = false
+end
+
+local function countEntries(map)
+	local total = 0
+	for _ in pairs(map) do
+		total = total + 1
+	end
+	return total
+end
+
+local function countActiveProgress()
+	local totalTargets = 0
+	local checkedTargets = 0
+	local includeLocal = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	local localSteamID = nil
+	local localWrap = PlayerCache.GetLocal()
+	if localWrap and localWrap.GetSteamID64 then
+		localSteamID = normalizeSteamID64(localWrap:GetSteamID64())
+	end
+
+	for steamID, playerState in pairs(PlayerCache.GetActiveTable()) do
+		local id = normalizeSteamID64(steamID)
+		if id and (includeLocal or id ~= localSteamID) then
+			totalTargets = totalTargets + 1
+			local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
+			if checkFlags.steamHistoryChecked then
+				checkedTargets = checkedTargets + 1
+			end
+		end
+	end
+
+	return totalTargets, checkedTargets
+end
+
+local function logProgress(force)
+	local now = globals.RealTime()
+	local pendingCount = countEntries(state.pending)
+	local scannedCount = countEntries(state.scanned)
+	local totalTargets, checkedTargets = countActiveProgress()
+	local inFlight = state.scanning == true and 1 or 0
+	local snapshot = string.format(
+		"pending=%d inflight=%d checked=%d/%d scanned=%d",
+		pendingCount,
+		inFlight,
+		checkedTargets,
+		totalTargets,
+		scannedCount
+	)
+
+	local isComplete = totalTargets > 0 and checkedTargets >= totalTargets and pendingCount == 0 and not state.scanning
+	if isComplete and not state.completionAnnounced then
+		printInfo(
+			{ 120, 255, 120, 255 },
+			string.format("[SteamHistory] Scan complete: checked %d/%d active players", checkedTargets, totalTargets)
+		)
+		state.completionAnnounced = true
+	end
+	if not isComplete then
+		state.completionAnnounced = false
+	end
+
+	if force or (now - state.lastProgressLogTime) >= PROGRESS_LOG_INTERVAL then
+		if force or snapshot ~= state.lastProgressSnapshot then
+			printInfo({ 120, 220, 255, 255 }, "[SteamHistory] Progress: " .. snapshot)
+			state.lastProgressSnapshot = snapshot
+		end
+		state.lastProgressLogTime = now
+	end
 end
 
 local function queueActivePlayerStates()
@@ -749,17 +824,21 @@ local function onCreateMove()
 	end
 
 	if state.scanning then
+		logProgress(false)
 		return
 	end
 
 	-- Check if we are in cooldown
 	if globals.RealTime() < state.nextRetryTime then
+		logProgress(false)
 		return
 	end
 
 	if next(state.pending) and globals.RealTime() - state.lastBatchTime >= MIN_INTERVAL then
 		requestBatch()
 	end
+
+	logProgress(false)
 end
 
 --[[ Public API ]]
