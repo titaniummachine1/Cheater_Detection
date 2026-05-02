@@ -45,6 +45,10 @@ local bridgeState = {
 	blockedUntilSafeWindow = false,
 }
 
+local lastLoggedTransportMode = "startup"
+local lastLoggedBridgeAlive = BRIDGE_ASSUME_HEALTHY_ON_LOAD
+local lastLoggedBridgeError = ""
+
 local FinishActiveRequest
 
 local function Now()
@@ -102,6 +106,36 @@ local function DecodeBridgePayload(body)
 	return decoded, nil
 end
 
+local function LogTransportMode(mode, detail)
+	if lastLoggedTransportMode == mode then
+		return
+	end
+	lastLoggedTransportMode = mode
+	if type(detail) == "string" and detail ~= "" then
+		print(string.format("[HTTP QUEUE] transport=%s %s", mode, detail))
+		return
+	end
+	print(string.format("[HTTP QUEUE] transport=%s", mode))
+end
+
+local function LogBridgeState(alive, detail)
+	local detailText = type(detail) == "string" and detail or ""
+	if lastLoggedBridgeAlive == alive and lastLoggedBridgeError == detailText then
+		return
+	end
+	lastLoggedBridgeAlive = alive
+	lastLoggedBridgeError = detailText
+	if alive then
+		print("[HTTP QUEUE] bridge confirmed")
+		return
+	end
+	if detailText ~= "" then
+		print(string.format("[HTTP QUEUE] bridge offline: %s", detailText))
+		return
+	end
+	print("[HTTP QUEUE] bridge offline")
+end
+
 local function MarkBridgeOffline(errorMessage, now, blockUntilSafeWindow)
 	local currentTime = type(now) == "number" and now or Now()
 	bridgeState.alive = false
@@ -112,6 +146,7 @@ local function MarkBridgeOffline(errorMessage, now, blockUntilSafeWindow)
 	if blockUntilSafeWindow then
 		bridgeState.blockedUntilSafeWindow = true
 	end
+	LogBridgeState(false, bridgeState.lastError)
 end
 
 local function MarkBridgeAlive(protocol, now)
@@ -121,6 +156,7 @@ local function MarkBridgeAlive(protocol, now)
 	bridgeState.lastProbeAt = type(now) == "number" and now or Now()
 	bridgeState.nextProbeAt = bridgeState.lastProbeAt + BRIDGE_HEALTH_CHECK_INTERVAL
 	bridgeState.blockedUntilSafeWindow = false
+	LogBridgeState(true, nil)
 end
 
 local function RefreshBridgeSafeWindowGate()
@@ -233,6 +269,7 @@ local function StartBridgeRequest(item, now)
 	activeNextRetry = now + BRIDGE_POLL_INTERVAL
 	activeLastError = ""
 	MarkBridgeAlive(bridgeState.protocol or BRIDGE_PROTOCOL, now)
+	LogTransportMode("bridge", nil)
 	return true, nil
 end
 
@@ -242,6 +279,7 @@ local function FallbackToBlockingTransport(now, errorMessage)
 	activeNextRetry = type(now) == "number" and now or Now()
 	activeLastError = errorMessage or activeLastError
 	activeAttemptInFlight = false
+	LogTransportMode("blocking", activeLastError)
 end
 
 local function PollBridgeResult(now)
