@@ -24,7 +24,9 @@ local KEYWORDS = {
 }
 
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
-local MAX_BATCH = 100
+local MAX_BATCH = 25
+local DEFAULT_BATCH = 5
+local MIN_BATCH = 1
 local MIN_INTERVAL = 0.0 -- Dispatch next batch immediately when queue/HTTP permits
 local ACTIVE_SWEEP_INTERVAL = 2.0
 local DISABLED_LOG_INTERVAL = 10.0
@@ -46,7 +48,7 @@ local state = {
 	maxConsecutiveFailures = 5, -- Disable after 5 failures at max cooldown
 	temporarilyDisabled = false,
 	-- Adaptive batch size
-	currentBatchSize = MAX_BATCH,
+	currentBatchSize = DEFAULT_BATCH,
 	rateLimitedRecently = false,
 	lastActiveSweepTime = 0,
 	completionAnnounced = false,
@@ -549,8 +551,8 @@ local function handleError(message, contexts)
 		delay = math.min(300, 30 * (2 ^ (state.errorCount - 1))) -- Max 5 minutes
 
 		-- Reduce batch size on rate limiting
-		if state.currentBatchSize > 25 then
-			state.currentBatchSize = math.max(25, math.floor(state.currentBatchSize / 2))
+		if state.currentBatchSize > MIN_BATCH then
+			state.currentBatchSize = math.max(MIN_BATCH, math.floor(state.currentBatchSize / 2))
 			printInfo(
 				{ 255, 200, 100, 255 },
 				string.format("[SteamHistory] Rate limited - reducing batch size to %d", state.currentBatchSize)
@@ -562,8 +564,8 @@ local function handleError(message, contexts)
 		delay = math.min(120, 15 * (2 ^ (state.errorCount - 1))) -- Max 2 minutes
 
 		-- Reduce batch size on server errors
-		if state.currentBatchSize > 25 then
-			state.currentBatchSize = math.max(25, math.floor(state.currentBatchSize * 0.75))
+		if state.currentBatchSize > MIN_BATCH then
+			state.currentBatchSize = math.max(MIN_BATCH, math.floor(state.currentBatchSize * 0.75))
 			printInfo(
 				{ 255, 200, 100, 255 },
 				string.format("[SteamHistory] Server errors - reducing batch size to %d", state.currentBatchSize)
@@ -682,7 +684,7 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	if state.currentBatchSize < MAX_BATCH then
 		-- Only increase if we weren't rate limited recently
 		if not state.rateLimitedRecently then
-			state.currentBatchSize = math.min(MAX_BATCH, state.currentBatchSize + 10)
+			state.currentBatchSize = math.min(MAX_BATCH, state.currentBatchSize + 1)
 			if state.currentBatchSize < MAX_BATCH then
 				printInfo(
 					{ 150, 255, 150, 255 },
@@ -944,12 +946,12 @@ end
 function SteamHistory.QueueRescan()
 	resetState(true)
 	state.temporarilyDisabled = false
-	state.currentBatchSize = MAX_BATCH -- Reset to maximum
+	state.currentBatchSize = DEFAULT_BATCH
 	state.rateLimitedRecently = false
 	queueCurrentPlayers()
 	printInfo(
 		{ 0, 200, 255, 255 },
-		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", MAX_BATCH)
+		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", DEFAULT_BATCH)
 	)
 end
 
