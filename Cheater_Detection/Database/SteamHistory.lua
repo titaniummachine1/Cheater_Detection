@@ -24,8 +24,7 @@ local KEYWORDS = {
 }
 
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
-local MAX_BATCH = 25
-local DEFAULT_BATCH = 5
+local MAX_BATCH = 100
 local MIN_BATCH = 1
 local MIN_INTERVAL = 0.0 -- Dispatch next batch immediately when queue/HTTP permits
 local ACTIVE_SWEEP_INTERVAL = 2.0
@@ -47,9 +46,8 @@ local state = {
 	consecutiveFailures = 0,
 	maxConsecutiveFailures = 5, -- Disable after 5 failures at max cooldown
 	temporarilyDisabled = false,
-	-- Adaptive batch size
-	currentBatchSize = DEFAULT_BATCH,
-	rateLimitedRecently = false,
+	currentBatchSize = MAX_BATCH,
+	singlePlayerFallback = false,
 	lastActiveSweepTime = 0,
 	completionAnnounced = false,
 	lastDisabledLogTime = 0,
@@ -543,34 +541,23 @@ end
 local function handleError(message, contexts)
 	state.errorCount = state.errorCount + 1
 	state.consecutiveFailures = state.consecutiveFailures + 1
+	if state.currentBatchSize ~= MIN_BATCH or not state.singlePlayerFallback then
+		state.currentBatchSize = MIN_BATCH
+		state.singlePlayerFallback = true
+		printInfo(
+			{ 255, 200, 100, 255 },
+			"[SteamHistory] Request failed - switching to single-player retries"
+		)
+	end
 
 	-- Adaptive backoff based on error type
 	local delay
 	if message:match("Rate limited") or message:match("429") then
 		-- Rate limit: longer backoff, start at 30s
 		delay = math.min(300, 30 * (2 ^ (state.errorCount - 1))) -- Max 5 minutes
-
-		-- Reduce batch size on rate limiting
-		if state.currentBatchSize > MIN_BATCH then
-			state.currentBatchSize = math.max(MIN_BATCH, math.floor(state.currentBatchSize / 2))
-			printInfo(
-				{ 255, 200, 100, 255 },
-				string.format("[SteamHistory] Rate limited - reducing batch size to %d", state.currentBatchSize)
-			)
-		end
-		state.rateLimitedRecently = true
 	elseif message:match("Server error") or message:match("502") or message:match("503") or message:match("504") then
 		-- Server errors: moderate backoff, start at 15s
 		delay = math.min(120, 15 * (2 ^ (state.errorCount - 1))) -- Max 2 minutes
-
-		-- Reduce batch size on server errors
-		if state.currentBatchSize > MIN_BATCH then
-			state.currentBatchSize = math.max(MIN_BATCH, math.floor(state.currentBatchSize * 0.75))
-			printInfo(
-				{ 255, 200, 100, 255 },
-				string.format("[SteamHistory] Server errors - reducing batch size to %d", state.currentBatchSize)
-			)
-		end
 	else
 		-- Other errors: normal backoff, start at 10s
 		delay = math.min(60, 10 * (2 ^ (state.errorCount - 1))) -- Max 1 minute
@@ -680,22 +667,10 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	state.scanning = false
 	maybeAnnounceScanComplete()
 
-	-- Gradually restore batch size on success
-	if state.currentBatchSize < MAX_BATCH then
-		-- Only increase if we weren't rate limited recently
-		if not state.rateLimitedRecently then
-			state.currentBatchSize = math.min(MAX_BATCH, state.currentBatchSize + 1)
-			if state.currentBatchSize < MAX_BATCH then
-				printInfo(
-					{ 150, 255, 150, 255 },
-					string.format("[SteamHistory] Success - increasing batch size to %d", state.currentBatchSize)
-				)
-			else
-				printInfo({ 150, 255, 150, 255 }, "[SteamHistory] Success - batch size restored to maximum")
-			end
-		else
-			state.rateLimitedRecently = false -- Reset flag after one successful batch
-		end
+	if state.singlePlayerFallback and state.currentBatchSize == MIN_BATCH then
+		state.currentBatchSize = MAX_BATCH
+		state.singlePlayerFallback = false
+		printInfo({ 150, 255, 150, 255 }, "[SteamHistory] Single-player retry succeeded - batch size restored to 100")
 	end
 end
 
@@ -946,12 +921,12 @@ end
 function SteamHistory.QueueRescan()
 	resetState(true)
 	state.temporarilyDisabled = false
-	state.currentBatchSize = DEFAULT_BATCH
-	state.rateLimitedRecently = false
+	state.currentBatchSize = MAX_BATCH
+	state.singlePlayerFallback = false
 	queueCurrentPlayers()
 	printInfo(
 		{ 0, 200, 255, 255 },
-		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", DEFAULT_BATCH)
+		string.format("[SteamHistory] Re-enabled, queue reset, batch size restored to %d", MAX_BATCH)
 	)
 end
 
