@@ -181,8 +181,6 @@ end
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
 	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
-		hasSearchedGroup = false
-		valveDisconnectTriggered = false
 		return
 	end
 
@@ -204,8 +202,6 @@ local function OnCreateMove(cmd)
 
 	local localPlayer = entities.GetLocalPlayer()
 	if not localPlayer or not localPlayer:IsValid() then
-		hasSearchedGroup = false
-		valveDisconnectTriggered = false
 		return
 	end
 
