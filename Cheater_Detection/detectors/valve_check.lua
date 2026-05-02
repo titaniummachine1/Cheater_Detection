@@ -39,6 +39,7 @@ local lastProfileCheck = {}
 local layer1Logged = {}
 local deferredQueue = {}
 local deferredSweepRequested = true
+local pendingBadgeProfileVerification = {}
 
 local function queueDeferredCheck(id)
 	if id then
@@ -348,10 +349,51 @@ function ValveCheck.ProcessPlayer(playerState)
 				if isDebug then
 					Logger.Debug("ValveCheck", id .. " – item/badge HIT: " .. reason)
 				end
-				checkFlags.valveGroupChecked = true
-				checkFlags.vacBanChecked = true
-				checkFlags.commBanChecked = true
-				applyValveFlag(playerState, reason)
+
+				-- Private profiles cannot be used to verify badge-based Valve detection.
+				if not pendingBadgeProfileVerification[id] then
+					pendingBadgeProfileVerification[id] = true
+					SteamLookup.CheckProfileAsync(id, function(results)
+						pendingBadgeProfileVerification[id] = nil
+						if not results then
+							if isDebug then
+								Logger.Debug("ValveCheck", id .. " – badge not verified: profile lookup failed")
+							end
+							deferredQueue[id] = true
+							return
+						end
+
+						if results.isPrivate then
+							if isDebug then
+								Logger.Debug("ValveCheck", id .. " – badge not verified: profile is private")
+							end
+							deferredQueue[id] = true
+							return
+						end
+
+						if not results.isPublic then
+							if isDebug then
+								Logger.Debug("ValveCheck", id .. " – badge not verified: profile visibility unknown")
+							end
+							deferredQueue[id] = true
+							return
+						end
+
+						if not results.isValve then
+							if isDebug then
+								Logger.Debug("ValveCheck", id .. " – badge not verified: no Valve group confirmation")
+							end
+							deferredQueue[id] = true
+							return
+						end
+
+						checkFlags.valveGroupChecked = true
+						checkFlags.vacBanChecked = true
+						checkFlags.commBanChecked = true
+						applyValveFlag(playerState, reason .. " (public profile verified)")
+						deferredQueue[id] = nil
+					end)
+				end
 				return
 			end
 		end
@@ -446,6 +488,7 @@ end
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	lastProfileCheck[id] = nil
 	deferredQueue[id] = nil
+	pendingBadgeProfileVerification[id] = nil
 end)
 
 Events.Subscribe("OnPlayerJoinTeam", function(id, _ent)

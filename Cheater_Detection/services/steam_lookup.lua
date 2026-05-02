@@ -158,6 +158,9 @@ function SteamLookup.CheckProfileAsync(steamID64, callback)
 			isValve = data:find(ValveData.GroupID, 1, true) ~= nil,
 			vacBanned = data:find("<vacBanned>1</vacBanned>", 1, true) ~= nil,
 			tradeBanned = data:find("<tradeBanState>Banned</tradeBanState>", 1, true) ~= nil,
+			isPrivate = data:find("<privacyState>private</privacyState>", 1, true) ~= nil
+				or data:find("<privacyMessage>", 1, true) ~= nil,
+			isPublic = data:find("<privacyState>public</privacyState>", 1, true) ~= nil,
 		}
 
 		callback(result)
