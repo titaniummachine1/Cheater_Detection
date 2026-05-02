@@ -34,6 +34,7 @@ local PROFILE_RECHECK_INTERVAL = 120 -- Re-verify every 2 minutes
 -- Track last async profile-check TIME per player: id -> CurTime
 -- (NOT a boolean; we re-check periodically even after success)
 local lastProfileCheck = {}
+local pendingItemEvidence = {}
 
 -- Track if Layer 1 logging has occurred for a player: id -> boolean
 local layer1Logged = {}
@@ -250,6 +251,7 @@ function ValveCheck.ProcessPlayer(playerState)
 		checkFlags.valveGroupChecked = true
 		checkFlags.vacBanChecked = true
 		checkFlags.commBanChecked = true
+		pendingItemEvidence[id] = nil
 		applyValveFlag(playerState, "Known Valve SteamID")
 		return
 	end
@@ -280,6 +282,7 @@ function ValveCheck.ProcessPlayer(playerState)
 			checkFlags.valveGroupChecked = true
 			checkFlags.vacBanChecked = true
 			checkFlags.commBanChecked = true
+			pendingItemEvidence[id] = nil
 			if isDebug then
 				Logger.Debug("ValveCheck", id .. " matched legacy Steam2 list (" .. tostring(s2) .. ")")
 			end
@@ -299,14 +302,10 @@ function ValveCheck.ProcessPlayer(playerState)
 			end
 			local found, reason = checkPlayerItems(ply)
 			if found then
+				pendingItemEvidence[id] = reason
 				if isDebug then
-					Logger.Debug("ValveCheck", id .. " – item/badge HIT: " .. reason)
+					Logger.Debug("ValveCheck", id .. " – item evidence captured (awaiting profile/group confirmation): " .. reason)
 				end
-				checkFlags.valveGroupChecked = true
-				checkFlags.vacBanChecked = true
-				checkFlags.commBanChecked = true
-				applyValveFlag(playerState, reason)
-				return
 			end
 		end
 	end
@@ -315,7 +314,13 @@ function ValveCheck.ProcessPlayer(playerState)
 		if not checkFlags.valveGroupChecked then
 			if SteamLookup.IsGroupMemberID64(id) then
 				checkFlags.valveGroupChecked = true
-				applyValveFlag(playerState, "Valve Steam Group Member")
+				local itemEvidence = pendingItemEvidence[id]
+				if itemEvidence then
+					applyValveFlag(playerState, "Valve Steam Group Member + " .. itemEvidence)
+				else
+					applyValveFlag(playerState, "Valve Steam Group Member")
+				end
+				pendingItemEvidence[id] = nil
 			elseif SteamLookup.IsGroupFetchComplete and SteamLookup.IsGroupFetchComplete() then
 				checkFlags.valveGroupChecked = true
 			end
@@ -327,6 +332,7 @@ function ValveCheck.ProcessPlayer(playerState)
 			playerState.flags = playerState.flags | Constants.Flags.CHECKED
 			playerState.externalChecked = true
 			deferredQueue[id] = nil
+			pendingItemEvidence[id] = nil
 		end
 		return
 	end
@@ -367,7 +373,12 @@ function ValveCheck.ProcessPlayer(playerState)
 				end
 
 				if results.isValve then
-					applyValveFlag(playerState, "Valve Steam Group Member")
+					local itemEvidence = pendingItemEvidence[id]
+					if itemEvidence then
+						applyValveFlag(playerState, "Valve Steam Group Member + " .. itemEvidence)
+					else
+						applyValveFlag(playerState, "Valve Steam Group Member")
+					end
 				end
 				checkFlags.valveGroupChecked = true
 				if results.vacBanned then
@@ -384,6 +395,7 @@ function ValveCheck.ProcessPlayer(playerState)
 				playerState.externalChecked = true
 				playerState.flags = playerState.flags | Constants.Flags.CHECKED
 				deferredQueue[id] = nil
+				pendingItemEvidence[id] = nil
 			end)
 		end
 	end
@@ -393,6 +405,7 @@ end
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	lastProfileCheck[id] = nil
 	deferredQueue[id] = nil
+	pendingItemEvidence[tostring(id)] = nil
 end)
 
 Events.Subscribe("OnPlayerJoinTeam", function(id, _ent)
