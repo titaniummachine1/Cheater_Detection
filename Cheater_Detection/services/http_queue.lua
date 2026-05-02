@@ -402,10 +402,6 @@ local function ProcessNextRequest()
 
 	local canRunBlocking = CanRunBlockingHTTPNow()
 	local canUseBridge = CanUseBridgeTransport()
-	if not canUseBridge and canRunBlocking and now >= bridgeState.nextProbeAt then
-		ProbeBridge(now)
-		canUseBridge = CanUseBridgeTransport()
-	end
 
 	if not canUseBridge and not canRunBlocking then
 		return
@@ -437,6 +433,12 @@ local function ProcessNextRequest()
 			FallbackToBlockingTransport(now, bridgeErr)
 			return
 		end
+		-- Bridge submit used this tick's network budget.
+		-- Defer blocking fallback attempt to next tick.
+		activeTransport = "blocking"
+		activeLastError = bridgeErr or activeLastError
+		activeNextRetry = now + REQUEST_RETRY_INTERVAL
+		return
 	end
 
 	activeTransport = "blocking"
@@ -502,9 +504,11 @@ function HttpQueue.Tick()
 	end
 
 	local now = Now()
+	local didNetworkOp = false
 	RefreshBridgeSafeWindowGate()
 	if (not isProcessing) and now >= bridgeState.nextProbeAt then
 		ProbeBridge(now)
+		didNetworkOp = true
 	end
 
 	if isProcessing and activeItem and now >= activeDeadline then
@@ -520,8 +524,14 @@ function HttpQueue.Tick()
 		FinishActiveRequest(timedOutItem, nil, err)
 	elseif isProcessing and activeItem and activeTransport == "bridge" and now >= activeNextRetry then
 		PollBridgeResult(now)
+		didNetworkOp = true
 	elseif isProcessing and activeItem and activeTransport == "blocking" and (not activeAttemptInFlight) and now >= activeNextRetry then
 		DispatchBlockingAttempt()
+		didNetworkOp = true
+	end
+
+	if didNetworkOp then
+		return
 	end
 
 	ProcessNextRequest()
