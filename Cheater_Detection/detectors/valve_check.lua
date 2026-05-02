@@ -172,20 +172,62 @@ local function applyCommBanFlag(playerState)
 	end
 end
 
+local function readItemInt(ent, propName)
+	local ok, value = pcall(ent.GetPropInt, ent, propName)
+	if not ok or type(value) ~= "number" then
+		return nil
+	end
+	return value
+end
+
+local function isVerifiedWearableItemEntity(ent)
+	if not ent then
+		return false
+	end
+
+	local okValid, isValid = pcall(ent.IsValid, ent)
+	if not okValid or not isValid then
+		return false
+	end
+
+	local okClass, className = pcall(ent.GetClass, ent)
+	if not okClass or type(className) ~= "string" then
+		return false
+	end
+	if not className:find("Wearable", 1, true) then
+		return false
+	end
+
+	local defIndex = readItemInt(ent, "m_iItemDefinitionIndex")
+	local itemIDHigh = readItemInt(ent, "m_iItemIDHigh")
+	local itemIDLow = readItemInt(ent, "m_iItemIDLow")
+	if defIndex == nil or itemIDHigh == nil or itemIDLow == nil then
+		return false
+	end
+	if defIndex <= 0 then
+		return false
+	end
+	if (itemIDHigh == 0 and itemIDLow == 0) or (itemIDHigh == -1 and itemIDLow == -1) then
+		return false
+	end
+
+	return true
+end
+
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Layer 2: Item + Badge check (pcall-safe)
 -- ──────────────────────────────────────────────────────────────────────────────
 local function checkPlayerItems(ply)
 	for slot = 0, 18 do
 		local okEnt, ent = pcall(ply.GetEntityForLoadoutSlot, ply, slot)
-		if okEnt and ent then
-			local okQ, quality = pcall(ent.GetPropInt, ent, "m_iEntityQuality")
-			local okD, defIdx = pcall(ent.GetPropInt, ent, "m_iItemDefinitionIndex")
+		if okEnt and isVerifiedWearableItemEntity(ent) then
+			local quality = readItemInt(ent, "m_iEntityQuality")
+			local defIdx = readItemInt(ent, "m_iItemDefinitionIndex")
 
-			if okQ and quality == ValveData.QualityID then
+			if quality == ValveData.QualityID then
 				return true, "Valve-Quality Item (slot " .. slot .. ")"
 			end
-			if okD and defIdx == ValveData.BadgeDefIndex then
+			if defIdx == ValveData.BadgeDefIndex then
 				return true, "Valve Employee Badge (slot " .. slot .. ")"
 			end
 		end
