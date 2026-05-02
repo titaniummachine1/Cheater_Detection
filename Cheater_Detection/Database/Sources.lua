@@ -22,24 +22,21 @@ Sources.List = {
 		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy.json",
 		cause = "Sleepy Cheater List",
 		parser = "tf2db",
-		sourceID = "sleepy_main",
-		__disabled = true, -- consistently returns nil JSON (CDN rate-limited/removed)
+		sourceID = "sleepy_main"
 	},
 	{
 		name = "Sleepy External List",
 		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy-external.json",
 		cause = "Sleepy External",
 		parser = "tf2db",
-		sourceID = "sleepy_ext",
-		__disabled = true, -- consistently returns nil JSON (CDN rate-limited/removed)
+		sourceID = "sleepy_ext"
 	},
 	{
 		name = "Sleepy Nullc0re List",
 		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.nullc0re.json",
 		cause = "Sleepy Nullc0re",
 		parser = "tf2db",
-		sourceID = "sleepy_nullc0re",
-		__disabled = true, -- consistently returns nil JSON (CDN rate-limited/removed)
+		sourceID = "sleepy_nullc0re"
 	},
 	{
 		name = "TF2BD Official",
@@ -60,7 +57,7 @@ Sources.List = {
 		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
 		cause = "TF2BD Community (qfoxb)",
 		parser = "tf2db",
-        sourceID = "qfoxb"
+		sourceID = "qfoxb"
 	},
 	{
 		name = "joekiller Player List",
