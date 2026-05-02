@@ -206,6 +206,9 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local isInvalid = isInvalidPitchValue(pitch)
 
 	if isInvalid then
+		if isCorruptedAngleValue(pitch) then
+			return
+		end
 		-- Entity state can change between early validation and angle reads.
 		-- Re-check here to avoid flagging stale dormant/dead snapshots.
 		if (not entity:IsValid()) or entity:IsDormant() or (not entity:IsAlive()) then

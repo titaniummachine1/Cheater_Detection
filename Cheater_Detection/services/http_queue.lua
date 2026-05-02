@@ -37,7 +37,6 @@ local BRIDGE_ASSUME_HEALTHY_ON_LOAD = false
 local BRIDGE_HEALTH_CHECK_INTERVAL = 10.0
 local BRIDGE_STALL_PROBE_INTERVAL = 120.0 -- After a stall (server not listening), wait much longer before retrying
 local SLOW_BLOCKING_HTTP_WARN_SECONDS = 0.015
-local SLOW_BRIDGE_CALL_WARN_SECONDS = 0.020
 
 local bridgeState = {
 	alive = BRIDGE_ASSUME_HEALTHY_ON_LOAD,
@@ -195,9 +194,6 @@ local function BridgeGet(path)
 	local startedAt = Now()
 	local bodyOrErr, err = HttpGet(BRIDGE_BASE .. path)
 	local elapsed = Now() - startedAt
-	if elapsed > SLOW_BRIDGE_CALL_WARN_SECONDS then
-		print(string.format("[HTTP QUEUE WARN] slow bridge call %.1fms path=%s", elapsed * 1000, tostring(path)))
-	end
 	local stalled = elapsed > BRIDGE_STALL_LIMIT
 	if stalled then
 		return nil, string.format("bridge call stalled for %.3fs", elapsed), true

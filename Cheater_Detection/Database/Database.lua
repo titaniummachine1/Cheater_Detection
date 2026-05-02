@@ -131,6 +131,10 @@ function Database.SaveDatabase(force)
 	if not G.DataBase then
 		return
 	end
+	local localPlayer = entities.GetLocalPlayer()
+	if not force and localPlayer and localPlayer:IsValid() and localPlayer:IsAlive() then
+		return
+	end
 	if not force and not Database.State.isDirty then
 		return
 	end
@@ -207,13 +211,12 @@ local function OnFireEvent(event)
 		local spawnEntity = entities.GetByUserID(spawnUserID)
 		local isLocalSpawn = spawnEntity and localPlayer and spawnEntity:GetIndex() == localPlayer:GetIndex()
 		if isLocalSpawn then
-			Logger.Debug("Database", "[DB] Local player spawned, force-saving dirty database...")
-			Database.SaveDatabase(true)
+			Logger.Debug("Database", "[DB] Local player spawned; deferring dirty save until non-intrusive window")
 		end
 	end
 
 	if eventName == "game_newmap" or eventName == "teamplay_round_start" or eventName == "round_end" then
-		Logger.Debug("Database", "[DB] Session boundary event, triggering save...")
+		Logger.Debug("Database", "[DB] Session boundary event, scheduling save...")
 		Database.SaveDatabase()
 	end
 end
@@ -232,15 +235,7 @@ local function OnCreateMoveAutoSave()
 	end
 
 	if localPlayer:IsAlive() then
-		local aliveNow = os.time()
-		if Database.State.lastSave ~= 0 and (aliveNow - Database.State.lastSave) < ALIVE_IDLE_SAVE_INTERVAL then
-			return
-		end
-		Logger.Debug(
-			"Database",
-			string.format("[DB] Alive idle autosave (interval=%ds)...", ALIVE_IDLE_SAVE_INTERVAL)
-		)
-		Database.SaveDatabase()
+		-- Never write to disk while alive; defer until death/disconnect/unload.
 		return
 	end
 
