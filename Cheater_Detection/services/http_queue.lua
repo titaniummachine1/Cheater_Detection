@@ -224,19 +224,6 @@ local function ProbeBridge(now)
 	return false, bridgeState.lastError
 end
 
-local function ShouldAllowAliveBridgeProbe()
-	if bridgeState.alive == true then
-		return false
-	end
-	if #queue == 0 then
-		return false
-	end
-	-- If work is queued and the bridge is still unconfirmed, allow a probe even
-	-- while alive so requests don't stall forever waiting for a death/safe window.
-	-- Repeated failures are still throttled by bridgeState.nextProbeAt.
-	return true
-end
-
 local function CanUseBridgeTransport()
 	RefreshBridgeSafeWindowGate()
 	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL
@@ -519,14 +506,9 @@ function HttpQueue.Tick()
 	local now = Now()
 	local didNetworkOp = false
 	RefreshBridgeSafeWindowGate()
-	-- Prefer probing in unintrusive windows, but if requests are queued and bridge
-	-- is still unconfirmed, allow a throttled alive-state probe so HTTP work does
-	-- not stall indefinitely until the local player dies.
-	if
-		(not isProcessing)
-		and now >= bridgeState.nextProbeAt
-		and (CanRunBlockingHTTPNow() or ShouldAllowAliveBridgeProbe())
-	then
+	-- Only probe bridge in unintrusive windows: http.Get is synchronous and stalls
+	-- for ~2s when the server is not listening, which freezes TF2 during gameplay.
+	if (not isProcessing) and now >= bridgeState.nextProbeAt and CanRunBlockingHTTPNow() then
 		ProbeBridge(now)
 		didNetworkOp = true
 	end
