@@ -168,6 +168,15 @@ function WrappedPlayer:GetSimulationTime()
 end
 
 function WrappedPlayer:GetHitboxPos(hitboxIndex)
+	if not self._rawEntity or not self._rawEntity:IsValid() then
+		return nil
+	end
+	if not self._rawEntity:IsAlive() then
+		return nil
+	end
+	if self._rawEntity:IsDormant() then
+		return nil
+	end
 	-- SetupBones is the preferred API (GetHitboxes is deprecated)
 	local bones = self._rawEntity:SetupBones()
 	if not bones then
