@@ -221,17 +221,27 @@ local function OnCreateMove(cmd)
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
+	local isDebug = isDebugEnabled()
 
 	for i = 1, #players do
 		local ply = players[i]
 		local isLocalPlayer = (ply == localPlayer)
-		if isLocalPlayer and not isDebugEnabled() then
+		if isLocalPlayer and not isDebug then
 			goto continue
 		end
 
 		local pState = PlayerCache.Get(ply)
 		if pState then
-			if isDebugEnabled() then
+			-- In normal mode: exclude local player's friends and party members.
+			-- Also clean them from DB so they are never flagged in the local player's eyes.
+			if not isDebug and pState.isFriend then
+				if pState.id and pState.id:match("^7656119%d+$") then
+					Database.RemoveCheater(pState.id)
+				end
+				goto continue
+			end
+
+			if isDebug then
 				assert(pState.wrap, "OnCreateMove: pState.wrap missing for id=" .. tostring(pState.id))
 				assert(pState.id, "OnCreateMove: pState.id missing")
 			end

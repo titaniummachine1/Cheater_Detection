@@ -1,5 +1,5 @@
 --[[ detectors/antiaim.lua
-     Detects invalid view angles (Rage AA). 
+     Detects invalid view angles (Rage AA).
      Triggering this marks the player as CHEATER immediately.
 ]]
 
@@ -181,7 +181,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		skipEntity = localPlayer
 	end
 
-	if not Common.IsValidPlayer(entity, false, true, skipEntity) then
+	if not Common.IsValidPlayer(entity, true, true, skipEntity) then
 		return
 	end
 
