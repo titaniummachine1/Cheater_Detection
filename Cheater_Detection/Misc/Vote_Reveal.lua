@@ -330,7 +330,8 @@ local function drawVoteUI()
 	-- Column setup (floor to avoid sub-pixel)
 	local colW = math.floor((boxW - pad * 2) / 2)
 	local yesX = boxX + pad
-	local noX = boxX + pad + colW
+	local divX = math.floor(boxX + boxW / 2)
+	local noX = divX + 5
 
 	-- YES / NO headers
 	contentY = contentY + 6
@@ -341,7 +342,6 @@ local function drawVoteUI()
 	draw.Text(noX, contentY, "NO")
 
 	-- Vertical divider
-	local divX = math.floor(boxX + boxW / 2)
 	draw.Color(45, 45, 55, math.floor(alpha * 0.6))
 	draw.Line(divX, contentY + 18, divX, boxY + boxH - pad - 14)
 
