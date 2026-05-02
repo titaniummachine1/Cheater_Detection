@@ -10,6 +10,8 @@ local G = require("Cheater_Detection.Utils.Globals")
 
 local AntiAim = {}
 
+local lastInvalidPitchLogAt = {}
+
 local function isInvalidPitchValue(pitch)
 	if type(pitch) ~= "number" then
 		return false
@@ -189,7 +191,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	end
 
 	local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
-	if isCheater and not isDebug then
+	if isCheater then
 		return
 	end
 
@@ -202,16 +204,22 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local isInvalid = isInvalidPitchValue(pitch)
 
 	if isInvalid then
-		traceLog(
-			isDebug,
-			playerState,
-			string.format(
-				"invalid pitch hit pitch=%.3f yaw=%s source=%s",
-				pitch,
-				yaw ~= nil and string.format("%.3f", yaw) or "nil",
-				tostring(angleSource)
+		local now = globals.RealTime()
+		local lastLog = lastInvalidPitchLogAt[playerState.id] or 0
+		local cooldownExpired = (now - lastLog) >= 10.0
+		if isDebug and cooldownExpired then
+			lastInvalidPitchLogAt[playerState.id] = now
+			traceLog(
+				true,
+				playerState,
+				string.format(
+					"invalid pitch hit pitch=%.3f yaw=%s source=%s",
+					pitch,
+					yaw ~= nil and string.format("%.3f", yaw) or "nil",
+					tostring(angleSource)
+				)
 			)
-		)
+		end
 		local reason = string.format("Invalid Pitch (%.2f)", pitch)
 		DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
 	end
