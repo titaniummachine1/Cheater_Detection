@@ -16,7 +16,6 @@ local CONFIG = {
 }
 
 local BRIDGE_BASE = "http://" .. CONFIG.bridgeHost .. ":" .. tostring(CONFIG.bridgePort)
-local didLogHttpAvailability = false
 
 local function Log(message)
     print(string.format("[LOCAL-BRIDGE] %s", tostring(message)))
@@ -73,20 +72,18 @@ local function CanRunBlockingBridgeNow()
 end
 
 local function HttpText(path)
-    local startedAt = Now()
-    local ok, bodyOrErr = pcall(function()
-        return http.Get(BRIDGE_BASE .. path)
-    end)
-    local elapsed = Now() - startedAt
-
-    if not didLogHttpAvailability then
-        didLogHttpAvailability = true
-        if ok then
-            Log("http availability: direct http.Get")
-        else
-            Log("http availability: direct http.Get failed: " .. tostring(bodyOrErr))
-        end
+    local httpTable = http
+    if httpTable == nil then
+        return nil, "http table missing"
     end
+    local httpGet = httpTable.Get
+    if type(httpGet) ~= "function" then
+        return nil, "http.Get missing"
+    end
+
+    local startedAt = Now()
+    local ok, bodyOrErr = pcall(httpGet, BRIDGE_BASE .. path)
+    local elapsed = Now() - startedAt
     if elapsed > CONFIG.bridgeStallLimit then
         return nil, string.format("bridge call stalled for %.3fs", elapsed)
     end
@@ -170,13 +167,9 @@ function Bridge.Probe(now, force)
         return true, nil
     end
 
-    if err == "http.Get unavailable" then
-        Bridge.MarkOffline(err, probeNow, CONFIG.offlineRetryMaxDelay, true)
-    else
-        local shouldBlockUntilSafeWindow = type(err) == "string" and string.find(err, "stalled", 1, true) ~= nil
-        local lineError = type(body) == "string" and body:match("^err|(.-)\n?$") or nil
-        Bridge.MarkOffline(err or lineError or "bridge offline", probeNow, nil, shouldBlockUntilSafeWindow)
-    end
+    local shouldBlockUntilSafeWindow = type(err) == "string" and string.find(err, "stalled", 1, true) ~= nil
+    local lineError = type(body) == "string" and body:match("^err|(.-)\n?$") or nil
+    Bridge.MarkOffline(err or lineError or "bridge offline", probeNow, nil, shouldBlockUntilSafeWindow)
 
     return false, Bridge.state.lastError
 end
