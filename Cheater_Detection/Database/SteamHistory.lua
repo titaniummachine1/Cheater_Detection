@@ -25,10 +25,8 @@ local KEYWORDS = {
 
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
 local MAX_BATCH = 100
-local MIN_INTERVAL = 0.35 -- Dense scan cadence while still pacing API requests
+local MIN_INTERVAL = 0.0 -- Dispatch next batch immediately when queue/HTTP permits
 local ACTIVE_SWEEP_INTERVAL = 2.0
-local PROGRESS_LOG_INTERVAL_ACTIVE = 1.0
-local PROGRESS_LOG_INTERVAL_IDLE = 3.0
 local DISABLED_LOG_INTERVAL = 10.0
 
 --[[ Internal State ]]
@@ -50,13 +48,9 @@ local state = {
 	currentBatchSize = MAX_BATCH,
 	rateLimitedRecently = false,
 	lastActiveSweepTime = 0,
-	lastProgressLogTime = 0,
-	lastProgressSnapshot = "",
 	completionAnnounced = false,
 	lastDisabledLogTime = 0,
 	lastDisabledReason = "",
-	lastBatchSummary = "",
-	lastBatchSummaryTime = 0,
 }
 
 --[[ Helper Functions ]]
@@ -164,13 +158,9 @@ local function resetState(clearScanned)
 	state.errorCount = 0
 	state.nextRetryTime = 0
 	state.lastActiveSweepTime = 0
-	state.lastProgressLogTime = 0
-	state.lastProgressSnapshot = ""
 	state.completionAnnounced = false
 	state.lastDisabledLogTime = 0
 	state.lastDisabledReason = ""
-	state.lastBatchSummary = ""
-	state.lastBatchSummaryTime = 0
 end
 
 local function getInactiveReason()
@@ -235,30 +225,9 @@ local function countActiveProgress()
 	return totalTargets, checkedTargets
 end
 
-local function logProgress(force)
-	local now = globals.RealTime()
+local function maybeAnnounceScanComplete()
 	local pendingCount = countEntries(state.pending)
-	local scannedCount = countEntries(state.scanned)
 	local totalTargets, checkedTargets = countActiveProgress()
-	local inFlight = state.scanning == true and 1 or 0
-	local isActive = pendingCount > 0 or inFlight > 0
-	local interval = isActive and PROGRESS_LOG_INTERVAL_ACTIVE or PROGRESS_LOG_INTERVAL_IDLE
-	local phase = "idle"
-	if inFlight > 0 then
-		phase = "scanning"
-	elseif pendingCount > 0 then
-		phase = "queued"
-	end
-	local snapshot = string.format(
-		"phase=%s pending=%d inflight=%d checked=%d/%d scanned=%d",
-		phase,
-		pendingCount,
-		inFlight,
-		checkedTargets,
-		totalTargets,
-		scannedCount
-	)
-
 	local isComplete = totalTargets > 0 and checkedTargets >= totalTargets and pendingCount == 0 and not state.scanning
 	if isComplete and not state.completionAnnounced then
 		printInfo(
@@ -270,28 +239,6 @@ local function logProgress(force)
 	if not isComplete then
 		state.completionAnnounced = false
 	end
-
-	if force or (now - state.lastProgressLogTime) >= interval then
-		if force or snapshot ~= state.lastProgressSnapshot then
-			printInfo({ 120, 220, 255, 255 }, "[SteamHistory] Progress: " .. snapshot)
-			state.lastProgressSnapshot = snapshot
-		end
-		state.lastProgressLogTime = now
-	end
-end
-
-local function logBatchSummary(flagged, passed)
-	local now = globals.RealTime()
-	local summary = string.format("flagged=%d clean=%d", flagged, passed)
-	if summary == state.lastBatchSummary and (now - state.lastBatchSummaryTime) < 1.0 then
-		return
-	end
-	state.lastBatchSummary = summary
-	state.lastBatchSummaryTime = now
-	printInfo(
-		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
-		string.format("[SteamHistory] Batch done: %d flagged, %d clean", flagged, passed)
-	)
 end
 
 local function queueActivePlayerStates()
@@ -460,7 +407,7 @@ end
 local function setSteamHistoryChecks(steamID, entry)
 	local playerState = PlayerCache.GetByID(steamID)
 	if not playerState then
-		return
+		return nil
 	end
 
 	local oldFlags = playerState.flags
@@ -534,6 +481,31 @@ local function setSteamHistoryChecks(steamID, entry)
 			score = playerState.score or 0,
 		})
 	end
+
+	return {
+		hasEntry = hasEntry,
+		isVacBanned = isVacBanned,
+		isCommBanned = isCommBanned,
+	}
+end
+
+local function logPlayerScanResult(steamID, context, entry, checkResult)
+	local name = resolveName(steamID, context, entry)
+	if checkResult and checkResult.isVacBanned then
+		printInfo(
+			{ 255, 180, 120, 255 },
+			string.format("[SteamHistory] %s scan complete: VAC ban on record", name)
+		)
+		return
+	end
+	if checkResult and checkResult.isCommBanned then
+		printInfo(
+			{ 255, 180, 120, 255 },
+			string.format("[SteamHistory] %s scan complete: Community/Trade ban on record", name)
+		)
+		return
+	end
+	printInfo({ 150, 220, 255, 255 }, string.format("[SteamHistory] %s scan complete: clean", name))
 end
 
 local function handleError(message, contexts)
@@ -652,23 +624,27 @@ local function handleBatchResponse(ids, contexts, responseTable)
 		state.scanned[steamID] = true
 		local entry = responseMap[steamID]
 		local context = contexts[steamID] or {}
-		setSteamHistoryChecks(steamID, entry)
+		local checkResult = setSteamHistoryChecks(steamID, entry)
 		if entry and matchesKeyword(entry.BanReason or "") then
 			flagged = flagged + 1
 			flagPlayer(steamID, context, entry)
 		else
-			-- Player is clean or not found in SteamHistory
+			logPlayerScanResult(steamID, context, entry, checkResult)
 		end
 	end
 
 	local passed = #ids - flagged
-	logBatchSummary(flagged, passed)
+	printInfo(
+		flagged > 0 and { 255, 200, 120, 255 } or { 0, 200, 255, 255 },
+		string.format("[SteamHistory] Batch done: %d flagged, %d clean", flagged, passed)
+	)
 
 	-- Success! Reset error count and consecutive failures
 	state.errorCount = 0
 	state.nextRetryTime = 0
 	state.consecutiveFailures = 0
 	state.scanning = false
+	maybeAnnounceScanComplete()
 
 	-- Gradually restore batch size on success
 	if state.currentBatchSize < MAX_BATCH then
@@ -890,21 +866,18 @@ local function onCreateMove()
 	end
 
 	if state.scanning then
-		logProgress(false)
 		return
 	end
 
 	-- Check if we are in cooldown
 	if globals.RealTime() < state.nextRetryTime then
-		logProgress(false)
 		return
 	end
 
 	if next(state.pending) and globals.RealTime() - state.lastBatchTime >= MIN_INTERVAL then
 		requestBatch()
 	end
-
-	logProgress(false)
+	maybeAnnounceScanComplete()
 end
 
 --[[ Public API ]]
