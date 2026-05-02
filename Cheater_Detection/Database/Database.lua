@@ -30,6 +30,7 @@ local Database = {
 local HARD_PRIORITY_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 local LOCAL_DEAD_SAVE_INTERVAL = 3
 local MIN_NONFORCED_SAVE_INTERVAL = 20
+local EFFECTIVE_DEAD_AUTOSAVE_INTERVAL = math.max(LOCAL_DEAD_SAVE_INTERVAL, MIN_NONFORCED_SAVE_INTERVAL)
 
 local function ReapplyDetectedPriorities()
 	if not G.DataBase then
@@ -205,11 +206,14 @@ local function OnCreateMoveAutoSave()
 	end
 
 	local now = os.time()
-	if Database.State.lastSave ~= 0 and (now - Database.State.lastSave) < LOCAL_DEAD_SAVE_INTERVAL then
+	if Database.State.lastSave ~= 0 and (now - Database.State.lastSave) < EFFECTIVE_DEAD_AUTOSAVE_INTERVAL then
 		return
 	end
 
-	Logger.Debug("Database", "[DB] Local player is dead, triggering save...")
+	Logger.Debug(
+		"Database",
+		string.format("[DB] Local player is dead, triggering save (interval=%ds)...", EFFECTIVE_DEAD_AUTOSAVE_INTERVAL)
+	)
 	Database.SaveDatabase()
 end
 
