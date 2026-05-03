@@ -88,7 +88,7 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck == true)
 		TimMenu.NextLine()
-		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave On Valve Presence", JN.ValveAutoDisconnect == true)
+		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave If Valve Employee Detected", JN.ValveAutoDisconnect == true)
 		TimMenu.NextLine()
 
 		local shStatus = "Ready"
