@@ -63,9 +63,6 @@ local handlers = {
 	Unload              = {},
 }
 
--- One engine callback registered per event type (lazy, on first Register() call)
-local registeredCallbacks = {}
-
 local function dispatchFireGameEvent(event)
 	local eventName = event:GetName()
 	for _, handler in pairs(handlers.FireGameEvent) do
@@ -87,6 +84,18 @@ local function dispatchGeneric(eventType, ...)
 	end
 end
 
+function Events.DispatchFireGameEvent(event)
+	dispatchFireGameEvent(event)
+end
+
+function Events.DispatchEngineEvent(eventType, ...)
+	if not handlers[eventType] then
+		return false
+	end
+	dispatchGeneric(eventType, ...)
+	return true
+end
+
 ---Register a handler for an engine event type
 ---@param eventType string  "CreateMove"|"Draw"|"FireGameEvent"|"DispatchUserMessage"|"Unload"
 ---@param handlerName string  Unique name (e.g. "SilentAim_Death")
@@ -94,7 +103,7 @@ end
 ---@param filter string?  Event name filter (FireGameEvent only; use "*" for all)
 ---@return boolean
 function Events.Register(eventType, handlerName, callback, filter)
-	assert(eventType,   "Events.Register: eventType missing")
+	assert(eventType, "Events.Register: eventType missing")
 	assert(handlerName, "Events.Register: handlerName missing")
 	assert(type(callback) == "function", "Events.Register: callback must be a function")
 	if not handlers[eventType] then
@@ -102,18 +111,6 @@ function Events.Register(eventType, handlerName, callback, filter)
 		return false
 	end
 	handlers[eventType][handlerName] = { callback = callback, filter = filter }
-	if not registeredCallbacks[eventType] then
-		local cbName = "CD_Events_" .. eventType
-		callbacks.Unregister(eventType, cbName)
-		if eventType == "FireGameEvent" then
-			callbacks.Register(eventType, cbName, dispatchFireGameEvent)
-		else
-			callbacks.Register(eventType, cbName, function(...)
-				dispatchGeneric(eventType, ...)
-			end)
-		end
-		registeredCallbacks[eventType] = cbName
-	end
 	return true
 end
 

@@ -22,11 +22,11 @@ local CallVoteFailed = 49
 -- Prioritised voting order (highest to lowest priority)
 local GROUP_PRIORITY = {
 	"retaliation", -- Players who voted NO on my votes (highest priority)
-	"bot", -- Cheat bots
-	"cheater", -- Known cheaters
-	"valve", -- Valve employees
-	"legit", -- Legit players
-	"friend", -- Friends (lowest priority)
+	"bot",      -- Cheat bots
+	"cheater",  -- Known cheaters
+	"valve",    -- Valve employees
+	"legit",    -- Legit players
+	"friend",   -- Friends (lowest priority)
 }
 
 local VOTE_OPTION_YES = 1
@@ -54,12 +54,12 @@ local State = {
 	serverCooldownUntil = 0, -- Server-reported cooldown end time
 	lastCooldownLog = 0,
 	-- Exponential backoff for guessed cooldowns
-	failureBackoff = 60, -- Start at 60 seconds (1 min)
-	maxBackoff = 120, -- Max 2 minutes
+	failureBackoff = 60,  -- Start at 60 seconds (1 min)
+	maxBackoff = 120,     -- Max 2 minutes
 	backoffUntil = 0,
 	iCalledThisVote = false, -- Track if WE initiated the current vote
-	voteSentTime = 0, -- When we sent the vote command
-	voteTimeout = 3.0, -- Seconds to wait for server response
+	voteSentTime = 0,     -- When we sent the vote command
+	voteTimeout = 3.0,    -- Seconds to wait for server response
 	lastKarmaVoteIdx = nil,
 }
 
@@ -528,7 +528,7 @@ local function issueVote(target)
 		expectedResult = VOTE_OPTION_YES,
 	}
 	State.lastVoteTime = globals.RealTime()
-	State.iCalledThisVote = true -- Track that WE initiated this vote
+	State.iCalledThisVote = true         -- Track that WE initiated this vote
 	State.voteSentTime = globals.RealTime() -- Track when we sent the command
 	return true
 end
@@ -600,7 +600,7 @@ local function handleVoteStart(msg)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
 				recordRetaliationCaller(callerSteamID, callerName)
 			end
-		-- Is this a vote against our FRIEND?
+			-- Is this a vote against our FRIEND?
 		elseif isFriendEntity(voteTargetEntity) then
 			local callerEntity = entities.GetByIndex(callerIdx)
 			if callerEntity and callerEntity:IsValid() then

@@ -277,6 +277,10 @@ local function OnDraw()
 end
 
 local function OnFireGameEvent(event)
+	if Events and Events.DispatchFireGameEvent then
+		Events.DispatchFireGameEvent(event)
+	end
+
 	local name = event:GetName()
 	if name == "player_disconnect" then
 		local uid = event:GetInt("userid")

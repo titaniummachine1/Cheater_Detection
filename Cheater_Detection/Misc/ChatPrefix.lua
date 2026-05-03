@@ -140,7 +140,7 @@ local function OnUserMessage(msg)
 	-- Read chat data (TF2's actual SayText2 structure)
 	local wantsToChat = bf:ReadByte() -- Byte 0-7: wants to chat flag
 	local clientIndex = bf:ReadByte() -- Byte 8-15: client index
-	local isChat = bf:ReadByte() -- Byte 16-23: chat flag (THIS WAS MISSING!)
+	local isChat = bf:ReadByte()     -- Byte 16-23: chat flag (THIS WAS MISSING!)
 	local chatType = bf:ReadString(256) -- Now properly aligned - e.g. "TF_Chat_Team"
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)

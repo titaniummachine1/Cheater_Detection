@@ -1,10 +1,5 @@
 {
   "Lua.runtime.version": "Lua 5.4",
-  "code-runner.respectShebang": false,
-  "code-runner.executorMap": {
-    "python": "python -u"
-  },
-  "code-runner.runInTerminal": true,
   "Lua.workspace.library": [
     "C:/gitProjects/Lmaobox-Annotations/library"
   ],
@@ -17,7 +12,7 @@
       {
         "match": ".*\\.lua$",
         "isAsync": false,
-        "cmd": "cmd /c if exist \"${workspaceFolder}\\bundle-and-deploy.js\" node \"${workspaceFolder}\\bundle-and-deploy.js\"",
+        "cmd": "node \"${workspaceFolder}\\bundle-and-deploy.js\"",
         "autoShowOutputPanel": "always"
       }
     ]
@@ -28,7 +23,7 @@
       {
         "match": ".*\\.lua$",
         "isAsync": false,
-        "cmd": "cmd /c if exist \"${workspaceFolder}\\bundle-and-deploy.js\" node \"${workspaceFolder}\\bundle-and-deploy.js\"",
+        "cmd": "node \"${workspaceFolder}\\bundle-and-deploy.js\"",
         "autoShowOutputPanel": "always"
       }
     ]
