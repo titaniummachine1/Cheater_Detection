@@ -35,7 +35,7 @@ local BRIDGE_REMOTE_MAX_BYTES = 2 * 1024 * 1024
 local BRIDGE_POLL_INTERVAL = 0.0
 local BRIDGE_ASSUME_HEALTHY_ON_LOAD = false
 local BRIDGE_HEALTH_CHECK_INTERVAL = 10.0
-local BRIDGE_STALL_PROBE_INTERVAL = 120.0 -- After a stall (server not listening), wait much longer before retrying
+local BRIDGE_STALL_PROBE_INTERVAL = 10.0 -- After a stall, retry on the normal cadence in safe windows
 local SLOW_BLOCKING_HTTP_WARN_SECONDS = 0.015
 
 local bridgeState = {
@@ -541,10 +541,11 @@ function HttpQueue.Tick()
 	local now = Now()
 	local didNetworkOp = false
 	RefreshBridgeSafeWindowGate()
+	local canProbeNow = CanRunBlockingHTTPNow()
 	local shouldProbeOnStartup = startupBridgeProbePending and now >= bridgeState.nextProbeAt
 	-- Only probe bridge in unintrusive windows: http.Get is synchronous and stalls
 	-- for ~2s when the server is not listening, which freezes TF2 during gameplay.
-	if (not isProcessing) and (shouldProbeOnStartup or (now >= bridgeState.nextProbeAt and CanRunBlockingHTTPNow())) then
+	if (not isProcessing) and canProbeNow and (shouldProbeOnStartup or now >= bridgeState.nextProbeAt) then
 		startupBridgeProbePending = false
 		ProbeBridge(now)
 		didNetworkOp = true

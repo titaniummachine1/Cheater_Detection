@@ -7,6 +7,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
+local Constants = require("Cheater_Detection.Core.constants")
 
 local ChatPrefix = {}
 
@@ -90,9 +91,15 @@ local function GetCheaterStatus(player)
 	-- Check if marked by Evidence system
 	local isMarkedCheater = Evidence.IsMarkedCheater(steamID)
 
-	-- Check if player is in database
+	-- Only treat DB entries as cheater when cheater-like flags exist.
+	-- Retaliation/karma-only records should remain silent in chat tags.
 	local dbEntry = Database.GetCheater(steamID)
-	local inDatabase = dbEntry ~= nil
+	local inDatabase = false
+	if type(dbEntry) == "table" then
+		local flags = tonumber(dbEntry.Flags or 0) or 0
+		local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED
+		inDatabase = (flags & cheaterMask) ~= 0
+	end
 
 	if isMarkedCheater or inDatabase then
 		-- Red for confirmed cheater

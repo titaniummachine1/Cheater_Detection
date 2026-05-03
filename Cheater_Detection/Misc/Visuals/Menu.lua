@@ -3,6 +3,7 @@ local Menu = {}
 local G = require("Cheater_Detection.Utils.Globals")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
+local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 local Fonts = {
 	Verdana = draw.CreateFont("Verdana", 14, 510),
@@ -81,9 +82,13 @@ local function DrawMenu()
 	TimMenu.NextLine()
 	if G.Menu.currentTab == "Main" then
 		TimMenu.BeginSector("Player Scanner")
+		Misc.JoinNotifications = Misc.JoinNotifications or {}
+		local JN = Misc.JoinNotifications
 		Main.AutoSync = TimMenu.Checkbox("Auto-Sync Databases", Main.AutoSync == true)
 		TimMenu.NextLine()
 		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck == true)
+		TimMenu.NextLine()
+		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave On Valve Presence", JN.ValveAutoDisconnect == true)
 		TimMenu.NextLine()
 
 		local shStatus = "Ready"
@@ -217,8 +222,6 @@ local function DrawMenu()
 				TimMenu.NextLine()
 				JN.CheckValve = TimMenu.Checkbox("Valve alerts", JN.CheckValve == true)
 				TimMenu.NextLine()
-				JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto leave on Valve", JN.ValveAutoDisconnect == true)
-				TimMenu.NextLine()
 				JN.DefaultOutput = JN.DefaultOutput
 					or { LocalChat = true, PublicChat = false, Party = false, Toast = false, Console = true }
 				JN.CheaterOverride = JN.CheaterOverride
@@ -250,7 +253,7 @@ local function DrawMenu()
 
 			Misc.intent = Misc.intent or {}
 			local voteTargets =
-				{ "Retaliation", "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
+			{ "Retaliation", "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
 			local voteTable = {
 				Misc.intent.retaliation ~= false,
 				Misc.intent.bot ~= false,
@@ -282,6 +285,13 @@ local function DrawMenu()
 		else
 			TimMenu.Text("Last Sync: Never")
 		end
+		TimMenu.NextLine()
+
+		local bridgeText = "Bridge: Offline (safe fallback)"
+		if HttpQueue and HttpQueue.IsBridgeAlive and HttpQueue.IsBridgeAlive() then
+			bridgeText = "Bridge: Connected (local)"
+		end
+		TimMenu.Text(bridgeText)
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
@@ -295,7 +305,7 @@ local function DrawMenu()
 			TimMenu.NextLine()
 			Misc.Vote_Reveal.TargetTeam = Misc.Vote_Reveal.TargetTeam or { MyTeam = true, enemyTeam = true }
 			local teamTable =
-				{ Misc.Vote_Reveal.TargetTeam.MyTeam == true, Misc.Vote_Reveal.TargetTeam.enemyTeam == true }
+			{ Misc.Vote_Reveal.TargetTeam.MyTeam == true, Misc.Vote_Reveal.TargetTeam.enemyTeam == true }
 			teamTable = TimMenu.Combo("Target Teams", teamTable, { "My Team", "Enemy Team" })
 			Misc.Vote_Reveal.TargetTeam.MyTeam, Misc.Vote_Reveal.TargetTeam.enemyTeam = teamTable[1], teamTable[2]
 			TimMenu.NextLine()

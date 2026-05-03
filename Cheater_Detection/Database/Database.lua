@@ -168,6 +168,12 @@ function Database.SaveDatabase(force)
 			if v.Score and v.Score ~= 0 then
 				clean.Score = v.Score
 			end
+			if type(v.Karma) == "number" and v.Karma > 0 then
+				clean.Karma = math.floor(v.Karma)
+			end
+			if v.Retaliation == true then
+				clean.Retaliation = true
+			end
 			cleanedData[k] = clean
 		end
 	end
@@ -464,15 +470,44 @@ function Database.UpsertCheater(steamID, data)
 	local existing = G.DataBase[steamID]
 	local currentTime = os.time()
 	local score = data.score or 0
+	local incomingKarma = nil
+	if type(data.Karma) == "number" then
+		incomingKarma = math.floor(data.Karma)
+	end
+	local incomingRetaliation = nil
+	if type(data.Retaliation) == "boolean" then
+		incomingRetaliation = data.Retaliation
+	end
 
 	if existing then
 		local scoreDelta = math.abs(score - (existing.Score or 0))
 		local timeDelta = currentTime - (existing.Timestamp or 0)
 		local reasonChanged = data.reason ~= existing.Reason
+		local existingKarma = type(existing.Karma) == "number" and existing.Karma or 0
+		local existingRetaliation = existing.Retaliation == true
+		local effectiveKarma = incomingKarma
+		if effectiveKarma == nil then
+			effectiveKarma = existingKarma
+		end
+		local effectiveRetaliation = incomingRetaliation
+		if effectiveRetaliation == nil then
+			effectiveRetaliation = existingRetaliation
+		end
+		local karmaChanged = effectiveKarma ~= existingKarma
+		local retaliationChanged = effectiveRetaliation ~= existingRetaliation
 
-		if scoreDelta < 1 and timeDelta < 3600 and not reasonChanged and persistentFlags == existing.Flags then
+		if scoreDelta < 1 and timeDelta < 3600 and not reasonChanged and persistentFlags == existing.Flags and not karmaChanged and not retaliationChanged then
 			return false
 		end
+	end
+
+	local finalKarma = incomingKarma
+	if finalKarma == nil and type(existing) == "table" and type(existing.Karma) == "number" then
+		finalKarma = existing.Karma
+	end
+	local finalRetaliation = incomingRetaliation
+	if finalRetaliation == nil and type(existing) == "table" and type(existing.Retaliation) == "boolean" then
+		finalRetaliation = existing.Retaliation
 	end
 
 	G.DataBase[steamID] = {
@@ -482,6 +517,8 @@ function Database.UpsertCheater(steamID, data)
 		Score = score,
 		Timestamp = currentTime,
 		Static = data.Static or false,
+		Karma = finalKarma,
+		Retaliation = finalRetaliation,
 	}
 
 	Database.State.isDirty = true

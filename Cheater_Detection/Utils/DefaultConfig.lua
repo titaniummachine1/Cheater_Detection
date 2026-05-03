@@ -65,6 +65,7 @@ local Default_Config = {
 		Autovote = true,
 		AutovoteAutoCast = true,
 		intent = {
+			retaliation = true,
 			legit = true,
 			cheater = true,
 			bot = true,

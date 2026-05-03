@@ -97,6 +97,28 @@ local function isKnownValveIDSteam2(s2)
 	return s2 ~= nil and ValveData.ManualIDsSteam2[s2] == true
 end
 
+local function isKnownStaticValvePlayer(playerState)
+	if not playerState or not playerState.id then
+		return false
+	end
+
+	if isKnownValveID64(playerState.id) then
+		return true
+	end
+
+	if playerState.wrap and playerState.wrap.GetRawEntity then
+		local rawEntity = playerState.wrap:GetRawEntity()
+		if rawEntity then
+			local steam2 = Common.GetSteamID(rawEntity)
+			if isKnownValveIDSteam2(steam2) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Apply VALVE flag (idempotent – only logs/saves on first apply)
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -105,6 +127,14 @@ local function applyValveFlag(playerState, reason)
 	playerState.flags = playerState.flags | Constants.Flags.VALVE
 
 	if playerState.flags ~= oldFlags then
+		local inStaticValveList = isKnownStaticValvePlayer(playerState)
+		local reasonForDatabase = reason
+		local staticTag = nil
+		if not inStaticValveList then
+			reasonForDatabase = reason .. " (Not in static Valve list)"
+			staticTag = "ValveDynamic"
+		end
+
 		printc(
 			255,
 			215,
@@ -119,10 +149,17 @@ local function applyValveFlag(playerState, reason)
 		)
 		Database.UpsertCheater(playerState.id, {
 			name = playerState.wrap:GetName(),
-			reason = reason,
+			reason = reasonForDatabase,
 			flags = playerState.flags,
 			score = playerState.score,
+			Static = staticTag,
 		})
+		if not inStaticValveList then
+			Logger.Info(
+				"ValveCheck",
+				string.format("Discovered non-static Valve employee saved to database: %s", tostring(playerState.id))
+			)
+		end
 		Events.Publish("OnPlayerStateChange", playerState, reason)
 	end
 end

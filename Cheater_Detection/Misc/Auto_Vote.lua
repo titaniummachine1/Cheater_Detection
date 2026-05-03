@@ -8,6 +8,8 @@ local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Sources = require("Cheater_Detection.Database.Sources")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local VoteReveal = require("Cheater_Detection.Misc.Vote_Reveal")
+local Database = require("Cheater_Detection.Database.Database")
+local Constants = require("Cheater_Detection.Core.constants")
 
 local LOG_CATEGORY = "AutoVote"
 
@@ -30,15 +32,19 @@ local GROUP_PRIORITY = {
 local VOTE_OPTION_YES = 1
 local VOTE_OPTION_NO = 2
 
+local KARMA_DELTA_OPPOSE_INTENT = 5
+local KARMA_DELTA_VOTE_YES_ON_ME = 50
+local KARMA_DELTA_CALLED_ON_ME = 100
+local RETALIATION_KARMA_THRESHOLD = 50
+
 local MIN_SECONDS_BETWEEN_CALLVOTES = 1.5
 
 -- Track players who CALLED a vote against us: steamID -> true
 -- These players go into "retaliation" group
 local RetaliationCallers = {}
 
--- Track score penalties for players who voted against our interests: steamID -> score
--- Does NOT put them in retaliation group, just adds to their kick priority score
-local ScorePenalties = {}
+-- Persistent per-player retaliation karma in memory (mirrored into DB via UpsertCheater).
+local RetaliationKarma = {}
 
 local State = {
 	currentVoteIdx = nil,
@@ -54,6 +60,7 @@ local State = {
 	iCalledThisVote = false, -- Track if WE initiated the current vote
 	voteSentTime = 0, -- When we sent the vote command
 	voteTimeout = 3.0, -- Seconds to wait for server response
+	lastKarmaVoteIdx = nil,
 }
 
 local function logInfo(message)
@@ -64,12 +71,110 @@ local function logDebug(message)
 	Logger.Debug(LOG_CATEGORY, message)
 end
 
+local function getExistingDbEntry(steamID)
+	if not steamID then
+		return nil
+	end
+	if Database and type(Database.GetCheater) == "function" then
+		return Database.GetCheater(steamID)
+	end
+	return G.DataBase and G.DataBase[steamID] or nil
+end
+
+local function isRetaliationReason(reason)
+	if type(reason) ~= "string" then
+		return false
+	end
+	local lowerReason = reason:lower()
+	return lowerReason:find("retaliation", 1, true) ~= nil or lowerReason:find("vote karma", 1, true) ~= nil
+end
+
+local function getRetaliationKarma(steamID)
+	if not steamID then
+		return 0
+	end
+	local localKarma = RetaliationKarma[steamID]
+	if type(localKarma) == "number" and localKarma > 0 then
+		return localKarma
+	end
+
+	local entry = getExistingDbEntry(steamID)
+	if type(entry) == "table" and type(entry.Karma) == "number" and entry.Karma > 0 then
+		RetaliationKarma[steamID] = entry.Karma
+		return entry.Karma
+	end
+
+	return 0
+end
+
+local function persistRetaliationKarma(steamID, playerName, delta, reasonLabel)
+	if not steamID or type(delta) ~= "number" or delta <= 0 then
+		return
+	end
+
+	local previousKarma = getRetaliationKarma(steamID)
+	local newKarma = previousKarma + delta
+	RetaliationKarma[steamID] = newKarma
+
+	local existing = getExistingDbEntry(steamID)
+	local existingFlags = (type(existing) == "table" and tonumber(existing.Flags or 0)) or 0
+	local existingScore = (type(existing) == "table" and tonumber(existing.Score or 0)) or 0
+	local existingReason = type(existing) == "table" and existing.Reason or nil
+
+	local isRetaliationTarget = newKarma >= RETALIATION_KARMA_THRESHOLD
+	local dbReason = existingReason
+	if isRetaliationTarget then
+		dbReason = "Retaliation Target"
+	elseif dbReason == nil or dbReason == "" or isRetaliationReason(dbReason) then
+		dbReason = "Vote Karma Tracking"
+	end
+
+	if type(Database) == "table" and type(Database.UpsertCheater) == "function" then
+		Database.UpsertCheater(steamID, {
+			name = playerName or (type(existing) == "table" and existing.Name) or steamID,
+			reason = dbReason,
+			flags = existingFlags,
+			score = existingScore,
+			Karma = newKarma,
+			Retaliation = isRetaliationTarget,
+			Static = "RetaliationKarma",
+		})
+	end
+
+	local nowRetaliation = isRetaliationTarget
+	if nowRetaliation then
+		RetaliationCallers[steamID] = true
+	end
+
+	logInfo(
+		string.format(
+			"KARMA: %s +%d (%s) total=%d retaliation=%s",
+			playerName or steamID,
+			delta,
+			reasonLabel or "vote signal",
+			newKarma,
+			tostring(nowRetaliation)
+		)
+	)
+end
+
+local function isRetaliationTarget(steamID)
+	if not steamID then
+		return false
+	end
+	if RetaliationCallers[steamID] then
+		return true
+	end
+	return getRetaliationKarma(steamID) >= RETALIATION_KARMA_THRESHOLD
+end
+
 --- Record the CALLER of a vote against us (goes into retaliation GROUP)
 local function recordRetaliationCaller(callerSteamID, callerName)
 	if not callerSteamID then
 		return
 	end
 	RetaliationCallers[callerSteamID] = true
+	persistRetaliationKarma(callerSteamID, callerName, KARMA_DELTA_CALLED_ON_ME, "called vote on us/friend")
 	logInfo(
 		string.format("RETALIATION: %s CALLED a vote against us - added to retaliation group", callerName or "Unknown")
 	)
@@ -129,16 +234,56 @@ local function recordScorePenalties()
 
 	for _, voter in ipairs(againstVoters) do
 		if voter.steamID then
-			ScorePenalties[voter.steamID] = (ScorePenalties[voter.steamID] or 0) + 10
-			logInfo(
-				string.format(
-					"PENALTY: %s voted against our interest (+10 score, total: %d)",
-					voter.name,
-					ScorePenalties[voter.steamID]
-				)
-			)
+			persistRetaliationKarma(voter.steamID, voter.name, KARMA_DELTA_OPPOSE_INTENT, "opposed our vote intent")
 		end
 	end
+end
+
+local function recordVoteYesAgainstUsKarma()
+	local activeVote = VoteReveal.GetActiveVote()
+	if not activeVote then
+		return
+	end
+
+	local localPlayer = PlayerCache.GetLocal()
+	local localSteamID = localPlayer and localPlayer:GetSteamID64()
+	if not localSteamID then
+		return
+	end
+
+	if not activeVote.targetIdx then
+		return
+	end
+
+	local targetEntity = entities.GetByIndex(activeVote.targetIdx)
+	if not targetEntity or not targetEntity:IsValid() then
+		return
+	end
+
+	local targetSteamID = Common.GetSteamID64(targetEntity)
+	if targetSteamID ~= localSteamID then
+		return
+	end
+
+	local yesVoters = VoteReveal.GetYesVoters()
+	for _, voter in ipairs(yesVoters) do
+		if voter.steamID then
+			persistRetaliationKarma(voter.steamID, voter.name, KARMA_DELTA_VOTE_YES_ON_ME, "voted YES against us")
+		end
+	end
+end
+
+local function finalizeVoteKarmaOnce()
+	local activeVote = VoteReveal.GetActiveVote()
+	if not activeVote or not activeVote.voteIdx then
+		return
+	end
+	if State.lastKarmaVoteIdx == activeVote.voteIdx then
+		return
+	end
+	State.lastKarmaVoteIdx = activeVote.voteIdx
+	recordScorePenalties()
+	recordVoteYesAgainstUsKarma()
 end
 
 local function resetVoteState()
@@ -149,7 +294,7 @@ local function resetVoteState()
 end
 
 local function getMenu()
-	return G.Menu and G.Menu.Automation or nil
+	return G.Menu and G.Menu.Misc or nil
 end
 
 local function isValveEmployee(steamID)
@@ -163,7 +308,23 @@ local function getCheaterStatus(steamID)
 	if Evidence.IsMarkedCheater(steamID) then
 		return true
 	end
-	return G.DataBase and G.DataBase[steamID] ~= nil
+
+	local entry = getExistingDbEntry(steamID)
+	if type(entry) ~= "table" then
+		return false
+	end
+
+	local flags = tonumber(entry.Flags or 0) or 0
+	local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED
+	if (flags & cheaterMask) ~= 0 then
+		return true
+	end
+
+	if isRetaliationReason(entry.Reason) then
+		return false
+	end
+
+	return false
 end
 
 local function isBot(player, steamID)
@@ -202,7 +363,7 @@ local function getGroupForPlayer(player)
 	local isFriend = isFriendEntity(entity)
 
 	-- HIGHEST PRIORITY: Retaliation - players who CALLED a vote against us
-	if steamID and RetaliationCallers[steamID] then
+	if config.intent.retaliation ~= false and steamID and isRetaliationTarget(steamID) then
 		return "retaliation"
 	end
 
@@ -263,12 +424,6 @@ local function collectCandidates()
 			local group = getGroupForPlayer(player)
 			if group then
 				local score = scoreboard[index + 1] or 0
-
-				-- Add score penalty for players who voted against our interests
-				local steamID = player:GetSteamID64()
-				if steamID and ScorePenalties[steamID] then
-					score = score + ScorePenalties[steamID]
-				end
 
 				candidates[#candidates + 1] = {
 					player = player,
@@ -383,7 +538,7 @@ local function sendVote(voteIdx, option)
 end
 
 local function determineVoteOptionForEntity(entity)
-	local menu = G.Menu and G.Menu.Automation or nil
+	local menu = G.Menu and G.Menu.Misc or nil
 	if not menu or not menu.Autovote then
 		return nil
 	end
@@ -522,8 +677,7 @@ end
 
 --- Handle vote failure with retaliation tracking and cooldown
 local function handleVoteFailed()
-	-- Record score penalties for players who voted against our interests
-	recordScorePenalties()
+	finalizeVoteKarmaOnce()
 
 	-- Assume 60s cooldown if we don't have explicit cooldown
 	local now = globals.RealTime()
@@ -561,6 +715,7 @@ local function onVoteEvent(event)
 		local details = event:GetString("details")
 		local param1 = event:GetString("param1")
 		logInfo(string.format("Vote passed: %s (%s)", details or "?", param1 or "?"))
+		finalizeVoteKarmaOnce()
 		State.failureBackoff = 60 -- Reset backoff on success
 		resetVoteState()
 		return
@@ -575,6 +730,7 @@ local function onVoteEvent(event)
 
 	-- Vote ended (generic)
 	if name == "vote_ended" then
+		finalizeVoteKarmaOnce()
 		resetVoteState()
 		return
 	end
@@ -679,6 +835,7 @@ function AutoVote.OnDispatchUserMessage(msg)
 		handleVoteStart(msg)
 	elseif id == VotePass then
 		-- Vote passed - reset backoff
+		finalizeVoteKarmaOnce()
 		State.failureBackoff = 60
 		handleVoteEnd()
 	elseif id == VoteFailed then
@@ -756,7 +913,8 @@ function AutoVote.Reset()
 	State.lastCooldownLog = 0
 	State.failureBackoff = 60 -- Reset to 60s
 	State.voteSentTime = 0 -- Clear timeout
-	-- Don't clear RetaliationCallers/ScorePenalties - they persist for the session
+	State.lastKarmaVoteIdx = nil
+	-- Don't clear retaliation state - it persists for the session
 	logInfo("AutoVote reset - cooldown cleared")
 end
 
@@ -764,11 +922,14 @@ end
 function AutoVote.GetRetaliationData()
 	return {
 		callers = RetaliationCallers,
-		penalties = ScorePenalties,
+		karma = RetaliationKarma,
 	}
 end
 
 -- Register callbacks to enable auto-voting
+callbacks.Unregister("CreateMove", "CD_AutoVote_CreateMove")
+callbacks.Unregister("DispatchUserMessage", "CD_AutoVote_UserMsg")
+callbacks.Unregister("FireGameEvent", "CD_AutoVote_Event")
 callbacks.Register("CreateMove", "CD_AutoVote_CreateMove", AutoVote.OnCreateMove)
 callbacks.Register("DispatchUserMessage", "CD_AutoVote_UserMsg", AutoVote.OnDispatchUserMessage)
 callbacks.Register("FireGameEvent", "CD_AutoVote_Event", AutoVote.OnFireGameEvent)
