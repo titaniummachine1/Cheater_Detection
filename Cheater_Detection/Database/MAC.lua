@@ -599,15 +599,15 @@ end
 
 function MAC.GetStatusText()
     if not state.enabled then
-        return "MAC: Disabled"
+        return "MAC: Disabled (client-backend API checker)"
     end
     if state.lastError ~= "" then
         return "MAC: " .. state.lastError
     end
     if state.lastSuccessAt > 0 then
-        return "MAC: Connected"
+        return "MAC: Connected (client-backend API)"
     end
-    return "MAC: Waiting"
+    return "MAC: Waiting for client-backend API"
 end
 
 function MAC.GetBaseURL()
