@@ -2,11 +2,11 @@ local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 local BridgePrompt = {}
 
-local PROMPT_DURATION = 5.0
-local PROMPT_TITLE = "Optional Local Bridge"
-local PROMPT_LINE_1 = "Start LocalBridge/StartLocalBridge.bat for smoother real-time HTTP."
-local PROMPT_LINE_2 = "Without it, Cheater Detection only uses blocking HTTP in safe moments."
-local PROMPT_LINE_3 = "Click anywhere to dismiss."
+local PROMPT_DURATION = 0.0
+local PROMPT_TITLE = ""
+local PROMPT_LINE_1 = ""
+local PROMPT_LINE_2 = ""
+local PROMPT_LINE_3 = ""
 
 local expiresAt = 0.0
 local dismissed = false

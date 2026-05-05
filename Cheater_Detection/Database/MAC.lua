@@ -303,20 +303,7 @@ local function handleError(message)
     state.lastError = message
     state.nextRetryAt = globals.RealTime() + ERROR_RETRY_SECONDS
 
-    if not state.loggedLocalhostHint then
-        local lowerBase = tostring(state.baseURL):lower()
-        local lowerMessage = tostring(message):lower()
-        local isLocalhost = lowerBase:find("127.0.0.1", 1, true) ~= nil or lowerBase:find("localhost", 1, true) ~= nil
-        local refused = lowerMessage:find("10061", 1, true) ~= nil or
-            lowerMessage:find("actively refused", 1, true) ~= nil
-        if isLocalhost and refused then
-            state.loggedLocalhostHint = true
-            printInfo({ 255, 180, 100, 255 }, "[MAC] Local backend unreachable at " .. tostring(state.baseURL))
-            printInfo({ 255, 180, 100, 255 },
-                "[MAC] Download/run MAC client-backend: github.com/MegaAntiCheat/client-backend")
-            printInfo({ 255, 180, 100, 255 }, "[MAC] Or change endpoint with: mac_url <base_url>")
-        end
-    end
+    state.loggedLocalhostHint = true
 
     printInfo(
         { 255, 120, 120, 255 },
@@ -640,15 +627,15 @@ end
 
 function MAC.GetStatusText()
     if not state.enabled then
-        return "MAC: Disabled (requires client-backend at localhost:1984)"
+        return "MAC: Disabled"
     end
     if state.lastError ~= "" then
         return "MAC: " .. state.lastError
     end
     if state.lastSuccessAt > 0 then
-        return "MAC: Connected (client-backend localhost:1984)"
+        return "MAC: Connected"
     end
-    return "MAC: Waiting for client-backend (localhost:1984)"
+    return "MAC: Waiting for response"
 end
 
 function MAC.GetBaseURL()
