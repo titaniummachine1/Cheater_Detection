@@ -131,6 +131,9 @@ local function setupMAC()
 
 		if not key or key == "" then
 			G.Menu.Scanner.MAC = true
+			if MAC and MAC.ClearApiKey then
+				MAC.ClearApiKey()
+			end
 			if Config and Config.CreateCFG then
 				Config.CreateCFG()
 			end

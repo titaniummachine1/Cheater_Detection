@@ -738,7 +738,8 @@ end
 
 -- Track last log time to avoid spam
 local lastStatusLog = 0
-local STATUS_LOG_INTERVAL = 5.0
+local STATUS_LOG_INTERVAL = 45.0
+local wasNoTargetLastCheck = false
 
 function AutoVote.OnCreateMove()
 	local menu = getMenu()
@@ -801,16 +802,20 @@ function AutoVote.OnCreateMove()
 
 	local target = pickNextTarget()
 	if not target then
-		-- Log status periodically
-		if globals.RealTime() - lastStatusLog > STATUS_LOG_INTERVAL then
-			lastStatusLog = globals.RealTime()
-			local candidates = collectCandidates()
-			if #candidates == 0 then
+		local candidates = collectCandidates()
+		if #candidates == 0 then
+			if (not wasNoTargetLastCheck) or (globals.RealTime() - lastStatusLog > STATUS_LOG_INTERVAL) then
+				lastStatusLog = globals.RealTime()
 				logInfo("No vote targets on your team (check intent settings)")
 			end
+			wasNoTargetLastCheck = true
+		else
+			wasNoTargetLastCheck = false
 		end
 		return
 	end
+
+	wasNoTargetLastCheck = false
 
 	logInfo(
 		string.format(
