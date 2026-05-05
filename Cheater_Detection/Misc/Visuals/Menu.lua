@@ -3,6 +3,7 @@ local Menu = {}
 local G = require("Cheater_Detection.Utils.Globals")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
+local MAC = require("Cheater_Detection.Database.MAC")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 local Fonts = {
@@ -51,6 +52,7 @@ end
 local function EnsureMenuState()
 	G.Menu = G.Menu or {}
 	G.Menu.Main = G.Menu.Main or {}
+	G.Menu.Scanner = G.Menu.Scanner or {}
 	G.Menu.Advanced = G.Menu.Advanced or {}
 	G.Menu.Notifications = G.Menu.Notifications or {}
 	G.Menu.Misc = G.Menu.Misc or {}
@@ -73,6 +75,7 @@ local function DrawMenu()
 	end
 
 	local Main = G.Menu.Main
+	local Scanner = G.Menu.Scanner
 	local Advanced = G.Menu.Advanced
 	local Notifications = G.Menu.Notifications
 	local Misc = G.Menu.Misc
@@ -88,6 +91,8 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck == true)
 		TimMenu.NextLine()
+		Scanner.MAC = TimMenu.Checkbox("MAC Database Check", Scanner.MAC == true)
+		TimMenu.NextLine()
 		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave If Valve Employee Detected", JN.ValveAutoDisconnect == true)
 		TimMenu.NextLine()
 
@@ -98,6 +103,9 @@ local function DrawMenu()
 			shStatus = "Rate limited (Wait)"
 		end
 		TimMenu.Text("SteamHistory: " .. shStatus)
+		TimMenu.NextLine()
+		local macStatus = (MAC and MAC.GetStatusText and MAC.GetStatusText()) or "MAC: unavailable"
+		TimMenu.Text(macStatus)
 		TimMenu.EndSector()
 
 		TimMenu.BeginSector("Detection Automation")

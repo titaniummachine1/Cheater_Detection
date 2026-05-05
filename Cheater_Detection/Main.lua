@@ -19,6 +19,7 @@ require("Cheater_Detection.Misc.Auto_Vote")
 require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
+require("Cheater_Detection.Database.MAC")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")
 
 -- Detectors

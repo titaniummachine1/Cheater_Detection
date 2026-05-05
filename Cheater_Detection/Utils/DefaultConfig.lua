@@ -14,6 +14,7 @@ local Default_Config = {
 
 	Scanner = {
 		SteamHistory = false,
+		MAC = false,
 		ValveCheck = true,
 	},
 
@@ -132,6 +133,9 @@ local Default_Config = {
 		SteamHistory = {
 			Enable = false,
 			ApiKey = "",
+		},
+		MAC = {
+			BaseURL = "http://127.0.0.1:3000",
 		},
 	},
 }

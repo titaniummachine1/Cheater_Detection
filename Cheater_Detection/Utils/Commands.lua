@@ -5,6 +5,7 @@ local Logger = require("Cheater_Detection.Utils.Logger")
 local ValveData = require("Cheater_Detection.data.valve_data")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
+local MAC = require("Cheater_Detection.Database.MAC")
 local Config = require("Cheater_Detection.Utils.Config")
 
 local Commands = {}
@@ -77,7 +78,7 @@ local function setupSteamHistory()
 		local hasKey = SteamHistory and SteamHistory.HasKey and SteamHistory.HasKey() or false
 		local enabled = SteamHistory and SteamHistory.IsEnabled and SteamHistory.IsEnabled() or false
 		local tempDisabled = SteamHistory and SteamHistory.IsTemporarilyDisabled and SteamHistory.IsTemporarilyDisabled() or
-		false
+			false
 
 		printc(100, 220, 255, 255, "[SteamHistory] Status:")
 		printc(200, 200, 200, 255, string.format("  hasKey           : %s", tostring(hasKey)))
@@ -90,6 +91,56 @@ local function setupSteamHistory()
 end
 
 setupSteamHistory()
+
+local function setupMAC()
+	Commands.Register("mac_url", function(args)
+		local url = args and args[1] or nil
+		if not url or url == "" then
+			local currentURL = MAC and MAC.GetBaseURL and MAC.GetBaseURL() or "unknown"
+			printc(100, 220, 255, 255, "[MAC] Usage: mac_url <base_url>")
+			printc(200, 200, 200, 255, "[MAC] Current URL: " .. tostring(currentURL))
+			return
+		end
+
+		G.Menu = G.Menu or {}
+		G.Menu.Scanner = G.Menu.Scanner or {}
+		G.Menu.Scanner.MAC = true
+		G.Menu.Misc = G.Menu.Misc or {}
+		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
+
+		local ok, err = MAC.SetBaseURL(url)
+		if not ok then
+			printc(255, 100, 100, 255, "[MAC] Invalid URL: " .. tostring(err))
+			return
+		end
+
+		if Config and Config.CreateCFG then
+			Config.CreateCFG()
+		end
+
+		printc(0, 255, 140, 255, "[MAC] URL stored and scanner enabled: " .. tostring(MAC.GetBaseURL()))
+	end)
+
+	Commands.Register("mac_status", function(_args)
+		local scannerEnabled = G.Menu and G.Menu.Scanner and G.Menu.Scanner.MAC == true
+		local baseURL = MAC and MAC.GetBaseURL and MAC.GetBaseURL() or "unknown"
+		local status = MAC and MAC.GetStatusText and MAC.GetStatusText() or "MAC unavailable"
+
+		printc(100, 220, 255, 255, "[MAC] Status:")
+		printc(200, 200, 200, 255, string.format("  scannerEnabled : %s", tostring(scannerEnabled)))
+		printc(200, 200, 200, 255, string.format("  baseURL        : %s", tostring(baseURL)))
+		printc(200, 200, 200, 255, string.format("  moduleStatus   : %s", tostring(status)))
+	end)
+
+	Commands.Register("mac_rescan", function(_args)
+		if MAC and MAC.QueueRescan then
+			MAC.QueueRescan()
+			printc(0, 200, 255, 255, "[MAC] Rescan queued")
+		end
+	end)
+end
+
+setupMAC()
 
 local function setupDiagnostics()
 	Commands.Register("cd_myid", function(_args)
