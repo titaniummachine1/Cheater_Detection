@@ -555,9 +555,9 @@ function HttpQueue.Tick()
 	RefreshBridgeSafeWindowGate()
 	local canProbeNow = CanRunBlockingHTTPNow()
 	local shouldProbeOnStartup = startupBridgeProbePending and now >= bridgeState.nextProbeAt
-	-- Only probe bridge in unintrusive windows: http.Get is synchronous and stalls
-	-- for ~2s when the server is not listening, which freezes TF2 during gameplay.
-	if (not isProcessing) and canProbeNow and (shouldProbeOnStartup or now >= bridgeState.nextProbeAt) then
+	-- Run exactly one startup probe immediately after load/enable so bridge status is known
+	-- without waiting for a death/safe-window. After startup, probe only in safe windows.
+	if (not isProcessing) and (shouldProbeOnStartup or (canProbeNow and now >= bridgeState.nextProbeAt)) then
 		startupBridgeProbePending = false
 		ProbeBridge(now)
 		didNetworkOp = true

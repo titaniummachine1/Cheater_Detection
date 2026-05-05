@@ -21,6 +21,7 @@ local POLL_INTERVAL = 4.0
 local ERROR_RETRY_SECONDS = 8.0
 local ERROR_LOG_INTERVAL = 12.0
 local STARTUP_PROBE_RETRY_SECONDS = 1.0
+local ACTIVITY_LOG_INTERVAL = 15.0
 
 local state = {
     enabled = false,
@@ -34,10 +35,19 @@ local state = {
     apiKey = nil,
     startupProbePending = true,
     startupProbeAttempts = 0,
+    lastActivityLogAt = 0,
 }
 
 local function printInfo(color, text)
     printc(color[1], color[2], color[3], color[4], text)
+end
+
+local function logActivity(message, force)
+    local now = globals.RealTime()
+    if force == true or (now - state.lastActivityLogAt) >= ACTIVITY_LOG_INTERVAL then
+        state.lastActivityLogAt = now
+        printInfo({ 120, 220, 255, 255 }, "[MAC] " .. message)
+    end
 end
 
 local function getConfig()
@@ -197,7 +207,7 @@ local function applyVerdict(steamID, playerEntry)
             local checkFlags = PlayerCache.EnsureCheckFlags(cached)
             checkFlags.macChecked = true
         end
-        return
+        return "none"
     end
 
     local name = resolvePlayerName(steamID, playerEntry)
@@ -241,6 +251,11 @@ local function applyVerdict(steamID, playerEntry)
     elseif changed and suspicious then
         printInfo({ 255, 200, 120, 255 }, string.format("[MAC] %s flagged as SUSPICIOUS (%s)", name, reason))
     end
+
+    if hardCheater then
+        return "cheater"
+    end
+    return "sus"
 end
 
 local function handleError(message)
@@ -335,12 +350,21 @@ local function handleResponse(body)
     ---@cast players table
 
     local count = #players
+	local processed = 0
+	local flaggedCheater = 0
+	local flaggedSus = 0
     if count > 0 then
         for _, playerEntry in ipairs(players) do
             if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
                 local steamID = normalizeSteamID64(playerEntry.steamID64)
                 if steamID then
-                    applyVerdict(steamID, playerEntry)
+					processed = processed + 1
+					local verdictResult = applyVerdict(steamID, playerEntry)
+					if verdictResult == "cheater" then
+						flaggedCheater = flaggedCheater + 1
+					elseif verdictResult == "sus" then
+						flaggedSus = flaggedSus + 1
+					end
                 end
             end
         end
@@ -349,18 +373,26 @@ local function handleResponse(body)
             if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
                 local steamID = normalizeSteamID64(playerEntry.steamID64)
                 if steamID then
-                    applyVerdict(steamID, playerEntry)
+					processed = processed + 1
+					local verdictResult = applyVerdict(steamID, playerEntry)
+					if verdictResult == "cheater" then
+						flaggedCheater = flaggedCheater + 1
+					elseif verdictResult == "sus" then
+						flaggedSus = flaggedSus + 1
+					end
                 end
             end
         end
     end
 
+	logActivity(string.format("poll complete: players=%d cheater=%d suspicious=%d", processed, flaggedCheater, flaggedSus), false)
+
     state.scanning = false
     state.lastSuccessAt = globals.RealTime()
     state.lastError = ""
     state.nextRetryAt = 0
-	state.startupProbePending = false
-	state.startupProbeAttempts = 0
+    state.startupProbePending = false
+    state.startupProbeAttempts = 0
     return true, nil
 end
 
@@ -377,7 +409,8 @@ local function enqueueSnapshotAttempt(urls, attemptIndex)
                 enqueueSnapshotAttempt(urls, attemptIndex + 1)
                 return
             end
-            handleError("request failed: " .. tostring(errorMessage))
+			local displayURL = tostring(url):gsub("%?.*$", "")
+			handleError("request failed: " .. displayURL .. " " .. tostring(errorMessage))
             return
         end
 
@@ -403,6 +436,7 @@ end
 local function requestSnapshot()
     state.scanning = true
     state.lastPollAt = globals.RealTime()
+	logActivity("polling backend...", false)
     local urls = buildSnapshotURLVariants()
     enqueueSnapshotAttempt(urls, 1)
 end
@@ -416,8 +450,8 @@ local function refreshEnabled()
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
-		state.startupProbePending = true
-		state.startupProbeAttempts = 0
+        state.startupProbePending = true
+        state.startupProbeAttempts = 0
     end
 
     if newApiKey ~= state.apiKey then
@@ -425,19 +459,19 @@ local function refreshEnabled()
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
-		state.startupProbePending = true
-		state.startupProbeAttempts = 0
+        state.startupProbePending = true
+        state.startupProbeAttempts = 0
     end
 
     if scannerEnabled ~= state.enabled then
         state.enabled = scannerEnabled
         if state.enabled then
-			state.startupProbePending = true
-			state.startupProbeAttempts = 0
+            state.startupProbePending = true
+            state.startupProbeAttempts = 0
             printInfo({ 120, 220, 255, 255 }, "[MAC] scanning enabled")
         else
-			state.startupProbePending = true
-			state.startupProbeAttempts = 0
+            state.startupProbePending = true
+            state.startupProbeAttempts = 0
             printInfo({ 200, 200, 200, 255 }, "[MAC] scanning disabled")
         end
     end
@@ -451,8 +485,8 @@ local function onGameEvent(event)
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
-		state.startupProbePending = true
-		state.startupProbeAttempts = 0
+        state.startupProbePending = true
+        state.startupProbeAttempts = 0
     elseif eventName == "player_connect" or eventName == "player_connect_client" then
         state.lastPollAt = 0
     end
