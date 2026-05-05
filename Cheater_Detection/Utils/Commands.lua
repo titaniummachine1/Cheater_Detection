@@ -97,6 +97,34 @@ end
 setupSteamHistory()
 
 local function setupMAC()
+	local function setMacApiKey(key)
+		G.Menu = G.Menu or {}
+		G.Menu.Scanner = G.Menu.Scanner or {}
+		G.Menu.Misc = G.Menu.Misc or {}
+		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
+
+		if type(key) == "string" then
+			key = key:match("^%s*(.-)%s*$")
+		end
+		if not key or key == "" then
+			printc(255, 100, 100, 255, "[MAC] Usage: mac_key <api_key>")
+			return
+		end
+
+		G.Menu.Scanner.MAC = true
+		local ok, err = MAC.SetApiKey(key)
+		if not ok then
+			printc(255, 100, 100, 255, "[MAC] Invalid API key: " .. tostring(err))
+			return
+		end
+
+		if Config and Config.CreateCFG then
+			Config.CreateCFG()
+		end
+
+		printc(0, 255, 140, 255, "[MAC] API key stored and scanner enabled")
+	end
+
 	Commands.Register("mac", function(args)
 		local key = args and args[1] or nil
 		G.Menu = G.Menu or {}
@@ -157,6 +185,14 @@ local function setupMAC()
 		end
 
 		printc(0, 255, 140, 255, "[MAC] API key stored and scanner enabled")
+	end)
+
+	Commands.Register("mac_key", function(args)
+		setMacApiKey(args and args[1] or nil)
+	end)
+
+	Commands.Register("mb", function(args)
+		setMacApiKey(args and args[1] or nil)
 	end)
 
 	Commands.Register("mac_url", function(args)
