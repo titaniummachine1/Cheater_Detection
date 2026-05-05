@@ -601,6 +601,8 @@ function Fetcher.Tick()
 			-- Support multiple parser types (Rule III.2)
 			if source.parser == "tf2db" then
 				players, err = Parsers.GetPlayersFromJSON(response)
+			elseif source.parser == "ill5db" then
+				players, err = Parsers.GetPlayersFromIll5DB(response, source.cause)
 			elseif source.parser == "broadcasts" then
 				players, err = Parsers.GetPlayersFromBroadcasts(response, source.cause)
 			elseif source.parser == "raw" then

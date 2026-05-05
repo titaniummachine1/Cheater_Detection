@@ -19,9 +19,10 @@ Sources.List = {
 	},
 	{
 		name = "MegaScaterbomb",
-		url = "https://raw.githubusercontent.com/ill5-com/megascatterbomb-tf2-cheater-database/main/megascatterbomb-tf2-cheater-database.min.json",
+		url =
+		"https://raw.githubusercontent.com/ill5-com/megascatterbomb-tf2-cheater-database/main/megascatterbomb-tf2-cheater-database.min.json",
 		cause = "Cheater (MegaScaterbomb)",
-		parser = "tf2db",
+		parser = "ill5db",
 		sourceID = "mega_scat"
 	},
 	{
@@ -85,7 +86,7 @@ function Sources.AddSource(name, url, cause, parser)
 		return false
 	end
 
-	if parser ~= "raw" and parser ~= "tf2db" and parser ~= "broadcasts" then
+	if parser ~= "raw" and parser ~= "tf2db" and parser ~= "broadcasts" and parser ~= "ill5db" then
 		print("[Database Fetcher] Error: Invalid parser type: " .. parser)
 		return false
 	end

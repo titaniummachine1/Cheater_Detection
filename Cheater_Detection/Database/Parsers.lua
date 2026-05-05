@@ -382,6 +382,48 @@ function Parsers.GetPlayersFromBroadcasts(contentString, fallbackReason)
 	return players, nil
 end
 
+-- Parses the ill5-com megascatterbomb flat JSON array format:
+-- [{id, id1, id3, label, type, aliases}, ...]
+-- Converts to the tf2db player shape expected by ParseTF2BotDetector_MergeEntry.
+function Parsers.GetPlayersFromIll5DB(contentString, fallbackReason)
+	assert(type(contentString) == "string", "GetPlayersFromIll5DB: contentString must be string")
+
+	local stripped = contentString:gsub("^\xEF\xBB\xBF", "")
+
+	if stripped:match("^%s*<!") or stripped:match("^%s*<html") then
+		return nil, "Response is HTML (likely CDN error page)"
+	end
+
+	local success, decoded = pcall(Json.decode, stripped)
+	if not success then
+		return nil, "JSON decode error: " .. tostring(decoded)
+	end
+
+	if type(decoded) ~= "table" then
+		return nil, "JSON decode returned " .. type(decoded)
+	end
+
+	if #decoded == 0 then
+		return {}, nil
+	end
+
+	local reason = fallbackReason or "Cheater (MegaScaterbomb)"
+	local players = {}
+	for i = 1, #decoded do
+		local entry = decoded[i]
+		if type(entry) == "table" and type(entry.id) == "string" then
+			local entryType = type(entry.type) == "string" and entry.type or reason
+			players[#players + 1] = {
+				steamid = entry.id,
+				last_seen = { player_name = entry.label },
+				attributes = { entryType },
+			}
+		end
+	end
+
+	return players, nil
+end
+
 -- Processes a single player entry into the database
 -- Returns: wasAdded, wasUpdated, wasError
 function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticSource, defaultReason)
