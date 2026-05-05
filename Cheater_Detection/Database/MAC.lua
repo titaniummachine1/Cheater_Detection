@@ -230,6 +230,43 @@ local function handleError(message)
     end
 end
 
+local function previewBody(body)
+    if type(body) ~= "string" then
+        return ""
+    end
+    local snippet = body:sub(1, 180)
+    snippet = snippet:gsub("\r", " "):gsub("\n", " ")
+    return snippet
+end
+
+local function extractPlayers(decoded)
+    if type(decoded) ~= "table" then
+        return nil, nil
+    end
+
+    if type(decoded.players) == "table" then
+        return decoded.players, nil
+    end
+
+    if type(decoded.data) == "table" and type(decoded.data.players) == "table" then
+        return decoded.data.players, nil
+    end
+
+    if decoded[1] ~= nil then
+        return decoded, nil
+    end
+
+    if type(decoded.error) == "string" and decoded.error ~= "" then
+        return nil, decoded.error
+    end
+
+    if type(decoded.message) == "string" and decoded.message ~= "" then
+        return nil, decoded.message
+    end
+
+    return nil, nil
+end
+
 local function handleResponse(body)
     if type(body) ~= "string" then
         handleError("invalid response from backend")
@@ -251,13 +288,17 @@ local function handleResponse(body)
 
     local ok, decoded = pcall(Json.decode, body)
     if not ok or type(decoded) ~= "table" then
-        handleError("invalid json from backend")
+        handleError("invalid json from backend: " .. previewBody(body))
         return
     end
 
-    local players = decoded.players
+    local players, payloadError = extractPlayers(decoded)
     if type(players) ~= "table" then
-        handleError("missing players array in mac/game/v1 response")
+        if type(payloadError) == "string" and payloadError ~= "" then
+            handleError("backend error: " .. payloadError)
+        else
+            handleError("missing players array in mac/game/v1 response")
+        end
         return
     end
 
@@ -281,7 +322,11 @@ local function requestSnapshot()
     state.scanning = true
     state.lastPollAt = globals.RealTime()
     local url = buildSnapshotURL()
-    local enqueued = HttpQueue.Enqueue(url, function(body)
+    local enqueued = HttpQueue.Enqueue(url, function(body, errorMessage)
+        if errorMessage ~= nil then
+            handleError("request failed: " .. tostring(errorMessage))
+            return
+        end
         handleResponse(body)
     end, nil, { noDelay = true, highPriority = true, bridgeTimeoutMs = 6000, bridgeMaxBytes = 1024 * 1024 })
 
