@@ -20,6 +20,7 @@ local MAC_GAME_ENDPOINT = "/mac/game/v1"
 local POLL_INTERVAL = 4.0
 local ERROR_RETRY_SECONDS = 8.0
 local ERROR_LOG_INTERVAL = 12.0
+local STARTUP_PROBE_RETRY_SECONDS = 1.0
 
 local state = {
     enabled = false,
@@ -31,6 +32,8 @@ local state = {
     lastSuccessAt = 0,
     baseURL = DEFAULT_BASE_URL,
     apiKey = nil,
+    startupProbePending = true,
+    startupProbeAttempts = 0,
 }
 
 local function printInfo(color, text)
@@ -241,6 +244,17 @@ local function applyVerdict(steamID, playerEntry)
 end
 
 local function handleError(message)
+    if state.startupProbePending then
+        state.startupProbeAttempts = state.startupProbeAttempts + 1
+        if state.startupProbeAttempts < 2 then
+            state.scanning = false
+            state.nextRetryAt = globals.RealTime() + STARTUP_PROBE_RETRY_SECONDS
+            state.lastError = ""
+            return
+        end
+        state.startupProbePending = false
+    end
+
     state.scanning = false
     state.lastError = message
     state.nextRetryAt = globals.RealTime() + ERROR_RETRY_SECONDS
@@ -345,6 +359,8 @@ local function handleResponse(body)
     state.lastSuccessAt = globals.RealTime()
     state.lastError = ""
     state.nextRetryAt = 0
+	state.startupProbePending = false
+	state.startupProbeAttempts = 0
     return true, nil
 end
 
@@ -400,6 +416,8 @@ local function refreshEnabled()
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
+		state.startupProbePending = true
+		state.startupProbeAttempts = 0
     end
 
     if newApiKey ~= state.apiKey then
@@ -407,13 +425,19 @@ local function refreshEnabled()
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
+		state.startupProbePending = true
+		state.startupProbeAttempts = 0
     end
 
     if scannerEnabled ~= state.enabled then
         state.enabled = scannerEnabled
         if state.enabled then
+			state.startupProbePending = true
+			state.startupProbeAttempts = 0
             printInfo({ 120, 220, 255, 255 }, "[MAC] scanning enabled")
         else
+			state.startupProbePending = true
+			state.startupProbeAttempts = 0
             printInfo({ 200, 200, 200, 255 }, "[MAC] scanning disabled")
         end
     end
@@ -427,6 +451,8 @@ local function onGameEvent(event)
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
+		state.startupProbePending = true
+		state.startupProbeAttempts = 0
     elseif eventName == "player_connect" or eventName == "player_connect_client" then
         state.lastPollAt = 0
     end
