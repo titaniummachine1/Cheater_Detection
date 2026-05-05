@@ -53,6 +53,13 @@ Sources.List = {
 		sourceID = "mega_scat"
 	},
 	{
+		name = "Masterbase Broadcasts",
+		url = "https://masterbase.megascatterbomb.com/broadcasts",
+		cause = "Masterbase Broadcast Conviction",
+		parser = "broadcasts",
+		sourceID = "masterbase_broadcasts"
+	},
+	{
 		name = "qfoxb Player List",
 		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
 		cause = "TF2BD Community (qfoxb)",
@@ -78,7 +85,7 @@ function Sources.AddSource(name, url, cause, parser)
 		return false
 	end
 
-	if parser ~= "raw" and parser ~= "tf2db" then
+	if parser ~= "raw" and parser ~= "tf2db" and parser ~= "broadcasts" then
 		print("[Database Fetcher] Error: Invalid parser type: " .. parser)
 		return false
 	end

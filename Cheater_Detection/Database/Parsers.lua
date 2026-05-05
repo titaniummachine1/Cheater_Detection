@@ -165,6 +165,68 @@ local function buildReasonFromAttributes(attributes, fallbackReason)
 	return first
 end
 
+local function appendUniqueAttribute(attributes, value)
+	local trimmed = trimString(value)
+	if not trimmed then
+		return
+	end
+	for i = 1, #attributes do
+		if attributes[i] == trimmed then
+			return
+		end
+	end
+	attributes[#attributes + 1] = trimmed
+end
+
+local function findSteamIDsInText(text, sink)
+	if type(text) ~= "string" or type(sink) ~= "table" then
+		return
+	end
+	for steamID in text:gmatch("7656119%d+") do
+		if #steamID == 17 then
+			sink[steamID] = true
+		end
+	end
+end
+
+local function harvestSteamIDs(node, sink, depth)
+	if type(node) == "string" then
+		findSteamIDsInText(node, sink)
+		return
+	end
+	if type(node) == "number" then
+		local asText = tostring(node)
+		if #asText == 17 and asText:match("^7656119%d+$") then
+			sink[asText] = true
+		end
+		return
+	end
+	if type(node) ~= "table" then
+		return
+	end
+	if depth > 3 then
+		return
+	end
+
+	for key, value in pairs(node) do
+		if type(key) == "string" then
+			local lowered = key:lower()
+			if lowered:find("steam", 1, true) then
+				harvestSteamIDs(value, sink, depth + 1)
+			elseif type(value) == "string" then
+				findSteamIDsInText(value, sink)
+			end
+		end
+		if type(value) == "table" then
+			harvestSteamIDs(value, sink, depth + 1)
+		elseif type(value) == "string" then
+			findSteamIDsInText(value, sink)
+		elseif type(value) == "number" then
+			harvestSteamIDs(value, sink, depth + 1)
+		end
+	end
+end
+
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
 function Parsers.GetSteamID64(input)
@@ -253,6 +315,70 @@ function Parsers.GetPlayersFromJSON(contentString)
 
 	if not players then
 		return nil, "JSON missing 'players' array"
+	end
+
+	return players, nil
+end
+
+function Parsers.GetPlayersFromBroadcasts(contentString, fallbackReason)
+	if not contentString or contentString == "" then
+		return nil, "Empty content string"
+	end
+
+	if not Json or type(Json.decode) ~= "function" then
+		return nil, "JSON decode function is unavailable"
+	end
+
+	local stripped = contentString:gsub("^\xEF\xBB\xBF", "")
+	if stripped:match("^%s*<!") or stripped:match("^%s*<html") then
+		return nil, "Response is HTML (likely CDN error page), length=" .. #stripped
+	end
+
+	local ok, decoded = pcall(Json.decode, stripped)
+	if not ok then
+		return nil, "JSON decode error: " .. tostring(decoded)
+	end
+	if type(decoded) ~= "table" then
+		return nil, "JSON decode returned " .. type(decoded)
+	end
+
+	local broadcasts = decoded.broadcasts
+	if type(broadcasts) ~= "table" then
+		if decoded[1] ~= nil then
+			broadcasts = decoded
+		else
+			return nil, "Broadcast payload missing array"
+		end
+	end
+
+	local players = {}
+	local seen = {}
+	local reasonSeed = fallbackReason or "Masterbase Broadcast Conviction"
+
+	for i = 1, #broadcasts do
+		local item = broadcasts[i]
+		if type(item) == "table" then
+			local candidateIDs = {}
+			harvestSteamIDs(item, candidateIDs, 0)
+
+			local attributes = {}
+			appendUniqueAttribute(attributes, reasonSeed)
+			appendUniqueAttribute(attributes, item.type)
+			appendUniqueAttribute(attributes, item.reason)
+			appendUniqueAttribute(attributes, item.importance)
+			appendUniqueAttribute(attributes, item.title)
+			appendUniqueAttribute(attributes, item.message)
+
+			for steamID, _ in pairs(candidateIDs) do
+				if not seen[steamID] then
+					seen[steamID] = true
+					players[#players + 1] = {
+						steamid = steamID,
+						attributes = attributes,
+					}
+				end
+			end
+		end
 	end
 
 	return players, nil

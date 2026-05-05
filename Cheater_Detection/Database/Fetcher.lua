@@ -61,6 +61,51 @@ local function proxyGitHubUrl(url)
 	return url
 end
 
+local function urlEncode(value)
+	if type(value) ~= "string" then
+		return nil
+	end
+	return string.gsub(value, "([^%w%-_%.~])", function(character)
+		return string.format("%%%02X", string.byte(character))
+	end)
+end
+
+local function buildFetchUrl(source)
+	if type(source) ~= "table" then
+		return nil, "invalid source"
+	end
+	if type(source.url) ~= "string" or source.url == "" then
+		return nil, "missing source url"
+	end
+
+	if source.parser ~= "broadcasts" then
+		return proxyGitHubUrl(source.url), nil
+	end
+
+	local key = G
+		and G.Menu
+		and G.Menu.Misc
+		and G.Menu.Misc.MAC
+		and G.Menu.Misc.MAC.ApiKey
+		or nil
+	if type(key) == "string" then
+		key = key:match("^%s*(.-)%s*$")
+	end
+	if type(key) ~= "string" or key == "" then
+		return nil, "missing MAC API key for broadcasts source"
+	end
+
+	local encodedKey = urlEncode(key)
+	if not encodedKey then
+		return nil, "failed to encode MAC API key"
+	end
+
+	if source.url:find("?", 1, true) then
+		return source.url .. "&api_key=" .. encodedKey, nil
+	end
+	return source.url .. "?api_key=" .. encodedKey, nil
+end
+
 -- Returns true when frame-time budget restrictions on the fetcher can be
 -- relaxed: either the local player is dead (no active gameplay to stutter)
 -- or we are not connected to a game at all.
@@ -515,7 +560,12 @@ function Fetcher.Tick()
 			return
 		end
 
-		local fetchUrl = proxyGitHubUrl(source.url)
+		local fetchUrl, fetchErr = buildFetchUrl(source)
+		if not fetchUrl then
+			Logger.Warning("Fetcher", "[FETCHER] Skipping source " .. source.name .. ": " .. tostring(fetchErr))
+			state.sourceIdx = state.sourceIdx + 1
+			return
+		end
 		local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
 		if not enqueued then
 			-- Strict queue mode can reject while another module is using HTTP.
@@ -582,6 +632,8 @@ function Fetcher.Tick()
 			-- Support multiple parser types (Rule III.2)
 			if source.parser == "tf2db" then
 				players, err = Parsers.GetPlayersFromJSON(response)
+			elseif source.parser == "broadcasts" then
+				players, err = Parsers.GetPlayersFromBroadcasts(response, source.cause)
 			elseif source.parser == "raw" then
 				Logger.Debug("Fetcher", "[FETCHER] Online source is raw IDs, parsing incrementally")
 				state.rawText = response
@@ -611,7 +663,14 @@ function Fetcher.Tick()
 					state.onlineNilRetryCount[sourceName] = retryCount
 
 					if retryCount <= MAX_JSON_NIL_RETRIES then
-						local fetchUrl = proxyGitHubUrl(source.url)
+						local fetchUrl, fetchErr = buildFetchUrl(source)
+						if not fetchUrl then
+							Logger.Warning("Fetcher", "[FETCHER] Retry skipped for " .. sourceName .. ": " .. tostring(fetchErr))
+							state.sourceIdx = state.sourceIdx + 1
+							state.results.errors = state.results.errors + 1
+							state.mode = "ONLINE_FETCH"
+							return
+						end
 						local reEnqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
 						if reEnqueued then
 							state.onlinePendingCount = state.onlinePendingCount + 1
