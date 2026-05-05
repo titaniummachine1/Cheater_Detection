@@ -36,6 +36,7 @@ local state = {
     startupProbePending = true,
     startupProbeAttempts = 0,
     lastActivityLogAt = 0,
+	pollAttempt = 0,
 }
 
 local function printInfo(color, text)
@@ -273,6 +274,15 @@ local function handleError(message)
     state.scanning = false
     state.lastError = message
     state.nextRetryAt = globals.RealTime() + ERROR_RETRY_SECONDS
+    printInfo(
+		{ 255, 120, 120, 255 },
+		string.format(
+			"[MAC] poll #%d failed: %s (retry in %.1fs)",
+			state.pollAttempt,
+			tostring(message),
+			ERROR_RETRY_SECONDS
+		)
+	)
     if globals.RealTime() - state.lastErrorAt >= ERROR_LOG_INTERVAL then
         state.lastErrorAt = globals.RealTime()
         printInfo({ 255, 120, 120, 255 }, "[MAC] " .. message)
@@ -386,7 +396,15 @@ local function handleResponse(body)
     end
 
     logActivity(
-    string.format("poll complete: players=%d cheater=%d suspicious=%d", processed, flaggedCheater, flaggedSus), false)
+        string.format(
+            "poll #%d complete: players=%d cheater=%d suspicious=%d",
+            state.pollAttempt,
+            processed,
+            flaggedCheater,
+            flaggedSus
+        ),
+        true
+    )
 
     state.scanning = false
     state.lastSuccessAt = globals.RealTime()
@@ -436,8 +454,17 @@ end
 
 local function requestSnapshot()
     state.scanning = true
+    state.pollAttempt = state.pollAttempt + 1
     state.lastPollAt = globals.RealTime()
-    logActivity("polling backend...", false)
+    logActivity(
+        string.format(
+            "poll #%d start: %s (key=%s)",
+            state.pollAttempt,
+            tostring(state.baseURL .. MAC_GAME_ENDPOINT),
+            tostring(state.apiKey ~= nil)
+        ),
+        true
+    )
     local urls = buildSnapshotURLVariants()
     enqueueSnapshotAttempt(urls, 1)
 end
