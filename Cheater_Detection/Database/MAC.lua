@@ -318,10 +318,11 @@ local function handleResponse(body)
         end
     end
 
+    ---@cast players table
+
     local count = #players
     if count > 0 then
-        for i = 1, count do
-            local playerEntry = players[i]
+        for _, playerEntry in ipairs(players) do
             if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
                 local steamID = normalizeSteamID64(playerEntry.steamID64)
                 if steamID then
