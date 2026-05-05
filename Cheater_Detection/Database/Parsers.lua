@@ -358,16 +358,14 @@ function Parsers.GetPlayersFromBroadcasts(contentString, fallbackReason)
 	for i = 1, #broadcasts do
 		local item = broadcasts[i]
 		if type(item) == "table" then
+			-- Table schema: message varchar, importance varchar, post_date timestamptz
 			local candidateIDs = {}
+			findSteamIDsInText(item.message, candidateIDs)
 			harvestSteamIDs(item, candidateIDs, 0)
 
 			local attributes = {}
 			appendUniqueAttribute(attributes, reasonSeed)
-			appendUniqueAttribute(attributes, item.type)
-			appendUniqueAttribute(attributes, item.reason)
 			appendUniqueAttribute(attributes, item.importance)
-			appendUniqueAttribute(attributes, item.title)
-			appendUniqueAttribute(attributes, item.message)
 
 			for steamID, _ in pairs(candidateIDs) do
 				if not seen[steamID] then

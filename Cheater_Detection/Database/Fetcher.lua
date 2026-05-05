@@ -61,15 +61,6 @@ local function proxyGitHubUrl(url)
 	return url
 end
 
-local function urlEncode(value)
-	if type(value) ~= "string" then
-		return nil
-	end
-	return string.gsub(value, "([^%w%-_%.~])", function(character)
-		return string.format("%%%02X", string.byte(character))
-	end)
-end
-
 local function buildFetchUrl(source)
 	if type(source) ~= "table" then
 		return nil, "invalid source"
@@ -77,33 +68,11 @@ local function buildFetchUrl(source)
 	if type(source.url) ~= "string" or source.url == "" then
 		return nil, "missing source url"
 	end
-
-	if source.parser ~= "broadcasts" then
-		return proxyGitHubUrl(source.url), nil
+	-- broadcasts endpoint is public, no auth needed
+	if source.parser == "broadcasts" then
+		return source.url, nil
 	end
-
-	local key = G
-		and G.Menu
-		and G.Menu.Misc
-		and G.Menu.Misc.MAC
-		and G.Menu.Misc.MAC.ApiKey
-		or nil
-	if type(key) == "string" then
-		key = key:match("^%s*(.-)%s*$")
-	end
-	if type(key) ~= "string" or key == "" then
-		return nil, "missing MAC API key for broadcasts source"
-	end
-
-	local encodedKey = urlEncode(key)
-	if not encodedKey then
-		return nil, "failed to encode MAC API key"
-	end
-
-	if source.url:find("?", 1, true) then
-		return source.url .. "&api_key=" .. encodedKey, nil
-	end
-	return source.url .. "?api_key=" .. encodedKey, nil
+	return proxyGitHubUrl(source.url), nil
 end
 
 -- Returns true when frame-time budget restrictions on the fetcher can be
