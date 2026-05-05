@@ -231,8 +231,16 @@ local function handleError(message)
 end
 
 local function handleResponse(body)
-    if type(body) ~= "string" or body == "" then
-        handleError("empty response from backend")
+    if type(body) ~= "string" then
+        handleError("invalid response from backend")
+        return
+    end
+
+    if body == "" then
+        state.scanning = false
+        state.lastSuccessAt = globals.RealTime()
+        state.lastError = ""
+        state.nextRetryAt = 0
         return
     end
 
