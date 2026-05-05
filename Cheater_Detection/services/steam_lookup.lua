@@ -28,6 +28,15 @@ local function countLoadedIDs()
 	return count
 end
 
+local function sortedKeysFromMap(map)
+	local ids = {}
+	for id in pairs(map) do
+		ids[#ids + 1] = tostring(id)
+	end
+	table.sort(ids)
+	return ids
+end
+
 --- Parse <steamID64> tags from Valve Group XML (stores as s64 string)
 local function parseGroupXML(xml)
 	if not xml or #xml == 0 then
@@ -118,6 +127,44 @@ end
 --- True once all configured Valve group pages have been fetched.
 function SteamLookup.IsGroupFetchComplete()
 	return fetchState.done == true
+end
+
+--- Returns all fetched Valve group IDs (sorted ascending).
+function SteamLookup.GetFetchedGroupIDs()
+	return sortedKeysFromMap(autoFetchedID64s)
+end
+
+--- Returns fetched group IDs that are not present in static known Valve lists.
+function SteamLookup.GetMissingFetchedIDs()
+	local missing = {}
+	for id in pairs(autoFetchedID64s) do
+		if ValveData.KnownSteamID64s[tostring(id)] ~= true then
+			missing[#missing + 1] = tostring(id)
+		end
+	end
+	table.sort(missing)
+	return missing
+end
+
+--- Prints fetched IDs (all or missing-only) to console for manual copy/paste.
+function SteamLookup.DumpFetchedGroupIDs(missingOnly)
+	local ids = nil
+	if missingOnly == true then
+		ids = SteamLookup.GetMissingFetchedIDs()
+		print(string.format("[SteamLookup] Missing IDs (fetched but not static): %d", #ids))
+	else
+		ids = SteamLookup.GetFetchedGroupIDs()
+		print(string.format("[SteamLookup] Dumping fetched group IDs: %d", #ids))
+	end
+
+	if #ids == 0 then
+		print("[SteamLookup] No IDs to print yet. Wait until group fetch is complete.")
+		return
+	end
+
+	for i = 1, #ids do
+		print(string.format("[SteamLookup][%03d] %s", i, ids[i]))
+	end
 end
 
 --- Check if a Steam2 ID is in the manual Valve list (legacy)

@@ -4,6 +4,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local ValveData = require("Cheater_Detection.data.valve_data")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
+local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 local MAC = require("Cheater_Detection.Database.MAC")
 local Config = require("Cheater_Detection.Utils.Config")
@@ -143,6 +144,33 @@ end
 setupMAC()
 
 local function setupDiagnostics()
+	Commands.Register("valve_group_dump", function(_args)
+		if SteamLookup and SteamLookup.DumpFetchedGroupIDs then
+			SteamLookup.DumpFetchedGroupIDs(false)
+		else
+			printc(255, 100, 100, 255, "[SteamLookup] dump unavailable")
+		end
+	end)
+
+	Commands.Register("valve_group_missing", function(_args)
+		if SteamLookup and SteamLookup.DumpFetchedGroupIDs then
+			SteamLookup.DumpFetchedGroupIDs(true)
+		else
+			printc(255, 100, 100, 255, "[SteamLookup] missing-dump unavailable")
+		end
+	end)
+
+	Commands.Register("valve_group_status", function(_args)
+		local fetched = (SteamLookup and SteamLookup.GetFetchedGroupIDs and SteamLookup.GetFetchedGroupIDs()) or {}
+		local missing = (SteamLookup and SteamLookup.GetMissingFetchedIDs and SteamLookup.GetMissingFetchedIDs()) or {}
+		local complete = SteamLookup and SteamLookup.IsGroupFetchComplete and SteamLookup.IsGroupFetchComplete()
+		printc(100, 220, 255, 255, "[SteamLookup] Status:")
+		printc(200, 200, 200, 255, string.format("  fetchComplete : %s", tostring(complete == true)))
+		printc(200, 200, 200, 255, string.format("  fetchedIDs    : %d", #fetched))
+		printc(200, 200, 200, 255, string.format("  missingStatic : %d", #missing))
+		printc(200, 200, 200, 255, "  commands      : valve_group_dump / valve_group_missing")
+	end)
+
 	Commands.Register("cd_myid", function(_args)
 		local localPlayer = entities.GetLocalPlayer()
 		if not localPlayer then
