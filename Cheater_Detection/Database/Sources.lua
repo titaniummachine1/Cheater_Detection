@@ -12,7 +12,7 @@ local Sources = {}
 Sources.List = {
 	{
 		name = "Masterbase Broadcasts",
-		url = "https://masterbase.megascatterbomb.com/broadcasts",
+		url = "https://megaanticheat.com/broadcasts",
 		cause = "Masterbase Broadcast Conviction",
 		parser = "broadcasts",
 		sourceID = "masterbase_broadcasts"
