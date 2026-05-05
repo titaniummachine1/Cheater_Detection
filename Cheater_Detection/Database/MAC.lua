@@ -36,7 +36,8 @@ local state = {
     startupProbePending = true,
     startupProbeAttempts = 0,
     lastActivityLogAt = 0,
-	pollAttempt = 0,
+    pollAttempt = 0,
+	loggedLocalhostHint = false,
 }
 
 local function printInfo(color, text)
@@ -274,19 +275,28 @@ local function handleError(message)
     state.scanning = false
     state.lastError = message
     state.nextRetryAt = globals.RealTime() + ERROR_RETRY_SECONDS
-    printInfo(
-		{ 255, 120, 120, 255 },
-		string.format(
-			"[MAC] poll #%d failed: %s (retry in %.1fs)",
-			state.pollAttempt,
-			tostring(message),
-			ERROR_RETRY_SECONDS
-		)
-	)
-    if globals.RealTime() - state.lastErrorAt >= ERROR_LOG_INTERVAL then
-        state.lastErrorAt = globals.RealTime()
-        printInfo({ 255, 120, 120, 255 }, "[MAC] " .. message)
+
+    if not state.loggedLocalhostHint then
+        local lowerBase = tostring(state.baseURL):lower()
+        local lowerMessage = tostring(message):lower()
+        local isLocalhost = lowerBase:find("127.0.0.1", 1, true) ~= nil or lowerBase:find("localhost", 1, true) ~= nil
+        local refused = lowerMessage:find("10061", 1, true) ~= nil or lowerMessage:find("actively refused", 1, true) ~= nil
+        if isLocalhost and refused then
+            state.loggedLocalhostHint = true
+            printInfo({ 255, 180, 100, 255 }, "[MAC] Local backend unreachable at " .. tostring(state.baseURL))
+            printInfo({ 255, 180, 100, 255 }, "[MAC] Start MAC backend or set endpoint with: mac_url <base_url>")
+        end
     end
+
+    printInfo(
+        { 255, 120, 120, 255 },
+        string.format(
+            "[MAC] poll #%d failed: %s (retry in %.1fs)",
+            state.pollAttempt,
+            tostring(message),
+            ERROR_RETRY_SECONDS
+        )
+    )
 end
 
 local function previewBody(body)
@@ -480,6 +490,7 @@ local function refreshEnabled()
         state.lastError = ""
         state.startupProbePending = true
         state.startupProbeAttempts = 0
+		state.loggedLocalhostHint = false
     end
 
     if newApiKey ~= state.apiKey then
@@ -489,6 +500,7 @@ local function refreshEnabled()
         state.lastError = ""
         state.startupProbePending = true
         state.startupProbeAttempts = 0
+		state.loggedLocalhostHint = false
     end
 
     if scannerEnabled ~= state.enabled then
