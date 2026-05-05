@@ -350,21 +350,21 @@ local function handleResponse(body)
     ---@cast players table
 
     local count = #players
-	local processed = 0
-	local flaggedCheater = 0
-	local flaggedSus = 0
+    local processed = 0
+    local flaggedCheater = 0
+    local flaggedSus = 0
     if count > 0 then
         for _, playerEntry in ipairs(players) do
             if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
                 local steamID = normalizeSteamID64(playerEntry.steamID64)
                 if steamID then
-					processed = processed + 1
-					local verdictResult = applyVerdict(steamID, playerEntry)
-					if verdictResult == "cheater" then
-						flaggedCheater = flaggedCheater + 1
-					elseif verdictResult == "sus" then
-						flaggedSus = flaggedSus + 1
-					end
+                    processed = processed + 1
+                    local verdictResult = applyVerdict(steamID, playerEntry)
+                    if verdictResult == "cheater" then
+                        flaggedCheater = flaggedCheater + 1
+                    elseif verdictResult == "sus" then
+                        flaggedSus = flaggedSus + 1
+                    end
                 end
             end
         end
@@ -373,19 +373,20 @@ local function handleResponse(body)
             if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
                 local steamID = normalizeSteamID64(playerEntry.steamID64)
                 if steamID then
-					processed = processed + 1
-					local verdictResult = applyVerdict(steamID, playerEntry)
-					if verdictResult == "cheater" then
-						flaggedCheater = flaggedCheater + 1
-					elseif verdictResult == "sus" then
-						flaggedSus = flaggedSus + 1
-					end
+                    processed = processed + 1
+                    local verdictResult = applyVerdict(steamID, playerEntry)
+                    if verdictResult == "cheater" then
+                        flaggedCheater = flaggedCheater + 1
+                    elseif verdictResult == "sus" then
+                        flaggedSus = flaggedSus + 1
+                    end
                 end
             end
         end
     end
 
-	logActivity(string.format("poll complete: players=%d cheater=%d suspicious=%d", processed, flaggedCheater, flaggedSus), false)
+    logActivity(
+    string.format("poll complete: players=%d cheater=%d suspicious=%d", processed, flaggedCheater, flaggedSus), false)
 
     state.scanning = false
     state.lastSuccessAt = globals.RealTime()
@@ -409,8 +410,8 @@ local function enqueueSnapshotAttempt(urls, attemptIndex)
                 enqueueSnapshotAttempt(urls, attemptIndex + 1)
                 return
             end
-			local displayURL = tostring(url):gsub("%?.*$", "")
-			handleError("request failed: " .. displayURL .. " " .. tostring(errorMessage))
+            local displayURL = tostring(url):gsub("%?.*$", "")
+            handleError("request failed: " .. displayURL .. " " .. tostring(errorMessage))
             return
         end
 
@@ -436,7 +437,7 @@ end
 local function requestSnapshot()
     state.scanning = true
     state.lastPollAt = globals.RealTime()
-	logActivity("polling backend...", false)
+    logActivity("polling backend...", false)
     local urls = buildSnapshotURLVariants()
     enqueueSnapshotAttempt(urls, 1)
 end
