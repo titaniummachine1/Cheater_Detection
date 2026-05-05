@@ -11,6 +11,20 @@ local Sources = {}
 -- List of available sources
 Sources.List = {
 	{
+		name = "MegaScaterbomb",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
+		cause = "Cheater (MegaScaterbomb)",
+		parser = "tf2db",
+		sourceID = "mega_scat"
+	},
+	{
+		name = "Masterbase Broadcasts",
+		url = "https://masterbase.megascatterbomb.com/broadcasts",
+		cause = "Masterbase Broadcast Conviction",
+		parser = "broadcasts",
+		sourceID = "masterbase_broadcasts"
+	},
+	{
 		name = "d3fc0n6 Cheater List",
 		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
 		cause = "D3fc0n6 Cheater List",
@@ -44,20 +58,6 @@ Sources.List = {
 		cause = "TF2BD Official",
 		parser = "tf2db",
 		sourceID = "tf2bd_off"
-	},
-	{
-		name = "MegaScaterbomb",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
-		cause = "Cheater (MegaScaterbomb)",
-		parser = "tf2db",
-		sourceID = "mega_scat"
-	},
-	{
-		name = "Masterbase Broadcasts",
-		url = "https://masterbase.megascatterbomb.com/broadcasts",
-		cause = "Masterbase Broadcast Conviction",
-		parser = "broadcasts",
-		sourceID = "masterbase_broadcasts"
 	},
 	{
 		name = "qfoxb Player List",
