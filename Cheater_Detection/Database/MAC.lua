@@ -17,7 +17,8 @@ local Json = Common.Json
 
 local DEFAULT_BASE_URL = "http://127.0.0.1:3000"
 local MAC_GAME_ENDPOINT = "/mac/game/v1"
-local POLL_INTERVAL = 4.0
+local EVENT_POLL_COOLDOWN = 1.5
+local HEARTBEAT_INTERVAL = 30.0
 local ERROR_RETRY_SECONDS = 8.0
 local ERROR_LOG_INTERVAL = 12.0
 local STARTUP_PROBE_RETRY_SECONDS = 1.0
@@ -37,7 +38,10 @@ local state = {
     startupProbeAttempts = 0,
     lastActivityLogAt = 0,
     pollAttempt = 0,
-	loggedLocalhostHint = false,
+    loggedLocalhostHint = false,
+    pollRequested = true,
+    pollReason = "startup",
+    currentServerIP = "",
 }
 
 local function printInfo(color, text)
@@ -280,7 +284,8 @@ local function handleError(message)
         local lowerBase = tostring(state.baseURL):lower()
         local lowerMessage = tostring(message):lower()
         local isLocalhost = lowerBase:find("127.0.0.1", 1, true) ~= nil or lowerBase:find("localhost", 1, true) ~= nil
-        local refused = lowerMessage:find("10061", 1, true) ~= nil or lowerMessage:find("actively refused", 1, true) ~= nil
+        local refused = lowerMessage:find("10061", 1, true) ~= nil or
+            lowerMessage:find("actively refused", 1, true) ~= nil
         if isLocalhost and refused then
             state.loggedLocalhostHint = true
             printInfo({ 255, 180, 100, 255 }, "[MAC] Local backend unreachable at " .. tostring(state.baseURL))
@@ -468,15 +473,25 @@ local function requestSnapshot()
     state.lastPollAt = globals.RealTime()
     logActivity(
         string.format(
-            "poll #%d start: %s (key=%s)",
+            "poll #%d start: %s (key=%s, reason=%s)",
             state.pollAttempt,
             tostring(state.baseURL .. MAC_GAME_ENDPOINT),
-            tostring(state.apiKey ~= nil)
+            tostring(state.apiKey ~= nil),
+            tostring(state.pollReason or "unknown")
         ),
         true
     )
+    state.pollRequested = false
+    state.pollReason = "periodic"
     local urls = buildSnapshotURLVariants()
     enqueueSnapshotAttempt(urls, 1)
+end
+
+local function requestSnapshotSoon(reason)
+    state.pollRequested = true
+    if type(reason) == "string" and reason ~= "" then
+        state.pollReason = reason
+    end
 end
 
 local function refreshEnabled()
@@ -490,7 +505,8 @@ local function refreshEnabled()
         state.lastError = ""
         state.startupProbePending = true
         state.startupProbeAttempts = 0
-		state.loggedLocalhostHint = false
+        state.loggedLocalhostHint = false
+        requestSnapshotSoon("base_url_changed")
     end
 
     if newApiKey ~= state.apiKey then
@@ -500,7 +516,8 @@ local function refreshEnabled()
         state.lastError = ""
         state.startupProbePending = true
         state.startupProbeAttempts = 0
-		state.loggedLocalhostHint = false
+        state.loggedLocalhostHint = false
+        requestSnapshotSoon("api_key_changed")
     end
 
     if scannerEnabled ~= state.enabled then
@@ -509,6 +526,7 @@ local function refreshEnabled()
             state.startupProbePending = true
             state.startupProbeAttempts = 0
             printInfo({ 120, 220, 255, 255 }, "[MAC] scanning enabled")
+            requestSnapshotSoon("enabled")
         else
             state.startupProbePending = true
             state.startupProbeAttempts = 0
@@ -527,14 +545,24 @@ local function onGameEvent(event)
         state.lastError = ""
         state.startupProbePending = true
         state.startupProbeAttempts = 0
+        requestSnapshotSoon("new_map")
     elseif eventName == "player_connect" or eventName == "player_connect_client" then
-        state.lastPollAt = 0
+        requestSnapshotSoon("player_join")
+    elseif eventName == "teamplay_round_start" or eventName == "post_inventory_application" then
+        requestSnapshotSoon("round_or_inventory")
     end
 end
 
 local function onCreateMove()
-    if not engine.GetServerIP() then
+    local serverIP = engine.GetServerIP()
+    if not serverIP then
+        state.currentServerIP = ""
         return
+    end
+
+    if serverIP ~= state.currentServerIP then
+        state.currentServerIP = serverIP
+        requestSnapshotSoon("server_changed")
     end
 
     if not refreshEnabled() then
@@ -550,7 +578,15 @@ local function onCreateMove()
         return
     end
 
-    if (now - state.lastPollAt) < POLL_INTERVAL then
+    if (now - state.lastPollAt) >= HEARTBEAT_INTERVAL then
+        requestSnapshotSoon("heartbeat")
+    end
+
+    if not state.pollRequested then
+        return
+    end
+
+    if (now - state.lastPollAt) < EVENT_POLL_COOLDOWN then
         return
     end
 
@@ -638,6 +674,7 @@ function MAC.QueueRescan()
     state.lastPollAt = 0
     state.nextRetryAt = 0
     state.lastError = ""
+    requestSnapshotSoon("manual_rescan")
 end
 
 callbacks.Unregister("FireGameEvent", "CD_MAC_Events")
