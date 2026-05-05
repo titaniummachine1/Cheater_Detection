@@ -166,7 +166,6 @@ local function setupMAC()
 				Config.CreateCFG()
 			end
 			printc(0, 255, 140, 255, "[MAC] Scanner enabled (no API key mode)")
-			printc(255, 200, 120, 255, "[MAC] Note: this queries MAC client-backend API (mac/user/v1)")
 			printc(200, 200, 200, 255, "[MAC] Public cheater lists come from Auto-Sync Databases")
 			printc(100, 220, 255, 255, "[MAC] Optional: mac <api_key> to set key, mac clear to remove key")
 			return

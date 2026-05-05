@@ -344,11 +344,11 @@ function Parsers.GetPlayersFromBroadcasts(contentString, fallbackReason)
 
 	local broadcasts = decoded.broadcasts
 	if type(broadcasts) ~= "table" then
-		if decoded[1] ~= nil then
-			broadcasts = decoded
-		else
-			return nil, "Broadcast payload missing array"
-		end
+		-- Root-level array (e.g. [] or [{...}])
+		broadcasts = decoded
+	end
+	if #broadcasts == 0 then
+		return {}, nil
 	end
 
 	local players = {}

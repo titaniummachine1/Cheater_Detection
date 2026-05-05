@@ -91,8 +91,6 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck == true)
 		TimMenu.NextLine()
-		Scanner.MAC = TimMenu.Checkbox("MAC Client-Backend Check", Scanner.MAC == true)
-		TimMenu.NextLine()
 		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave If Valve Employee Detected", JN.ValveAutoDisconnect == true)
 		TimMenu.NextLine()
 
@@ -103,9 +101,6 @@ local function DrawMenu()
 			shStatus = "Rate limited (Wait)"
 		end
 		TimMenu.Text("SteamHistory: " .. shStatus)
-		TimMenu.NextLine()
-		local macStatus = (MAC and MAC.GetStatusText and MAC.GetStatusText()) or "MAC: unavailable"
-		TimMenu.Text(macStatus)
 		TimMenu.NextLine()
 		TimMenu.Text("Public cheater lists are fetched by Auto-Sync Databases")
 		TimMenu.EndSector()

@@ -1,7 +1,6 @@
 --[[ Database/MAC.lua
-	Polls the MAC client-backend at localhost:1984 for player conviction data.
-	No API key is required for local read endpoints.
-	Run the MAC client-backend: github.com/MegaAntiCheat/client-backend
+	Polls the Masterbase API for player conviction data.
+	Requires a Masterbase API key set via: mac <api_key>
 ]]
 
 local MAC = {}
@@ -523,7 +522,9 @@ local function requestSnapshotSoon(reason)
 end
 
 local function refreshEnabled()
-    local scannerEnabled = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.MAC == true
+    local apiKey = G and G.Menu and G.Menu.Misc and G.Menu.Misc.MAC and G.Menu.Misc.MAC.ApiKey
+    local hasKey = type(apiKey) == "string" and apiKey:match("^%s*(.-)%s*$") ~= ""
+    local scannerEnabled = hasKey == true
     local newBaseURL = getBaseURL()
     local newApiKey = getApiKey()
     if newBaseURL ~= state.baseURL then
