@@ -100,6 +100,26 @@ local function buildSnapshotURL()
     return url .. "?key=" .. encoded
 end
 
+local function buildSnapshotURLVariants()
+    local base = state.baseURL .. MAC_GAME_ENDPOINT
+    local apiKey = state.apiKey
+    if not apiKey then
+        return { base }
+    end
+
+    local encoded = urlEncode(apiKey)
+    if not encoded then
+        return { base }
+    end
+
+    -- Spec-first: plain GET /mac/game/v1. Keep keyed variants for custom deployments.
+    return {
+        base,
+        base .. "?key=" .. encoded,
+        base .. "?api_key=" .. encoded,
+    }
+end
+
 local function normalizeSteamID64(rawID)
     if not rawID then
         return nil
@@ -269,8 +289,7 @@ end
 
 local function handleResponse(body)
     if type(body) ~= "string" then
-        handleError("invalid response from backend")
-        return
+        return false, "invalid response from backend"
     end
 
     if body == "" then
@@ -278,36 +297,45 @@ local function handleResponse(body)
         state.lastSuccessAt = globals.RealTime()
         state.lastError = ""
         state.nextRetryAt = 0
-        return
+        return true, nil
     end
 
     if type(Json) ~= "table" or type(Json.decode) ~= "function" then
-        handleError("json decoder missing")
-        return
+        return false, "json decoder missing"
     end
 
     local ok, decoded = pcall(Json.decode, body)
     if not ok or type(decoded) ~= "table" then
-        handleError("invalid json from backend: " .. previewBody(body))
-        return
+        return false, "invalid json from backend: " .. previewBody(body)
     end
 
     local players, payloadError = extractPlayers(decoded)
     if type(players) ~= "table" then
         if type(payloadError) == "string" and payloadError ~= "" then
-            handleError("backend error: " .. payloadError)
+            return false, "backend error: " .. payloadError
         else
-            handleError("missing players array in mac/game/v1 response")
+            return false, "missing players array in mac/game/v1 response"
         end
-        return
     end
 
-    for i = 1, #players do
-        local playerEntry = players[i]
-        if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
-            local steamID = normalizeSteamID64(playerEntry.steamID64)
-            if steamID then
-                applyVerdict(steamID, playerEntry)
+    local count = #players
+    if count > 0 then
+        for i = 1, count do
+            local playerEntry = players[i]
+            if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
+                local steamID = normalizeSteamID64(playerEntry.steamID64)
+                if steamID then
+                    applyVerdict(steamID, playerEntry)
+                end
+            end
+        end
+    else
+        for _, playerEntry in pairs(players) do
+            if type(playerEntry) == "table" and playerEntry.isSelf ~= true then
+                local steamID = normalizeSteamID64(playerEntry.steamID64)
+                if steamID then
+                    applyVerdict(steamID, playerEntry)
+                end
             end
         end
     end
@@ -316,24 +344,50 @@ local function handleResponse(body)
     state.lastSuccessAt = globals.RealTime()
     state.lastError = ""
     state.nextRetryAt = 0
+    return true, nil
 end
 
-local function requestSnapshot()
-    state.scanning = true
-    state.lastPollAt = globals.RealTime()
-    local url = buildSnapshotURL()
+local function enqueueSnapshotAttempt(urls, attemptIndex)
+    local url = urls[attemptIndex]
+    if type(url) ~= "string" or url == "" then
+        handleError("no valid MAC endpoint URL")
+        return
+    end
+
     local enqueued = HttpQueue.Enqueue(url, function(body, errorMessage)
         if errorMessage ~= nil then
+            if attemptIndex < #urls then
+                enqueueSnapshotAttempt(urls, attemptIndex + 1)
+                return
+            end
             handleError("request failed: " .. tostring(errorMessage))
             return
         end
-        handleResponse(body)
+
+        local ok, parseError = handleResponse(body)
+        if ok then
+            return
+        end
+
+        if attemptIndex < #urls then
+            enqueueSnapshotAttempt(urls, attemptIndex + 1)
+            return
+        end
+
+        handleError(parseError or "invalid response from backend")
     end, nil, { noDelay = true, highPriority = true, bridgeTimeoutMs = 6000, bridgeMaxBytes = 1024 * 1024 })
 
     if not enqueued then
         state.scanning = false
         state.nextRetryAt = globals.RealTime() + 1.0
     end
+end
+
+local function requestSnapshot()
+    state.scanning = true
+    state.lastPollAt = globals.RealTime()
+    local urls = buildSnapshotURLVariants()
+    enqueueSnapshotAttempt(urls, 1)
 end
 
 local function refreshEnabled()
