@@ -27,7 +27,8 @@ local activeAttemptInFlight = false
 local activeTransport = nil
 local activeBridgeRequestId = nil
 
-local BRIDGE_PROTOCOL = "local-http-bridge-v1"
+local BRIDGE_PROTOCOL = "local-http-bridge-v2"
+local BRIDGE_PROTOCOL_FALLBACK = "local-http-bridge-v1"
 local BRIDGE_BASE = "http://127.0.0.1:17354"
 local BRIDGE_STALL_LIMIT = 0.20
 local BRIDGE_REMOTE_TIMEOUT_MS = 12000
@@ -227,7 +228,9 @@ local function ProbeBridge(now)
 	end
 
 	local payload, err, stalled = BridgeJson("/health")
-	if payload and payload.ok == true and payload.alive == true and payload.protocol == BRIDGE_PROTOCOL then
+	local protocol = payload and payload.protocol or nil
+	local protocolOk = protocol == BRIDGE_PROTOCOL or protocol == BRIDGE_PROTOCOL_FALLBACK
+	if payload and payload.ok == true and payload.alive == true and protocolOk then
 		MarkBridgeAlive(payload.protocol, currentTime)
 		return true, nil
 	end
@@ -242,7 +245,10 @@ end
 
 local function CanUseBridgeTransport()
 	RefreshBridgeSafeWindowGate()
-	return bridgeState.alive == true and bridgeState.protocol == BRIDGE_PROTOCOL
+	if bridgeState.alive ~= true then
+		return false
+	end
+	return bridgeState.protocol == BRIDGE_PROTOCOL or bridgeState.protocol == BRIDGE_PROTOCOL_FALLBACK
 end
 
 local function StartBridgeRequest(item, now)
