@@ -19,7 +19,7 @@ Sources.List = {
 	},
 	{
 		name = "MegaScaterbomb",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
+		url = "https://raw.githubusercontent.com/ill5-com/megascatterbomb-tf2-cheater-database/main/megascatterbomb-tf2-cheater-database.min.json",
 		cause = "Cheater (MegaScaterbomb)",
 		parser = "tf2db",
 		sourceID = "mega_scat"
