@@ -1,6 +1,7 @@
 --[[ Database/MAC.lua
-	Performs MegaAntiCheat backend lookups for players in the current match.
-	No API key is required by this module; it queries a local/remote MAC backend URL.
+	Polls the MAC client-backend at localhost:1984 for player conviction data.
+	No API key is required for local read endpoints.
+	Run the MAC client-backend: github.com/MegaAntiCheat/client-backend
 ]]
 
 local MAC = {}
@@ -15,8 +16,8 @@ local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 local Json = Common.Json
 
-local DEFAULT_BASE_URL = "http://127.0.0.1:3000"
-local MAC_GAME_ENDPOINT = "/mac/game/v1"
+local DEFAULT_BASE_URL = "http://127.0.0.1:1984"
+local MAC_USER_ENDPOINT = "/mac/user/v1"
 local EVENT_POLL_COOLDOWN = 1.5
 local HEARTBEAT_INTERVAL = 30.0
 local ERROR_RETRY_SECONDS = 8.0
@@ -43,6 +44,8 @@ local state = {
     pollReason = "startup",
     currentServerIP = "",
 }
+
+local normalizeSteamID64
 
 local function printInfo(color, text)
     printc(color[1], color[2], color[3], color[4], text)
@@ -104,42 +107,62 @@ local function urlEncode(value)
     end)
 end
 
-local function buildSnapshotURL()
-    local url = state.baseURL .. MAC_GAME_ENDPOINT
-    local apiKey = state.apiKey
-    if not apiKey then
-        return url
+local function collectLookupUsers()
+    local users = {}
+    local seen = {}
+
+    if type(PlayerCache.GetAll) == "function" then
+        local wrappedPlayers = PlayerCache.GetAll(true)
+        if type(wrappedPlayers) == "table" then
+            for i = 1, #wrappedPlayers do
+                local wrapped = wrappedPlayers[i]
+                if wrapped and wrapped.GetRawEntity then
+                    local raw = wrapped:GetRawEntity()
+                    local steamID = normalizeSteamID64(Common.GetSteamID64(raw))
+                    if steamID and not seen[steamID] then
+                        seen[steamID] = true
+                        users[#users + 1] = steamID
+                    end
+                end
+            end
+        end
     end
 
-    local encoded = urlEncode(apiKey)
-    if not encoded then
-        return url
+    if #users == 0 and type(PlayerCache.GetActiveTable) == "function" then
+        local activeTable = PlayerCache.GetActiveTable()
+        if type(activeTable) == "table" then
+            for steamID, _ in pairs(activeTable) do
+                local normalized = normalizeSteamID64(steamID)
+                if normalized and not seen[normalized] then
+                    seen[normalized] = true
+                    users[#users + 1] = normalized
+                end
+            end
+        end
     end
 
-    return url .. "?key=" .. encoded
+    return users
 end
 
-local function buildSnapshotURLVariants()
-    local base = state.baseURL .. MAC_GAME_ENDPOINT
-    local apiKey = state.apiKey
-    if not apiKey then
-        return { base }
+local function buildLookupRequestBody()
+    local users = collectLookupUsers()
+    if #users == 0 then
+        return nil, nil, "no players to query"
     end
 
-    local encoded = urlEncode(apiKey)
-    if not encoded then
-        return { base }
+    if type(Json) ~= "table" or type(Json.encode) ~= "function" then
+        return nil, nil, "json encoder missing"
     end
 
-    -- Spec-first: plain GET /mac/game/v1. Keep keyed variants for custom deployments.
-    return {
-        base,
-        base .. "?key=" .. encoded,
-        base .. "?api_key=" .. encoded,
-    }
+    local ok, encoded = pcall(Json.encode, { users = users })
+    if not ok or type(encoded) ~= "string" or encoded == "" then
+        return nil, nil, "failed to encode user lookup request"
+    end
+
+    return encoded, #users, nil
 end
 
-local function normalizeSteamID64(rawID)
+normalizeSteamID64 = function(rawID)
     if not rawID then
         return nil
     end
@@ -289,7 +312,9 @@ local function handleError(message)
         if isLocalhost and refused then
             state.loggedLocalhostHint = true
             printInfo({ 255, 180, 100, 255 }, "[MAC] Local backend unreachable at " .. tostring(state.baseURL))
-            printInfo({ 255, 180, 100, 255 }, "[MAC] Start MAC backend or set endpoint with: mac_url <base_url>")
+            printInfo({ 255, 180, 100, 255 },
+                "[MAC] Download/run MAC client-backend: github.com/MegaAntiCheat/client-backend")
+            printInfo({ 255, 180, 100, 255 }, "[MAC] Or change endpoint with: mac_url <base_url>")
         end
     end
 
@@ -368,7 +393,7 @@ local function handleResponse(body)
         if type(payloadError) == "string" and payloadError ~= "" then
             return false, "backend error: " .. payloadError
         else
-            return false, "missing players array in mac/game/v1 response"
+            return false, "missing players array in mac/user/v1 response"
         end
     end
 
@@ -430,36 +455,37 @@ local function handleResponse(body)
     return true, nil
 end
 
-local function enqueueSnapshotAttempt(urls, attemptIndex)
-    local url = urls[attemptIndex]
+local function enqueueLookup(url, body)
     if type(url) ~= "string" or url == "" then
         handleError("no valid MAC endpoint URL")
         return
     end
+    if type(body) ~= "string" or body == "" then
+        handleError("invalid MAC request body")
+        return
+    end
 
-    local enqueued = HttpQueue.Enqueue(url, function(body, errorMessage)
+    local enqueued = HttpQueue.Enqueue(url, function(responseBody, errorMessage)
         if errorMessage ~= nil then
-            if attemptIndex < #urls then
-                enqueueSnapshotAttempt(urls, attemptIndex + 1)
-                return
-            end
             local displayURL = tostring(url):gsub("%?.*$", "")
             handleError("request failed: " .. displayURL .. " " .. tostring(errorMessage))
             return
         end
 
-        local ok, parseError = handleResponse(body)
+        local ok, parseError = handleResponse(responseBody)
         if ok then
             return
         end
-
-        if attemptIndex < #urls then
-            enqueueSnapshotAttempt(urls, attemptIndex + 1)
-            return
-        end
-
         handleError(parseError or "invalid response from backend")
-    end, nil, { noDelay = true, highPriority = true, bridgeTimeoutMs = 6000, bridgeMaxBytes = 1024 * 1024 })
+    end, nil, {
+        noDelay = true,
+        highPriority = true,
+        method = "POST",
+        body = body,
+        contentType = "application/json",
+        bridgeTimeoutMs = 6000,
+        bridgeMaxBytes = 1024 * 1024,
+    })
 
     if not enqueued then
         state.scanning = false
@@ -468,14 +494,30 @@ local function enqueueSnapshotAttempt(urls, attemptIndex)
 end
 
 local function requestSnapshot()
+    local requestBody, userCount, bodyError = buildLookupRequestBody()
+    if requestBody == nil then
+        state.pollRequested = false
+        state.pollReason = "periodic"
+        if bodyError ~= "no players to query" then
+            handleError(bodyError or "failed to build lookup request")
+        else
+            state.scanning = false
+            state.lastSuccessAt = globals.RealTime()
+            state.lastError = ""
+            state.nextRetryAt = 0
+        end
+        return
+    end
+
     state.scanning = true
     state.pollAttempt = state.pollAttempt + 1
     state.lastPollAt = globals.RealTime()
     logActivity(
         string.format(
-            "poll #%d start: %s (key=%s, reason=%s)",
+            "poll #%d start: %s users=%d (key=%s, reason=%s)",
             state.pollAttempt,
-            tostring(state.baseURL .. MAC_GAME_ENDPOINT),
+            tostring(state.baseURL .. MAC_USER_ENDPOINT),
+            tonumber(userCount) or 0,
             tostring(state.apiKey ~= nil),
             tostring(state.pollReason or "unknown")
         ),
@@ -483,8 +525,7 @@ local function requestSnapshot()
     )
     state.pollRequested = false
     state.pollReason = "periodic"
-    local urls = buildSnapshotURLVariants()
-    enqueueSnapshotAttempt(urls, 1)
+    enqueueLookup(state.baseURL .. MAC_USER_ENDPOINT, requestBody)
 end
 
 local function requestSnapshotSoon(reason)
@@ -599,15 +640,15 @@ end
 
 function MAC.GetStatusText()
     if not state.enabled then
-        return "MAC: Disabled (client-backend API checker)"
+        return "MAC: Disabled (requires client-backend at localhost:1984)"
     end
     if state.lastError ~= "" then
         return "MAC: " .. state.lastError
     end
     if state.lastSuccessAt > 0 then
-        return "MAC: Connected (client-backend API)"
+        return "MAC: Connected (client-backend localhost:1984)"
     end
-    return "MAC: Waiting for client-backend API"
+    return "MAC: Waiting for client-backend (localhost:1984)"
 end
 
 function MAC.GetBaseURL()

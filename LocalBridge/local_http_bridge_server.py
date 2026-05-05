@@ -4,6 +4,7 @@
 Protocol:
 - GET /health
 - GET /submit?url=<encoded_url>&timeout_ms=<int>&max_bytes=<int>
+- GET /submit_json?url=<encoded_url>&method=<HTTP_METHOD>&content_type=<mime>&body=<encoded_body>&timeout_ms=<int>&max_bytes=<int>
 - GET /result?id=<request_id>
 
 Optional batch helpers:
@@ -49,6 +50,12 @@ class Job:
     created_at: float
     updated_at: float
     request_key: str
+    url: str
+    timeout_ms: int
+    max_bytes: int
+    method: str
+    body: str
+    content_type: str
     done: bool
     success: bool | None
     data: str | None
@@ -134,7 +141,7 @@ def send_text(handler: BaseHTTPRequestHandler, text: str, status_code: int = 200
 
 def cache_ttl_seconds(url: str, success: bool) -> int:
     lowered = url.lower()
-    if "mac/game/v1" in lowered:
+    if "mac/game/v1" in lowered or "mac/user/v1" in lowered:
         ttl = 20
     elif "steamhistory" in lowered:
         ttl = 120
@@ -148,13 +155,35 @@ def cache_ttl_seconds(url: str, success: bool) -> int:
     return ttl
 
 
-def make_request_key(url: str, timeout_ms: int, max_bytes: int) -> str:
-    return f"{timeout_ms}|{max_bytes}|{url}"
+def make_request_key(
+    url: str,
+    timeout_ms: int,
+    max_bytes: int,
+    method: str,
+    body: str,
+    content_type: str,
+) -> str:
+    return f"{timeout_ms}|{max_bytes}|{method}|{content_type}|{body}|{url}"
 
 
-def fetch_url(url: str, timeout_ms: int, max_bytes: int) -> tuple[bool, str | None, str | None]:
+def fetch_url(
+    url: str,
+    timeout_ms: int,
+    max_bytes: int,
+    method: str,
+    body: str,
+    content_type: str,
+) -> tuple[bool, str | None, str | None]:
     timeout_seconds = timeout_ms / 1000.0
-    request = Request(url, headers={"User-Agent": "LocalLuaBridge/2.0"})
+    body_bytes = None
+    if body:
+        body_bytes = body.encode("utf-8", errors="replace")
+
+    headers = {"User-Agent": "LocalLuaBridge/2.0"}
+    if content_type:
+        headers["Content-Type"] = content_type
+
+    request = Request(url, data=body_bytes, headers=headers, method=method)
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
             raw = response.read(max_bytes + 1)
@@ -209,7 +238,7 @@ def finish_job_locked(job_id: str, success: bool, data: str | None, error: str |
 
     LAST_SERVED_BY_KEY[job.request_key] = now
 
-    ttl_seconds = cache_ttl_seconds(job.request_key, success)
+    ttl_seconds = cache_ttl_seconds(job.url, success)
     RESULT_CACHE[job.request_key] = CacheEntry(
         expires_at=now + ttl_seconds,
         success=success,
@@ -234,8 +263,15 @@ def finish_job_locked(job_id: str, success: bool, data: str | None, error: str |
         subscriber.updated_at = now
 
 
-def create_job(url: str, timeout_ms: int, max_bytes: int) -> str:
-    request_key = make_request_key(url, timeout_ms, max_bytes)
+def create_job(
+    url: str,
+    timeout_ms: int,
+    max_bytes: int,
+    method: str = "GET",
+    body: str = "",
+    content_type: str = "",
+) -> str:
+    request_key = make_request_key(url, timeout_ms, max_bytes, method, body, content_type)
     now = time.time()
 
     with JOBS_COND:
@@ -248,6 +284,12 @@ def create_job(url: str, timeout_ms: int, max_bytes: int) -> str:
                 created_at=now,
                 updated_at=now,
                 request_key=request_key,
+                url=url,
+                timeout_ms=timeout_ms,
+                max_bytes=max_bytes,
+                method=method,
+                body=body,
+                content_type=content_type,
                 done=True,
                 success=cache_entry.success,
                 data=cache_entry.data,
@@ -266,6 +308,12 @@ def create_job(url: str, timeout_ms: int, max_bytes: int) -> str:
                     created_at=now,
                     updated_at=now,
                     request_key=request_key,
+                    url=url,
+                    timeout_ms=timeout_ms,
+                    max_bytes=max_bytes,
+                    method=method,
+                    body=body,
+                    content_type=content_type,
                     done=False,
                     success=None,
                     data=None,
@@ -284,6 +332,12 @@ def create_job(url: str, timeout_ms: int, max_bytes: int) -> str:
             created_at=now,
             updated_at=now,
             request_key=request_key,
+            url=url,
+            timeout_ms=timeout_ms,
+            max_bytes=max_bytes,
+            method=method,
+            body=body,
+            content_type=content_type,
             done=False,
             success=None,
             data=None,
@@ -311,6 +365,12 @@ def read_job(job_id: str) -> Job | None:
             created_at=job.created_at,
             updated_at=job.updated_at,
             request_key=job.request_key,
+            url=job.url,
+            timeout_ms=job.timeout_ms,
+            max_bytes=job.max_bytes,
+            method=job.method,
+            body=job.body,
+            content_type=job.content_type,
             done=job.done,
             success=job.success,
             data=job.data,
@@ -323,10 +383,12 @@ def read_job(job_id: str) -> Job | None:
 def worker_loop(worker_index: int) -> None:
     while True:
         job_id: str | None = None
-        job_key: str | None = None
         timeout_ms = DEFAULT_TIMEOUT_MS
         max_bytes = DEFAULT_MAX_BYTES
         url = ""
+        method = "GET"
+        body = ""
+        content_type = ""
 
         with JOBS_COND:
             while True:
@@ -346,20 +408,18 @@ def worker_loop(worker_index: int) -> None:
                 candidate.worker_started = True
                 candidate.updated_at = time.time()
                 job_id = item.job_id
-                job_key = candidate.request_key
+                url = candidate.url
+                timeout_ms = candidate.timeout_ms
+                max_bytes = candidate.max_bytes
+                method = candidate.method
+                body = candidate.body
+                content_type = candidate.content_type
                 break
 
-            if job_id is None or job_key is None:
+            if job_id is None:
                 continue
 
-        try:
-            _, _, url = job_key.split("|", 2)
-            timeout_ms = int(job_key.split("|", 2)[0])
-            max_bytes = int(job_key.split("|", 2)[1])
-        except Exception:
-            success, data, error = False, None, "invalid queued request key"
-        else:
-            success, data, error = fetch_url(url, timeout_ms, max_bytes)
+        success, data, error = fetch_url(url, timeout_ms, max_bytes, method, body, content_type)
 
         with JOBS_COND:
             finish_job_locked(job_id, success, data, error)
@@ -458,6 +518,30 @@ class BridgeHandler(BaseHTTPRequestHandler):
             send_json(self, {"ok": True, "id": job_id, "done": False, "error": None})
             return
 
+        if parsed.path == "/submit_json":
+            url = first_value(query, "url")
+            if not url:
+                send_json(self, {"ok": False, "error": "missing url"}, 400)
+                return
+
+            method = (first_value(query, "method") or "POST").upper()
+            if method == "":
+                method = "POST"
+            content_type = first_value(query, "content_type") or "application/json"
+            body = first_value(query, "body") or ""
+
+            timeout_ms = clamp_int(first_value(query, "timeout_ms"), DEFAULT_TIMEOUT_MS, 100, MAX_TIMEOUT_MS)
+            max_bytes = clamp_int(first_value(query, "max_bytes"), DEFAULT_MAX_BYTES, 1024, MAX_MAX_BYTES)
+
+            try:
+                job_id = create_job(url, timeout_ms, max_bytes, method, body, content_type)
+            except RuntimeError as exc:
+                send_json(self, {"ok": False, "error": str(exc)}, 503)
+                return
+
+            send_json(self, {"ok": True, "id": job_id, "done": False, "error": None})
+            return
+
         if parsed.path == "/submit_batch":
             urls = first_values(query, "url")
             if not urls:
@@ -549,7 +633,9 @@ def main() -> None:
     start_workers()
     server = ThreadingHTTPServer((HOST, PORT), BridgeHandler)
     print(f"[bridge] listening on http://{HOST}:{PORT}")
-    print("[bridge] endpoints: /health /submit /result /submit_batch /result_batch /health_txt /submit_txt /result_txt")
+    print(
+        "[bridge] endpoints: /health /submit /submit_json /result /submit_batch /result_batch /health_txt /submit_txt /result_txt"
+    )
     print(f"[bridge] workers={WORKER_COUNT} max_pending={MAX_PENDING_JOBS} max_cache_entries={MAX_CACHE_ENTRIES}")
     server.serve_forever()
 

@@ -135,7 +135,7 @@ local Default_Config = {
 			ApiKey = "",
 		},
 		MAC = {
-			BaseURL = "http://127.0.0.1:3000",
+			BaseURL = "http://127.0.0.1:1984",
 			ApiKey = "",
 		},
 	},

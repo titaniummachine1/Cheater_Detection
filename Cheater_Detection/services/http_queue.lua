@@ -258,14 +258,51 @@ local function StartBridgeRequest(item, now)
 		return false, "bridge url encode failed"
 	end
 
+	local method = tostring(item.method or "GET")
+	if method == "" then
+		method = "GET"
+	end
+	method = method:upper()
+
+	local body = tostring(item.body or "")
+	local contentType = tostring(item.contentType or "")
+
 	local timeoutMs = item.bridgeTimeoutMs or BRIDGE_REMOTE_TIMEOUT_MS
 	local maxBytes = item.bridgeMaxBytes or BRIDGE_REMOTE_MAX_BYTES
-	local path = string.format(
-		"/submit?url=%s&timeout_ms=%d&max_bytes=%d",
-		encodedUrl,
-		timeoutMs,
-		maxBytes
-	)
+	local path
+	if method == "GET" and body == "" and contentType == "" then
+		path = string.format(
+			"/submit?url=%s&timeout_ms=%d&max_bytes=%d",
+			encodedUrl,
+			timeoutMs,
+			maxBytes
+		)
+	else
+		local encodedMethod = UrlEncode(method)
+		if encodedMethod == nil then
+			return false, "bridge method encode failed"
+		end
+
+		local encodedBody = UrlEncode(body)
+		if encodedBody == nil then
+			return false, "bridge body encode failed"
+		end
+
+		local encodedContentType = UrlEncode(contentType)
+		if encodedContentType == nil then
+			return false, "bridge content-type encode failed"
+		end
+
+		path = string.format(
+			"/submit_json?url=%s&method=%s&content_type=%s&body=%s&timeout_ms=%d&max_bytes=%d",
+			encodedUrl,
+			encodedMethod,
+			encodedContentType,
+			encodedBody,
+			timeoutMs,
+			maxBytes
+		)
+	end
 
 	local payload, err, stalled = BridgeJson(path)
 	if not payload or payload.ok ~= true or type(payload.id) ~= "string" then
@@ -360,6 +397,20 @@ local function DispatchBlockingAttempt()
 		return
 	end
 
+	local method = tostring(activeItem.method or "GET")
+	if method ~= "" then
+		method = method:upper()
+	end
+	if method ~= "" and method ~= "GET" then
+		FinishActiveRequest(activeItem, nil, "blocking transport only supports GET")
+		return
+	end
+
+	if tostring(activeItem.body or "") ~= "" then
+		FinishActiveRequest(activeItem, nil, "blocking transport does not support request body")
+		return
+	end
+
 	if not CanRunBlockingHTTPNow() then
 		return
 	end
@@ -439,8 +490,14 @@ local function ProcessNextRequest()
 
 	local canRunBlocking = CanRunBlockingHTTPNow()
 	local canUseBridge = CanUseBridgeTransport()
+	local itemMethod = tostring(item and item.method or "GET")
+	if itemMethod ~= "" then
+		itemMethod = itemMethod:upper()
+	end
+	local itemBody = tostring(item and item.body or "")
+	local supportsBlocking = (itemMethod == "" or itemMethod == "GET") and itemBody == ""
 
-	if not canUseBridge and not canRunBlocking then
+	if not canUseBridge and (not canRunBlocking or not supportsBlocking) then
 		return
 	end
 
@@ -461,9 +518,18 @@ local function ProcessNextRequest()
 	activeTransport = nil
 	activeBridgeRequestId = nil
 
+	if not canUseBridge and not supportsBlocking then
+		FinishActiveRequest(item, nil, "bridge transport required for non-GET request")
+		return
+	end
+
 	if canUseBridge then
 		local started, bridgeErr = StartBridgeRequest(item, now)
 		if started then
+			return
+		end
+		if not supportsBlocking then
+			FinishActiveRequest(item, nil, bridgeErr or "bridge submit failed")
 			return
 		end
 		if not CanRunBlockingHTTPNow() then
@@ -510,6 +576,9 @@ function HttpQueue.Enqueue(url, callback, context, options)
 	local highPriority = false
 	local bridgeTimeoutMs = nil
 	local bridgeMaxBytes = nil
+	local method = "GET"
+	local body = ""
+	local contentType = ""
 	if type(options) == "table" and options.noDelay == true then
 		noDelay = true
 	end
@@ -522,6 +591,15 @@ function HttpQueue.Enqueue(url, callback, context, options)
 	if type(options) == "table" and type(options.bridgeMaxBytes) == "number" then
 		bridgeMaxBytes = math.floor(options.bridgeMaxBytes)
 	end
+	if type(options) == "table" and type(options.method) == "string" and options.method ~= "" then
+		method = options.method:upper()
+	end
+	if type(options) == "table" and type(options.body) == "string" then
+		body = options.body
+	end
+	if type(options) == "table" and type(options.contentType) == "string" then
+		contentType = options.contentType
+	end
 
 	if STRICT_SINGLE_FLIGHT and HttpQueue.IsBusy() then
 		return false
@@ -532,6 +610,9 @@ function HttpQueue.Enqueue(url, callback, context, options)
 		callback = callback,
 		context = context,
 		noDelay = noDelay,
+		method = method,
+		body = body,
+		contentType = contentType,
 		bridgeTimeoutMs = bridgeTimeoutMs,
 		bridgeMaxBytes = bridgeMaxBytes,
 	}
