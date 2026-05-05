@@ -11,18 +11,18 @@ local Sources = {}
 -- List of available sources
 Sources.List = {
 	{
-		name = "MegaScaterbomb",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
-		cause = "Cheater (MegaScaterbomb)",
-		parser = "tf2db",
-		sourceID = "mega_scat"
-	},
-	{
 		name = "Masterbase Broadcasts",
 		url = "https://masterbase.megascatterbomb.com/broadcasts",
 		cause = "Masterbase Broadcast Conviction",
 		parser = "broadcasts",
 		sourceID = "masterbase_broadcasts"
+	},
+	{
+		name = "MegaScaterbomb",
+		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/refs/heads/main/playerlist.megacheaterdb.json",
+		cause = "Cheater (MegaScaterbomb)",
+		parser = "tf2db",
+		sourceID = "mega_scat"
 	},
 	{
 		name = "d3fc0n6 Cheater List",

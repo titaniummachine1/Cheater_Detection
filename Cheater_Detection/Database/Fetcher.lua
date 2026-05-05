@@ -602,7 +602,7 @@ function Fetcher.Tick()
 		end
 
 		if responseError then
-			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName)
+			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName .. ": " .. tostring(responseError))
 			state.results.errors = state.results.errors + 1
 			state.sourceIdx = state.sourceIdx + 1
 			state.mode = "ONLINE_FETCH"
@@ -665,7 +665,8 @@ function Fetcher.Tick()
 					if retryCount <= MAX_JSON_NIL_RETRIES then
 						local fetchUrl, fetchErr = buildFetchUrl(source)
 						if not fetchUrl then
-							Logger.Warning("Fetcher", "[FETCHER] Retry skipped for " .. sourceName .. ": " .. tostring(fetchErr))
+							Logger.Warning("Fetcher",
+								"[FETCHER] Retry skipped for " .. sourceName .. ": " .. tostring(fetchErr))
 							state.sourceIdx = state.sourceIdx + 1
 							state.results.errors = state.results.errors + 1
 							state.mode = "ONLINE_FETCH"
@@ -711,7 +712,7 @@ function Fetcher.Tick()
 				end
 			end
 		else
-			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName)
+			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName .. " (empty response)")
 			state.sourceIdx = state.sourceIdx + 1
 			state.results.errors = state.results.errors + 1
 			state.mode = "ONLINE_FETCH"
