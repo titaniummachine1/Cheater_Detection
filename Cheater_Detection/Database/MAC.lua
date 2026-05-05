@@ -521,6 +521,19 @@ function MAC.SetApiKey(apiKey)
     return true, nil
 end
 
+function MAC.ClearApiKey()
+    G.Menu = G.Menu or {}
+    G.Menu.Misc = G.Menu.Misc or {}
+    G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
+    G.Menu.Misc.MAC.ApiKey = ""
+
+    state.apiKey = nil
+    state.lastPollAt = 0
+    state.nextRetryAt = 0
+    state.lastError = ""
+    return true
+end
+
 function MAC.QueueRescan()
     state.lastPollAt = 0
     state.nextRetryAt = 0

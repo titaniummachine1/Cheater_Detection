@@ -99,16 +99,47 @@ setupSteamHistory()
 local function setupMAC()
 	Commands.Register("mac", function(args)
 		local key = args and args[1] or nil
-		if not key or key == "" then
-			printc(100, 220, 255, 255, "[MAC] Usage: mac <api_key>")
+		G.Menu = G.Menu or {}
+		G.Menu.Scanner = G.Menu.Scanner or {}
+		G.Menu.Misc = G.Menu.Misc or {}
+		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
+
+		if type(key) == "string" then
+			key = key:match("^%s*(.-)%s*$")
+		end
+
+		if key == "off" or key == "disable" then
+			G.Menu.Scanner.MAC = false
+			if Config and Config.CreateCFG then
+				Config.CreateCFG()
+			end
+			printc(200, 200, 200, 255, "[MAC] Scanner disabled")
 			return
 		end
 
-		G.Menu = G.Menu or {}
-		G.Menu.Scanner = G.Menu.Scanner or {}
+		if key == "clear" or key == "none" or key == "nokey" then
+			G.Menu.Scanner.MAC = true
+			if MAC and MAC.ClearApiKey then
+				MAC.ClearApiKey()
+			end
+			if Config and Config.CreateCFG then
+				Config.CreateCFG()
+			end
+			printc(0, 255, 140, 255, "[MAC] API key cleared; scanner enabled in no-key mode")
+			return
+		end
+
+		if not key or key == "" then
+			G.Menu.Scanner.MAC = true
+			if Config and Config.CreateCFG then
+				Config.CreateCFG()
+			end
+			printc(0, 255, 140, 255, "[MAC] Scanner enabled (no API key mode)")
+			printc(100, 220, 255, 255, "[MAC] Optional: mac <api_key> to set key, mac clear to remove key")
+			return
+		end
+
 		G.Menu.Scanner.MAC = true
-		G.Menu.Misc = G.Menu.Misc or {}
-		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
 
 		local ok, err = MAC.SetApiKey(key)
 		if not ok then
