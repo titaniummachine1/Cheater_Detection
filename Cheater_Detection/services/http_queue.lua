@@ -14,6 +14,7 @@ local isProcessing = false
 local lastRequestTime = 0
 local isAlive = true          -- Set to false on unload to guard in-flight callbacks
 local REQUEST_DELAY = 1.2     -- 1.2s delay between requests (GitHub safety)
+local GITHUB_REQUEST_DELAY = 1.2
 local REQUEST_TIMEOUT = 120.0 -- Give enough time for a player to reach an unintrusive window
 local REQUEST_RETRY_INTERVAL = 0.25
 local STRICT_SINGLE_FLIGHT = false
@@ -424,8 +425,13 @@ local function ProcessNextRequest()
 	local now = Now()
 	local item = queue[1]
 	local requiredDelay = REQUEST_DELAY
-	if item and (item.noDelay or IsGitHubLikeURL(item.url)) then
+	if item and item.noDelay then
 		requiredDelay = 0
+	end
+	if item and IsGitHubLikeURL(item.url) then
+		if requiredDelay < GITHUB_REQUEST_DELAY then
+			requiredDelay = GITHUB_REQUEST_DELAY
+		end
 	end
 	if (now - lastRequestTime) < requiredDelay then
 		return
