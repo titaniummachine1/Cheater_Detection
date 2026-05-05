@@ -18,7 +18,7 @@ local folder_name = string.format([[Lua %s]], Lua__fileName)
 
 local function GetConfigPath()
 	local _, fullPath = filesystem.CreateDirectory(folder_name) -- succeeds even if already exists
-	local sep = package.config:sub(1, 1) -- OS path separator
+	local sep = package.config:sub(1, 1)                     -- OS path separator
 	return fullPath .. sep .. "config.cfg"
 end
 
