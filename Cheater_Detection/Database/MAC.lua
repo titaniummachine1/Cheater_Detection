@@ -30,6 +30,7 @@ local state = {
     lastError = "",
     lastSuccessAt = 0,
     baseURL = DEFAULT_BASE_URL,
+    apiKey = nil,
 }
 
 local function printInfo(color, text)
@@ -60,6 +61,43 @@ local function getBaseURL()
     local cfg = getConfig()
     local configured = cfg and cfg.BaseURL or nil
     return trimTrailingSlash(configured) or DEFAULT_BASE_URL
+end
+
+local function getApiKey()
+    local cfg = getConfig()
+    local rawKey = cfg and cfg.ApiKey or nil
+    if type(rawKey) ~= "string" then
+        return nil
+    end
+    local trimmed = rawKey:match("^%s*(.-)%s*$")
+    if not trimmed or trimmed == "" then
+        return nil
+    end
+    return trimmed
+end
+
+local function urlEncode(value)
+    if type(value) ~= "string" then
+        return nil
+    end
+    return string.gsub(value, "([^%w%-_%.~])", function(character)
+        return string.format("%%%02X", string.byte(character))
+    end)
+end
+
+local function buildSnapshotURL()
+    local url = state.baseURL .. MAC_GAME_ENDPOINT
+    local apiKey = state.apiKey
+    if not apiKey then
+        return url
+    end
+
+    local encoded = urlEncode(apiKey)
+    if not encoded then
+        return url
+    end
+
+    return url .. "?key=" .. encoded
 end
 
 local function normalizeSteamID64(rawID)
@@ -234,7 +272,7 @@ end
 local function requestSnapshot()
     state.scanning = true
     state.lastPollAt = globals.RealTime()
-    local url = state.baseURL .. MAC_GAME_ENDPOINT
+    local url = buildSnapshotURL()
     local enqueued = HttpQueue.Enqueue(url, function(body)
         handleResponse(body)
     end, nil, { noDelay = true, highPriority = true, bridgeTimeoutMs = 6000, bridgeMaxBytes = 1024 * 1024 })
@@ -248,8 +286,16 @@ end
 local function refreshEnabled()
     local scannerEnabled = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.MAC == true
     local newBaseURL = getBaseURL()
+    local newApiKey = getApiKey()
     if newBaseURL ~= state.baseURL then
         state.baseURL = newBaseURL
+        state.lastPollAt = 0
+        state.nextRetryAt = 0
+        state.lastError = ""
+    end
+
+    if newApiKey ~= state.apiKey then
+        state.apiKey = newApiKey
         state.lastPollAt = 0
         state.nextRetryAt = 0
         state.lastError = ""
@@ -324,6 +370,10 @@ function MAC.GetBaseURL()
     return state.baseURL
 end
 
+function MAC.GetApiKey()
+    return state.apiKey
+end
+
 function MAC.SetBaseURL(url)
     local normalized = trimTrailingSlash(url)
     if not normalized then
@@ -336,6 +386,27 @@ function MAC.SetBaseURL(url)
     G.Menu.Misc.MAC.BaseURL = normalized
 
     state.baseURL = normalized
+    state.lastPollAt = 0
+    state.nextRetryAt = 0
+    state.lastError = ""
+    return true, nil
+end
+
+function MAC.SetApiKey(apiKey)
+    local normalized = nil
+    if type(apiKey) == "string" then
+        normalized = apiKey:match("^%s*(.-)%s*$")
+    end
+    if not normalized or normalized == "" then
+        return false, "invalid API key"
+    end
+
+    G.Menu = G.Menu or {}
+    G.Menu.Misc = G.Menu.Misc or {}
+    G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
+    G.Menu.Misc.MAC.ApiKey = normalized
+
+    state.apiKey = normalized
     state.lastPollAt = 0
     state.nextRetryAt = 0
     state.lastError = ""

@@ -15,7 +15,7 @@ local registered = {}
 function Commands.Register(name, callback)
 	assert(type(name) == "string", "Commands.Register: name must be string")
 	assert(type(callback) == "function", "Commands.Register: callback must be function")
-	registered[name] = callback
+	registered[name:lower()] = callback
 end
 
 local function onStringCmd(stringCmd)
@@ -30,6 +30,9 @@ local function onStringCmd(stringCmd)
 	end
 
 	local cmd = parts[1]
+	if type(cmd) == "string" then
+		cmd = cmd:lower()
+	end
 	if not cmd or not registered[cmd] then
 		return
 	end
@@ -94,6 +97,32 @@ end
 setupSteamHistory()
 
 local function setupMAC()
+	Commands.Register("mac", function(args)
+		local key = args and args[1] or nil
+		if not key or key == "" then
+			printc(100, 220, 255, 255, "[MAC] Usage: mac <api_key>")
+			return
+		end
+
+		G.Menu = G.Menu or {}
+		G.Menu.Scanner = G.Menu.Scanner or {}
+		G.Menu.Scanner.MAC = true
+		G.Menu.Misc = G.Menu.Misc or {}
+		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
+
+		local ok, err = MAC.SetApiKey(key)
+		if not ok then
+			printc(255, 100, 100, 255, "[MAC] Invalid API key: " .. tostring(err))
+			return
+		end
+
+		if Config and Config.CreateCFG then
+			Config.CreateCFG()
+		end
+
+		printc(0, 255, 140, 255, "[MAC] API key stored and scanner enabled")
+	end)
+
 	Commands.Register("mac_url", function(args)
 		local url = args and args[1] or nil
 		if not url or url == "" then
@@ -125,11 +154,14 @@ local function setupMAC()
 	Commands.Register("mac_status", function(_args)
 		local scannerEnabled = G.Menu and G.Menu.Scanner and G.Menu.Scanner.MAC == true
 		local baseURL = MAC and MAC.GetBaseURL and MAC.GetBaseURL() or "unknown"
+		local apiKey = MAC and MAC.GetApiKey and MAC.GetApiKey() or nil
 		local status = MAC and MAC.GetStatusText and MAC.GetStatusText() or "MAC unavailable"
 
 		printc(100, 220, 255, 255, "[MAC] Status:")
 		printc(200, 200, 200, 255, string.format("  scannerEnabled : %s", tostring(scannerEnabled)))
 		printc(200, 200, 200, 255, string.format("  baseURL        : %s", tostring(baseURL)))
+		printc(200, 200, 200, 255,
+			string.format("  hasApiKey      : %s", tostring(type(apiKey) == "string" and apiKey ~= "")))
 		printc(200, 200, 200, 255, string.format("  moduleStatus   : %s", tostring(status)))
 	end)
 
