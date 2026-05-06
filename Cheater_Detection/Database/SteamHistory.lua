@@ -74,6 +74,10 @@ local function normalizeSteamID64(rawID)
 	return steamID
 end
 
+local function isValidSteamID64(steamID)
+	return type(steamID) == "string" and steamID:match("^7656119%d+$") ~= nil and #steamID == 17
+end
+
 local IGNORED_ID = "76561197960265728" -- [U:1:0]
 
 local function getScoreboardName(steamID)
@@ -341,10 +345,15 @@ local function popBatch()
 	local contexts = {}
 	local batchSize = state.currentBatchSize
 	for steamID, ctx in pairs(state.pending) do
-		ids[#ids + 1] = steamID
-		contexts[steamID] = ctx
+		if isValidSteamID64(steamID) then
+			ids[#ids + 1] = steamID
+			contexts[steamID] = ctx
+			state.inFlight[steamID] = true
+		else
+			printInfo({ 255, 120, 120, 255 },
+				string.format("[SteamHistory] Dropping invalid SteamID in queue: %s", tostring(steamID)))
+		end
 		state.pending[steamID] = nil
-		state.inFlight[steamID] = true
 		if #ids >= batchSize then
 			break
 		end
@@ -698,6 +707,26 @@ local function requestBatch()
 		return
 	end
 
+	-- Final guard: never send malformed IDs to API.
+	local validIDs = {}
+	local validContexts = {}
+	for i = 1, #ids do
+		local steamID = ids[i]
+		if isValidSteamID64(steamID) then
+			validIDs[#validIDs + 1] = steamID
+			validContexts[steamID] = contexts[steamID]
+		else
+			state.inFlight[steamID] = nil
+			printInfo({ 255, 120, 120, 255 },
+				string.format("[SteamHistory] Skipping invalid SteamID before request: %s", tostring(steamID)))
+		end
+	end
+	if #validIDs == 0 then
+		return
+	end
+	ids = validIDs
+	contexts = validContexts
+
 	state.scanning = true
 	state.lastBatchTime = globals.RealTime()
 	printInfo(
@@ -705,7 +734,13 @@ local function requestBatch()
 		string.format("[SteamHistory] Batch start: %d players", #ids)
 	)
 
-	local url = string.format(API_TEMPLATE, cfg.ApiKey, table.concat(ids, ","))
+	local joinedIds = table.concat(ids, ",")
+	if joinedIds == "" then
+		state.scanning = false
+		return
+	end
+
+	local url = string.format(API_TEMPLATE, cfg.ApiKey, joinedIds)
 
 	-- Use HttpQueue to avoid blocking during network I/O.
 	-- The inner pcall guarantees state.scanning is always reset even on an unhandled Lua error.
