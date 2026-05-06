@@ -226,6 +226,17 @@ local function countEntries(map)
 	return total
 end
 
+local function bodySample(body)
+	if type(body) ~= "string" then
+		return "<non-string body>"
+	end
+	local sample = body:gsub("[%c%s]+", " ")
+	if #sample > 220 then
+		sample = sample:sub(1, 220) .. "..."
+	end
+	return sample
+end
+
 local function countActiveProgress()
 	local totalTargets = 0
 	local checkedTargets = 0
@@ -554,7 +565,7 @@ local function logPlayerScanResult(steamID, context, entry, checkResult)
 	printInfo({ 150, 220, 255, 255 }, string.format("[SteamHistory] %s scan complete: clean", name))
 end
 
-local function handleError(message, contexts)
+local function handleError(message, contexts, details)
 	state.errorCount = state.errorCount + 1
 	state.consecutiveFailures = state.consecutiveFailures + 1
 	if state.currentBatchSize ~= MIN_BATCH or not state.singlePlayerFallback then
@@ -603,11 +614,15 @@ local function handleError(message, contexts)
 	printInfo(
 		{ 255, 100, 100, 255 },
 		string.format(
-			"[SteamHistory] Error: %s. Retrying in %ds... (%d/%d failures)",
+			"[SteamHistory] Error: %s. Retrying in %ds... (%d/%d failures) [pending=%d inFlight=%d mode=%s]%s",
 			message,
 			delay,
 			state.consecutiveFailures,
-			state.maxConsecutiveFailures
+			state.maxConsecutiveFailures,
+			countEntries(state.pending),
+			countEntries(state.inFlight),
+			state.singlePlayerFallback and "single" or "batch",
+			details and (" details=" .. tostring(details)) or ""
 		)
 	)
 
@@ -747,24 +762,23 @@ local function requestBatch()
 	local enqueued = HttpQueue.Enqueue(url, function(body)
 		local ok, err = pcall(function()
 			if type(body) ~= "string" or body == "" then
-				handleError("HTTP Request failed (empty/invalid response)", contexts)
+				handleError("HTTP Request failed (empty/invalid response)", contexts, "body_type=" .. type(body))
 				return
 			end
 
-			-- Detect HTML error pages before trying to JSON-decode
-			if
-				body:match("<html>")
-				or body:match("<title>")
-				or body:match("429")
-				or body:match("502")
-				or body:match("503")
-				or body:match("504")
-			then
-				local errorMsg = "API returned HTML (likely down)"
-				if body:match("429") then
-					errorMsg = "Rate limited (429)"
+			local lowerBody = body:lower()
+
+			-- Detect HTML/text gateway errors explicitly (avoid false positives from random "429" in JSON text).
+			if body:match("^%s*<") or lowerBody:find("<html", 1, true) then
+				if lowerBody:find("too many requests", 1, true) or lowerBody:find("rate limit", 1, true) then
+					handleError("Rate limited (html response)", contexts, bodySample(body))
+					return
 				end
-				handleError(errorMsg, contexts)
+				if lowerBody:find("502", 1, true) or lowerBody:find("503", 1, true) or lowerBody:find("504", 1, true) then
+					handleError("Server error (html gateway response)", contexts, bodySample(body))
+					return
+				end
+				handleError("API returned unexpected HTML response", contexts, bodySample(body))
 				return
 			end
 
@@ -772,7 +786,23 @@ local function requestBatch()
 			assert(Json and Json.decode, "SteamHistory: JSON decoder missing")
 			local decodeOk, decoded = pcall(Json.decode, body)
 			if not decodeOk or type(decoded) ~= "table" then
-				handleError("JSON Decode failed", contexts)
+				handleError("JSON Decode failed", contexts, bodySample(body))
+				return
+			end
+
+			local statusCode = tonumber(decoded.status or decoded.code or decoded.status_code or decoded.http_status)
+			if statusCode == 429 then
+				handleError("Rate limited (api status 429)", contexts, bodySample(body))
+				return
+			end
+			if statusCode == 502 or statusCode == 503 or statusCode == 504 then
+				handleError(string.format("Server error (api status %d)", statusCode), contexts, bodySample(body))
+				return
+			end
+
+			if decoded.error or decoded.message or decoded.status == "error" then
+				local errorMsg = tostring(decoded.error or decoded.message or "Unknown API error")
+				handleError("API error: " .. errorMsg, contexts, bodySample(body))
 				return
 			end
 
