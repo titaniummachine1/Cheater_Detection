@@ -221,6 +221,12 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		return
 	end
 
+	local state = getState(playerState.id)
+	if state.lastSimTime ~= nil and simTime <= state.lastSimTime then
+		return
+	end
+	state.lastSimTime = simTime
+
 	local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
 	if isCheater then
 		return
@@ -229,7 +235,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local pitch, yaw, angleSource, candidates =
 		readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
 	local now = globals.RealTime()
-	local state = antiAimStateById[playerState.id]
+	state = antiAimStateById[playerState.id]
 	if state then
 		applyDecay(state, now)
 	end
