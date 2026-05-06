@@ -1,6 +1,6 @@
 --[[ detectors/antiaim.lua
      Detects invalid view angles (Rage AA).
-     Triggering this marks the player as CHEATER immediately.
+	Uses weighted hits with decay before hard-cheater marking.
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
@@ -11,8 +11,13 @@ local G = require("Cheater_Detection.Utils.Globals")
 local AntiAim = {}
 
 local lastInvalidPitchLogAt = {}
+local antiAimStateById = {}
 local MAX_LEGAL_PITCH = 89.30
 local MAX_SANE_ABS_ANGLE = 540
+local DETECTION_COOLDOWN_SECONDS = 1.0
+local HIT_WEIGHT = 1.0
+local SCORE_DECAY_PER_SECOND = 0.67
+local SCORE_THRESHOLD = 10.0
 
 local function isInvalidPitchValue(pitch)
 	if type(pitch) ~= "number" then
@@ -69,6 +74,30 @@ local function traceLog(isDebug, playerState, detail)
 		print(string.format("[AntiAim] id=%s %s", tostring(id), tostring(detail)))
 	else
 		print(string.format("[AntiAim] id=%s", tostring(id)))
+	end
+end
+
+local function getState(playerID)
+	local state = antiAimStateById[playerID]
+	if not state then
+		state = {
+			score = 0,
+			lastHitTime = 0,
+			lastDecayTime = globals.RealTime(),
+		}
+		antiAimStateById[playerID] = state
+	end
+	return state
+end
+
+local function applyDecay(state, now)
+	if not state then
+		return
+	end
+	local elapsed = now - (state.lastDecayTime or now)
+	if elapsed > 0 then
+		state.score = math.max(0, (state.score or 0) - (SCORE_DECAY_PER_SECOND * elapsed))
+		state.lastDecayTime = now
 	end
 end
 
@@ -199,6 +228,11 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 
 	local pitch, yaw, angleSource, candidates =
 		readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
+	local now = globals.RealTime()
+	local state = antiAimStateById[playerState.id]
+	if state then
+		applyDecay(state, now)
+	end
 	if pitch == nil then
 		return
 	end
@@ -214,7 +248,13 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		if (not entity:IsValid()) or entity:IsDormant() or (not entity:IsAlive()) then
 			return
 		end
-		local now = globals.RealTime()
+		state = getState(playerState.id)
+		applyDecay(state, now)
+		if (now - (state.lastHitTime or 0)) >= DETECTION_COOLDOWN_SECONDS then
+			state.score = state.score + HIT_WEIGHT
+			state.lastHitTime = now
+		end
+
 		local lastLog = lastInvalidPitchLogAt[playerState.id] or 0
 		local cooldownExpired = (now - lastLog) >= 10.0
 		if isDebug and cooldownExpired then
@@ -223,15 +263,21 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 				true,
 				playerState,
 				string.format(
-					"invalid pitch hit pitch=%.3f yaw=%s source=%s",
+					"invalid pitch hit pitch=%.3f yaw=%s source=%s score=%.2f/%.2f",
 					pitch,
 					yaw ~= nil and string.format("%.3f", yaw) or "nil",
-					tostring(angleSource)
+					tostring(angleSource),
+					state.score,
+					SCORE_THRESHOLD
 				)
 			)
 		end
-		local reason = string.format("Invalid Pitch (%.3f)", pitch)
-		DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
+
+		if state.score >= SCORE_THRESHOLD then
+			local reason = string.format("Invalid Pitch sustained (%.3f)", pitch)
+			DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
+			antiAimStateById[playerState.id] = nil
+		end
 	end
 end
 

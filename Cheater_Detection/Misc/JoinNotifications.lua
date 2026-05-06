@@ -289,7 +289,7 @@ local function ValidateAllPlayers()
 			if steamID64 then
 				local sentState = getSentAlertState(steamID64)
 				-- Check Valve employee first (higher priority)
-				if config.CheckValve and Sources.IsValveEmployee(steamID64) then
+				if config.CheckValve and Sources.IsValveEmployee(steamID64) and not sentState.valve then
 					local alertSent = DispatchValveAlert(config, {
 						name = player:GetName(),
 						tail = config.ValveAutoDisconnect and "is in the server - Leaving game" or "is in the server",
@@ -301,7 +301,7 @@ local function ValidateAllPlayers()
 						return validatedCount
 					end
 					-- Check if cheater in database
-				elseif config.CheckCheater then
+				elseif config.CheckCheater and not sentState.cheater then
 					local cheaterData = Database.GetCheater(steamID64)
 					if IsDatabaseCheaterRecord(cheaterData) and type(cheaterData) == "table" then
 						DispatchCheaterAlert(config, {
