@@ -152,6 +152,45 @@ local function IsRuntimeCheaterFlag(flags)
 	return (flags & (Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0
 end
 
+local function IsKarmaOnlyReason(reason)
+	if type(reason) ~= "string" then
+		return false
+	end
+	local lower = reason:lower()
+	return lower:find("vote karma", 1, true) ~= nil or lower:find("retaliation", 1, true) ~= nil
+end
+
+local function IsDatabaseCheaterRecord(entry)
+	if type(entry) ~= "table" then
+		return false
+	end
+
+	local flags = tonumber(entry.Flags or 0) or 0
+	local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED |
+		Constants.Flags.COMM_BANNED
+	if (flags & cheaterMask) == 0 then
+		return false
+	end
+
+	if IsKarmaOnlyReason(entry.Reason) then
+		return false
+	end
+
+	return true
+end
+
+local function ResolveCheaterAlertReason(runtimeReason, dbEntry)
+	if type(runtimeReason) == "string" and runtimeReason ~= "" and not IsKarmaOnlyReason(runtimeReason) then
+		return runtimeReason
+	end
+
+	if IsDatabaseCheaterRecord(dbEntry) and type(dbEntry.Reason) == "string" and dbEntry.Reason ~= "" then
+		return dbEntry.Reason
+	end
+
+	return "Runtime Detection"
+end
+
 local function DispatchCheaterAlert(config, params)
 	if not config or not config.CheckCheater then
 		return false
@@ -252,13 +291,13 @@ local function ValidateAllPlayers()
 						client.Command("disconnect", true)
 						return
 					end
-				-- Check if cheater in database
+					-- Check if cheater in database
 				elseif config.CheckCheater then
 					local cheaterData = Database.GetCheater(steamID64)
-					if cheaterData then
+					if IsDatabaseCheaterRecord(cheaterData) and type(cheaterData) == "table" then
 						DispatchCheaterAlert(config, {
 							name = player:GetName(),
-							reason = cheaterData.Reason,
+							reason = cheaterData.Reason or "Unknown",
 							allowParty = false,
 						})
 						sentState.cheater = true
@@ -299,7 +338,7 @@ OnPlayerStateChange = function(playerState, reason)
 
 	if config.CheckCheater and IsRuntimeCheaterFlag(flags) and not sentState.cheater then
 		local dbEntry = Database.GetCheater(steamID64)
-		local alertReason = reason or (dbEntry and dbEntry.Reason) or "Unknown"
+		local alertReason = ResolveCheaterAlertReason(reason, dbEntry)
 		local alertSent = DispatchCheaterAlert(config, {
 			name = playerName,
 			reason = alertReason,
@@ -352,7 +391,7 @@ local function OnPlayerConnect(event)
 	-- Check if cheater in database
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
-		if cheaterData then
+		if IsDatabaseCheaterRecord(cheaterData) and type(cheaterData) == "table" then
 			local reason = cheaterData.Reason or "Unknown"
 			DispatchCheaterAlert(config, {
 				name = name,
@@ -390,7 +429,7 @@ local function OnPlayerDisconnect(event)
 	-- Only check cheaters
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
-		if cheaterData then
+		if IsDatabaseCheaterRecord(cheaterData) and type(cheaterData) == "table" then
 			local reason = cheaterData.Reason or "Unknown"
 			DispatchCheaterAlert(config, {
 				name = name,

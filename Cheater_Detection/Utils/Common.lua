@@ -9,6 +9,7 @@ local Common = {
 
 Common.Json = require("Cheater_Detection.Libs.Json")
 local G = require("Cheater_Detection.Utils.Globals")
+local Constants = require("Cheater_Detection.Core.constants")
 
 --[[ Inlined PlayerResource (from lnxLib/TF2/PlayerResource.lua) ]]
 local PlayerResource = {}
@@ -235,8 +236,16 @@ function Common.IsCheater(playerInfo)
 		return false
 	end
 
-	-- Check if the player is marked as a cheater based on various criteria
-	local inDatabase = G.DataBase[steamId] ~= nil
+	-- Check if the player is marked as a cheater based on flags.
+	-- Karma/retaliation-only rows must not count as cheater status.
+	local inDatabase = false
+	local entry = G.DataBase and G.DataBase[steamId] or nil
+	if type(entry) == "table" then
+		local flags = tonumber(entry.Flags or 0) or 0
+		local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED |
+		Constants.Flags.COMM_BANNED
+		inDatabase = (flags & cheaterMask) ~= 0
+	end
 	local priorityCheater = playerlist.GetPriority(steamId) == 10
 
 	return inDatabase or priorityCheater
