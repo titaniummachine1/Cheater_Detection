@@ -279,14 +279,42 @@ end
 
 local function queueCurrentPlayers()
 	local queued = 0
+	local includeLocal = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	local localPlayer = entities.GetLocalPlayer()
+	local localIndex = localPlayer and localPlayer:IsValid() and localPlayer:GetIndex() or -1
+
+	-- Pass 1: authoritative live entities currently in world.
 	local players = entities.FindByClass("CTFPlayer") or {}
 	for i = 1, #players do
 		local entity = players[i]
 		if entity and entity:IsValid() then
-			local steamID64 = normalizeSteamID64(Common.GetSteamID64(entity))
-			if steamID64 then
-				local contextName = entity:GetName()
-				if queueSteamID(steamID64, { name = contextName }) then
+			local idx = entity:GetIndex()
+			if includeLocal or idx ~= localIndex then
+				local steamID64 = normalizeSteamID64(Common.GetSteamID64(entity))
+				if steamID64 then
+					local contextName = entity:GetName()
+					if queueSteamID(steamID64, { name = contextName }) then
+						queued = queued + 1
+					end
+				end
+			end
+		end
+	end
+
+	-- Pass 2: connected player info catches players not yet materialized as entities.
+	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
+	for i = 1, maxClients do
+		if includeLocal or i ~= localIndex then
+			local info = client.GetPlayerInfo(i)
+			if info and info.SteamID and not info.IsBot and not info.IsHLTV then
+				local steamID64 = nil
+				local steamIDStr = tostring(info.SteamID)
+				if steamIDStr:match("^7656119%d+$") then
+					steamID64 = normalizeSteamID64(steamIDStr)
+				elseif steamIDStr:match("%[U:1:%d+%]") then
+					steamID64 = normalizeSteamID64(Common.FromSteamid3To64(steamIDStr))
+				end
+				if steamID64 and queueSteamID(steamID64, { name = info.Name }) then
 					queued = queued + 1
 				end
 			end
@@ -297,6 +325,30 @@ local function queueCurrentPlayers()
 		printInfo(
 			{ 0, 200, 255, 255 },
 			string.format("[SteamHistory] Queued %d player%s for scanning", queued, queued == 1 and "" or "s")
+		)
+	end
+end
+
+local function onPlayerConnect(event)
+	if event:GetName() ~= "player_connect" then
+		return
+	end
+
+	if not state.enabled then
+		return
+	end
+
+	local networkid = event:GetString("networkid")
+	local steamID = normalizeSteamID64(Common.FromSteamid3To64(networkid))
+	if not steamID then
+		return
+	end
+
+	local name = event:GetString("name")
+	if queueSteamID(steamID, { name = name }) then
+		printInfo(
+			{ 0, 200, 255, 255 },
+			string.format("[SteamHistory] New player connected: %s - queued for scan", name ~= "" and name or steamID)
 		)
 	end
 end
@@ -806,7 +858,9 @@ end
 
 local function onGameEvent(event)
 	local name = event:GetName()
-	if name == "player_team" then
+	if name == "player_connect" then
+		onPlayerConnect(event)
+	elseif name == "player_team" then
 		onPlayerTeam(event)
 	elseif name == "game_newmap" then
 		resetState(true)
