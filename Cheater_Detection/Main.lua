@@ -264,10 +264,9 @@ local function OnCreateMove(cmd)
 		runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
 		runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
 		runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
-			enforceValveAutoDisconnect(pState)
-			if valveDisconnectTriggered then
-				return
-			end
+		enforceValveAutoDisconnect(pState)
+		if valveDisconnectTriggered then
+			return
 		end
 
 		::continue::
@@ -290,7 +289,7 @@ local function OnFireGameEvent(event)
 		local uid = event:GetInt("userid")
 		local ent = entities.GetByUserID(uid)
 		local id = nil
-		if ent then
+		if ent and ent:IsValid() then
 			id = tostring(Common.GetSteamID64(ent))
 		else
 			id = Common.FromSteamid3To64(event:GetString("networkid"))
@@ -307,7 +306,7 @@ local function OnFireGameEvent(event)
 		-- Only trigger entry logic if joining active teams (Red: 2, Blue: 3)
 		if team == 2 or team == 3 then
 			local ent = entities.GetByUserID(uid)
-			if ent then
+			if ent and ent:IsValid() then
 				local id = tostring(Common.GetSteamID64(ent))
 				if id and id:match("^7656119%d+$") then
 					Events.Publish("OnPlayerJoinTeam", id, ent)

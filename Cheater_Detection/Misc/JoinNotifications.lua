@@ -7,6 +7,11 @@ local Sources = require("Cheater_Detection.Database.Sources")
 local Common = require("Cheater_Detection.Utils.Common")
 local Constants = require("Cheater_Detection.Core.constants")
 local Events = require("Cheater_Detection.Core.Events")
+local lnxLoaded, lnxModule = pcall(require, "lnxLib")
+local lnxNotifs = nil
+if lnxLoaded and lnxModule and lnxModule.UI and lnxModule.UI.Notifications then
+	lnxNotifs = lnxModule.UI.Notifications
+end
 
 --[[ Module Declaration ]]
 local JoinNotifications = {}
@@ -105,9 +110,8 @@ local function SendAlert(outputConfig, messageConfig)
 	end
 
 	if outputConfig.Toast then
-		local ok, lnx = pcall(require, "lnxLib")
-		if ok and lnx and lnx.UI and lnx.UI.Notifications then
-			pcall(lnx.UI.Notifications.Add, messagePlain)
+		if lnxNotifs then
+			pcall(lnxNotifs.Add, messagePlain)
 		end
 	end
 end
@@ -462,8 +466,6 @@ local function OnCreateMove()
 		if config and type(config.ValveAutoDisconnect) == "boolean" then
 			ValidateAllPlayers()
 			hasValidatedOnLoad = true
-			-- Unregister after first run
-			callbacks.Unregister("CreateMove", "CD_JoinNotifications_Init")
 		end
 	end
 end

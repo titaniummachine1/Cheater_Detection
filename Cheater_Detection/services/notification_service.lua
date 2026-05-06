@@ -14,26 +14,16 @@ local Constants = require("Cheater_Detection.Core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
 local Database = require("Cheater_Detection.Database.Database")
+local lnxLoaded, lnxModule = pcall(require, "lnxLib")
+local lnxNotifs = nil
+if lnxLoaded and lnxModule and lnxModule.UI and lnxModule.UI.Notifications then
+	lnxNotifs = lnxModule.UI.Notifications
+end
 
 local NotificationService = {}
 
 -- Global rate limiter (safety net against unexpected event bursts)
 local lastNotifyTimes = {} -- Array of timestamps for global frequency limiting
-
--- lnxLib toast helper (safe fallback if lnxLib not loaded)
-local lnxNotifs = nil
-local lnxChecked = false
-local function TryGetLNX()
-	if lnxChecked then
-		return lnxNotifs
-	end
-	lnxChecked = true
-	local ok, lnx = pcall(require, "lnxLib")
-	if ok and lnx and lnx.UI and lnx.UI.Notifications then
-		lnxNotifs = lnx.UI.Notifications
-	end
-	return lnxNotifs
-end
 
 -- Resolve which channels table to use for a given detection type
 local function ResolveChannels(cfg, isValve, isCheater)
@@ -74,9 +64,8 @@ local function Dispatch(channels, colorMsg, plainMsg)
 
 	-- Toast: lnxLib corner notification pop-up
 	if channels.Toast then
-		local notifs = TryGetLNX()
-		if notifs then
-			pcall(notifs.Add, plainMsg)
+		if lnxNotifs then
+			pcall(lnxNotifs.Add, plainMsg)
 		end
 	end
 end
