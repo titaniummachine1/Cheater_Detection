@@ -11,6 +11,7 @@ local Config = require("Cheater_Detection.Utils.Config")
 
 local Commands = {}
 local registered = {}
+local lastRecordBlockLogAt = 0
 
 function Commands.Register(name, callback)
 	assert(type(name) == "string", "Commands.Register: name must be string")
@@ -33,6 +34,18 @@ local function onStringCmd(stringCmd)
 	if type(cmd) == "string" then
 		cmd = cmd:lower()
 	end
+
+	-- Hard block demo recording command to prevent external auto-record spam.
+	if cmd == "record" then
+		stringCmd:Set("")
+		local now = globals.RealTime()
+		if now - lastRecordBlockLogAt >= 10.0 then
+			lastRecordBlockLogAt = now
+			Logger.Info("Commands", "Blocked demo recording command: record")
+		end
+		return
+	end
+
 	if not cmd or not registered[cmd] then
 		return
 	end
