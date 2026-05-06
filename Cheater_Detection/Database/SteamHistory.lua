@@ -262,46 +262,13 @@ local function maybeAnnounceScanComplete()
 	end
 end
 
-local function queueActivePlayerStates()
-	local queued = 0
-	for steamID, playerState in pairs(PlayerCache.GetActiveTable()) do
-		local id = normalizeSteamID64(steamID)
-		if id then
-			local wrap = playerState and playerState.wrap
-			local name = wrap and wrap.GetName and wrap:GetName() or nil
-			if queueSteamID(id, { name = name }) then
-				queued = queued + 1
-			end
-		end
-	end
-	return queued
-end
-
 local function queueCurrentPlayers()
 	local queued = 0
 	local includeLocal = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	local localPlayer = entities.GetLocalPlayer()
 	local localIndex = localPlayer and localPlayer:IsValid() and localPlayer:GetIndex() or -1
 
-	-- Pass 1: authoritative live entities currently in world.
-	local players = entities.FindByClass("CTFPlayer") or {}
-	for i = 1, #players do
-		local entity = players[i]
-		if entity and entity:IsValid() then
-			local idx = entity:GetIndex()
-			if includeLocal or idx ~= localIndex then
-				local steamID64 = normalizeSteamID64(Common.GetSteamID64(entity))
-				if steamID64 then
-					local contextName = entity:GetName()
-					if queueSteamID(steamID64, { name = contextName }) then
-						queued = queued + 1
-					end
-				end
-			end
-		end
-	end
-
-	-- Pass 2: connected player info catches players not yet materialized as entities.
+	-- Use connected player info only; avoids touching potentially stale entities.
 	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
 	for i = 1, maxClients do
 		if includeLocal or i ~= localIndex then
@@ -327,6 +294,22 @@ local function queueCurrentPlayers()
 			string.format("[SteamHistory] Queued %d player%s for scanning", queued, queued == 1 and "" or "s")
 		)
 	end
+end
+
+local function getPlayerInfoByUserID(userID)
+	if type(userID) ~= "number" or userID <= 0 then
+		return nil, nil
+	end
+
+	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
+	for i = 1, maxClients do
+		local info = client.GetPlayerInfo(i)
+		if info and info.UserID == userID then
+			return info, i
+		end
+	end
+
+	return nil, nil
 end
 
 local function onPlayerConnect(event)
@@ -817,13 +800,7 @@ local function onPlayerTeam(event)
 	end
 
 	local userid = event:GetInt("userid")
-	local playerEntity = entities.GetByUserID(userid)
-	if not playerEntity or not playerEntity:IsValid() then
-		return
-	end
-
-	local playerIndex = playerEntity:GetIndex()
-	local info = client.GetPlayerInfo(playerIndex)
+	local info, playerIndex = getPlayerInfoByUserID(userid)
 
 	-- Check if bot via player info (bot field doesn't exist in event)
 	if not info or info.IsBot or info.IsHLTV then
@@ -878,8 +855,8 @@ local function onGameEvent(event)
 			return
 		end
 		local userID = event:GetInt("userid")
-		local ent = entities.GetByUserID(userID)
-		if ent and ent:GetIndex() == localPlayer:GetIndex() then
+		local localInfo = client.GetPlayerInfo(localPlayer:GetIndex())
+		if localInfo and localInfo.UserID and localInfo.UserID == userID then
 			queueCurrentPlayers()
 		end
 	end
@@ -907,7 +884,7 @@ local function onCreateMove()
 	end
 
 	if globals.RealTime() - state.lastActiveSweepTime >= ACTIVE_SWEEP_INTERVAL then
-		queueActivePlayerStates()
+		queueCurrentPlayers()
 		state.lastActiveSweepTime = globals.RealTime()
 	end
 
