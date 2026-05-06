@@ -134,14 +134,6 @@ local function queueSteamID(steamID, context)
 		return false
 	end
 
-	-- Check local database first
-	local existing = Database.GetCheater(steamID)
-	if existing then
-		-- Already known as cheater, skip scanning
-		state.scanned[steamID] = true
-		return false
-	end
-
 	state.pending[steamID] = {
 		name = context and context.name or nil,
 		queuedAt = globals.RealTime(),
@@ -287,35 +279,15 @@ end
 
 local function queueCurrentPlayers()
 	local queued = 0
-	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
-	for i = 1, maxClients do
-		local info = client.GetPlayerInfo(i)
-		if info and info.SteamID and not info.IsBot and not info.IsHLTV then
-			-- Skip local player unless debug mode is enabled
-			local isLocal = false
-			local localPlayer = entities.GetLocalPlayer()
-			if localPlayer and localPlayer:GetIndex() == i then
-				isLocal = true
-			end
-
-			-- Check if player is on a valid team (Red=2, Blue=3)
-			local entity = entities.GetByIndex(i)
-			local teamNum = entity and entity:GetTeamNumber() or 0
-			local isValidTeam = teamNum == 2 or teamNum == 3
-
-			if (isValidTeam and not isLocal) or (G.Menu.Advanced and G.Menu.Advanced.debug) then
-				local steamID64 = nil
-				local steamIDStr = tostring(info.SteamID)
-				if steamIDStr:match("^7656119%d+$") then
-					steamID64 = normalizeSteamID64(steamIDStr)
-				elseif steamIDStr:match("%[U:1:%d+%]") then
-					steamID64 = normalizeSteamID64(Common.FromSteamid3To64(steamIDStr))
-				end
-				if steamID64 then
-					local contextName = info.Name
-					if queueSteamID(steamID64, { name = contextName }) then
-						queued = queued + 1
-					end
+	local players = entities.FindByClass("CTFPlayer") or {}
+	for i = 1, #players do
+		local entity = players[i]
+		if entity and entity:IsValid() then
+			local steamID64 = normalizeSteamID64(Common.GetSteamID64(entity))
+			if steamID64 then
+				local contextName = entity:GetName()
+				if queueSteamID(steamID64, { name = contextName }) then
+					queued = queued + 1
 				end
 			end
 		end
@@ -794,7 +766,7 @@ local function onPlayerTeam(event)
 
 	local userid = event:GetInt("userid")
 	local playerEntity = entities.GetByUserID(userid)
-	if not playerEntity then
+	if not playerEntity or not playerEntity:IsValid() then
 		return
 	end
 
@@ -837,6 +809,8 @@ local function onGameEvent(event)
 	if name == "player_team" then
 		onPlayerTeam(event)
 	elseif name == "game_newmap" then
+		resetState(true)
+	elseif name == "teamplay_round_start" then
 		resetState(true)
 	elseif name == "player_spawn" or name == "player_death" then
 		if state.scanning or next(state.inFlight) ~= nil then
