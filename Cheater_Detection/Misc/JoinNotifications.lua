@@ -20,6 +20,9 @@ local JoinNotifications = {}
 local hasValidatedOnLoad = false
 local sentAlerts = {}
 local OnPlayerStateChange
+local lastCatchupSweepTime = 0
+
+local CATCHUP_SWEEP_INTERVAL = 5.0
 
 local function resetSentAlerts()
 	sentAlerts = {}
@@ -98,7 +101,7 @@ local function SendAlert(outputConfig, messageConfig)
 		sentToExternalChannel = true
 	end
 
-	if outputConfig.LocalChat and not sentToExternalChannel then
+	if outputConfig.LocalChat then
 		if not client.ChatPrintf(messageColored) then
 			print("[CD] Failed to send client chat message")
 		end
@@ -274,12 +277,14 @@ end
 local function ValidateAllPlayers()
 	local config = GetJoinNotificationsConfig()
 	if not config then
-		return -- Config not fully loaded yet
+		return 0 -- Config not fully loaded yet
 	end
 
+	local validatedCount = 0
 	local players = entities.FindByClass("CTFPlayer")
 	for _, player in ipairs(players) do
 		if player and player:IsValid() then
+			validatedCount = validatedCount + 1
 			local steamID64 = NormalizeSteamID64(Common.GetSteamID64(player))
 			if steamID64 then
 				local sentState = getSentAlertState(steamID64)
@@ -293,7 +298,7 @@ local function ValidateAllPlayers()
 					sentState.valve = alertSent == true
 					if alertSent and config.ValveAutoDisconnect then
 						client.Command("disconnect", true)
-						return
+						return validatedCount
 					end
 					-- Check if cheater in database
 				elseif config.CheckCheater then
@@ -310,6 +315,8 @@ local function ValidateAllPlayers()
 			end
 		end
 	end
+
+	return validatedCount
 end
 
 OnPlayerStateChange = function(playerState, reason)
@@ -381,11 +388,13 @@ local function OnPlayerConnect(event)
 	-- Check if Valve employee (higher priority)
 	if config.CheckValve and Sources.IsValveEmployee(steamID64) then
 		local tail = config.ValveAutoDisconnect and "joined - Leaving game" or "joined"
+		local sentState = getSentAlertState(steamID64)
 		local alertSent = DispatchValveAlert(config, {
 			name = name,
 			tail = tail,
 			allowParty = false,
 		})
+		sentState.valve = alertSent == true
 		if alertSent and config.ValveAutoDisconnect then
 			client.Command("disconnect", true)
 		end
@@ -396,13 +405,15 @@ local function OnPlayerConnect(event)
 	if config.CheckCheater then
 		local cheaterData = Database.GetCheater(steamID64)
 		if IsDatabaseCheaterRecord(cheaterData) and type(cheaterData) == "table" then
+			local sentState = getSentAlertState(steamID64)
 			local reason = cheaterData.Reason or "Unknown"
-			DispatchCheaterAlert(config, {
+			local alertSent = DispatchCheaterAlert(config, {
 				name = name,
 				reason = reason,
 				tail = string.format("joined (Suspected of: %s)", reason),
 				allowParty = false,
 			})
+			sentState.cheater = alertSent == true
 		end
 	end
 end
@@ -464,9 +475,24 @@ local function OnCreateMove()
 		local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
 		-- Check if config is loaded (has boolean ValveAutoDisconnect)
 		if config and type(config.ValveAutoDisconnect) == "boolean" then
-			ValidateAllPlayers()
-			hasValidatedOnLoad = true
+			local validatedCount = ValidateAllPlayers()
+			if validatedCount > 0 then
+				hasValidatedOnLoad = true
+				lastCatchupSweepTime = globals.RealTime()
+			end
 		end
+		return
+	end
+
+	local config = GetJoinNotificationsConfig()
+	if not config then
+		return
+	end
+
+	local now = globals.RealTime()
+	if (now - lastCatchupSweepTime) >= CATCHUP_SWEEP_INTERVAL then
+		lastCatchupSweepTime = now
+		ValidateAllPlayers()
 	end
 end
 
