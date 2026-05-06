@@ -222,40 +222,48 @@ local function OnCreateMove(cmd)
 
 	for i = 1, #players do
 		local ply = players[i]
+		-- Sanity check: validate entity before using
+		if not ply or not ply:IsValid() then
+			goto continue
+		end
+
 		local isLocalPlayer = (ply == localPlayer)
 		if isLocalPlayer and not isDebug then
 			goto continue
 		end
 
 		local pState = PlayerCache.Get(ply)
-		if pState then
-			-- In normal mode: exclude local player's friends and party members.
-			-- Clean them from DB once on first encounter, not every tick.
-			if not isDebug and pState.isFriend then
-				local friendID = pState.id
-				if friendID and friendID:match("^7656119%d+$") and not cleanedFriendIDs[friendID] then
-					cleanedFriendIDs[friendID] = true
-					Database.RemoveCheater(friendID)
-				end
-				goto continue
+		if not pState then
+			goto continue
+		end
+
+		-- In normal mode: exclude local player's friends and party members.
+		-- Clean them from DB once on first encounter, not every tick.
+		if not isDebug and pState.isFriend then
+			local friendID = pState.id
+			if friendID and friendID:match("^7656119%d+$") and not cleanedFriendIDs[friendID] then
+				cleanedFriendIDs[friendID] = true
+				Database.RemoveCheater(friendID)
 			end
+			goto continue
+		end
 
-			if isDebug then
-				assert(pState.wrap, "OnCreateMove: pState.wrap missing for id=" .. tostring(pState.id))
-				assert(pState.id, "OnCreateMove: pState.id missing")
-			end
+		if isDebug then
+			assert(pState.wrap, "OnCreateMove: pState.wrap missing for id=" .. tostring(pState.id))
+			assert(pState.id, "OnCreateMove: pState.id missing")
+		end
 
-			-- Update history snapshot first
-			HistoryManager.Push(pState.wrap)
+		-- Update history snapshot (entity valid at entry, safe for whole tick)
+		HistoryManager.Push(pState.wrap)
 
-			-- Layer 1-3 Detections
-			runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState, cmd)
-			runDetector("SilentAim", SilentAim.ProcessPlayer, pState, cmd)
-			runDetector("AntiAim", AntiAim.ProcessPlayer, pState, cmd)
-			runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState, cmd)
-			runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
-			runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
-			runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
+		-- Layer 1-3 Detections (entity validity checked once at entry)
+		runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState, cmd)
+		runDetector("SilentAim", SilentAim.ProcessPlayer, pState, cmd)
+		runDetector("AntiAim", AntiAim.ProcessPlayer, pState, cmd)
+		runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState, cmd)
+		runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
+		runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
+		runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
 			enforceValveAutoDisconnect(pState)
 			if valveDisconnectTriggered then
 				return

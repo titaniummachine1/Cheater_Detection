@@ -67,16 +67,11 @@ local function rebuildArrays()
 	refreshLocal()
 
 	local allN, noLocalN, teamN, enemyN = 0, 0, 0, 0
-	local toRemove = {}
-
 	for id, state in pairs(activeSet) do
 		local wrap = state.wrap
 		local ent  = wrap and wrap:GetRawEntity()
-
-		-- If entity is invalid/dormant, mark for removal from activeSet (prevents memory bloat)
-		if not ent or not ent:IsValid() or ent:IsDormant() then
-			toRemove[#toRemove + 1] = id
-		else
+		-- Filter to only valid, non-dormant players for the view arrays
+		if wrap and ent and ent:IsValid() and not ent:IsDormant() then
 			allN = allN + 1
 			arrAll[allN] = wrap
 
@@ -96,11 +91,6 @@ local function rebuildArrays()
 				end
 			end
 		end
-	end
-
-	-- Clean up invalid players from activeSet
-	for _, id in ipairs(toRemove) do
-		activeSet[id] = nil
 	end
 
 	-- Trim stale tail entries
@@ -308,9 +298,9 @@ Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
 	end
 end)
 
--- ── Periodic validation (once per second) ───────────────────────────────────
--- Ensures orphaned player states (invalid entities) get cleaned up even if
--- they somehow evaded the event-driven markDirty() path.
+-- ── Periodic validation (every 1s) ───────────────────────────────────────────
+-- Authoritative player list sync: get live players from FindByClass, remove
+-- any orphaned entries in activeSet. Catches player rotation leaks that events miss.
 
 local lastValidationTick = 0
 local VALIDATION_INTERVAL_TICKS = Constants.SecondsToTicks(1.0)
@@ -322,11 +312,23 @@ function PlayerCache.ValidateStates()
 	end
 	lastValidationTick = now
 
+	-- Get authoritative list of live players
+	local liveEntities = entities.FindByClass("CTFPlayer") or {}
+	local liveIDs = {}
+
+	for _, ent in ipairs(liveEntities) do
+		if ent and ent:IsValid() then
+			local steamID = Common.GetSteamID64(ent)
+			if steamID then
+				liveIDs[tostring(steamID)] = true
+			end
+		end
+	end
+
+	-- Remove any activeSet entries not in the live list
 	local toRemove = {}
 	for id, state in pairs(activeSet) do
-		local wrap = state.wrap
-		local ent = wrap and wrap:GetRawEntity()
-		if not ent or not ent:IsValid() then
+		if not liveIDs[id] then
 			toRemove[#toRemove + 1] = id
 		end
 	end
