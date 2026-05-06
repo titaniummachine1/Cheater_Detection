@@ -504,14 +504,20 @@ local function issueVote(target)
 		return false
 	end
 
-	client.Command(string.format("callvote kick %d", info.UserID), true)
+	local voteReason = "other"
+	if target.group == "cheater" or target.group == "bot" or target.group == "retaliation" then
+		voteReason = "cheating"
+	end
+
+	client.Command(string.format("callvote kick %d %s", info.UserID, voteReason), true)
 	logInfo(
 		string.format(
-			"Initiated vote on %s [%s] (group: %s, score: %d)",
+			"Initiated vote on %s [%s] (group: %s, score: %d, reason: %s)",
 			target.player:GetName(),
 			target.player:GetSteamID64(),
 			target.group,
-			target.score
+			target.score,
+			voteReason
 		)
 	)
 
