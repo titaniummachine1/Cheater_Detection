@@ -50,6 +50,7 @@ local state = {
 	singlePlayerFallback = false,
 	lastActiveSweepTime = 0,
 	completionAnnounced = false,
+	lastCompletionSignature = "",
 	lastDisabledLogTime = 0,
 	lastDisabledReason = "",
 	currentServerIP = "",
@@ -158,6 +159,7 @@ local function resetState(clearScanned)
 	state.nextRetryTime = 0
 	state.lastActiveSweepTime = 0
 	state.completionAnnounced = false
+	state.lastCompletionSignature = ""
 	state.lastDisabledLogTime = 0
 	state.lastDisabledReason = ""
 	state.currentServerIP = ""
@@ -265,16 +267,21 @@ local function maybeAnnounceScanComplete()
 	local pendingCount = countEntries(state.pending)
 	local totalTargets, checkedTargets = countActiveProgress()
 	local isComplete = totalTargets > 0 and checkedTargets >= totalTargets and pendingCount == 0 and not state.scanning
-	if isComplete and not state.completionAnnounced then
+	if isComplete then
+		local signature = string.format("%d/%d", checkedTargets, totalTargets)
+		if state.lastCompletionSignature == signature then
+			state.completionAnnounced = true
+			return
+		end
 		printInfo(
 			{ 120, 255, 120, 255 },
 			string.format("[SteamHistory] Scan complete: checked %d/%d active players", checkedTargets, totalTargets)
 		)
 		state.completionAnnounced = true
+		state.lastCompletionSignature = signature
+		return
 	end
-	if not isComplete then
-		state.completionAnnounced = false
-	end
+	state.completionAnnounced = false
 end
 
 local function queueCurrentPlayers()
