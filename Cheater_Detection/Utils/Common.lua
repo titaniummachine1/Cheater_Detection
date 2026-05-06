@@ -236,13 +236,10 @@ function Common.IsCheater(playerInfo)
 	end
 
 	-- Check if the player is marked as a cheater based on various criteria
-	-- Use Evidence system instead of deprecated G.PlayerData.info fields
-	local Evidence = require("Cheater_Detection.Core.Evidence_system")
-	local isMarkedCheater = Evidence.IsMarkedCheater(steamId)
 	local inDatabase = G.DataBase[steamId] ~= nil
 	local priorityCheater = playerlist.GetPriority(steamId) == 10
 
-	return isMarkedCheater or inDatabase or priorityCheater
+	return inDatabase or priorityCheater
 end
 
 ---@param entity any
@@ -284,12 +281,6 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 	end
 
 	return true -- Entity is a valid player
-end
-
--- Legacy shim; new code should use HistoryManager.Push directly
-function Common.pushHistory(player)
-	local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-	HistoryManager.Push(player)
 end
 
 function Common.FromSteamid3To64(steamid3)

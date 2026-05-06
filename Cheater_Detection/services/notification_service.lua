@@ -1,6 +1,6 @@
 --[[ services/notification_service.lua
      Centralized notification system for all detections.
-     
+
      Channels:
        LocalChat  = client.ChatPrintf   (only you see it)
        PublicChat = client.Command("say ...")  (whole server sees it)
@@ -13,6 +13,7 @@ local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.Core.constants")
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
+local Database = require("Cheater_Detection.Database.Database")
 
 local NotificationService = {}
 
@@ -158,7 +159,6 @@ local function OnStateChange(playerState, reason)
 		(G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug)
 		and id == tostring(Common.GetSteamID64(entities.GetLocalPlayer()))
 	then
-		local Database = require("Cheater_Detection.Database.Database")
 		Database.RemoveCheater(id)
 	end
 

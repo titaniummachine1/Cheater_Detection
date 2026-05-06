@@ -38,7 +38,7 @@ Evidence.Config = {
 
 	-- Thresholds
 	Evidence_Tolerance = 50, -- Evidence threshold % (0–100) to mark as cheater
-	MinWeightFloor = 0, -- Cannot decay below this
+	MinWeightFloor = 0,   -- Cannot decay below this
 
 	-- Category mappings (only implemented detections)
 	Categories = {
@@ -62,19 +62,7 @@ Evidence.Config = {
 }
 
 --[[ Private Variables ]]
-local DECAY_BATCHES_PER_CYCLE = 6
--- Interval in ticks between decay batches – recomputed dynamically each cycle so the
--- rate stays correct even if the server tick rate differs from the standard 66 Hz.
-local function getDecayIntervalTicks()
-	return math.max(1, math.floor(1 / (DECAY_BATCHES_PER_CYCLE * globals.TickInterval()) + 0.5))
-end
-local DECAY_SECONDS_PER_BATCH = 1 / DECAY_BATCHES_PER_CYCLE
-local lastDecayTick = 0 -- Simple tick-based rate limiting
-
-local decayQueue = {}
-local decayQueueIndex = {}
-local decayCursor = 1
-local decayQueueDirty = true
+-- Lazy decay: no batch system. Decay is applied on access using elapsed real time.
 
 local DetectionToggles = {
 	anti_aim = "AntiAim",
@@ -99,56 +87,6 @@ local function isDetectionEnabled(detectionName)
 	return flag ~= false
 end
 
-local function refreshDecayQueue()
-	for i = #decayQueue, 1, -1 do decayQueue[i] = nil end
-	for k in pairs(decayQueueIndex) do decayQueueIndex[k] = nil end
-	decayCursor = 1
-	decayQueueDirty = false
-
-	for steamID, evidence in pairs(evidenceStore) do
-		if evidence and evidence.Reasons and next(evidence.Reasons) ~= nil then
-			decayQueue[#decayQueue + 1] = steamID
-			decayQueueIndex[steamID] = true
-		end
-	end
-end
-
-local function markDecayQueueDirty()
-	decayQueueDirty = true
-end
-
-local function ensureDecayQueue()
-	if decayQueueDirty then
-		refreshDecayQueue()
-	end
-end
-
-local function enqueueForDecay(steamID)
-	if not steamID then
-		return
-	end
-
-	steamID = tostring(steamID)
-	if decayQueueIndex[steamID] then
-		return
-	end
-
-	decayQueue[#decayQueue + 1] = steamID
-	decayQueueIndex[steamID] = true
-end
-
-local function removeFromDecayQueue(steamID)
-	if not steamID then
-		return
-	end
-	steamID = tostring(steamID)
-	if not decayQueueIndex[steamID] then
-		return
-	end
-	decayQueueIndex[steamID] = nil
-	markDecayQueueDirty()
-end
-
 --[[ Helper Functions ]]
 
 -- Get category for a detection method
@@ -167,9 +105,7 @@ local function getOrCreateEvidence(steamID)
 	if not evidenceStore[steamID] then
 		evidenceStore[steamID] = {
 			TotalScore = 0,
-			LastUpdateTick = globals.TickCount(),
 			Reasons = {},
-			MarkedAsCheater = false,
 		}
 	end
 	return evidenceStore[steamID]
@@ -181,7 +117,6 @@ local function recalcTotalScore(evidence)
 		total = total + reason.Weight
 	end
 	evidence.TotalScore = total
-	evidence.LastUpdateTick = globals.TickCount()
 end
 
 local function applyReasonOptions(reason, opts)
@@ -338,119 +273,37 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 		evidence.Reasons[detectionName] = {
 			Weight = 0,
 			Category = getCategory(detectionName),
-			LastAddedTick = globals.TickCount(),
+			LastDecayTime = globals.RealTime(),
 		}
 	end
 	applyReasonOptions(evidence.Reasons[detectionName], opts)
 
+	-- Apply accumulated lazy decay before adding new weight
+	local reason = evidence.Reasons[detectionName]
+	if reason.ManualDecay ~= true then
+		local now = globals.RealTime()
+		local elapsed = now - (reason.LastDecayTime or now)
+		if elapsed > 0 then
+			local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
+			if rate > 0 then
+				reason.Weight = math.max(0, reason.Weight - rate * elapsed)
+			end
+		end
+		reason.LastDecayTime = now
+	end
+
 	-- Add weight
-	evidence.Reasons[detectionName].Weight = evidence.Reasons[detectionName].Weight + weight
-	evidence.Reasons[detectionName].LastAddedTick = globals.TickCount()
+	reason.Weight = reason.Weight + weight
 	evidence.Dirty = true
 
 	-- Recalculate total and check if player should be marked
 	recalcTotalScore(evidence)
 
 	tryApplyAutoPriority(steamID, evidence)
-
-	enqueueForDecay(steamID)
 end
 
-local function processEvidenceState(steamID, evidence, deltaTime)
-	if not evidence then
-		return false
-	end
-	if not evidence.Reasons or next(evidence.Reasons) == nil then
-		evidence.Dirty = false
-		return false
-	end
-
-	local changed = false
-	local minFloor = Evidence.Config.MinWeightFloor or 0
-	local toRemove = {}
-	local hasReasons = false
-
-	if deltaTime > 0 then
-		for detectionName, reason in pairs(evidence.Reasons) do
-			local detectionEnabled = isDetectionEnabled(detectionName)
-			if detectionEnabled and reason.ManualDecay ~= true and reason.Weight > minFloor then
-				local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
-				if rate > 0 then
-					local newWeight = math.max(minFloor, reason.Weight - rate * deltaTime)
-					if newWeight ~= reason.Weight then
-						reason.Weight = newWeight
-						changed = true
-					end
-				end
-			end
-
-			if reason.ManualDecay ~= true and reason.Weight <= minFloor then
-				toRemove[#toRemove + 1] = detectionName
-			else
-				hasReasons = true
-			end
-		end
-	else
-		hasReasons = true
-	end
-
-	for _, detectionName in ipairs(toRemove) do
-		evidence.Reasons[detectionName] = nil
-		changed = true
-	end
-
-	if evidence.Dirty or changed then
-		recalcTotalScore(evidence)
-		evidence.Dirty = false
-		tryApplyAutoPriority(steamID, evidence)
-	end
-
-	return hasReasons and next(evidence.Reasons) ~= nil
-end
-
-local function processDecayBatch()
-	ensureDecayQueue()
-	local queueSize = #decayQueue
-	if queueSize == 0 then
-		return
-	end
-
-	local batchSize = math.max(1, math.ceil(queueSize / DECAY_BATCHES_PER_CYCLE))
-	local processed = 0
-
-	while processed < batchSize and queueSize > 0 do
-		if decayCursor > queueSize then
-			decayCursor = 1
-			queueSize = #decayQueue
-			if queueSize == 0 then
-				break
-			end
-		end
-
-		local steamID = decayQueue[decayCursor]
-		decayCursor = decayCursor + 1
-		if steamID then
-			local evidence = evidenceStore[steamID]
-			if evidence and evidence.Reasons and next(evidence.Reasons) ~= nil then
-				local hasReasons = processEvidenceState(steamID, evidence, DECAY_SECONDS_PER_BATCH)
-				if not hasReasons then
-					removeFromDecayQueue(steamID)
-				end
-			else
-				removeFromDecayQueue(steamID)
-			end
-		end
-		processed = processed + 1
-	end
-end
-
---- Apply decay to all players (called per tick, internally rate-limited)
+--- No-op kept for API compatibility – decay is now lazy (applied on AddEvidence/GetScore).
 function Evidence.ApplyDecay()
-	local currentTick = globals.TickCount()
-	if currentTick - lastDecayTick >= getDecayIntervalTicks() then
-		lastDecayTick = currentTick
-		processDecayBatch()
-	end
 end
 
 --- Check if player is marked as cheater (for detection skip optimization)
@@ -469,11 +322,6 @@ function Evidence.IsMarkedCheater(steamID)
 		return true
 	end
 
-	-- Check evidence store
-	if evidenceStore[steamID] then
-		return evidenceStore[steamID].MarkedAsCheater == true
-	end
-
 	-- Check playerlist priority
 	local priority = playerlist.GetPriority(steamID)
 	if priority == 10 then
@@ -483,7 +331,7 @@ function Evidence.IsMarkedCheater(steamID)
 	return false
 end
 
---- Apply decay to a specific detection method for a player
+--- Apply manual decay to a specific detection method for a player
 ---@param steamID string Player's SteamID64
 ---@param detectionName string Detection method name
 ---@param decayAmount number Amount to decay
@@ -509,7 +357,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 		evidence.Reasons[detectionName] = {
 			Weight = 0,
 			Category = getCategory(detectionName),
-			LastAddedTick = globals.TickCount(),
+			LastDecayTime = globals.RealTime(),
 		}
 	end
 	local reason = evidence.Reasons[detectionName]
@@ -523,7 +371,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 	if oldWeight ~= reason.Weight then
 		evidence.Dirty = true
 		recalcTotalScore(evidence)
-		enqueueForDecay(steamID)
+
 		tryApplyAutoPriority(steamID, evidence)
 
 		-- Debug: Log decay
@@ -601,10 +449,6 @@ end
 function Evidence.OnPlayerLeave(steamID)
 	-- Clean up evidence data
 	evidenceStore[steamID] = nil
-	removeFromDecayQueue(steamID)
-
-	-- Detection module data cleanup is handled by script unload
-	-- Individual modules' local data structures are cleaned up automatically
 end
 
 --- Set playerlist priority for a player by SteamID

@@ -51,7 +51,6 @@ local bridgeState = {
 local lastLoggedTransportMode = "startup"
 local lastLoggedBridgeAlive = BRIDGE_ASSUME_HEALTHY_ON_LOAD
 local lastLoggedBridgeError = ""
-local startupBridgeProbePending = not BRIDGE_ASSUME_HEALTHY_ON_LOAD
 
 local FinishActiveRequest
 
@@ -635,11 +634,9 @@ function HttpQueue.Tick()
 	local didNetworkOp = false
 	RefreshBridgeSafeWindowGate()
 	local canProbeNow = CanRunBlockingHTTPNow()
-	local shouldProbeOnStartup = startupBridgeProbePending and now >= bridgeState.nextProbeAt
-	-- Run exactly one startup probe immediately after load/enable so bridge status is known
-	-- without waiting for a death/safe-window. After startup, probe only in safe windows.
-	if (not isProcessing) and (shouldProbeOnStartup or (canProbeNow and now >= bridgeState.nextProbeAt)) then
-		startupBridgeProbePending = false
+	-- Only probe bridge in safe windows (player dead / not in game).
+	-- Never probe while alive: http.Get to localhost is blocking and causes hitches.
+	if (not isProcessing) and canProbeNow and now >= bridgeState.nextProbeAt then
 		ProbeBridge(now)
 		didNetworkOp = true
 	end
