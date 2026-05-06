@@ -67,10 +67,16 @@ local function rebuildArrays()
 	refreshLocal()
 
 	local allN, noLocalN, teamN, enemyN = 0, 0, 0, 0
+	local toRemove = {}
+
 	for id, state in pairs(activeSet) do
 		local wrap = state.wrap
 		local ent  = wrap and wrap:GetRawEntity()
-		if wrap and ent and ent:IsValid() and not ent:IsDormant() then
+
+		-- If entity is invalid/dormant, mark for removal from activeSet (prevents memory bloat)
+		if not ent or not ent:IsValid() or ent:IsDormant() then
+			toRemove[#toRemove + 1] = id
+		else
 			allN = allN + 1
 			arrAll[allN] = wrap
 
@@ -90,6 +96,11 @@ local function rebuildArrays()
 				end
 			end
 		end
+	end
+
+	-- Clean up invalid players from activeSet
+	for _, id in ipairs(toRemove) do
+		activeSet[id] = nil
 	end
 
 	-- Trim stale tail entries
@@ -296,6 +307,38 @@ Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
 		pcall(playerlist.SetPriority, playerState.id, 10)
 	end
 end)
+
+-- ── Periodic validation (once per second) ───────────────────────────────────
+-- Ensures orphaned player states (invalid entities) get cleaned up even if
+-- they somehow evaded the event-driven markDirty() path.
+
+local lastValidationTick = 0
+local VALIDATION_INTERVAL_TICKS = Constants.SecondsToTicks(1.0)
+
+function PlayerCache.ValidateStates()
+	local now = globals.TickCount()
+	if now - lastValidationTick < VALIDATION_INTERVAL_TICKS then
+		return
+	end
+	lastValidationTick = now
+
+	local toRemove = {}
+	for id, state in pairs(activeSet) do
+		local wrap = state.wrap
+		local ent = wrap and wrap:GetRawEntity()
+		if not ent or not ent:IsValid() then
+			toRemove[#toRemove + 1] = id
+		end
+	end
+
+	for _, id in ipairs(toRemove) do
+		activeSet[id] = nil
+	end
+
+	if #toRemove > 0 then
+		markDirty()
+	end
+end
 
 -- ── Lifecycle listeners (replaces FastPlayers' EventManager registrations) ────
 
