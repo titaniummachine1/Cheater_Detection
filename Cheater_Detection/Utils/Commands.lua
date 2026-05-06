@@ -1,7 +1,6 @@
 --[[ Command bridge ]]
 
 local G = require("Cheater_Detection.Utils.Globals")
-local Logger = require("Cheater_Detection.Utils.Logger")
 local ValveData = require("Cheater_Detection.data.valve_data")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
@@ -11,18 +10,6 @@ local Config = require("Cheater_Detection.Utils.Config")
 
 local Commands = {}
 local registered = {}
-local lastRecordBlockLogAt = 0
-local BLOCKED_DEMO_COMMANDS = {
-	record = true,
-	stop = true,
-	playdemo = true,
-	timedemo = true,
-	startmovie = true,
-	endmovie = true,
-	ds_record = true,
-	ds_stop = true,
-	ds_mark = true,
-}
 
 function Commands.Register(name, callback)
 	assert(type(name) == "string", "Commands.Register: name must be string")
@@ -44,17 +31,6 @@ local function onStringCmd(stringCmd)
 	local cmd = parts[1]
 	if type(cmd) == "string" then
 		cmd = cmd:lower()
-	end
-
-	-- Hard block demo-related commands to prevent external auto-record spam.
-	if cmd and BLOCKED_DEMO_COMMANDS[cmd] then
-		stringCmd:Set("")
-		local now = globals.RealTime()
-		if now - lastRecordBlockLogAt >= 10.0 then
-			lastRecordBlockLogAt = now
-			Logger.Info("Commands", "Blocked demo command: " .. tostring(cmd))
-		end
-		return
 	end
 
 	if not cmd or not registered[cmd] then
