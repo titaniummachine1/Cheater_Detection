@@ -341,6 +341,13 @@ local function drawVoteUI()
 
 	local alpha = math.floor(voteAlpha)
 
+	-- Precompute vote counts and outcome (used for title bar color and auto-leave)
+	local yesCount = activeVote.counts[1] or 0
+	local noCount = activeVote.counts[2] or 0
+	local totalEligible = countEligibleTeamVoters(activeVote.team)
+	local outcomeState = getVoteOutcomeState(yesCount, noCount, totalEligible)
+	local titleR, titleG, titleB = computeTitleBarColor(yesCount, noCount, totalEligible)
+
 	-- UI dimensions (floor all to avoid sub-pixel rendering)
 	local screenW, _ = draw.GetScreenSize()
 	local boxW = 280
@@ -348,7 +355,7 @@ local function drawVoteUI()
 	local boxY = 55
 	local pad = 12
 	local lineH = 18
-	local bottomBarsH = 34
+	local bottomBarsH = 22
 
 	-- Calculate height
 	local maxVoters = math.max(#activeVote.votes[1], #activeVote.votes[2])
@@ -365,8 +372,8 @@ local function drawVoteUI()
 	draw.Color(55, 55, 65, alpha)
 	draw.OutlinedRect(boxX, boxY, boxX + boxW, boxY + boxH)
 
-	-- Title bar
-	draw.Color(30, 30, 38, alpha)
+	-- Title bar (color interpolates exponentially toward green/red based on vote certainty)
+	draw.Color(titleR, titleG, titleB, alpha)
 	draw.FilledRect(boxX + 1, boxY + 1, boxX + boxW - 1, boxY + 26)
 
 	-- Title text
@@ -459,57 +466,31 @@ local function drawVoteUI()
 	-- Vote count (bottom right)
 	draw.SetFont(font_small)
 	draw.Color(90, 90, 100, alpha)
-	local yesCount = activeVote.counts[1] or 0
-	local noCount = activeVote.counts[2] or 0
 	local countText = string.format("%d/%d", yesCount, noCount)
 	local countW = draw.GetTextSize(countText)
-	draw.Text(boxX + boxW - countW - pad, boxY + boxH - 30, countText)
+	draw.Text(boxX + boxW - countW - pad, boxY + boxH - 20, countText)
 
-	-- Bars (below voter lists)
+	-- Vote split bar
 	local barH = 5
 	local barW = boxW - pad * 2
 	local barX = boxX + pad
-	local barY = boxY + boxH - 24
+	local barY = boxY + boxH - 12
 
-	-- Vote split bar background
 	draw.Color(30, 30, 35, alpha)
 	draw.FilledRect(barX, barY, barX + barW, barY + barH)
 
-	-- Calculate progress
-	-- TF2 vote kick usually requires a majority of connected players on the team
-	-- We'll use the counts from the message for visual feedback
 	local totalPossible = yesCount + noCount
 	if totalPossible > 0 then
 		local yesRatio = yesCount / totalPossible
 		local yesWidth = math.floor(barW * yesRatio)
 
-		-- YES portion (Green)
 		draw.Color(70, 180, 70, alpha)
 		draw.FilledRect(barX, barY, barX + yesWidth, barY + barH)
 
-		-- NO portion (Red) - the rest of the bar if there are NO votes
 		if noCount > 0 then
 			draw.Color(180, 70, 70, alpha)
 			draw.FilledRect(barX + yesWidth, barY, barX + barW, barY + barH)
 		end
-	end
-
-	-- Guaranteed outcome bar (green=locked pass, red=locked fail, gray=still undecided)
-	local totalEligible = countEligibleTeamVoters(activeVote.team)
-	local outcomeState = getVoteOutcomeState(yesCount, noCount, totalEligible)
-	local outcomeY = barY + 10
-	draw.Color(30, 30, 35, alpha)
-	draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
-
-	if outcomeState == "pass" then
-		draw.Color(70, 180, 70, alpha)
-		draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
-	elseif outcomeState == "fail" then
-		draw.Color(180, 70, 70, alpha)
-		draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
-	else
-		draw.Color(130, 130, 140, alpha)
-		draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
 	end
 
 	if shouldAutoLeaveGuaranteedKick(outcomeState) then
