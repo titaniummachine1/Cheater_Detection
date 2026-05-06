@@ -308,6 +308,12 @@ local function DrawMenu()
 		if Misc.Vote_Reveal.Enable then
 			Misc.Vote_Reveal.Indicator = TimMenu.Checkbox("Vote Indicator", Misc.Vote_Reveal.Indicator == true)
 			TimMenu.NextLine()
+			Misc.Vote_Reveal.AutoLeaveOnGuaranteedLocalKick =
+				TimMenu.Checkbox(
+					"Auto Leave if Kick Guaranteed (Local)",
+					Misc.Vote_Reveal.AutoLeaveOnGuaranteedLocalKick == true
+				)
+			TimMenu.NextLine()
 			Misc.Vote_Reveal.TargetTeam = Misc.Vote_Reveal.TargetTeam or { MyTeam = true, enemyTeam = true }
 			local teamTable =
 			{ Misc.Vote_Reveal.TargetTeam.MyTeam == true, Misc.Vote_Reveal.TargetTeam.enemyTeam == true }

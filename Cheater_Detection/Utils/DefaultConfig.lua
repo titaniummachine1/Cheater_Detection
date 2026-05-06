@@ -76,6 +76,7 @@ local Default_Config = {
 		Vote_Reveal = {
 			Enable = true,
 			Indicator = true,
+			AutoLeaveOnGuaranteedLocalKick = false,
 			TargetTeam = {
 				MyTeam = true,
 				enemyTeam = true,

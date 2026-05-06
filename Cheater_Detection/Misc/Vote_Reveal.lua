@@ -148,6 +148,7 @@ local function startVote(team, voteidx, callerIdx, dispStr, detailsStr, targetId
 		},
 		counts = { 0, 0, 0, 0, 0 },
 		startTime = globals.RealTime(),
+		autoLeftGuaranteedKick = false,
 	}
 
 	targetAlpha = 255
@@ -257,6 +258,78 @@ local function getVoteTypeText(reason)
 	end
 end
 
+local function countEligibleTeamVoters(team)
+	if type(team) ~= "number" or team <= TEAM_SPECTATOR then
+		return 0
+	end
+
+	local eligible = 0
+	local maxClients = (globals and globals.MaxClients and globals.MaxClients()) or 32
+	for i = 1, maxClients do
+		local info = client.GetPlayerInfo(i)
+		if info and not info.IsBot and not info.IsHLTV then
+			local player = entities.GetByIndex(i)
+			if player and player.IsValid and player:IsValid() and player.GetTeamNumber then
+				if player:GetTeamNumber() == team then
+					eligible = eligible + 1
+				end
+			end
+		end
+	end
+
+	return eligible
+end
+
+local function getVoteOutcomeState(yesCount, noCount, totalEligible)
+	if totalEligible <= 0 then
+		return "uncertain", yesCount, noCount, 0
+	end
+
+	local neededToPass = math.floor(totalEligible / 2) + 1
+	local votesCast = yesCount + noCount
+	local remaining = totalEligible - votesCast
+	if remaining < 0 then
+		remaining = 0
+	end
+
+	if yesCount >= neededToPass then
+		return "pass", yesCount, noCount, neededToPass
+	end
+
+	local maxPossibleYes = yesCount + remaining
+	if maxPossibleYes < neededToPass then
+		return "fail", yesCount, noCount, neededToPass
+	end
+
+	return "uncertain", yesCount, noCount, neededToPass
+end
+
+local function shouldAutoLeaveGuaranteedKick(outcomeState)
+	if outcomeState ~= "pass" then
+		return false
+	end
+
+	if not activeVote or activeVote.autoLeftGuaranteedKick then
+		return false
+	end
+
+	local cfg = getConfig()
+	if not cfg or cfg.AutoLeaveOnGuaranteedLocalKick ~= true then
+		return false
+	end
+
+	local localPlayer = entities.GetLocalPlayer()
+	if not localPlayer or not localPlayer.IsValid or not localPlayer:IsValid() then
+		return false
+	end
+
+	if activeVote.targetIdx ~= localPlayer:GetIndex() then
+		return false
+	end
+
+	return true
+end
+
 local function drawVoteUI()
 	if not activeVote or voteAlpha <= 0 then
 		return
@@ -275,13 +348,14 @@ local function drawVoteUI()
 	local boxY = 55
 	local pad = 12
 	local lineH = 18
+	local bottomBarsH = 34
 
 	-- Calculate height
 	local maxVoters = math.max(#activeVote.votes[1], #activeVote.votes[2])
 	local voterRows = math.min(maxVoters, 8)
 	local hasTarget = activeVote.targetName and #activeVote.targetName > 0
 	local headerH = hasTarget and 70 or 52
-	local boxH = headerH + (voterRows * lineH) + pad + 20
+	local boxH = headerH + (voterRows * lineH) + pad + bottomBarsH
 
 	-- Background
 	draw.Color(18, 18, 22, math.floor(alpha * 0.96))
@@ -389,15 +463,15 @@ local function drawVoteUI()
 	local noCount = activeVote.counts[2] or 0
 	local countText = string.format("%d/%d", yesCount, noCount)
 	local countW = draw.GetTextSize(countText)
-	draw.Text(boxX + boxW - countW - pad, boxY + boxH - 16, countText)
+	draw.Text(boxX + boxW - countW - pad, boxY + boxH - 30, countText)
 
-	-- Progress Bar
-	local barH = 4
+	-- Bars (below voter lists)
+	local barH = 5
 	local barW = boxW - pad * 2
 	local barX = boxX + pad
 	local barY = boxY + boxH - 24
 
-	-- Bar Background
+	-- Vote split bar background
 	draw.Color(30, 30, 35, alpha)
 	draw.FilledRect(barX, barY, barX + barW, barY + barH)
 
@@ -418,6 +492,29 @@ local function drawVoteUI()
 			draw.Color(180, 70, 70, alpha)
 			draw.FilledRect(barX + yesWidth, barY, barX + barW, barY + barH)
 		end
+	end
+
+	-- Guaranteed outcome bar (green=locked pass, red=locked fail, gray=still undecided)
+	local totalEligible = countEligibleTeamVoters(activeVote.team)
+	local outcomeState = getVoteOutcomeState(yesCount, noCount, totalEligible)
+	local outcomeY = barY + 10
+	draw.Color(30, 30, 35, alpha)
+	draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
+
+	if outcomeState == "pass" then
+		draw.Color(70, 180, 70, alpha)
+		draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
+	elseif outcomeState == "fail" then
+		draw.Color(180, 70, 70, alpha)
+		draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
+	else
+		draw.Color(130, 130, 140, alpha)
+		draw.FilledRect(barX, outcomeY, barX + barW, outcomeY + barH)
+	end
+
+	if shouldAutoLeaveGuaranteedKick(outcomeState) then
+		activeVote.autoLeftGuaranteedKick = true
+		client.Command("disconnect", true)
 	end
 end
 
