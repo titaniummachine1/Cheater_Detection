@@ -11,6 +11,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Database = require("Cheater_Detection.Database.Database")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local Constants = require("Cheater_Detection.Core.constants")
 
 -- Own evidence store (keyed by steamID64 string)
 local evidenceStore = {}
@@ -319,9 +320,15 @@ function Evidence.IsMarkedCheater(steamID)
 	-- Ensure steamID is a string for table lookup
 	steamID = tostring(steamID)
 
-	-- Check database first (known cheater lists)
-	if G.DataBase[steamID] then
-		return true
+	-- Check database with strict hard-evidence flags only.
+	-- Presence in DB alone is not enough (many imported rows are metadata only).
+	local entry = G.DataBase[steamID]
+	if type(entry) == "table" then
+		local flags = tonumber(entry.Flags or 0) or 0
+		local hardMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED
+		if (flags & hardMask) ~= 0 then
+			return true
+		end
 	end
 
 	-- Check playerlist priority

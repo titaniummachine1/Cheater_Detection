@@ -4,7 +4,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
-local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Sources = require("Cheater_Detection.Database.Sources")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local VoteReveal = require("Cheater_Detection.Misc.Vote_Reveal")
@@ -307,9 +306,6 @@ local function getCheaterStatus(steamID)
 	if not steamID then
 		return false
 	end
-	if Evidence.IsMarkedCheater(steamID) then
-		return true
-	end
 
 	local entry = getExistingDbEntry(steamID)
 	if type(entry) ~= "table" then
@@ -317,7 +313,7 @@ local function getCheaterStatus(steamID)
 	end
 
 	local flags = tonumber(entry.Flags or 0) or 0
-	local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED
+	local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED
 	if (flags & cheaterMask) ~= 0 then
 		return true
 	end
