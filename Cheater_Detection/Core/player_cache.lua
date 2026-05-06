@@ -316,7 +316,7 @@ function PlayerCache.ValidateStates()
 	local liveEntities = entities.FindByClass("CTFPlayer") or {}
 	local liveIDs = {}
 
-	for _, ent in ipairs(liveEntities) do
+	for _, ent in pairs(liveEntities) do
 		if ent and ent:IsValid() then
 			local steamID = Common.GetSteamID64(ent)
 			if steamID then

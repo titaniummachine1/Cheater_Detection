@@ -17,10 +17,19 @@ local Json = Common.Json
 --[[ Constants ]]
 local KEYWORDS = {
 	"[stac]",
+	"[smac]",
 	"smac ",
 	"cheat",
 	"hack",
 	"aimbot",
+	"anticheat",
+	"anti-cheat",
+	"[ac]",
+	"[sn]",
+	"[st]",
+	"wallhack",
+	"triggerbot",
+	"speedhack",
 }
 
 local API_TEMPLATE = "https://steamhistory.net/api/sourcebans?key=%s&shouldkey=0&steamids=%s"
@@ -418,6 +427,15 @@ local function flagPlayer(steamID, context, entry)
 		or lowerReason:find("cheat")
 		or lowerReason:find("hack")
 		or lowerReason:find("smac")
+		or lowerReason:find("%[stac%]")
+		or lowerReason:find("anticheat")
+		or lowerReason:find("anti%-cheat")
+		or lowerReason:find("%[ac%]")
+		or lowerReason:find("%[sn%]")
+		or lowerReason:find("%[st%]")
+		or lowerReason:find("wallhack")
+		or lowerReason:find("triggerbot")
+		or lowerReason:find("speedhack")
 
 	local formattedReason = string.format("SteamHistory (%s)", reason)
 	local flags = 0
