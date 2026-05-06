@@ -174,11 +174,6 @@ local function Init()
 	end
 
 	print("[CD] System initialized.")
-
-	-- Register Decay Heartbeat
-	Events.Subscribe("DecayHeartbeat", function()
-		PlayerCache.Heartbeat()
-	end)
 end
 
 -- [[ Callbacks ]]

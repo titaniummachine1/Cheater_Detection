@@ -15,26 +15,26 @@
        PlayerCache.IsFriend(id)          → bool
 ]]
 
-local Constants   = require("Cheater_Detection.Core.constants")
-local WrappedPlayer = require("Cheater_Detection.Utils.WrappedPlayer")
-local Common      = require("Cheater_Detection.Utils.Common")
-local Events      = require("Cheater_Detection.Core.Events")
-local G           = require("Cheater_Detection.Utils.Globals")
+local Constants       = require("Cheater_Detection.Core.constants")
+local WrappedPlayer   = require("Cheater_Detection.Utils.WrappedPlayer")
+local Common          = require("Cheater_Detection.Utils.Common")
+local Events          = require("Cheater_Detection.Core.Events")
+local G               = require("Cheater_Detection.Utils.Globals")
 
-local PlayerCache = {}
+local PlayerCache     = {}
 
 -- ── Authoritative per-player state ───────────────────────────────────────────
 
 ---@type table<string, table>
-local activeSet = {}
+local activeSet       = {}
 
 -- ── Lazy array views (rebuilt when arrDirty == true) ─────────────────────────
 
-local arrAll     = {}
-local arrNoLocal = {}
-local arrTeam    = {}
-local arrEnemy   = {}
-local arrDirty   = true
+local arrAll          = {}
+local arrNoLocal      = {}
+local arrTeam         = {}
+local arrEnemy        = {}
+local arrDirty        = true
 
 local cachedLocal     = nil
 local cachedLocalID   = nil
@@ -93,13 +93,20 @@ local function rebuildArrays()
 	end
 
 	-- Trim stale tail entries
-	for i = allN     + 1, #arrAll     do arrAll[i]     = nil end
+	for i = allN + 1, #arrAll do arrAll[i] = nil end
 	for i = noLocalN + 1, #arrNoLocal do arrNoLocal[i] = nil end
-	for i = teamN    + 1, #arrTeam    do arrTeam[i]    = nil end
-	for i = enemyN   + 1, #arrEnemy   do arrEnemy[i]   = nil end
+	for i = teamN + 1, #arrTeam do arrTeam[i] = nil end
+	for i = enemyN + 1, #arrEnemy do arrEnemy[i] = nil end
 
 	arrDirty = false
 end
+
+-- ── Score decay constants (replaces Heartbeat periodic decay) ───────────────
+-- Rates match original: 2pts per 10s heartbeat for HIGH_RISK, 5pts per 10s for SUSPICIOUS
+local SCORE_DECAY_HIGH_RISK  = 0.2 -- points/sec
+local SCORE_DECAY_SUSPICIOUS = 0.5 -- points/sec
+
+local HARD_FLAGS             = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 
 -- ── Detector API ──────────────────────────────────────────────────────────────
 
@@ -151,9 +158,8 @@ function PlayerCache.Get(ply)
 
 		local dbEntry   = G.DataBase[id]
 		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
-		local initScore = dbEntry and dbEntry.Score  or 0
+		local initScore = dbEntry and dbEntry.Score or 0
 
-		local HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 		if (initFlags & HARD_FLAGS) ~= 0 then
 			pcall(playerlist.SetPriority, id, 10)
 		end
@@ -167,11 +173,36 @@ function PlayerCache.Get(ply)
 			checkFlags      = newCheckFlags(),
 			isFriend        = Common.IsFriend and Common.IsFriend(ply, true) or false,
 			lastUpdate      = globals.TickCount(),
+			lastScoreDecay  = globals.RealTime(),
 		}
 		markDirty()
 	end
 
-	return activeSet[id]
+	-- Lazy score decay: apply elapsed-time decay on every access
+	local state = activeSet[id]
+	local now = globals.RealTime()
+	local elapsed = now - (state.lastScoreDecay or now)
+	if elapsed > 0 and state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
+		local rate = 0
+		if (state.flags & Constants.Flags.HIGH_RISK) ~= 0 then
+			rate = SCORE_DECAY_HIGH_RISK
+		elseif (state.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
+			rate = SCORE_DECAY_SUSPICIOUS
+		end
+		if rate > 0 then
+			state.score = math.max(0, state.score - rate * elapsed)
+			if state.score < Constants.Threshold.SUSPICIOUS then
+				state.flags = (state.flags & ~Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
+			elseif state.score < Constants.Threshold.HIGH_RISK then
+				state.flags = (state.flags | Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
+			else
+				state.flags = state.flags | Constants.Flags.SUSPICIOUS | Constants.Flags.HIGH_RISK
+			end
+		end
+	end
+	state.lastScoreDecay = now
+
+	return state
 end
 
 ---Get state by steamID64 string (HistoryManager / warp_dt path)
@@ -194,33 +225,9 @@ function PlayerCache.GetActiveTable()
 end
 
 -- ── Heartbeat / score decay ───────────────────────────────────────────────────
-
-function PlayerCache.Heartbeat()
-	for id, state in pairs(activeSet) do
-		local ply = state.wrap and state.wrap:GetRawEntity()
-		if not ply or not ply:IsValid() then
-			activeSet[id] = nil
-			markDirty()
-		elseif state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
-			if (state.flags & Constants.Flags.HIGH_RISK) ~= 0 then
-				state.score = math.max(0, state.score - 2)
-			elseif (state.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
-				state.score = math.max(0, state.score - 5)
-			end
-
-			if state.score < Constants.Threshold.SUSPICIOUS then
-				state.flags = state.flags & ~Constants.Flags.SUSPICIOUS
-				state.flags = state.flags & ~Constants.Flags.HIGH_RISK
-			elseif state.score < Constants.Threshold.HIGH_RISK then
-				state.flags = state.flags | Constants.Flags.SUSPICIOUS
-				state.flags = state.flags & ~Constants.Flags.HIGH_RISK
-			else
-				state.flags = state.flags | Constants.Flags.SUSPICIOUS
-				state.flags = state.flags | Constants.Flags.HIGH_RISK
-			end
-		end
-	end
-end
+-- Score decay is now lazy (applied in Get() using elapsed RealTime).
+-- Invalid player eviction is handled lazily: rebuildArrays() skips invalid
+-- entities; Get() returns nil for invalid entities; Remove() handles disconnects.
 
 function PlayerCache.ResetCheckedState()
 	for _, state in pairs(activeSet) do
@@ -283,7 +290,7 @@ end
 
 local RUNTIME_HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
-	assert(playerState,    "PlayerCache priority subscriber: playerState missing")
+	assert(playerState, "PlayerCache priority subscriber: playerState missing")
 	assert(playerState.id, "PlayerCache priority subscriber: id missing")
 	if (playerState.flags & RUNTIME_HARD_FLAGS) ~= 0 then
 		pcall(playerlist.SetPriority, playerState.id, 10)
@@ -296,12 +303,12 @@ local function onLifecycleEvent(_event)
 	markDirty()
 end
 
-Events.Register("FireGameEvent", "PC_PlayerConnect",    onLifecycleEvent, "player_connect_client")
+Events.Register("FireGameEvent", "PC_PlayerConnect", onLifecycleEvent, "player_connect_client")
 Events.Register("FireGameEvent", "PC_PlayerDisconnect", onLifecycleEvent, "player_disconnect")
-Events.Register("FireGameEvent", "PC_PlayerTeam",       onLifecycleEvent, "player_team")
-Events.Register("FireGameEvent", "PC_PlayerSpawn",      onLifecycleEvent, "player_spawn")
-Events.Register("FireGameEvent", "PC_PlayerDeath",      onLifecycleEvent, "player_death")
-Events.Register("FireGameEvent", "PC_NewMap",           onLifecycleEvent, "game_newmap")
-Events.Register("FireGameEvent", "PC_RoundStart",       onLifecycleEvent, "teamplay_round_start")
+Events.Register("FireGameEvent", "PC_PlayerTeam", onLifecycleEvent, "player_team")
+Events.Register("FireGameEvent", "PC_PlayerSpawn", onLifecycleEvent, "player_spawn")
+Events.Register("FireGameEvent", "PC_PlayerDeath", onLifecycleEvent, "player_death")
+Events.Register("FireGameEvent", "PC_NewMap", onLifecycleEvent, "game_newmap")
+Events.Register("FireGameEvent", "PC_RoundStart", onLifecycleEvent, "teamplay_round_start")
 
 return PlayerCache
