@@ -46,11 +46,13 @@ local RetaliationCallers = {}
 -- Persistent per-player retaliation karma in memory (mirrored into DB via UpsertCheater).
 local RetaliationKarma = {}
 
+local VOTE_DECISION_INTERVAL = 10.0 -- Max frequency for full candidate scan (seconds)
+
 local State = {
 	currentVoteIdx = nil,
 	currentTarget = nil,
 	lastVoteTime = 0,
-	lastDecisionTick = 0,
+	lastDecisionTime = 0,
 	serverCooldownUntil = 0, -- Server-reported cooldown end time
 	lastCooldownLog = 0,
 	-- Exponential backoff for guessed cooldowns
@@ -469,21 +471,12 @@ local function shouldVoteAutomatically()
 	local menu = getMenu()
 	local result = menu and menu.Autovote and menu.AutovoteAutoCast ~= false
 	if not result then
-		logDebug(
-			string.format(
-				"Auto-cast disabled: menu=%s, Autovote=%s, AutovoteAutoCast=%s",
-				tostring(menu ~= nil),
-				tostring(menu and menu.Autovote),
-				tostring(menu and menu.AutovoteAutoCast)
-			)
-		)
 		return false
 	end
 
 	-- Check if we're in a casual game mode
 	local isCasual = gamerules.IsMatchTypeCasual()
 	if not isCasual then
-		logDebug("Auto-vote disabled: not in casual game mode")
 		return false
 	end
 
@@ -736,11 +729,6 @@ local function onVoteEvent(event)
 	end
 end
 
--- Track last log time to avoid spam
-local lastStatusLog = 0
-local STATUS_LOG_INTERVAL = 45.0
-local wasNoTargetLastCheck = false
-
 function AutoVote.OnCreateMove()
 	local menu = getMenu()
 	if not menu then
@@ -793,29 +781,16 @@ function AutoVote.OnCreateMove()
 		return
 	end
 
-	-- Rate limit per tick
-	if globals.TickCount() == State.lastDecisionTick then
+	-- Gate the expensive candidate scan: run at most once every VOTE_DECISION_INTERVAL seconds
+	if now - State.lastDecisionTime < VOTE_DECISION_INTERVAL then
 		return
 	end
-
-	State.lastDecisionTick = globals.TickCount()
+	State.lastDecisionTime = now
 
 	local target = pickNextTarget()
 	if not target then
-		local candidates = collectCandidates()
-		if #candidates == 0 then
-			if (not wasNoTargetLastCheck) or (globals.RealTime() - lastStatusLog > STATUS_LOG_INTERVAL) then
-				lastStatusLog = globals.RealTime()
-				logInfo("No vote targets on your team (check intent settings)")
-			end
-			wasNoTargetLastCheck = true
-		else
-			wasNoTargetLastCheck = false
-		end
 		return
 	end
-
-	wasNoTargetLastCheck = false
 
 	logInfo(
 		string.format(

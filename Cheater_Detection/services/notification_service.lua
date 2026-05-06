@@ -22,10 +22,12 @@ local lastNotifyTimes = {} -- Array of timestamps for global frequency limiting
 
 -- lnxLib toast helper (safe fallback if lnxLib not loaded)
 local lnxNotifs = nil
+local lnxChecked = false
 local function TryGetLNX()
-	if lnxNotifs then
+	if lnxChecked then
 		return lnxNotifs
 	end
+	lnxChecked = true
 	local ok, lnx = pcall(require, "lnxLib")
 	if ok and lnx and lnx.UI and lnx.UI.Notifications then
 		lnxNotifs = lnx.UI.Notifications

@@ -89,16 +89,18 @@ end
 
 --[[ Helper Functions ]]
 
--- Get category for a detection method
-local function getCategory(detectionName)
+-- Pre-built reverse map: detectionName -> category (built once at load time)
+local categoryByDetection = {}
+do
 	for category, methods in pairs(Evidence.Config.Categories) do
 		for _, method in ipairs(methods) do
-			if method == detectionName then
-				return category
-			end
+			categoryByDetection[method] = category
 		end
 	end
-	return "Movement" -- Default fallback
+end
+
+local function getCategory(detectionName)
+	return categoryByDetection[detectionName] or "Movement"
 end
 
 local function getOrCreateEvidence(steamID)

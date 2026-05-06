@@ -55,44 +55,27 @@ local lastLoggedBridgeError = ""
 local FinishActiveRequest
 
 local function Now()
-	local globalsTable = globals
-	if globalsTable and type(globalsTable.RealTime) == "function" then
-		local ok, value = pcall(globalsTable.RealTime)
-		if ok and type(value) == "number" then
-			return value
-		end
+	return globals.RealTime()
+end
+
+local function GetLocalPlayerAlive()
+	local localPlayer = entities.GetLocalPlayer()
+	if not localPlayer then
+		return nil
 	end
-	return os.clock()
+	return localPlayer:IsAlive()
 end
 
 local function CanRunBlockingHTTPNow()
-	local ok, localPlayer = pcall(entities.GetLocalPlayer)
-	if not ok or not localPlayer then
-		return true
+	local alive = GetLocalPlayerAlive()
+	if alive == nil then
+		return true -- not in server, safe to block
 	end
-
-	local aliveOk, alive = pcall(function()
-		return localPlayer:IsAlive()
-	end)
-	if not aliveOk then
-		return false
-	end
-
 	return not alive
 end
 
 local function IsLocalPlayerAliveNow()
-	local ok, localPlayer = pcall(entities.GetLocalPlayer)
-	if not ok or not localPlayer then
-		return false
-	end
-	local aliveOk, alive = pcall(function()
-		return localPlayer:IsAlive()
-	end)
-	if not aliveOk then
-		return false
-	end
-	return alive == true
+	return GetLocalPlayerAlive() == true
 end
 
 local function UrlEncode(value)
