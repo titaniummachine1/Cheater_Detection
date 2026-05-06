@@ -675,9 +675,13 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	maybeAnnounceScanComplete()
 
 	if state.singlePlayerFallback and state.currentBatchSize == MIN_BATCH then
-		state.currentBatchSize = MAX_BATCH
-		state.singlePlayerFallback = false
-		printInfo({ 150, 255, 150, 255 }, "[SteamHistory] Single-player retry succeeded - batch size restored to 100")
+		-- Keep single-player fallback until the queue is drained.
+		-- Restoring MAX_BATCH after one success can trigger immediate 429 loops.
+		if countEntries(state.pending) == 0 then
+			state.currentBatchSize = MAX_BATCH
+			state.singlePlayerFallback = false
+			printInfo({ 150, 255, 150, 255 }, "[SteamHistory] Single-player retry succeeded - batch size restored to 100")
+		end
 	end
 end
 
@@ -842,7 +846,8 @@ local function onGameEvent(event)
 	elseif name == "game_newmap" then
 		resetState(true)
 	elseif name == "teamplay_round_start" then
-		resetState(true)
+		-- Round transitions are not session boundaries; avoid full requeue storms.
+		return
 	elseif name == "player_spawn" or name == "player_death" then
 		if state.scanning or next(state.inFlight) ~= nil then
 			return
