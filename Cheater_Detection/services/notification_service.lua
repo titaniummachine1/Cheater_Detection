@@ -114,31 +114,49 @@ local function OnStateChange(playerState, reason)
 
 	table.insert(lastNotifyTimes, now)
 
+	-- Read Source stored by the caller (Fetcher, SteamHistory, etc.).
+	-- nil means the detection came from local in-session analysis only.
+	local dbEntry = G.DataBase and G.DataBase[id]
+	local detectionSource = dbEntry and dbEntry.Source or nil
+	local fromDatabase = detectionSource ~= nil
+
 	-- Build messages
 	local colorMsg = ""
 	local plainMsg = ""
 
 	if isValve then
 		colorMsg = string.format("\x07FFD700[VALVE]\x01 %s is a Valve Employee!", name)
-		plainMsg = string.format("[VALVE] %s is a Valve Employee!", name)
+		plainMsg = string.format("fyi: %s is a Valve employee", name)
 	elseif isCheater then
-		colorMsg = string.format("\x07FF0000[DETECTION]\x01 %s is Cheating! (%s)", name, reason or "")
-		plainMsg = string.format("[DETECTION] %s is Cheating! (%s)", name, reason or "")
+		if fromDatabase then
+			colorMsg = string.format("\x07FF0000[DETECTION]\x01 %s appears in %s as a cheater (%s)", name,
+				detectionSource, reason or "")
+			plainMsg = string.format("%s is listed in %s as a cheater (%s)", name, detectionSource, reason or "")
+		else
+			colorMsg = string.format("\x07FF0000[DETECTION]\x01 %s is Cheating! (%s)", name, reason or "")
+			plainMsg = string.format("heads up: %s might be cheating", name)
+		end
 	elseif isVacBanned then
 		colorMsg = string.format("\x07FFB300[BAN]\x01 %s has a VAC ban on record!", name)
-		plainMsg = string.format("[BAN] %s has a VAC ban on record!", name)
+		plainMsg = string.format("watch out: %s has a VAC ban on record", name)
 	elseif isCommBanned then
 		colorMsg = string.format("\x07FFB300[BAN]\x01 %s has a Community/Trade ban!", name)
-		plainMsg = string.format("[BAN] %s has a Community/Trade ban!", name)
+		plainMsg = string.format("watch out: %s has a community/trade ban", name)
 	elseif isSus then
 		local displayScore = math.min(99, math.floor(score))
-		colorMsg = string.format(
-			"\x07FFD500[SUSPICIOUS]\x01 %s is %d pct likely cheating (%s)",
-			name,
-			displayScore,
-			reason or ""
-		)
-		plainMsg = string.format("[SUSPICIOUS] %s is %d pct likely cheating (%s)", name, displayScore, reason or "")
+		if fromDatabase then
+			colorMsg = string.format(
+				"\x07FFD500[SUSPICIOUS]\x01 %s is flagged in %s (%d pct confidence, %s)",
+				name, detectionSource, displayScore, reason or ""
+			)
+			plainMsg = string.format("%s is flagged in %s (%s)", name, detectionSource, reason or "")
+		else
+			colorMsg = string.format(
+				"\x07FFD500[SUSPICIOUS]\x01 %s is %d pct likely cheating (%s)",
+				name, displayScore, reason or ""
+			)
+			plainMsg = string.format("heads up: %s might be cheating", name)
+		end
 	end
 
 	if colorMsg == "" then

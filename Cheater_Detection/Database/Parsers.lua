@@ -426,7 +426,7 @@ end
 
 -- Processes a single player entry into the database
 -- Returns: wasAdded, wasUpdated, wasError
-function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticSource, defaultReason)
+function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticSource, defaultReason, sourceName)
 	if not player or type(player) ~= "table" then
 		return false, false, true
 	end
@@ -501,6 +501,11 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 			end
 		end
 
+		-- Store source name if not already set
+		if sourceName and not existingEntry.Source then
+			existingEntry.Source = sourceName
+		end
+
 		local updated = updName or updReason or updStatic
 
 
@@ -510,6 +515,7 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 		existingEntries[steamID64] = {
 			Name = playerName or "Unknown",
 			Reason = reason or "Unknown Source",
+			Source = sourceName or nil,
 			Static = staticSource or false,
 			Timestamp = os.time(),
 		}

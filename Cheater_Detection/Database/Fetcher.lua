@@ -459,7 +459,7 @@ function Fetcher.Tick()
 				s.errors = s.errors + 1
 			else
 				local added, updated, err, updName, updReason, updStatic =
-					Parsers.ParseTF2BotDetector_MergeEntry(player, G.DataBase, staticID, sourceCause)
+					Parsers.ParseTF2BotDetector_MergeEntry(player, G.DataBase, staticID, sourceCause, source.name)
 
 				if err then
 					s.errors = s.errors + 1

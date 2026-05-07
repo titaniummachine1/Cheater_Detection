@@ -457,6 +457,7 @@ local function flagPlayer(steamID, context, entry)
 	Database.UpsertCheater(steamID, {
 		name = name,
 		reason = formattedReason,
+		source = "SteamHistory",
 		flags = flags,
 	})
 
@@ -560,6 +561,7 @@ local function setSteamHistoryChecks(steamID, entry)
 		Database.UpsertCheater(steamID, {
 			name = playerState.wrap and playerState.wrap:GetName() or resolveName(steamID, nil, entry),
 			reason = isVacBanned and "SteamHistory VAC Ban" or "SteamHistory Community/Trade Ban",
+			source = "SteamHistory",
 			flags = playerState.flags,
 			score = playerState.score or 0,
 		})

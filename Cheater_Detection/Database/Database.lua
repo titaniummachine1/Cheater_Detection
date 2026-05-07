@@ -159,6 +159,9 @@ function Database.SaveDatabase(force)
 			if v.Reason and v.Reason ~= "Unknown Source" then
 				clean.Reason = v.Reason
 			end
+			if type(v.Source) == "string" then
+				clean.Source = v.Source
+			end
 			if v.Static then
 				clean.Static = v.Static
 			end
@@ -510,9 +513,16 @@ function Database.UpsertCheater(steamID, data)
 		finalRetaliation = existing.Retaliation
 	end
 
+	-- Caller is responsible for providing data.source. Inherit from existing if not supplied.
+	local finalSource = data.source
+	if not finalSource and existing and type(existing.Source) == "string" then
+		finalSource = existing.Source
+	end
+
 	G.DataBase[steamID] = {
 		Name = data.name or "Unknown",
 		Reason = data.reason or "Cheater",
+		Source = finalSource,
 		Flags = persistentFlags,
 		Score = score,
 		Timestamp = currentTime,
