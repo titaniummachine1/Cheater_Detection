@@ -16,6 +16,8 @@ local MAX_JSON_NIL_RETRIES = 0
 -- Seconds to wait between sequential online source fetches to avoid
 -- hammering the HTTP subsystem when safe-window blocking requests run.
 local INTER_SOURCE_DELAY = 3.0
+local ONLINE_ACTIVE_FETCH_LIMIT = 1
+local ONLINE_SAFE_WINDOW_FETCH_LIMIT = 20
 
 ---- State tracking
 Fetcher.State = {
@@ -45,6 +47,7 @@ Fetcher.State = {
 	currentSourceStats = nil,
 	onlineEnqueued = false,
 	onlinePendingCount = 0,
+	onlineCompletedCount = 0,
 	onlineResponses = {},
 	onlineNilRetryCount = {},
 	lastOnlineFetchTime = 0,
@@ -125,6 +128,40 @@ local function onOnlineResponse(responseBody, errorMessage, source)
 	})
 end
 
+local function GetOnlineFetchParallelLimit()
+	if ShouldRelaxFrameLimits() then
+		return ONLINE_SAFE_WINDOW_FETCH_LIMIT
+	end
+	return ONLINE_ACTIVE_FETCH_LIMIT
+end
+
+local function GetOnlineFetchDispatchDelay()
+	if ShouldRelaxFrameLimits() then
+		return 0.0
+	end
+	return INTER_SOURCE_DELAY
+end
+
+local function TotalOnlineSources(state)
+	if type(state.activeSources) ~= "table" then
+		return 0
+	end
+	return #state.activeSources
+end
+
+local function CompleteOnlineSource(state)
+	state.onlineCompletedCount = state.onlineCompletedCount + 1
+	if state.sourceIdx <= TotalOnlineSources(state) and state.onlinePendingCount < GetOnlineFetchParallelLimit() then
+		state.mode = "ONLINE_FETCH"
+		return
+	end
+	if #state.onlineResponses > 0 or state.onlinePendingCount > 0 then
+		state.mode = "ONLINE_WAIT_RESPONSE"
+		return
+	end
+	state.mode = "FINISH"
+end
+
 -- Logic for starting the process
 function Fetcher.Start()
 	if Fetcher.State.isRunning then
@@ -158,6 +195,7 @@ function Fetcher.Start()
 	state.onlineEnqueued = false
 
 	state.onlinePendingCount = 0
+	state.onlineCompletedCount = 0
 	state.onlineResponses = {}
 	state.onlineNilRetryCount = {}
 	state.lastOnlineFetchTime = 0
@@ -490,8 +528,7 @@ function Fetcher.Tick()
 				state.fileIdx = state.fileIdx + 1
 				state.mode = "LOCAL_READ"
 			else
-				state.sourceIdx = state.sourceIdx + 1
-				state.mode = "ONLINE_FETCH"
+				CompleteOnlineSource(state)
 			end
 			state.playersToProcess = nil
 		end
@@ -506,53 +543,76 @@ function Fetcher.Tick()
 		end
 
 		if state.sourceIdx > #state.activeSources then
-			state.mode = "FINISH"
+			if #state.onlineResponses > 0 or state.onlinePendingCount > 0 then
+				state.mode = "ONLINE_WAIT_RESPONSE"
+			else
+				state.mode = "FINISH"
+			end
 			return
 		end
 
-		-- Inter-source cooldown: give the engine HTTP subsystem time to breathe
-		-- between sequential GetAsync calls to avoid engine instability.
+		-- Keep the live-game path serial, but allow safe windows to fill the
+		-- bridge queue with multiple source fetches at once.
 		local now = globals.RealTime()
-		if (now - state.lastOnlineFetchTime) < INTER_SOURCE_DELAY then
+		local dispatchDelay = GetOnlineFetchDispatchDelay()
+		if dispatchDelay > 0 and (now - state.lastOnlineFetchTime) < dispatchDelay then
 			return
 		end
 
-		state.onlinePendingCount = 0
-		state.onlineResponses = {}
+		local parallelLimit = GetOnlineFetchParallelLimit()
+		while state.sourceIdx <= #state.activeSources and state.onlinePendingCount < parallelLimit do
+			local source = state.activeSources[state.sourceIdx]
+			if type(source) ~= "table" then
+				Logger.Warning("Fetcher", "[FETCHER] Invalid source at index " .. tostring(state.sourceIdx))
+				state.results.errors = state.results.errors + 1
+				state.sourceIdx = state.sourceIdx + 1
+				state.onlineCompletedCount = state.onlineCompletedCount + 1
+			else
+				local fetchUrl, fetchErr = buildFetchUrl(source)
+				if not fetchUrl then
+					Logger.Warning("Fetcher", "[FETCHER] Skipping source " .. source.name .. ": " .. tostring(fetchErr))
+					state.sourceIdx = state.sourceIdx + 1
+					state.onlineCompletedCount = state.onlineCompletedCount + 1
+				else
+					local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
+					if not enqueued then
+						-- Strict queue mode can reject while another module is using HTTP.
+						-- Stay on ONLINE_FETCH and retry this same source next tick.
+						break
+					end
 
-		local source = state.activeSources[state.sourceIdx]
-		if type(source) ~= "table" then
-			Logger.Warning("Fetcher", "[FETCHER] Invalid source at index " .. tostring(state.sourceIdx))
-			state.results.errors = state.results.errors + 1
-			state.sourceIdx = state.sourceIdx + 1
-			state.mode = "ONLINE_FETCH"
+					Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
+					state.lastOnlineFetchTime = globals.RealTime()
+					state.onlinePendingCount = state.onlinePendingCount + 1
+					state.sourceIdx = state.sourceIdx + 1
+					if dispatchDelay > 0 then
+						break
+					end
+				end
+			end
+		end
+
+		if #state.onlineResponses > 0 or state.onlinePendingCount > 0 then
+			state.mode = "ONLINE_WAIT_RESPONSE"
 			return
 		end
 
-		local fetchUrl, fetchErr = buildFetchUrl(source)
-		if not fetchUrl then
-			Logger.Warning("Fetcher", "[FETCHER] Skipping source " .. source.name .. ": " .. tostring(fetchErr))
-			state.sourceIdx = state.sourceIdx + 1
-			return
+		if state.sourceIdx > #state.activeSources then
+			state.mode = "FINISH"
 		end
-		local enqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
-		if not enqueued then
-			-- Strict queue mode can reject while another module is using HTTP.
-			-- Stay on ONLINE_FETCH and retry this same source next tick.
-			return
-		end
-
-		Logger.Debug("Fetcher", "[FETCHER] Fetching online source: " .. source.name)
-		state.lastOnlineFetchTime = globals.RealTime()
-		state.onlinePendingCount = 1
-
-		state.mode = "ONLINE_WAIT_RESPONSE"
 
 		--------------------------------------------------------
 		-- STATE: ONLINE_WAIT_RESPONSE
 		--------------------------------------------------------
 	elseif state.mode == "ONLINE_WAIT_RESPONSE" then
 		if #state.onlineResponses == 0 then
+			if state.sourceIdx <= #state.activeSources and state.onlinePendingCount < GetOnlineFetchParallelLimit() then
+				state.mode = "ONLINE_FETCH"
+				return
+			end
+			if state.onlinePendingCount == 0 and state.onlineCompletedCount >= TotalOnlineSources(state) then
+				state.mode = "FINISH"
+			end
 			return
 		end
 
@@ -565,24 +625,21 @@ function Fetcher.Tick()
 		if type(source) ~= "table" then
 			Logger.Warning("Fetcher", "[FETCHER] Invalid source context from HTTP queue: " .. sourceName)
 			state.results.errors = state.results.errors + 1
-			state.sourceIdx = state.sourceIdx + 1
-			state.mode = "ONLINE_FETCH"
+			CompleteOnlineSource(state)
 			return
 		end
 
 		if responseError then
 			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName .. ": " .. tostring(responseError))
 			state.results.errors = state.results.errors + 1
-			state.sourceIdx = state.sourceIdx + 1
-			state.mode = "ONLINE_FETCH"
+			CompleteOnlineSource(state)
 			return
 		end
 
 		if not source then
 			Logger.Error("Fetcher", "[FETCHER] Missing source after HTTP response")
 			state.results.errors = state.results.errors + 1
-			state.sourceIdx = state.sourceIdx + 1
-			state.mode = "ONLINE_FETCH"
+			CompleteOnlineSource(state)
 			return
 		end
 
@@ -591,8 +648,7 @@ function Fetcher.Tick()
 			if response:match("<html") or response:match("<HTML") then
 				Logger.Warning("Fetcher", "[FETCHER] HTML Error page from " .. sourceName)
 				state.results.errors = state.results.errors + 1
-				state.sourceIdx = state.sourceIdx + 1
-				state.mode = "ONLINE_FETCH"
+				CompleteOnlineSource(state)
 				return
 			end
 
@@ -638,9 +694,8 @@ function Fetcher.Tick()
 						if not fetchUrl then
 							Logger.Warning("Fetcher",
 								"[FETCHER] Retry skipped for " .. sourceName .. ": " .. tostring(fetchErr))
-							state.sourceIdx = state.sourceIdx + 1
 							state.results.errors = state.results.errors + 1
-							state.mode = "ONLINE_FETCH"
+							CompleteOnlineSource(state)
 							return
 						end
 						local reEnqueued = HttpQueue.Enqueue(fetchUrl, onOnlineResponse, source, { noDelay = true })
@@ -657,9 +712,8 @@ function Fetcher.Tick()
 							)
 						else
 							Logger.Warning("Fetcher", "[FETCHER] Retry enqueue failed for " .. sourceName)
-							state.sourceIdx = state.sourceIdx + 1
 							state.results.errors = state.results.errors + 1
-							state.mode = "ONLINE_FETCH"
+							CompleteOnlineSource(state)
 						end
 					else
 						Logger.Warning(
@@ -671,22 +725,19 @@ function Fetcher.Tick()
 								errText
 							)
 						)
-						state.sourceIdx = state.sourceIdx + 1
 						state.results.errors = state.results.errors + 1
-						state.mode = "ONLINE_FETCH"
+						CompleteOnlineSource(state)
 					end
 				else
 					Logger.Warning("Fetcher", "[FETCHER] Parse error in " .. sourceName .. ": " .. errText)
-					state.sourceIdx = state.sourceIdx + 1
 					state.results.errors = state.results.errors + 1
-					state.mode = "ONLINE_FETCH"
+					CompleteOnlineSource(state)
 				end
 			end
 		else
 			Logger.Warning("Fetcher", "[FETCHER] Failed to fetch " .. sourceName .. " (empty response)")
-			state.sourceIdx = state.sourceIdx + 1
 			state.results.errors = state.results.errors + 1
-			state.mode = "ONLINE_FETCH"
+			CompleteOnlineSource(state)
 		end
 
 		--------------------------------------------------------

@@ -13,12 +13,14 @@ local SteamLookup = {}
 local autoFetchedID64s = {} -- s64 string -> true
 local fetchState = {
 	done = false,
-	inProgress = false,
 	nextPage = 1,
+	inFlightCount = 0,
 	totalFetched = 0,
 	cooldownUntil = 0,
 }
 local MAX_FETCH_PAGES = 3
+local GROUP_FETCH_COOLDOWN = 3.0
+local ACTIVE_GROUP_FETCH_LIMIT = 1
 
 local function countLoadedIDs()
 	local count = 0
@@ -52,9 +54,106 @@ local function parseGroupXML(xml)
 	return count
 end
 
---- Tick one page of Valve group fetching (call from scheduler, paced with 3s gaps)
+local function GetLocalPlayerEntity()
+	local ok, localPlayer = pcall(entities.GetLocalPlayer)
+	if not ok or not localPlayer then
+		return nil
+	end
+
+	local isValidFn = localPlayer.IsValid
+	if type(isValidFn) == "function" then
+		local validOk, isValid = pcall(isValidFn, localPlayer)
+		if not validOk or isValid ~= true then
+			return nil
+		end
+	end
+
+	return localPlayer
+end
+
+local function CanUseSafeWindowBurst()
+	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
+		return true
+	end
+
+	local serverIP = engine.GetServerIP()
+	if not serverIP or serverIP == "" then
+		return true
+	end
+
+	local localPlayer = GetLocalPlayerEntity()
+	if not localPlayer then
+		return true
+	end
+
+	local isAliveFn = localPlayer.IsAlive
+	if type(isAliveFn) ~= "function" then
+		return false
+	end
+
+	local aliveOk, alive = pcall(isAliveFn, localPlayer)
+	if not aliveOk then
+		return false
+	end
+
+	return alive ~= true
+end
+
+local function GetGroupFetchParallelLimit()
+	if CanUseSafeWindowBurst() then
+		return MAX_FETCH_PAGES
+	end
+	return ACTIVE_GROUP_FETCH_LIMIT
+end
+
+local function IsGroupFetchActive()
+	if fetchState.inFlightCount > 0 then
+		return true
+	end
+	return fetchState.done ~= true and fetchState.nextPage <= MAX_FETCH_PAGES
+end
+
+local function FinishGroupFetchIfReady()
+	if fetchState.done == true then
+		return
+	end
+	if fetchState.inFlightCount > 0 then
+		return
+	end
+	if fetchState.nextPage <= MAX_FETCH_PAGES then
+		return
+	end
+
+	fetchState.done = true
+	print(string.format("[SteamLookup] Group fetch done: %d IDs loaded.", fetchState.totalFetched))
+end
+
+local function OnValveGroupPageResponse(data, errorMessage, context)
+	local page = context and context.page or 0
+	if fetchState.inFlightCount > 0 then
+		fetchState.inFlightCount = fetchState.inFlightCount - 1
+	end
+
+	if type(errorMessage) == "string" and errorMessage ~= "" then
+		print(string.format("[SteamLookup] Page %d failed: %s", page, errorMessage))
+	else
+		local found = parseGroupXML(data or "")
+		fetchState.totalFetched = fetchState.totalFetched + found
+		print(string.format("[SteamLookup] Page %d: +%d Valve group IDs", page, found))
+	end
+
+	if not CanUseSafeWindowBurst() then
+		fetchState.cooldownUntil = globals.RealTime() + GROUP_FETCH_COOLDOWN
+	else
+		fetchState.cooldownUntil = 0
+	end
+
+	FinishGroupFetchIfReady()
+end
+
+--- Tick Valve group fetching. Safe windows can dispatch all remaining pages at once.
 function SteamLookup.TickGroupFetch()
-	if fetchState.done or fetchState.inProgress then
+	if fetchState.done then
 		return
 	end
 
@@ -64,42 +163,45 @@ function SteamLookup.TickGroupFetch()
 	end
 
 	if fetchState.nextPage > MAX_FETCH_PAGES then
-		fetchState.done = true
-		print(string.format("[SteamLookup] Group fetch done: %d IDs loaded.", fetchState.totalFetched))
+		FinishGroupFetchIfReady()
 		return
 	end
 
-	fetchState.inProgress = true
-	local page = fetchState.nextPage
-	local url = "https://steamcommunity.com/gid/" .. ValveData.GroupID .. "/memberslistxml/?xml=1&p=" .. page
+	local parallelLimit = GetGroupFetchParallelLimit()
+	while fetchState.nextPage <= MAX_FETCH_PAGES and fetchState.inFlightCount < parallelLimit do
+		local page = fetchState.nextPage
+		local url = "https://steamcommunity.com/gid/" .. ValveData.GroupID .. "/memberslistxml/?xml=1&p=" .. page
+		local context = { page = page }
 
-	local enqueued = HttpQueue.Enqueue(url, function(data)
-		local found = parseGroupXML(data or "")
-		fetchState.totalFetched = fetchState.totalFetched + found
+		local enqueued = HttpQueue.Enqueue(url, OnValveGroupPageResponse, context,
+			{ noDelay = true, highPriority = true })
+		if not enqueued then
+			fetchState.cooldownUntil = globals.RealTime() + 0.25
+			return
+		end
+
+		fetchState.inFlightCount = fetchState.inFlightCount + 1
 		fetchState.nextPage = page + 1
-		fetchState.inProgress = false
-		fetchState.cooldownUntil = globals.RealTime() + 3.0
-		print(string.format("[SteamLookup] Page %d: +%d Valve group IDs", page, found))
-	end, nil, { noDelay = true, highPriority = true })
-
-	if not enqueued then
-		fetchState.inProgress = false
-		fetchState.cooldownUntil = globals.RealTime() + 0.25
+		if parallelLimit <= ACTIVE_GROUP_FETCH_LIMIT then
+			return
+		end
 	end
+
+	FinishGroupFetchIfReady()
 end
 
 --- Kick off the group fetch on startup
 function SteamLookup.RefreshValveGroup(force)
 	local forceRefresh = force == true
 	if not forceRefresh then
-		if fetchState.inProgress or fetchState.done then
+		if IsGroupFetchActive() or fetchState.done then
 			return false
 		end
 
 		local cachedCount = countLoadedIDs()
 		if cachedCount > 0 then
 			fetchState.done = true
-			fetchState.inProgress = false
+			fetchState.inFlightCount = 0
 			fetchState.nextPage = MAX_FETCH_PAGES + 1
 			fetchState.totalFetched = cachedCount
 			fetchState.cooldownUntil = 0
@@ -111,7 +213,7 @@ function SteamLookup.RefreshValveGroup(force)
 	end
 
 	fetchState.done = false
-	fetchState.inProgress = false
+	fetchState.inFlightCount = 0
 	fetchState.nextPage = 1
 	fetchState.totalFetched = 0
 	fetchState.cooldownUntil = 0

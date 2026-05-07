@@ -300,7 +300,7 @@ local function DrawMenu()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Vote Reveal Alerts")
+		TimMenu.BeginSector("Vote Management")
 		Misc.Vote_Reveal = Misc.Vote_Reveal or {}
 		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable == true)
 		TimMenu.NextLine()

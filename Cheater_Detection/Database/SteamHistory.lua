@@ -13,6 +13,7 @@ local Database = require("Cheater_Detection.Database.Database")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 local Constants = require("Cheater_Detection.Core.constants")
 local Json = Common.Json
+local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 --[[ Constants ]]
 local KEYWORDS = {
@@ -734,8 +735,6 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	end
 end
 
-local HttpQueue = require("Cheater_Detection.services.http_queue")
-
 local function requestBatch()
 	local cfg = getConfig()
 	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
@@ -938,22 +937,6 @@ local function onGameEvent(event)
 	elseif name == "teamplay_round_start" then
 		-- Round transitions are not session boundaries; avoid full requeue storms.
 		return
-	elseif name == "player_spawn" or name == "player_death" then
-		if state.scanning or next(state.inFlight) ~= nil then
-			return
-		end
-		if not state.enabled then
-			return
-		end
-		local localPlayer = entities.GetLocalPlayer()
-		if not localPlayer then
-			return
-		end
-		local userID = event:GetInt("userid")
-		local localInfo = client.GetPlayerInfo(localPlayer:GetIndex())
-		if localInfo and localInfo.UserID and localInfo.UserID == userID then
-			queueCurrentPlayers()
-		end
 	end
 end
 
