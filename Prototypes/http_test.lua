@@ -75,6 +75,7 @@ local State = {
     requestsOk = 0,
     requestsShort = 0,
     requestsEmpty = 0,
+    requestsMalformed = 0,
     requestsTimeout = 0,
     requestsDispatchError = 0,
     requestsDropped = 0,
@@ -89,6 +90,7 @@ local State = {
         ok = 0,
         short = 0,
         empty = 0,
+        malformed = 0,
         timeout = 0,
         dispatch_error = 0,
     },
@@ -140,6 +142,7 @@ local function ResetRoundStats()
     State.roundStats.ok = 0
     State.roundStats.short = 0
     State.roundStats.empty = 0
+    State.roundStats.malformed = 0
     State.roundStats.timeout = 0
     State.roundStats.dispatch_error = 0
     State.roundPeakInFlight = 0
@@ -159,6 +162,7 @@ local function ResetState()
     State.requestsOk = 0
     State.requestsShort = 0
     State.requestsEmpty = 0
+    State.requestsMalformed = 0
     State.requestsTimeout = 0
     State.requestsDispatchError = 0
     State.requestsDropped = 0
@@ -226,12 +230,13 @@ end
 
 local function LogRoundSummary(reason)
     Log(string.format(
-        "round %d summary burst=%d ok=%d short=%d empty=%d timeout=%d dispatch=%d round_peak=%d reason=%s",
+        "round %d summary burst=%d ok=%d short=%d empty=%d malformed=%d timeout=%d dispatch=%d round_peak=%d reason=%s",
         State.roundIndex,
         GetCurrentRoundBurst(),
         State.roundStats.ok,
         State.roundStats.short,
         State.roundStats.empty,
+        State.roundStats.malformed,
         State.roundStats.timeout,
         State.roundStats.dispatch_error,
         State.roundPeakInFlight,
@@ -242,13 +247,14 @@ end
 
 local function FinishExperiment(reason)
     Log(string.format(
-        "finish reason=%s sent=%d callbacks=%d ok=%d short=%d empty=%d timeout=%d dispatch=%d dropped=%d fail=%d peak=%d last_dispatch=%s last_complete=%s",
+        "finish reason=%s sent=%d callbacks=%d ok=%d short=%d empty=%d malformed=%d timeout=%d dispatch=%d dropped=%d fail=%d peak=%d last_dispatch=%s last_complete=%s",
         tostring(reason),
         State.requestsSent,
         State.requestsCompleted,
         State.requestsOk,
         State.requestsShort,
         State.requestsEmpty,
+        State.requestsMalformed,
         State.requestsTimeout,
         State.requestsDispatchError,
         State.requestsDropped,
@@ -368,6 +374,51 @@ local function RecordCompletion(request, status, value, now)
     end
 end
 
+local function BuildSnippet(input, maxLen)
+    if type(input) ~= "string" then
+        return ""
+    end
+
+    local snippet = input:sub(1, maxLen)
+    snippet = snippet:gsub("%c", " ")
+    return snippet
+end
+
+local function ValidateResponseBody(source, data)
+    if type(data) ~= "string" then
+        return false, "non-string response"
+    end
+
+    if data == "" then
+        return false, "empty response"
+    end
+
+    if data:find("%z", 1, true) then
+        return false, "contains NUL byte"
+    end
+
+    local trimmed = data:match("^%s*(.-)%s*$") or ""
+    if trimmed == "" then
+        return false, "whitespace-only response"
+    end
+
+    local url = source and source.url or ""
+    local isJsonTarget = type(url) == "string" and (url:find("%.json", 1, false) ~= nil)
+
+    if isJsonTarget then
+        local first = trimmed:sub(1, 1)
+        local last = trimmed:sub(-1)
+        if not ((first == "{" and last == "}") or (first == "[" and last == "]")) then
+            return false, "json framing mismatch"
+        end
+        if trimmed:find("^<", 1, false) then
+            return false, "html/xml payload on json endpoint"
+        end
+    end
+
+    return true, nil
+end
+
 HandleAsyncResponse = function(slot, data)
     if not State.isAlive then
         return
@@ -402,6 +453,19 @@ HandleAsyncResponse = function(slot, data)
         State.requestsShort = State.requestsShort + 1
         State.requestsFailed = State.requestsFailed + 1
         RecordCompletion(request, "short", FormatRatio(#data, expectedBytes), now)
+        return
+    end
+
+    local validBody, malformedReason = ValidateResponseBody(source, data)
+    if not validBody then
+        State.requestsMalformed = State.requestsMalformed + 1
+        State.requestsFailed = State.requestsFailed + 1
+        local preview = BuildSnippet(data, 80)
+        local detail = tostring(malformedReason)
+        if preview ~= "" then
+            detail = detail .. " preview='" .. preview .. "'"
+        end
+        RecordCompletion(request, "malformed", detail, now)
         return
     end
 
