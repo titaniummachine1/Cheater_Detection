@@ -304,6 +304,53 @@ local function getVoteOutcomeState(yesCount, noCount, totalEligible)
 	return "uncertain", yesCount, noCount, neededToPass
 end
 
+local function clamp01(value)
+	if value < 0 then
+		return 0
+	end
+	if value > 1 then
+		return 1
+	end
+	return value
+end
+
+local function blendColorChannel(startValue, endValue, factor)
+	return math.floor(startValue + (endValue - startValue) * factor + 0.5)
+end
+
+local function computeTitleBarColor(yesCount, noCount, totalEligible)
+	local neutralR, neutralG, neutralB = 115, 90, 72
+	local passR, passG, passB = 80, 140, 92
+	local failR, failG, failB = 155, 82, 82
+	local outcomeState, _, _, neededToPass = getVoteOutcomeState(yesCount, noCount, totalEligible)
+	if neededToPass <= 0 then
+		return neutralR, neutralG, neutralB
+	end
+
+	local noNeededToFail = math.max(1, totalEligible - neededToPass + 1)
+	local factor = 0
+	local targetR, targetG, targetB = neutralR, neutralG, neutralB
+
+	if outcomeState == "pass" then
+		factor = clamp01(yesCount / neededToPass)
+		targetR, targetG, targetB = passR, passG, passB
+	elseif outcomeState == "fail" then
+		factor = clamp01(noCount / noNeededToFail)
+		targetR, targetG, targetB = failR, failG, failB
+	elseif yesCount >= noCount then
+		factor = clamp01(yesCount / neededToPass) * 0.55
+		targetR, targetG, targetB = passR, passG, passB
+	else
+		factor = clamp01(noCount / noNeededToFail) * 0.55
+		targetR, targetG, targetB = failR, failG, failB
+	end
+
+	factor = factor * factor
+	return blendColorChannel(neutralR, targetR, factor),
+		blendColorChannel(neutralG, targetG, factor),
+		blendColorChannel(neutralB, targetB, factor)
+end
+
 local function shouldAutoLeaveGuaranteedKick(outcomeState)
 	if outcomeState ~= "pass" then
 		return false
