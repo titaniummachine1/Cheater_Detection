@@ -104,13 +104,6 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		TimMenu.Text("Public cheater lists are fetched by Auto-Sync Databases")
 		TimMenu.EndSector()
-
-		TimMenu.BeginSector("Detection Automation")
-		Advanced.AutoPriority = TimMenu.Checkbox("Auto Priority", Advanced.AutoPriority == true)
-		TimMenu.NextLine()
-		Main.partyCallaut = TimMenu.Checkbox("Party Callouts", Main.partyCallaut == true)
-		TimMenu.NextLine()
-		TimMenu.EndSector()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Visual Feedback")
@@ -133,6 +126,8 @@ local function DrawMenu()
 		TimMenu.BeginSector("Evidence System")
 		Advanced.Evidence_Tolerance =
 			TimMenu.Slider("Evidence Threshold %", Advanced.Evidence_Tolerance or 50, 0, 100, 1)
+		TimMenu.NextLine()
+		Advanced.AutoPriority = TimMenu.Checkbox("Auto Priority", Advanced.AutoPriority == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 

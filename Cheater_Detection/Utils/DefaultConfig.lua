@@ -3,9 +3,7 @@ local Default_Config = {
 
 	Main = {
 		Fetch_Database = true,
-		AutoPriority = true,
 		AutoFetch = true,
-		partyCallaut = true,
 		Chat_Prefix = true,
 		Cheater_Tags = true,
 		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
@@ -20,6 +18,7 @@ local Default_Config = {
 
 	Advanced = {
 		Evidence_Tolerance = 100,           -- Evidence score threshold to mark as cheater
+		AutoPriority = true,
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
 		-- Detection toggles (only for implemented detections)

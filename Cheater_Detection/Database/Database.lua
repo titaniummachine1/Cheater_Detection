@@ -48,7 +48,13 @@ local function ReapplyDetectedPriorities()
 	if not G.DataBase then
 		return
 	end
-	if not (G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority) then
+	local autoPriorityEnabled = false
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
+		autoPriorityEnabled = G.Menu.Advanced.AutoPriority == true
+	elseif G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
+		autoPriorityEnabled = G.Menu.Main.AutoPriority == true
+	end
+	if not autoPriorityEnabled then
 		return
 	end
 
@@ -95,7 +101,13 @@ function Database.SetPriority(target, priority)
 	if steamID64 then
 		local ok, err = pcall(playerlist.SetPriority, steamID64, priority)
 		if ok then
-			if priority == 10 and G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority then
+			local autoPriorityEnabled = false
+			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
+				autoPriorityEnabled = G.Menu.Advanced.AutoPriority == true
+			elseif G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
+				autoPriorityEnabled = G.Menu.Main.AutoPriority == true
+			end
+			if priority == 10 and autoPriorityEnabled then
 				Database.UpsertCheater(steamID64, {
 					name = "Manual Flag",
 					reason = "Manual Priority 10",

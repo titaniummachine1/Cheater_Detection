@@ -462,7 +462,14 @@ local function flagPlayer(steamID, context, entry)
 	})
 
 	-- Set priority 10 if AutoPriority enabled
-	if G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority then
+	local autoPriorityEnabled = false
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
+		autoPriorityEnabled = G.Menu.Advanced.AutoPriority == true
+	elseif G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
+		autoPriorityEnabled = G.Menu.Main.AutoPriority == true
+	end
+
+	if autoPriorityEnabled then
 		Database.SetPriority(steamID, 10)
 	end
 
