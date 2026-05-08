@@ -14,6 +14,7 @@ assert(globals, "http_test: globals missing")
 local CONFIG = {
     MODE = "source_scan", -- sequential | burst | staircase | plateau | source_scan
     URL_MODE = "fixed",   -- round_robin | fixed
+    SOURCE_SET = "simple", -- github_raw | simple
     FIXED_URL_INDEX = 1,
     WAIT_FOR_SAFE_WINDOW = false,
     AUTO_START_DELAY = 2.0,
@@ -56,6 +57,33 @@ local CONFIG = {
             name = "joekiller",
             url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
             expectedBytes = 94518,
+        },
+    },
+    SIMPLE_SOURCES = {
+        {
+            name = "example.com",
+            url = "https://example.com/",
+            expectedBytes = 0,
+        },
+        {
+            name = "httpbin-get",
+            url = "https://httpbin.org/get",
+            expectedBytes = 0,
+        },
+        {
+            name = "jsonplaceholder",
+            url = "https://jsonplaceholder.typicode.com/todos/1",
+            expectedBytes = 0,
+        },
+        {
+            name = "api-github-zen",
+            url = "https://api.github.com/zen",
+            expectedBytes = 0,
+        },
+        {
+            name = "cloudflare-trace",
+            url = "https://www.cloudflare.com/cdn-cgi/trace",
+            expectedBytes = 0,
         },
     },
 }
@@ -130,6 +158,13 @@ local function GetMaxConfiguredBurst()
     return maxBurst
 end
 
+local function GetConfiguredSources()
+    if CONFIG.SOURCE_SET == "simple" then
+        return CONFIG.SIMPLE_SOURCES
+    end
+    return CONFIG.SOURCES
+end
+
 assert(CONFIG.MAX_CALLBACK_SLOTS >= GetMaxConfiguredBurst(), "http_test: MAX_CALLBACK_SLOTS too small")
 
 local function ClearPending()
@@ -176,7 +211,7 @@ local function ResetState()
 end
 
 local function GetSourceForRequest(requestIndex)
-    local sources = CONFIG.SOURCES
+    local sources = GetConfiguredSources()
     assert(type(sources) == "table" and #sources > 0, "http_test: CONFIG.SOURCES missing")
 
     if State.mode == "source_scan" then
@@ -324,7 +359,7 @@ local function AdvanceRound(now, reason)
     end
 
     if State.mode == "source_scan" then
-        local sourceCount = #CONFIG.SOURCES
+        local sourceCount = #GetConfiguredSources()
         State.scanSourceIndex = State.scanSourceIndex + 1
         if State.scanSourceIndex > sourceCount then
             State.scanSourceIndex = 1
@@ -543,9 +578,10 @@ local function StartExperiment()
     State.nextActionAt = State.startedAt + CONFIG.AUTO_START_DELAY
     Log("============================================================")
     Log(string.format(
-        "start mode=%s url_mode=%s fixed_url=%d safe_window=%s start_delay=%.2f timeout=%.2f full_ratio=%.2f stop_on_first_bad=%s scan_repeats=%d",
+        "start mode=%s url_mode=%s source_set=%s fixed_url=%d safe_window=%s start_delay=%.2f timeout=%.2f full_ratio=%.2f stop_on_first_bad=%s scan_repeats=%d",
         CONFIG.MODE,
         CONFIG.URL_MODE,
+        CONFIG.SOURCE_SET,
         CONFIG.FIXED_URL_INDEX,
         tostring(CONFIG.WAIT_FOR_SAFE_WINDOW),
         CONFIG.AUTO_START_DELAY,
@@ -561,7 +597,7 @@ local function StartExperiment()
     elseif CONFIG.MODE == "plateau" then
         Log(string.format("plateau burst=%d rounds=%d", CONFIG.PLATEAU_BURST, CONFIG.PLATEAU_ROUNDS))
     elseif CONFIG.MODE == "source_scan" then
-        Log(string.format("source_scan sources=%d repeats=%d", #CONFIG.SOURCES, CONFIG.SCAN_REPEATS))
+        Log(string.format("source_scan sources=%d repeats=%d", #GetConfiguredSources(), CONFIG.SCAN_REPEATS))
     else
         Log("staircase steps=" .. table.concat(CONFIG.STAIRCASE_STEPS, ","))
     end
@@ -592,7 +628,8 @@ local function TickBurstLike(now)
 
     local burst = GetCurrentRoundBurst()
     if State.mode == "source_scan" then
-        local source = CONFIG.SOURCES[State.scanSourceIndex]
+        local sources = GetConfiguredSources()
+        local source = sources[State.scanSourceIndex]
         Log(string.format(
             "starting round=%d repeat=%d source_index=%d source=%s burst=%d",
             State.roundIndex,
