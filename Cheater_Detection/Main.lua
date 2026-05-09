@@ -32,12 +32,13 @@ local WarpDT = require("Cheater_Detection.detectors.warp_dt")
 local FakeLag = require("Cheater_Detection.detectors.fake_lag")
 
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 
 -- Actions
 local NotificationService = require("Cheater_Detection.services.notification_service")
-local BridgePrompt = require("Cheater_Detection.services.bridge_prompt")
 local Visuals = require("Cheater_Detection.actions.visuals")
+local BridgePrompt = require("Cheater_Detection.services.bridge_prompt")
 
 local hasSearchedGroup = false
 local detectorErrorSeen = {}
@@ -163,8 +164,13 @@ local function Init()
 	NotificationService.Init()
 	BridgePrompt.Init()
 
+	-- Filter out engine warnings for out-of-range eye angles (Anti-Aim noise)
+	client.Command('con_filter_enable 1; con_filter_text_out "Out-of-range value"', true)
+
 	-- Populate global menu config before anything else
 	Config.LoadCFG()
+
+	DetectionConfig.RegisterWithHistoryManager()
 
 	-- Automate Database Fetch (Local then Online) - Respects AutoSync setting
 	if G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false then
@@ -207,14 +213,14 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	-- Advance history ring buffer once per tick
+	HistoryManager.NewTick()
+
 	if not hasSearchedGroup then
 		SteamLookup.RefreshValveGroup()
 		hasSearchedGroup = true
 	end
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
-
-	-- Auto-fetching is disabled per user request.
-	-- Use the menu to manually refresh sources if needed.
 
 	-- Scan currently encountered players
 	local players = entities.FindByClass("CTFPlayer")
@@ -228,24 +234,25 @@ local function OnCreateMove(cmd)
 		end
 
 		local isLocalPlayer = (ply == localPlayer)
-		if isLocalPlayer and not isDebug then
-			goto continue
-		end
-
 		local pState = PlayerCache.Get(ply)
 		if not pState then
 			goto continue
 		end
 
 		-- In normal mode: exclude local player's friends and party members.
-		-- Clean them from DB once on first encounter, not every tick.
-		if not isDebug and pState.isFriend then
-			local friendID = pState.id
-			if friendID and friendID:match("^7656119%d+$") and not cleanedFriendIDs[friendID] then
-				cleanedFriendIDs[friendID] = true
-				Database.RemoveCheater(friendID)
+		-- In debug mode: process everyone including self and friends.
+		if not isDebug then
+			if isLocalPlayer then
+				goto continue
 			end
-			goto continue
+			if pState.isFriend then
+				local friendID = pState.id
+				if friendID and friendID:match("^7656119%d+$") and not cleanedFriendIDs[friendID] then
+					cleanedFriendIDs[friendID] = true
+					Database.RemoveCheater(friendID)
+				end
+				goto continue
+			end
 		end
 
 		if isDebug then
@@ -275,8 +282,8 @@ end
 
 local function OnDraw()
 	Scheduler.Tick()
-	BridgePrompt.Draw()
 	Visuals.DrawTags()
+	BridgePrompt.Draw()
 end
 
 local function OnFireGameEvent(event)

@@ -12,8 +12,8 @@ assert(callbacks, "http_test: callbacks missing")
 assert(globals, "http_test: globals missing")
 
 local CONFIG = {
-    MODE = "source_scan", -- sequential | burst | staircase | plateau | source_scan
-    URL_MODE = "fixed",   -- round_robin | fixed
+    MODE = "source_scan",  -- sequential | burst | staircase | plateau | source_scan
+    URL_MODE = "fixed",    -- round_robin | fixed
     SOURCE_SET = "simple", -- github_raw | simple
     FIXED_URL_INDEX = 1,
     WAIT_FOR_SAFE_WINDOW = false,

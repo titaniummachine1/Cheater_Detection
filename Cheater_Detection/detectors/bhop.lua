@@ -13,6 +13,9 @@ local Bhop = {}
 -- Per-player state
 local playerData = {}
 
+-- Constant override: some scripts use 2 ticks to bypass simple anticheats
+local MAX_GROUND_TICKS = 2
+
 function Bhop.ProcessPlayer(playerState)
 	if not playerState or not playerState.wrap or not playerState.id then
 		return
@@ -47,21 +50,25 @@ function Bhop.ProcessPlayer(playerState)
 	else
 		-- Transitioned from ground to air (The moment of the jump)
 		if data.wasOnGround then
-			-- Check if it was a "perfect" jump window
-			-- Note: Constants.BHOP_MAX_GROUND_TICKS is usually 1
-			if data.groundTicks > 0 and data.groundTicks <= Constants.BHOP_MAX_GROUND_TICKS then
+			-- Check if it was a "perfect" jump window (0-2 ticks)
+			if data.groundTicks >= 0 and data.groundTicks <= MAX_GROUND_TICKS then
 				data.consecutivePerfects = data.consecutivePerfects + 1
 
 				-- Threshold for adding suspicion
 				if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
 					local increment = 2
 					-- Scale increment for extreme consistency
-					if data.consecutivePerfects > 10 then
+					if data.consecutivePerfects > 8 then
 						increment = 5
 					end
 
 					local reason = string.format("Bhop Script (%d perfect jumps)", data.consecutivePerfects)
 					DetectorUtils.ApplyPlayerFlag(playerState, increment, nil, reason)
+
+					if Common.IsDebugEnabled() then
+						print(string.format("[Bhop] %s perfect jump #%d (ground_ticks=%d) gain=%d", id,
+						data.consecutivePerfects, data.groundTicks, increment))
+					end
 				end
 			else
 				-- Reset if they stayed on ground too long (not a bhop chain)

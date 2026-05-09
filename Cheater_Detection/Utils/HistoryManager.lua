@@ -1,21 +1,17 @@
 --[[ HistoryManager.lua
-     Circular-buffer history for per-player snapshots.
-     Detections register how many ticks they need; capacity = max of all consumers.
-     Records are preallocated and overwritten in-place — zero per-tick allocation.
-     Exposes array-like read access via metatable so consumers iterate normally.
+     Tick-bucket circular buffer for player history.
+     Architecture:
+       - Circular buffer of tick-buckets
+       - Each bucket: { [steamID] = { field1 = val, field2 = val, ... }, _tick = n }
+       - Push does shallow-merge: only writes fields that are non-nil, preserves existing data
+       - Overflow = clear bucket then overwrite
+       - All detectors share same data source
 ]]
 
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
-local Logger = require("Cheater_Detection.Utils.Logger")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 local HistoryManager = {}
-
-local consumers = {}
-local activeFields = {}
-local maxRetentionTicks = 0
-
-local DEFAULT_RETENTION_TICKS = 33
 
 HistoryManager.Fields = {
 	Angles = "angles",
@@ -28,231 +24,157 @@ HistoryManager.Fields = {
 	ViewOffset = "view_offset",
 }
 
---[[ Field Builders ]]
+local activeFields = {}
+local maxRetentionTicks = 0
+local initialized = false
 
-local function buildAngles(player) return player.GetEyeAngles and player:GetEyeAngles() end
-local function buildEyePos(player) return player.GetEyePos and player:GetEyePos() end
-local function buildHeadHitbox(player) return player.GetHitboxPos and player:GetHitboxPos(1) end
-local function buildBodyHitbox(player) return player.GetHitboxPos and player:GetHitboxPos(4) end
-local function buildSimTime(player) 
-	if player.GetSimulationTime then return player:GetSimulationTime() end
-	if player.GetPropFloat then return player:GetPropFloat("m_flSimulationTime") end
-	return nil
-end
-local function buildOnGround(player) return player.IsOnGround and player:IsOnGround() end
-local function buildVelocity(player) 
-	if player.GetVelocity then return player:GetVelocity() end
-	if player.EstimateAbsVelocity then return player:EstimateAbsVelocity() end
-	return nil
-end
-local function buildViewOffset(player) return player.GetViewOffset and player:GetViewOffset() end
+local ringBuffer = {}
+local ringHead = 0
+local ringCount = 0
+local ringCapacity = 0
 
 local FIELD_BUILDERS = {
-	[HistoryManager.Fields.Angles] = buildAngles,
-	[HistoryManager.Fields.EyePosition] = buildEyePos,
-	[HistoryManager.Fields.HeadHitbox] = buildHeadHitbox,
-	[HistoryManager.Fields.BodyHitbox] = buildBodyHitbox,
-	[HistoryManager.Fields.SimulationTime] = buildSimTime,
-	[HistoryManager.Fields.OnGround] = buildOnGround,
-	[HistoryManager.Fields.Velocity] = buildVelocity,
-	[HistoryManager.Fields.ViewOffset] = buildViewOffset,
+	[HistoryManager.Fields.Angles] = function(player)
+		local ang = player.GetEyeAngles and player:GetEyeAngles()
+		if not ang then
+			return nil
+		end
+		local pitch = ang.pitch
+		local yaw = ang.yaw
+		if pitch == nil or yaw == nil then
+			return nil
+		end
+		return { pitch = pitch, yaw = yaw }
+	end,
+	[HistoryManager.Fields.EyePosition] = function(player)
+		return player.GetEyePos and player:GetEyePos()
+	end,
+	[HistoryManager.Fields.HeadHitbox] = function(player)
+		return player.GetHitboxPos and player:GetHitboxPos(1)
+	end,
+	[HistoryManager.Fields.BodyHitbox] = function(player)
+		return player.GetHitboxPos and player:GetHitboxPos(4)
+	end,
+	[HistoryManager.Fields.SimulationTime] = function(player)
+		if player.GetSimulationTime then
+			return player:GetSimulationTime()
+		end
+		if player.GetPropFloat then
+			return player:GetPropFloat("m_flSimulationTime")
+		end
+		return nil
+	end,
+	[HistoryManager.Fields.OnGround] = function(player)
+		return player.IsOnGround and player:IsOnGround()
+	end,
+	[HistoryManager.Fields.Velocity] = function(player)
+		if player.GetVelocity then
+			return player:GetVelocity()
+		end
+		if player.EstimateAbsVelocity then
+			return player:EstimateAbsVelocity()
+		end
+		return nil
+	end,
+	[HistoryManager.Fields.ViewOffset] = function(player)
+		return player.GetViewOffset and player:GetViewOffset()
+	end,
 }
 
---[[ Ring buffer functions ]]
-
-local function createRing(capacity)
-	local buf = {}
-	for i = 1, capacity do
-		buf[i] = {
-			tick = 0,
-			-- Fields will be populated here
-		}
+local function clearBucket(bucket)
+	for k in pairs(bucket) do
+		bucket[k] = nil
 	end
-	
-	return {
-		_buf = buf,
-		_head = 0,
-		_count = 0,
-		_capacity = capacity
-	}
 end
 
-function HistoryManager.GetAt(ring, key)
-	if not ring then return nil end
-	local count = ring._count
-	if key < 1 or key > count then
+function HistoryManager.Initialize(retentionTicks, fields)
+	if initialized and maxRetentionTicks == retentionTicks then
+		return
+	end
+
+	maxRetentionTicks = retentionTicks or 33
+	activeFields = fields or {}
+	ringCapacity = maxRetentionTicks
+
+	for i = 1, ringCapacity do
+		ringBuffer[i] = {}
+	end
+
+	ringHead = 0
+	ringCount = 0
+
+	initialized = true
+end
+
+function HistoryManager.GetBucketAt(bufferOffset)
+	if not initialized or bufferOffset < 0 or bufferOffset >= ringCount then
 		return nil
 	end
-	local capacity = ring._capacity
-	local head = ring._head
-	local oldestSlot = (head - count) % capacity
-	local slot = (oldestSlot + key - 1) % capacity + 1
-	return ring._buf[slot]
+	local idx = (ringHead - bufferOffset - 1) % ringCapacity + 1
+	return ringBuffer[idx]
 end
 
-function HistoryManager.GetCount(ring)
-	return ring and ring._count or 0
-end
-
-local function ringPush(ring)
-	local capacity = ring._capacity
-	local head = ring._head
-	local count = ring._count
-
-	local nextHead = head % capacity + 1
-	ring._head = nextHead
-
-	if count < capacity then
-		ring._count = count + 1
+function HistoryManager.GetPlayerDataInBucket(bucket, steamID)
+	if not bucket then
+		return nil
 	end
-
-	return ring._buf[nextHead]
-end
-
-local function ringClear(ring)
-	ring._head = 0
-	ring._count = 0
-end
-
-local function isRing(t)
-	return type(t) == "table" and t._buf ~= nil
-end
-
-local function getCapacity()
-	if maxRetentionTicks > 0 then
-		return maxRetentionTicks
+	if not steamID then
+		return nil
 	end
-	return DEFAULT_RETENTION_TICKS
+	if not PlayerCache.GetByID(tostring(steamID)) then
+		return nil
+	end
+	return bucket[steamID]
 end
 
-local function recomputeRequirements()
-	local newMax = 0
-	local newFields = {}
-	for _, spec in pairs(consumers) do
-		if spec.retentionTicks > newMax then
-			newMax = spec.retentionTicks
-		end
-		for field in pairs(spec.fields) do
-			newFields[field] = true
-		end
+function HistoryManager.GetPlayerFieldAt(bucket, steamID, fieldName)
+	if not bucket or not steamID then
+		return nil
 	end
-	maxRetentionTicks = newMax
-	activeFields = newFields
+	if not PlayerCache.GetByID(tostring(steamID)) then
+		return nil
+	end
+	local playerData = bucket[steamID]
+	return playerData and playerData[fieldName]
 end
 
-local function writeRecord(record, player)
-	local hasData = false
-	for field in pairs(activeFields) do
-		local builder = FIELD_BUILDERS[field]
-		if builder then
-			local value = builder(player)
-			record[field] = value
-			if value ~= nil then
-				hasData = true
-			end
-		end
-	end
-	record.tick = globals.TickCount()
-	return hasData
+function HistoryManager.GetTickAt(bufferOffset)
+	local bucket = HistoryManager.GetBucketAt(bufferOffset)
+	return bucket and bucket._tick or nil
 end
 
-local function ensureRing(state)
-	local cap = getCapacity()
-	local history = state.history
-
-	if isRing(history) then
-		if history._capacity == cap then
-			return history
-		end
-
-		local newRing = createRing(cap)
-		local oldCount = history._count
-		local copyCount = math.min(oldCount, cap)
-		local startIdx = oldCount - copyCount + 1
-
-		for i = startIdx, oldCount do
-			local src = HistoryManager.GetAt(history, i)
-			if src then
-				local dst = ringPush(newRing)
-				for k, v in pairs(src) do
-					dst[k] = v
-				end
-			end
-		end
-		state.history = newRing
-		return newRing
-	end
-
-	local newRing = createRing(cap)
-
-	if type(history) == "table" then
-		local total = #history
-		local copyCount = math.min(total, cap)
-		local startIdx = total - copyCount + 1
-		for i = startIdx, total do
-			local src = history[i]
-			if src then
-				local dst = ringPush(newRing)
-				for k, v in pairs(src) do
-					dst[k] = v
-				end
-			end
-		end
-	end
-
-	state.history = newRing
-	return newRing
+function HistoryManager.GetRingCount()
+	return ringCount
 end
 
----@param name string
----@param spec { retentionTicks:number, fields:string[] }
-function HistoryManager.RegisterConsumer(name, spec)
-	assert(type(name) == "string" and name ~= "", "HistoryManager.RegisterConsumer requires a name")
-	assert(type(spec) == "table", "HistoryManager.RegisterConsumer requires a spec table")
+function HistoryManager.IsInitialized()
+	return initialized
+end
 
-	local retention = math.max(1, tonumber(spec.retentionTicks) or DEFAULT_RETENTION_TICKS)
-	local fieldSet = {}
-	if type(spec.fields) == "table" then
-		for _, field in ipairs(spec.fields) do
-			if FIELD_BUILDERS[field] then
-				fieldSet[field] = true
-			else
-				Logger.Warning(
-					"HistoryManager",
-					string.format("Unknown history field '%s' requested by %s", tostring(field), name)
-				)
-			end
-		end
-	end
+local lastTickCount = -1
 
-	if not next(fieldSet) then
-		Logger.Warning(
-			"HistoryManager",
-			string.format("Consumer %s registered without valid fields; ignoring registration", name)
-		)
+function HistoryManager.NewTick()
+	if not initialized then
 		return
 	end
-
-	consumers[name] = {
-		retentionTicks = retention,
-		fields = fieldSet,
-	}
-
-	recomputeRequirements()
-end
-
----@param name string
-function HistoryManager.UnregisterConsumer(name)
-	if not consumers[name] then
+	local curTick = globals.TickCount()
+	if curTick == lastTickCount then
 		return
 	end
-	consumers[name] = nil
-	recomputeRequirements()
+	lastTickCount = curTick
+
+	ringHead = ringHead % ringCapacity + 1
+	if ringCount < ringCapacity then
+		ringCount = ringCount + 1
+	end
+
+	local currentBucket = ringBuffer[ringHead]
+	clearBucket(currentBucket)
+	currentBucket._tick = curTick
 end
 
----@param player table
 function HistoryManager.Push(player)
-	if not next(activeFields) then
+	if not initialized or not next(activeFields) then
 		return
 	end
 	if not player or type(player.GetSteamID64) ~= "function" then
@@ -269,40 +191,87 @@ function HistoryManager.Push(player)
 		return
 	end
 
-	local ring = ensureRing(state)
-
 	TickProfiler.BeginSection("History_Write")
-	local record = ringPush(ring)
-	local hasData = writeRecord(record, player)
-	TickProfiler.EndSection("History_Write")
 
-	if hasData then
-		state.current = record
+	local currentBucket = ringBuffer[ringHead]
+	if not currentBucket or currentBucket._tick ~= globals.TickCount() then
+		HistoryManager.NewTick()
+		currentBucket = ringBuffer[ringHead]
+	end
+
+	local existingPlayerData = currentBucket[steamID]
+	if not existingPlayerData then
+		existingPlayerData = {}
+		currentBucket[steamID] = existingPlayerData
+	end
+
+	for field in pairs(activeFields) do
+		local builder = FIELD_BUILDERS[field]
+		if builder then
+			local value = builder(player)
+			existingPlayerData[field] = value
+		end
+	end
+
+	state.current = existingPlayerData
+
+	TickProfiler.EndSection("History_Write")
+end
+
+function HistoryManager.MarkDamageDealt(steamID)
+	if not initialized then
+		return
+	end
+	local currentBucket = ringBuffer[ringHead]
+	if not currentBucket then
+		return
+	end
+	local playerData = currentBucket[steamID]
+	if not playerData then
+		playerData = {}
+		currentBucket[steamID] = playerData
+	end
+	playerData.damageDealt = true
+end
+
+function HistoryManager.PushAngles(steamID, pitch, yaw)
+	if not initialized then
+		return
+	end
+	if not steamID then
+		return
+	end
+
+	local currentBucket = ringBuffer[ringHead]
+	if not currentBucket or currentBucket._tick ~= globals.TickCount() then
+		HistoryManager.NewTick()
+		currentBucket = ringBuffer[ringHead]
+	end
+	if not currentBucket then
+		return
+	end
+
+	local playerData = currentBucket[steamID]
+	if not playerData then
+		playerData = {}
+		currentBucket[steamID] = playerData
+	end
+
+	if pitch ~= nil and yaw ~= nil then
+		playerData[HistoryManager.Fields.Angles] = { pitch = pitch, yaw = yaw }
 	end
 end
 
----@return integer
 function HistoryManager.GetRetentionTicks()
-	return getCapacity()
+	return maxRetentionTicks
 end
 
----@return table<string, boolean>
 function HistoryManager.GetActiveFields()
 	local copy = {}
 	for field in pairs(activeFields) do
 		copy[field] = true
 	end
 	return copy
-end
-
-function HistoryManager.IsRing(t)
-	return isRing(t)
-end
-
-function HistoryManager.ClearRing(ring)
-	if isRing(ring) then
-		ringClear(ring)
-	end
 end
 
 return HistoryManager

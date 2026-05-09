@@ -1,286 +1,319 @@
 --[[ detectors/silent_aim.lua
      Silent Aimbot Detector — 2-tick view-angle extrapolation.
+     Uses shared tick-bucket history from HistoryManager.
 
      Algorithm:
-       Per-player angle history is collected at FRAME_NET_UPDATE_POSTDATAUPDATE_END
-       (stage 3) — this is raw server data before client-side interpolation is applied.
+       - Stage 3: Push angles to current bucket via HistoryManager.PushAngles()
+       - On player_hurt: Record shot angle, build predictions from history
+       - On ProcessPlayer: Consume accumulated score
 
-       When player_hurt fires for attacker A at game tick T:
-         1. Record the actual angle at T (the snap-to-target angle).
-         2. Take the last 2 pre-shot history entries (T-2, T-1) and extrapolate:
-              predicted_T   = T-1 angle + 1-tick velocity
-              predicted_T+1 = T-1 angle + 2-tick velocity
-         3. One tick later (T+1), at stage 3, read the actual angle and check:
-              shot_dev      = angular distance(actual_T,   predicted_T)
-              return_dev    = angular distance(actual_T+1, predicted_T+1)
-              alignment     = max(0, 1 - return_dev / shot_dev)
-              score_gain    = shot_dev ^ (1 + alignment * WEIGHT_EXPONENT)
-
-       Interpretation: if the player snapped far at T (large shot_dev) AND the
-       angle at T+1 is back on the natural trajectory (large alignment), they
-       triggered an aimbot. Score is accumulated exponentially — small snaps need
-       strong alignment; large snaps score heavily even with partial alignment.
-
-       Score is applied in ProcessPlayer (CreateMove) after stage 3 writes it.
+     Uses shared bucket structure for angle storage instead of per-player tables.
 ]]
 
 local Events = require("Cheater_Detection.Core.Events")
-local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
+local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local SilentAim = {}
 
--- ── Tuning ────────────────────────────────────────────────────────────────────
-local HISTORY_MAX = 4        -- Pre-shot ticks to retain
-local MIN_SNAP_DEGREES = 8.0 -- Smaller snaps are ignored (noise floor)
-local WEIGHT_EXPONENT = 1.8
--- score = shot_dev ^ (1 + alignment * WEIGHT_EXPONENT)
--- alignment=0 → shot_dev^1.0  (linear, weak — no confirmed snap-back)
--- alignment=1 → shot_dev^2.8  (exponential — perfect snap-back confirmed)
+local MIN_SNAP_DEGREES = 8.0
 
--- ── State ─────────────────────────────────────────────────────────────────────
--- Single per-player table keyed by steamID64 string.
--- Fields:
---   entity      - raw entity (populated by ProcessPlayer, read by FrameStageNotify)
---   angleHistory - array of { pitch, yaw, tick }  (max HISTORY_MAX entries)
---   shotPending  - { shotTick, actualShotPitch, actualShotYaw, predShotPitch, predShotYaw,
---                    predNextPitch, predNextYaw } or nil
---   pendingScore - accumulated score gain (written by stage-3, consumed by ProcessPlayer)
---   pendingAngle - largest snap angle for the pending score
---   killDecay    - accumulated score to subtract on the next ProcessPlayer call
+local SNIPER_BIG_SNAP_DEGREES = 90.0
+local SNIPER_HEAD_MAX_ERROR_DEGREES = 6.0
+local SNIPER_RETURN_MAX_DEGREES = 3.0
+
+local SANITY_MAX_DEGREES = 16.0
 local playerData = {}
 
--- ── Angle Math ────────────────────────────────────────────────────────────────
+local debugFilterWindowStart = 0
+local debugFilterWindowCount = 0
+local DEBUG_FILTER_MAX_PER_SEC = 0
+
+local debugRecordWindowStart = 0
+local debugRecordWindowCount = 0
+local DEBUG_RECORD_MAX_PER_SEC = 8
+
+local function canPrintFiltered(now)
+	if DEBUG_FILTER_MAX_PER_SEC <= 0 then
+		return false
+	end
+	if now - debugFilterWindowStart >= 1.0 then
+		debugFilterWindowStart = now
+		debugFilterWindowCount = 0
+	end
+	if debugFilterWindowCount >= DEBUG_FILTER_MAX_PER_SEC then
+		return false
+	end
+	debugFilterWindowCount = debugFilterWindowCount + 1
+	return true
+end
+
+local function canPrintRecorded(now)
+	if now - debugRecordWindowStart >= 1.0 then
+		debugRecordWindowStart = now
+		debugRecordWindowCount = 0
+	end
+	if debugRecordWindowCount >= DEBUG_RECORD_MAX_PER_SEC then
+		return false
+	end
+	debugRecordWindowCount = debugRecordWindowCount + 1
+	return true
+end
+
 local function wrapAngle(d)
 	return (d + 180) % 360 - 180
 end
 
 local function angularDist(p1, y1, p2, y2)
-	local dp = math.abs(wrapAngle(p2 - p1))
-	local dy = math.abs(wrapAngle(y2 - y1))
+	local dp = math.abs(wrapAngle(p1 - p2))
+	local dy = math.abs(wrapAngle(y1 - y2))
 	return math.sqrt(dp * dp + dy * dy)
 end
 
--- ── Frame Stage Handler ───────────────────────────────────────────────────────
--- FRAME_NET_UPDATE_POSTDATAUPDATE_END = 3
--- Entity netprops have just been updated from the incoming server packet.
--- We read m_angEyeAngles here before the engine interpolates them.
-
-local STAGE_POST_DATA_END = 3
-
-local function processOnePlayer(id, ply, curTick, isDebug)
-	if not ply:IsValid() or ply:IsDormant() then
-		playerData[id] = nil
-		return
-	end
-
-	-- Read raw server angle.  Local player uses engine.GetViewAngles() to avoid
-	-- the DataTable "Out-of-range" warning that reading m_angEyeAngles triggers.
-	local pitch, yaw
-	local localPlayer = entities.GetLocalPlayer()
-	local isLocal = localPlayer and (ply:GetIndex() == localPlayer:GetIndex())
-	if isLocal then
-		local va = engine.GetViewAngles()
-		if not va then
-			return
-		end
-		pitch = va.pitch
-		yaw = va.yaw
-	else
-		pitch = ply:GetPropFloat("m_angEyeAngles[0]")
-		yaw = ply:GetPropFloat("m_angEyeAngles[1]")
-		if not pitch or not yaw then
-			return
-		end
-	end
-
-	local pdata = playerData[id]
-	if not pdata then
-		return
-	end
-
-	-- Push to history (only once per game tick)
-	local hist = pdata.angleHistory
-	if #hist == 0 or hist[#hist].tick ~= curTick then
-		hist[#hist + 1] = { pitch = pitch, yaw = yaw, tick = curTick }
-		if #hist > HISTORY_MAX then
-			table.remove(hist, 1)
-		end
-	end
-
-	-- Verify any pending shot for this player
-	local pending = pdata.shotPending
-	if not pending then
-		return
-	end
-	if curTick < pending.shotTick + 1 then
-		return
-	end
-
-	pdata.shotPending = nil
-
-	local shotDev =
-		angularDist(pending.actualShotPitch, pending.actualShotYaw, pending.predShotPitch, pending.predShotYaw)
-
-	if not (shotDev == shotDev) or shotDev == math.huge or shotDev < MIN_SNAP_DEGREES then
-		return
-	end
-
-	local returnDev = angularDist(pitch, yaw, pending.predNextPitch, pending.predNextYaw)
-	if not (returnDev == returnDev) or returnDev == math.huge then
-		return
-	end
-
-	-- alignment: 1 = T+1 angle returned perfectly to predicted path (strong confirm)
-	--            0 = T+1 angle is as far away as the shot itself (noise / natural move)
-	local alignmentFactor = math.max(0.0, 1.0 - returnDev / math.max(shotDev, 1.0))
-	local scoreGain = shotDev ^ (1.0 + alignmentFactor * WEIGHT_EXPONENT)
-
-	if isDebug then
-		print(
-			string.format(
-				"[SilentAim] %s  snap=%.1f°  return=%.1f°  align=%.2f  gain=%.1f",
-				id,
-				shotDev,
-				returnDev,
-				alignmentFactor,
-				scoreGain
-			)
-		)
-	end
-
-	-- Accumulate for ProcessPlayer to consume
-	pdata.pendingScore = (pdata.pendingScore or 0) + scoreGain
-	pdata.pendingAngle = math.max(pdata.pendingAngle or 0, shotDev)
+local function getAngleToPos(sourcePos, targetPos)
+	local delta = {
+		x = targetPos.x - sourcePos.x,
+		y = targetPos.y - sourcePos.y,
+		z = targetPos.z - sourcePos.z,
+	}
+	local dist = math.sqrt(delta.x * delta.x + delta.y * delta.y)
+	local pitch = -math.deg(math.atan(delta.z, dist))
+	local yaw = math.deg(math.atan(delta.y, delta.x))
+	return pitch, yaw
 end
 
-local function onFrameStage(stage)
-	if stage ~= STAGE_POST_DATA_END then
+local TF_PROJECTILE_BULLET = 1
+local TF_CLASS_SNIPER = 2
+local TF_CLASS_SPY = 8
+
+local function onDamageEvent(event)
+	local eventName = event:GetName()
+	if eventName ~= "player_hurt" then
 		return
 	end
 
-	-- Menu gate — cheapest check first
-	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
+	HistoryManager.NewTick()
+
+	local attackerUID = event:GetInt("attacker")
+	local victimUID = event:GetInt("userid")
+	if not attackerUID or not victimUID or attackerUID == victimUID then
+		if Common.IsDebugEnabled() then
+			local now = globals.RealTime()
+			if canPrintFiltered(now) then
+				print(string.format("[SilentAim] player_hurt ignored (attacker=%s victim=%s)", tostring(attackerUID),
+					tostring(victimUID)))
+			end
+		end
 		return
+	end
+
+	local attackerPly = entities.GetByUserID(attackerUID)
+	if not attackerPly or not attackerPly:IsValid() then
+		return
+	end
+
+	-- 1. Check weaponid from event (authoritative for hitscan vs projectile)
+	local weaponID = event:GetInt("weaponid")
+	local isHitscan = false
+	local projType = nil
+	local weaponClass = nil
+	local weaponSpread = nil
+	local weaponName = event.GetString and event:GetString("weapon") or nil
+
+	-- Use weapon APIs if we can get the active weapon
+	local activeWeapon = attackerPly:GetPropEntity("m_hActiveWeapon")
+	if activeWeapon and activeWeapon:IsValid() then
+		weaponClass = activeWeapon.GetClass and activeWeapon:GetClass() or nil
+		if activeWeapon.GetWeaponSpread then
+			weaponSpread = activeWeapon:GetWeaponSpread()
+		end
+
+		local token = tostring(weaponClass or weaponName or ""):lower()
+		local classNonHitscan = token:find("rocketlauncher")
+			or token:find("grenadelauncher")
+			or token:find("pipebomb")
+			or token:find("compoundbow")
+			or token:find("flamethrower")
+			or token:find("particlecannon")
+			or token:find("flare")
+			or token:find("crossbow")
+			or token:find("syringe")
+			or token:find("cannon")
+			or token:find("sticky")
+			or token:find("knife")
+			or token:find("bat")
+			or token:find("bottle")
+			or token:find("shovel")
+			or token:find("wrench")
+			or token:find("fists")
+			or token:find("bonesaw")
+			or token:find("sword")
+			or token:find("club")
+			or token:find("whip")
+			or token:find("robotarm")
+			or token:find("breakablesign")
+			or token:find("breakable")
+			or token:find("sign")
+			or token:find("rocket")
+			or token:find("grenade")
+			or token:find("pipe")
+			or token:find("arrow")
+			or token:find("bow")
+			or token:find("flame")
+
+		if classNonHitscan then
+			isHitscan = false
+		elseif weaponSpread ~= nil then
+			isHitscan = true
+		else
+			local getProjType = activeWeapon.GetWeaponProjectileType
+			if type(getProjType) == "function" then
+				projType = activeWeapon:GetWeaponProjectileType()
+				if projType ~= nil and projType ~= 0 and projType ~= TF_PROJECTILE_BULLET then
+					isHitscan = false
+				else
+					isHitscan = true
+				end
+			else
+				local nameToken = tostring(weaponName or weaponClass or ""):lower()
+				local isProjectileName = nameToken:find("tf_projectile")
+					or nameToken:find("rocket")
+					or nameToken:find("pipe")
+					or nameToken:find("grenade")
+					or nameToken:find("arrow")
+					or nameToken:find("bow")
+					or nameToken:find("crossbow")
+					or nameToken:find("flare")
+					or nameToken:find("flame")
+					or nameToken:find("robotarm")
+					or nameToken:find("breakable")
+					or nameToken:find("sign")
+					or nameToken:find("knife")
+					or nameToken:find("bat")
+					or nameToken:find("wrench")
+				local isHitscanName = nameToken:find("sniper")
+					or nameToken:find("scatter")
+					or nameToken:find("shotgun")
+					or nameToken:find("pistol")
+					or nameToken:find("revolver")
+					or nameToken:find("smg")
+					or nameToken:find("minigun")
+				if isProjectileName then
+					isHitscan = false
+				elseif isHitscanName then
+					isHitscan = true
+				else
+					isHitscan = true
+				end
+			end
+		end
+	end
+
+	-- Extra check: filter out common non-direct damage sources using weaponID
+	-- 54: SENTRY_BULLET, 55: SENTRY_ROCKET, 68: DISPENSER_GUN etc.
+	if weaponID == 54 or weaponID == 55 or weaponID == 68 then
+		isHitscan = false
+	end
+
+	if not isHitscan then
+		return
+	end
+
+	local victimPly = entities.GetByUserID(victimUID)
+	if not victimPly or not victimPly:IsValid() then
+		return
+	end
+
+	if not Common.IsValidPlayer(attackerPly, nil, nil, nil) then
+		return
+	end
+	if not Common.IsValidPlayer(victimPly, nil, nil, nil) then
+		return
+	end
+
+	local attackerID = tostring(Common.GetSteamID64(attackerPly))
+	local victimID = tostring(Common.GetSteamID64(victimPly))
+	if not attackerID or not victimID then
+		return
+	end
+
+	HistoryManager.MarkDamageDealt(attackerID)
+
+	local pdata = playerData[attackerID]
+	if not pdata then
+		pdata = {
+			shotPending = nil,
+		}
+		playerData[attackerID] = pdata
 	end
 
 	local curTick = globals.TickCount()
-	local isDebug = Common.IsDebugEnabled()
-
-	for id, pdata in pairs(playerData) do
-		if pdata.entity then
-			processOnePlayer(id, pdata.entity, curTick, isDebug)
+	if not pdata.shotPending or pdata.shotPending.shotTick < curTick then
+		local weapon = attackerPly:GetPropEntity("m_hActiveWeapon")
+		local activeWeaponName = "unknown"
+		if weapon and weapon:IsValid() then
+			activeWeaponName = weapon:GetClass()
 		end
-	end
-end
 
-callbacks.Unregister("FrameStageNotify", "CD_SilentAim_FSN")
-callbacks.Register("FrameStageNotify", "CD_SilentAim_FSN", onFrameStage)
-
--- ── Damage Event ──────────────────────────────────────────────────────────────
-local function onDamageEvent(event)
-	local eventName = event:GetName()
-	if eventName ~= "player_hurt" and eventName ~= "player_death" then
-		return
-	end
-
-	local attackerUID = event:GetInt("attacker")
-	if not attackerUID then
-		return
-	end
-
-	local ply = entities.GetByUserID(attackerUID)
-	if not ply then
-		return
-	end
-
-	local localPlayer = entities.GetLocalPlayer()
-	if localPlayer and (localPlayer:GetIndex() == ply:GetIndex()) and not Common.IsDebugEnabled() then
-		return
-	end
-
-	local steamID64 = Common.GetSteamID64(ply)
-	if not steamID64 then
-		return
-	end
-
-	local id = tostring(steamID64)
-	local pdata = playerData[id]
-	if not pdata then
-		return
-	end
-
-	-- Kill decay: every kill reduces accumulated aimbot suspicion by 5.
-	-- Applied before analysing the killing shot so legitimate aimers get credit.
-	if eventName == "player_death" then
-		pdata.killDecay = (pdata.killDecay or 0) + 5
-	end
-
-	local hist = pdata.angleHistory
-
-	-- Need at minimum 3 entries: T-2, T-1, T (T is the shot tick)
-	if not hist or #hist < 3 then
-		return
-	end
-
-	-- The last entry is the shot-tick angle.
-	-- Pre-shot history = all but the last entry.
-	local shotTick = hist[#hist].tick
-	local actualShotPitch = hist[#hist].pitch
-	local actualShotYaw = hist[#hist].yaw
-
-	-- Build pre-shot history (exclude shot tick)
-	-- We need at least 2 entries for extrapolate1.
-	local preN = #hist - 1
-	if preN < 2 then
-		return
-	end
-
-	-- Use the last 2 pre-shot entries for velocity
-	local prePrev = hist[preN - 1]
-	local preCurr = hist[preN]
-
-	-- Extrapolate predicted angle at shot tick T
-	local dtTicks = preCurr.tick - prePrev.tick
-	if dtTicks <= 0 then
-		dtTicks = 1
-	end
-	local vPitch = wrapAngle(preCurr.pitch - prePrev.pitch) / dtTicks
-	local vYaw = wrapAngle(preCurr.yaw - prePrev.yaw) / dtTicks
-
-	local predShotPitch = preCurr.pitch + vPitch
-	local predShotYaw = preCurr.yaw + vYaw
-
-	-- Extrapolate predicted angle at T+1 (one more step)
-	local predNextPitch = predShotPitch + vPitch
-	local predNextYaw = predShotYaw + vYaw
-
-	-- Only register if no pending shot already queued for a later tick
-	local existing = pdata.shotPending
-	if not existing or existing.shotTick < shotTick then
 		pdata.shotPending = {
-			shotTick = shotTick,
-			actualShotPitch = actualShotPitch,
-			actualShotYaw = actualShotYaw,
-			predShotPitch = predShotPitch,
-			predShotYaw = predShotYaw,
-			predNextPitch = predNextPitch,
-			predNextYaw = predNextYaw,
+			shotTick = curTick,
+			victimID = victimID,
+			weaponID = weaponID,
+			weaponClass = weaponClass,
+			projType = projType,
+			weaponSpread = weaponSpread,
+			weaponName = activeWeaponName,
+			crit = (event:GetInt("crit") or 0) ~= 0,
+			minicrit = (event:GetInt("minicrit") or 0) ~= 0,
+			damage = event:GetInt("damageamount"),
+			shooterEyePos = nil,
+			victimEyePos = nil,
+			victimOrigin = nil,
 		}
+
+		local origin = attackerPly:GetAbsOrigin()
+		local viewOffset = attackerPly:GetPropVector("localdata", "m_vecViewOffset[0]")
+		if origin and viewOffset then
+			pdata.shotPending.shooterEyePos = origin + viewOffset
+		end
+
+		local vOrigin = victimPly:GetAbsOrigin()
+		local vViewOffset = victimPly:GetPropVector("localdata", "m_vecViewOffset[0]")
+		if vOrigin then
+			pdata.shotPending.victimOrigin = vOrigin
+			if vViewOffset then
+				pdata.shotPending.victimEyePos = vOrigin + vViewOffset
+			end
+		end
+
+		if Common.IsDebugEnabled() then
+			local now = globals.RealTime()
+			if canPrintRecorded(now) then
+				print(string.format(
+					"[SilentAim] player_hurt recorded %s -> %s weaponid=%s projType=%s spread=%s class=%s name=%s",
+					attackerID,
+					victimID,
+					tostring(weaponID),
+					tostring(projType),
+					tostring(weaponSpread),
+					tostring(weaponClass),
+					tostring(weaponName)
+				))
+			end
+		end
 	end
 end
 
 Events.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
 
--- ── ProcessPlayer (called from Main.lua / CreateMove) ─────────────────────────
 function SilentAim.ProcessPlayer(playerState)
 	if not playerState or not playerState.wrap or not playerState.id then
 		return
 	end
 
-	-- Menu gate: cheapest first
 	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
 		return
 	end
@@ -291,52 +324,285 @@ function SilentAim.ProcessPlayer(playerState)
 		return
 	end
 
-	-- Ensure per-player data table exists and register entity for FrameStageNotify
 	if not playerData[id] then
 		playerData[id] = {
-			entity       = ply,
-			angleHistory = {},
-			shotPending  = nil,
-			pendingScore = 0,
-			pendingAngle = 0,
-			killDecay    = 0,
+			shotPending = nil,
 		}
-	else
-		playerData[id].entity = ply
 	end
 	local pdata = playerData[id]
 
-	-- Apply kill-based score decay accumulated between ProcessPlayer calls
-	local decay = pdata.killDecay
-	if decay and decay > 0 then
-		playerState.score = math.max(0, playerState.score - decay)
-		pdata.killDecay = 0
-	end
-
-	-- Consume any score that stage-3 prepared
-	local gain = pdata.pendingScore
-	if not gain or gain <= 0 then
+	local pending = pdata.shotPending
+	if not pending then
 		return
 	end
 
-	local snapAngle = pdata.pendingAngle or gain
-	pdata.pendingScore = 0
-	pdata.pendingAngle = 0
+	local curTick = globals.TickCount()
+	-- Wait until the shot bucket is at least 1 tick in the past
+	if curTick <= pending.shotTick then
+		return
+	end
 
-	local reason = string.format("SilentAim Spike (%.1f°)", snapAngle)
-	local wasSuspicious = (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0
+	pdata.shotPending = nil
 
-	local flagsChanged = DetectorUtils.ApplyPlayerFlag(playerState, gain, nil, reason)
+	if Common.IsDebugEnabled() then
+		print(string.format("[SilentAim] Analyzing shot for %s (tick %d)", id, pending.shotTick))
+	end
 
-	-- Dedicated event: first time this player crosses the SUSPICIOUS threshold
-	-- via aimbot detection.  Lets the real-time analyser and other modules react
-	-- without having to filter through generic OnPlayerStateChange.
-	if flagsChanged and not wasSuspicious and (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
-		Events.Publish("OnAimbotSuspect", playerState, reason)
+	-- Find the shot bucket (offset 1 if we are processing at shotTick + 1)
+	local shotOffset = curTick - pending.shotTick
+	local shotBucket = HistoryManager.GetBucketAt(shotOffset)
+	if not shotBucket or shotBucket._tick ~= pending.shotTick then
+		return
+	end
+
+	local shotAngles = HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.Angles)
+	if not shotAngles then
+		return
+	end
+	if type(shotAngles.pitch) ~= "number" or type(shotAngles.yaw) ~= "number" then
+		return
+	end
+	if math.abs(shotAngles.pitch) > 180 or math.abs(shotAngles.yaw) > 1000000 then
+		return
+	end
+	shotAngles = { pitch = shotAngles.pitch, yaw = wrapAngle(shotAngles.yaw) }
+
+	if Common.IsDebugEnabled() then
+		print(string.format(
+			"[SilentAim] shot context id=%s weaponid=%s projType=%s class=%s damage=%s",
+			id,
+			tostring(pending.weaponID),
+			tostring(pending.projType),
+			tostring(pending.weaponClass),
+			tostring(pending.damage)
+		))
+	end
+
+	-- SANITY CHECK: Was the player aiming remotely close to the victim? (degrees)
+	-- Skip this check for Sniper (2) and Spy (8)
+	local attackerClass = ply:GetPropInt("m_iClass")
+	local isSniperOrSpy = (attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
+
+	local sanityFactor = 1.0
+	if not isSniperOrSpy then
+		local victimID = pending.victimID
+		local victimWrap = PlayerCache.GetBySteamID(victimID)
+		local headPos = victimWrap and victimWrap:GetHitboxPos(1) or nil
+		local bodyPos = victimWrap and victimWrap:GetHitboxPos(4) or nil
+		local eyePos = pending.shooterEyePos or
+			HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition) or
+			playerState.wrap:GetEyePos()
+
+		local aimedAtTarget = false
+		if eyePos then
+			if headPos then
+				local p, y = getAngleToPos(eyePos, headPos)
+				if angularDist(shotAngles.pitch, shotAngles.yaw, p, y) < SANITY_MAX_DEGREES then
+					aimedAtTarget = true
+				end
+			end
+			if not aimedAtTarget and bodyPos then
+				local p, y = getAngleToPos(eyePos, bodyPos)
+				if angularDist(shotAngles.pitch, shotAngles.yaw, p, y) < SANITY_MAX_DEGREES then
+					aimedAtTarget = true
+				end
+			end
+		else
+			aimedAtTarget = true
+		end
+
+		if not aimedAtTarget then
+			sanityFactor = 0.15
+			if Common.IsDebugEnabled() then
+				print(string.format("[SilentAim] %s sanity miss (outside %.0f° bubble)", id, SANITY_MAX_DEGREES))
+			end
+		end
+	end
+
+	-- 1. Gather pre-shot history for prediction (up to 5 clean ticks)
+	local historyAngles = {}
+	local historyTicks = {}
+	local offset = shotOffset + 1
+	while #historyAngles < 5 and offset < HistoryManager.GetRingCount() do
+		local bucket = HistoryManager.GetBucketAt(offset)
+		if not bucket then
+			break
+		end
+		local data = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.Angles)
+		if data and type(data.pitch) == "number" and type(data.yaw) == "number" then
+			if math.abs(data.pitch) <= 180 and math.abs(data.yaw) <= 1000000 then
+				data = { pitch = data.pitch, yaw = wrapAngle(data.yaw) }
+			else
+				data = nil
+			end
+		else
+			data = nil
+		end
+		-- Skip buckets with damageDealt to keep prediction clean.
+		-- Also ensures we exclude the "current" tick since we are looking from shotOffset+1 onwards.
+		if data and not (bucket[id] and bucket[id].damageDealt) then
+			table.insert(historyAngles, data)
+			table.insert(historyTicks, bucket._tick)
+		end
+		offset = offset + 1
+	end
+
+	if #historyAngles < 2 then
+		if Common.IsDebugEnabled() then
+			print(string.format("[SilentAim] %s extrapolation failed (only %d clean history ticks)", id, #historyAngles))
+		end
+		return
+	end
+
+	-- 2. Predict angular velocity (average over history)
+	local totalVPitch, totalVYaw = 0, 0
+	local samples = 0
+	for i = 1, #historyAngles - 1 do
+		local a1 = historyAngles[i]
+		local a2 = historyAngles[i + 1]
+		local dt = historyTicks[i] - historyTicks[i + 1]
+		if dt > 0 then
+			totalVPitch = totalVPitch + wrapAngle(a1.pitch - a2.pitch) / dt
+			totalVYaw = totalVYaw + wrapAngle(a1.yaw - a2.yaw) / dt
+			samples = samples + 1
+		end
+	end
+
+	if samples == 0 then
+		return
+	end
+
+	local avgVPitch = totalVPitch / samples
+	local avgVYaw = totalVYaw / samples
+
+	-- 3. Predict shot tick angles from the most recent clean history tick
+	local mostRecentClean = historyAngles[1]
+	local dtToShot = pending.shotTick - historyTicks[1]
+	local predShotPitch = mostRecentClean.pitch + (avgVPitch * dtToShot)
+	local predShotYaw = mostRecentClean.yaw + (avgVYaw * dtToShot)
+
+	-- 4. Calculate deviation on shot tick
+	local shotDev = angularDist(shotAngles.pitch, shotAngles.yaw, predShotPitch, predShotYaw)
+
+	-- Minimum snap threshold to avoid noise
+	if shotDev < MIN_SNAP_DEGREES then
+		if Common.IsDebugEnabled() then
+			print(string.format("[SilentAim] %s snap too small: %.1f° (min %.1f°)", id, shotDev, MIN_SNAP_DEGREES))
+		end
+		return
+	end
+
+	-- 5. Check "return to pattern" over the next few ticks (silent aim can snap back within 1-3 ticks)
+	local bestReturnDev = nil
+	local bestReturnTick = nil
+	for k = 1, 3 do
+		local postShotBucket = HistoryManager.GetBucketAt(shotOffset - k)
+		if postShotBucket and postShotBucket._tick == (pending.shotTick + k) then
+			local postShotAngles = HistoryManager.GetPlayerFieldAt(postShotBucket, id, HistoryManager.Fields.Angles)
+			if postShotAngles and type(postShotAngles.pitch) == "number" and type(postShotAngles.yaw) == "number" then
+				postShotAngles = { pitch = postShotAngles.pitch, yaw = wrapAngle(postShotAngles.yaw) }
+
+				local dtToPost = (pending.shotTick + k) - historyTicks[1]
+				local predPostPitch = mostRecentClean.pitch + (avgVPitch * dtToPost)
+				local predPostYaw = mostRecentClean.yaw + (avgVYaw * dtToPost)
+				local returnDev = angularDist(postShotAngles.pitch, postShotAngles.yaw, predPostPitch, predPostYaw)
+
+				if not bestReturnDev or returnDev < bestReturnDev then
+					bestReturnDev = returnDev
+					bestReturnTick = pending.shotTick + k
+				end
+			end
+		end
+	end
+
+	if not bestReturnDev then
+		return
+	end
+
+	-- 6. Score calculation
+	-- High alignment (low returnDev relative to shotDev) indicates silent aim snapping back.
+	local alignmentFactor = math.max(0.0, 1.0 - bestReturnDev / math.max(shotDev, 1.0))
+
+	local scoreGain = 0.0
+	local headError = nil
+	local bestAimError = nil
+
+	if attackerClass == TF_CLASS_SNIPER then
+		local victimID = pending.victimID
+		local victimWrap = PlayerCache.GetBySteamID(victimID)
+		local headPos = pending.victimEyePos or (victimWrap and victimWrap:GetHitboxPos(1) or nil)
+		local bodyPos = nil
+		if pending.victimOrigin then
+			bodyPos = pending.victimOrigin + Vector3(0, 0, 40)
+		else
+			bodyPos = victimWrap and victimWrap:GetHitboxPos(4) or nil
+		end
+		local eyePos = pending.shooterEyePos
+			or HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition)
+			or playerState.wrap:GetEyePos()
+
+		if eyePos and headPos then
+			local hp, hy = getAngleToPos(eyePos, headPos)
+			headError = angularDist(shotAngles.pitch, shotAngles.yaw, hp, hy)
+			bestAimError = headError
+		end
+		if bestAimError == nil and eyePos and bodyPos then
+			local bp, by = getAngleToPos(eyePos, bodyPos)
+			bestAimError = angularDist(shotAngles.pitch, shotAngles.yaw, bp, by)
+		end
+
+		local bigSnapFactor = 0.0
+		if shotDev >= SNIPER_BIG_SNAP_DEGREES then
+			bigSnapFactor = math.min(1.0, (shotDev - SNIPER_BIG_SNAP_DEGREES) / 90.0 + 1.0)
+		end
+
+		local aimFactor = 0.0
+		if bestAimError ~= nil then
+			aimFactor = math.max(0.0, 1.0 - (bestAimError / SNIPER_HEAD_MAX_ERROR_DEGREES))
+		else
+			-- No positional context: still allow detection but with weaker weight
+			aimFactor = 0.25
+		end
+
+		local returnFactor = math.max(0.0, 1.0 - (bestReturnDev / SNIPER_RETURN_MAX_DEGREES))
+
+		-- Baseline for huge flicks that land precisely, even if snap-back isn't immediate.
+		local baseline = 0.0
+		if shotDev >= SNIPER_BIG_SNAP_DEGREES and aimFactor > 0.5 then
+			baseline = (shotDev - SNIPER_BIG_SNAP_DEGREES) * (aimFactor ^ 2.0)
+		end
+
+		-- Sniper: prioritize huge flicks that land precisely and snap back to predicted motion.
+		scoreGain = (shotDev ^ 1.25) * (aimFactor ^ 2.0) * (returnFactor ^ 2.0) * (1.0 + bigSnapFactor) + baseline
+	else
+		-- Default: prior model
+		scoreGain = (shotDev ^ 1.5) * (alignmentFactor ^ 2) * 10.0 * sanityFactor
+	end
+
+	if Common.IsDebugEnabled() then
+		local headErrText = "n/a"
+		if bestAimError ~= nil then
+			headErrText = string.format("%.1f°", bestAimError)
+		end
+		print(string.format(
+			"[SilentAim] %s | Snap: %.1f° | Return: %.1f° (t=%s) | Align: %.2f | AimErr: %s | Gain: %.1f",
+			id, shotDev, bestReturnDev, tostring(bestReturnTick), alignmentFactor, headErrText, scoreGain
+		))
+		print(string.format(
+			"          | Pred: P%.1f Y%.1f | Actual: P%.1f Y%.1f",
+			predShotPitch,
+			wrapAngle(predShotYaw),
+			shotAngles.pitch,
+			wrapAngle(shotAngles.yaw)
+		))
+	end
+
+	if scoreGain > 1.0 then
+		local reason = string.format("SilentAim Anomaly (%.1f° snap, %.2f align)", shotDev, alignmentFactor)
+		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
 	end
 end
 
--- ── Cleanup ───────────────────────────────────────────────────────────────────
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerData[id] = nil
 end)

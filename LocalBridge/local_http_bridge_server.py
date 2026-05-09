@@ -196,7 +196,14 @@ def fetch_url(
     return True, raw.decode("utf-8", errors="replace"), None
 
 
+LAST_CLEANUP = 0.0
+
 def cleanup_state_locked(now: float) -> None:
+    global LAST_CLEANUP
+    if now - LAST_CLEANUP < 10.0:
+        return
+    LAST_CLEANUP = now
+
     stale_job_ids: list[str] = []
     for job_id, job in JOBS.items():
         if job.done and now - job.created_at > MAX_JOB_AGE_SEC:

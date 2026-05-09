@@ -7,10 +7,6 @@ Purpose:
 - print both responses and optionally echo async response to chat
 ]]
 
-assert(http, "http_docs_smoke_test: http library missing")
-assert(type(http.Get) == "function", "http_docs_smoke_test: http.Get missing")
-assert(type(http.GetAsync) == "function", "http_docs_smoke_test: http.GetAsync missing")
-
 local URL = "https://catfact.ninja/fact"
 local ECHO_ASYNC_TO_CHAT = true
 

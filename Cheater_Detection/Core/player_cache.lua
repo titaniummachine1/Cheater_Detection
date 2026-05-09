@@ -108,6 +108,7 @@ local SCORE_DECAY_HIGH_RISK  = 0.2 -- points/sec
 local SCORE_DECAY_SUSPICIOUS = 0.5 -- points/sec
 
 local HARD_FLAGS             = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
+local SCORE_DECAY_INTERVAL   = 1.0 -- Decay every 1s
 
 -- ── Detector API ──────────────────────────────────────────────────────────────
 
@@ -122,19 +123,6 @@ local function newCheckFlags()
 		steamHistoryChecked = false,
 		profileLookupQueued = false,
 	}
-end
-
----Ensure per-check flags table exists for a player state.
----@param state table
----@return table
-function PlayerCache.EnsureCheckFlags(state)
-	if not state then
-		return newCheckFlags()
-	end
-	if type(state.checkFlags) ~= "table" then
-		state.checkFlags = newCheckFlags()
-	end
-	return state.checkFlags
 end
 
 ---Get or create active state for a player (CreateMove / detector path)
@@ -179,11 +167,16 @@ function PlayerCache.Get(ply)
 		markDirty()
 	end
 
-	-- Lazy score decay: apply elapsed-time decay on every access
+	-- Lazy score decay: apply elapsed-time decay periodically
 	local state = activeSet[id]
+	if not state.checkFlags then
+		state.checkFlags = newCheckFlags()
+	end
 	local now = globals.RealTime()
-	local elapsed = now - (state.lastScoreDecay or now)
-	if elapsed > 0 and state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
+	local lastDecay = state.lastScoreDecay or now
+	local elapsedSinceDecay = now - lastDecay
+
+	if elapsedSinceDecay >= SCORE_DECAY_INTERVAL and state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
 		local rate = 0
 		if (state.flags & Constants.Flags.HIGH_RISK) ~= 0 then
 			rate = SCORE_DECAY_HIGH_RISK
@@ -191,7 +184,7 @@ function PlayerCache.Get(ply)
 			rate = SCORE_DECAY_SUSPICIOUS
 		end
 		if rate > 0 then
-			state.score = math.max(0, state.score - rate * elapsed)
+			state.score = math.max(0, state.score - rate * elapsedSinceDecay)
 			if state.score < Constants.Threshold.SUSPICIOUS then
 				state.flags = (state.flags & ~Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
 			elseif state.score < Constants.Threshold.HIGH_RISK then
@@ -200,8 +193,8 @@ function PlayerCache.Get(ply)
 				state.flags = state.flags | Constants.Flags.SUSPICIOUS | Constants.Flags.HIGH_RISK
 			end
 		end
+		state.lastScoreDecay = now
 	end
-	state.lastScoreDecay = now
 
 	return state
 end
@@ -311,6 +304,11 @@ function PlayerCache.ValidateStates()
 		return
 	end
 	lastValidationTick = now
+
+	-- Memory management: prune inactive wrappers
+	if WrappedPlayer.PruneInactive then
+		pcall(WrappedPlayer.PruneInactive, now)
+	end
 
 	-- Get authoritative list of live players
 	local liveEntities = entities.FindByClass("CTFPlayer") or {}

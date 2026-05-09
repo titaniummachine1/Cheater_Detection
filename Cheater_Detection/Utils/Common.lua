@@ -169,7 +169,9 @@ function Common.GetSteamID64(Player)
 
 	-- Reset cache on new tick
 	if lastTick ~= currentTick then
-		cachedSteamIDs = {}
+		for k in pairs(cachedSteamIDs) do
+			cachedSteamIDs[k] = nil
+		end
 		lastTick = currentTick
 	end
 
@@ -243,7 +245,7 @@ function Common.IsCheater(playerInfo)
 	if type(entry) == "table" then
 		local flags = tonumber(entry.Flags or 0) or 0
 		local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED |
-		Constants.Flags.COMM_BANNED
+			Constants.Flags.COMM_BANNED
 		inDatabase = (flags & cheaterMask) ~= 0
 	end
 	local priorityCheater = playerlist.GetPriority(steamId) == 10

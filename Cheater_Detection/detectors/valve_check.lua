@@ -57,9 +57,10 @@ local function runDeferredSweep()
 	end
 	deferredSweepRequested = false
 	for id, state in pairs(PlayerCache.GetActiveTable()) do
-		local checkFlags = PlayerCache.EnsureCheckFlags(state)
+		local checkFlags = state.checkFlags
 		if
-			not checkFlags.valveItemBadgeChecked
+			not checkFlags
+			or not checkFlags.valveItemBadgeChecked
 			or not checkFlags.valveGroupChecked
 			or not checkFlags.vacBanChecked
 			or not checkFlags.commBanChecked
@@ -273,6 +274,9 @@ local function checkPlayerItems(ply)
 	return false, ""
 end
 
+local lastCheckTick = {}
+local CHECK_INTERVAL_TICKS = 33 -- ~0.5s at 66Hz
+
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Main processor
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -282,9 +286,17 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	local id = tostring(playerState.id)
+	local curTick = globals.TickCount()
+
+	-- Throttle checks to once every ~0.5s per player
+	if lastCheckTick[id] and (curTick - lastCheckTick[id]) < CHECK_INTERVAL_TICKS then
+		return
+	end
+	lastCheckTick[id] = curTick
+
 	local now = globals.CurTime()
 	local isDebug = Common.IsDebugEnabled()
-	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
+	local checkFlags = playerState.checkFlags
 	local useSteamHistory = SteamHistory.IsEnabled and SteamHistory.IsEnabled()
 
 	-- Skip Bots (Non-SteamID64)
@@ -304,9 +316,9 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	-- Skip local player unless debug mode is enabled
 	if not isDebug then
-		local localPlayer = PlayerCache.GetLocal()
+		local localPlayer = entities.GetLocalPlayer()
 		if localPlayer then
-			local localSteamID = localPlayer:GetSteamID64()
+			local localSteamID = Common.GetSteamID64(localPlayer)
 			if localSteamID and tostring(localSteamID) == tostring(id) then
 				return -- Skip local player check
 			end

@@ -129,6 +129,9 @@ local function onOnlineResponse(responseBody, errorMessage, source)
 end
 
 local function GetOnlineFetchParallelLimit()
+	if HttpQueue.IsBridgeAlive() then
+		return ONLINE_SAFE_WINDOW_FETCH_LIMIT
+	end
 	if ShouldRelaxFrameLimits() then
 		return ONLINE_SAFE_WINDOW_FETCH_LIMIT
 	end
@@ -136,6 +139,9 @@ local function GetOnlineFetchParallelLimit()
 end
 
 local function GetOnlineFetchDispatchDelay()
+	if HttpQueue.IsBridgeAlive() then
+		return 0.0
+	end
 	if ShouldRelaxFrameLimits() then
 		return 0.0
 	end
@@ -765,6 +771,22 @@ function Fetcher.FinishFetch()
 	local isDebugMode = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
 	local results = Fetcher.State.results
 
+	-- Always show high-level summary to user
+	printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
+	printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
+	if results.total_updated > 0 then
+		printc(255, 255, 100, 255, string.format("Database entries updated: %d", results.total_updated))
+	end
+	if results.errors > 0 then
+		printc(255, 100, 100, 255, "Errors encountered: " .. results.errors)
+	end
+
+	local dbCount = 0
+	for _ in pairs(G.DataBase) do
+		dbCount = dbCount + 1
+	end
+	printc(0, 255, 140, 255, string.format("Total database entries: %d", dbCount))
+
 	if isDebugMode then
 		Logger.Debug(
 			"Fetcher",
@@ -776,32 +798,6 @@ function Fetcher.FinishFetch()
 				results.errors
 			)
 		)
-		Logger.Debug(
-			"Fetcher",
-			string.format(
-				"[FETCHER] Totals processed=%d added=%d updated=%d existing=%d errors=%d",
-				Parsers.ParseStats.totalProcessed or 0,
-				Parsers.ParseStats.totalAdded or 0,
-				Parsers.ParseStats.totalUpdated or 0,
-				Parsers.ParseStats.totalExisting or 0,
-				Parsers.ParseStats.totalErrors or 0
-			)
-		)
-	else
-		printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
-		printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
-		if results.total_updated > 0 then
-			printc(255, 255, 100, 255, string.format("Database entries updated: %d", results.total_updated))
-		end
-		if results.errors > 0 then
-			printc(255, 100, 100, 255, "Errors encountered: " .. results.errors)
-		end
-
-		local count = 0
-		for _ in pairs(G.DataBase) do
-			count = count + 1
-		end
-		printc(0, 255, 140, 255, string.format("Total database entries: %d", count))
 	end
 
 	Fetcher.State.isRunning = false

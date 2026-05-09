@@ -263,8 +263,8 @@ local function countActiveProgress()
 		local id = normalizeSteamID64(steamID)
 		if id and (includeLocal or id ~= localSteamID) then
 			totalTargets = totalTargets + 1
-			local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
-			if checkFlags.steamHistoryChecked then
+			local checkFlags = playerState.checkFlags
+			if checkFlags and checkFlags.steamHistoryChecked then
 				checkedTargets = checkedTargets + 1
 			end
 		end
@@ -502,7 +502,11 @@ local function setSteamHistoryChecks(steamID, entry)
 	end
 
 	local oldFlags = playerState.flags
-	local checkFlags = PlayerCache.EnsureCheckFlags(playerState)
+	local checkFlags = playerState.checkFlags
+	if not checkFlags then
+		playerState.checkFlags = {}
+		checkFlags = playerState.checkFlags
+	end
 	checkFlags.steamHistoryChecked = true
 
 	local hasEntry = entry ~= nil

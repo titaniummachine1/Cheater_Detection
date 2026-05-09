@@ -7,12 +7,6 @@ Purpose:
 - report empty/error-read/timeout outcomes
 ]]
 
-assert(http, "http_async_singleflight_test: http library missing")
-assert(type(http.GetAsync) == "function", "http_async_singleflight_test: http.GetAsync missing")
-assert(type(http.Get) == "function", "http_async_singleflight_test: http.Get missing")
-assert(callbacks, "http_async_singleflight_test: callbacks missing")
-assert(globals, "http_async_singleflight_test: globals missing")
-
 local CONFIG = {
     URL = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
     REPEATS = 10,

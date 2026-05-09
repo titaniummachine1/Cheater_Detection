@@ -100,7 +100,7 @@ local function CanUseSafeWindowBurst()
 end
 
 local function GetGroupFetchParallelLimit()
-	if CanUseSafeWindowBurst() then
+	if HttpQueue.IsBridgeAlive() or CanUseSafeWindowBurst() then
 		return MAX_FETCH_PAGES
 	end
 	return ACTIVE_GROUP_FETCH_LIMIT
