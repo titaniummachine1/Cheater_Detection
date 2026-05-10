@@ -110,6 +110,52 @@ local SCORE_DECAY_SUSPICIOUS = 0.5 -- points/sec
 local HARD_FLAGS             = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 local SCORE_DECAY_INTERVAL   = 1.0 -- Decay every 1s
 
+local function isAutoPriorityEnabled()
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
+		return G.Menu.Advanced.AutoPriority == true
+	end
+	if G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
+		return G.Menu.Main.AutoPriority == true
+	end
+	return false
+end
+
+local function applyAutoPriority(state, ent)
+	if not state or not ent or not ent:IsValid() then
+		return
+	end
+	if not isAutoPriorityEnabled() then
+		return
+	end
+
+	if (state.flags & HARD_FLAGS) ~= 0 then
+		pcall(playerlist.SetPriority, ent, 10)
+		state.autoPrioritySusApplied = false
+		return
+	end
+
+	local isSus = (state.flags & Constants.Flags.SUSPICIOUS) ~= 0
+	if isSus then
+		if state.autoPrioritySusApplied ~= true then
+			local okGet, prio = pcall(playerlist.GetPriority, ent)
+			local currentPriority = okGet and type(prio) == "number" and prio or 0
+			if currentPriority < 1 then
+				pcall(playerlist.SetPriority, ent, 1)
+				state.autoPrioritySusApplied = true
+			end
+		end
+	else
+		if state.autoPrioritySusApplied == true then
+			local okGet, prio = pcall(playerlist.GetPriority, ent)
+			local currentPriority = okGet and type(prio) == "number" and prio or 0
+			if currentPriority == 1 then
+				pcall(playerlist.SetPriority, ent, 0)
+			end
+			state.autoPrioritySusApplied = false
+		end
+	end
+end
+
 -- ── Detector API ──────────────────────────────────────────────────────────────
 
 local function newCheckFlags()
@@ -149,10 +195,6 @@ function PlayerCache.Get(ply)
 		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initScore = dbEntry and dbEntry.Score or 0
 
-		if (initFlags & HARD_FLAGS) ~= 0 then
-			pcall(playerlist.SetPriority, id, 10)
-		end
-
 		activeSet[id] = {
 			id              = id,
 			wrap            = wrap,
@@ -163,8 +205,11 @@ function PlayerCache.Get(ply)
 			isFriend        = Common.IsFriend and Common.IsFriend(ply, true) or false,
 			lastUpdate      = globals.TickCount(),
 			lastScoreDecay  = globals.RealTime(),
+			autoPrioritySusApplied = false,
 		}
 		markDirty()
+
+		applyAutoPriority(activeSet[id], ply)
 	end
 
 	-- Lazy score decay: apply elapsed-time decay periodically
@@ -194,6 +239,7 @@ function PlayerCache.Get(ply)
 			end
 		end
 		state.lastScoreDecay = now
+		applyAutoPriority(state, ply)
 	end
 
 	return state
@@ -286,42 +332,19 @@ local RUNTIME_HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED 
 Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
 	assert(playerState, "PlayerCache priority subscriber: playerState missing")
 	assert(playerState.id, "PlayerCache priority subscriber: id missing")
+	local wrap = playerState.wrap
+	local ent = wrap and wrap:GetRawEntity()
+	if not ent or not ent:IsValid() then
+		return
+	end
+
 	if (playerState.flags & RUNTIME_HARD_FLAGS) ~= 0 then
-		pcall(playerlist.SetPriority, playerState.id, 10)
+		pcall(playerlist.SetPriority, ent, 10)
 		playerState.autoPrioritySusApplied = false
 		return
 	end
 
-	local autoPriorityEnabled = false
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
-		autoPriorityEnabled = G.Menu.Advanced.AutoPriority == true
-	elseif G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
-		autoPriorityEnabled = G.Menu.Main.AutoPriority == true
-	end
-	if not autoPriorityEnabled then
-		return
-	end
-
-	local isSus = (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0
-	if isSus then
-		if playerState.autoPrioritySusApplied ~= true then
-			local okGet, prio = pcall(playerlist.GetPriority, playerState.id)
-			local currentPriority = okGet and type(prio) == "number" and prio or 0
-			if currentPriority < 10 and currentPriority < 1 then
-				pcall(playerlist.SetPriority, playerState.id, 1)
-				playerState.autoPrioritySusApplied = true
-			end
-		end
-	else
-		if playerState.autoPrioritySusApplied == true then
-			local okGet, prio = pcall(playerlist.GetPriority, playerState.id)
-			local currentPriority = okGet and type(prio) == "number" and prio or 0
-			if currentPriority == 1 then
-				pcall(playerlist.SetPriority, playerState.id, 0)
-			end
-			playerState.autoPrioritySusApplied = false
-		end
-	end
+	applyAutoPriority(playerState, ent)
 end)
 
 -- ── Periodic validation (every 1s) ───────────────────────────────────────────
