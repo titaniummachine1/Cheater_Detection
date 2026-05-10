@@ -234,6 +234,22 @@ function HistoryManager.MarkDamageDealt(steamID)
 	playerData.damageDealt = true
 end
 
+function HistoryManager.ClearPlayer(steamID)
+	if not initialized then
+		return
+	end
+	if not steamID then
+		return
+	end
+	local id = tostring(steamID)
+	for i = 1, ringCapacity do
+		local bucket = ringBuffer[i]
+		if bucket then
+			bucket[id] = nil
+		end
+	end
+end
+
 function HistoryManager.PushAngles(steamID, pitch, yaw)
 	if not initialized then
 		return

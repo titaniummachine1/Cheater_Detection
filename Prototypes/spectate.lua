@@ -2,7 +2,7 @@ local camera_x_position = 25
 local camera_y_position = 300
 local camera_width = 500
 local camera_height = 300
-local fullscreen_width, fullscreen_height = draw.GetScreenSize()
+local fullscreen_width, fullscreen_height = 0, 0
 
 -- User configurable options
 local infinite_spectate = true  -- Will only work in casual mode regardless of this setting
@@ -48,6 +48,17 @@ local spectate_locked = false
 local current_all_player_index = 1
 local friendly_player_index = 1
 local is_spectating = false
+local spectate_anchor_player = nil
+local vanish_mode = false
+
+local desired_engine_spectate_target = nil
+local last_engine_spectate_uid = nil
+local last_engine_spectate_time = 0
+local last_overlay_active = false
+
+local desired_anchor_steam = nil
+local desired_anchor_name = nil
+local last_anchor_reacquire_time = 0
 
 -- Material variables
 local materials_initialized = false
@@ -75,6 +86,8 @@ local DEATH_TIME = 2.0
 local TRAVEL_TIME = 0.4
 local FREEZE_TIME = 4.0
 local DEFAULT_WAVE_TIME = 10.0
+local RESPAWN_RELOCK_THRESHOLD = 5.0
+local MENU_REFRESH_COOLDOWN = 0.35
 local BASE_DELAY = TRAVEL_TIME + FREEZE_TIME
 local TOTAL_BASE_DELAY = DEATH_TIME + BASE_DELAY
 
@@ -82,6 +95,7 @@ local TOTAL_BASE_DELAY = DEATH_TIME + BASE_DELAY
 local lockedWaveTime = nil
 local lastDeathTime = nil
 local lastDebugTime = 0
+local lastMenuRefreshTime = 0
 
 --[[
 There is a static base respawn time, which is based on a static death time of 2 seconds + the time for the freeze frame (0.4 travel time + 4.0 freeze time).
@@ -296,6 +310,8 @@ local function InitializeAllMaterials()
     -- Clean up any existing materials first
     CleanupMaterials()
 
+    fullscreen_width, fullscreen_height = draw.GetScreenSize()
+
     -- Create windowed mode materials
     local windowed_texture_name = "camTexture_windowed"
     windowed_texture = materials.CreateTextureRenderTarget(windowed_texture_name, camera_width, camera_height)
@@ -397,6 +413,225 @@ local function IsAttachedToTargetPlayer(entity)
     return false
 end
 
+local function IsValidAlivePlayer(player)
+    return player and player:IsValid() and player:IsAlive() and not player:IsDormant()
+end
+
+local function IsEnemyToLocalPlayer(player)
+    local localPlayer = entities.GetLocalPlayer()
+    if not localPlayer or not IsValidAlivePlayer(player) then
+        return false
+    end
+
+    return player:GetTeamNumber() ~= localPlayer:GetTeamNumber()
+end
+
+local function FindClosestTeammateToReference(referencePlayer)
+    if not IsValidAlivePlayer(referencePlayer) then
+        return nil
+    end
+
+    local referenceOrigin = referencePlayer:GetAbsOrigin()
+    local referenceTeam = referencePlayer:GetTeamNumber()
+
+    local bestTeam = nil
+    local bestTeamDist = math.huge
+
+    local players = entities.FindByClass("CTFPlayer")
+    for _, player in pairs(players) do
+        if IsValidAlivePlayer(player) and player ~= referencePlayer then
+            local distance = (player:GetAbsOrigin() - referenceOrigin):Length()
+
+            if player:GetTeamNumber() == referenceTeam and distance < bestTeamDist then
+                bestTeamDist = distance
+                bestTeam = player
+            end
+        end
+    end
+
+    return bestTeam
+end
+
+local function FindClosestAnyToReference(referencePlayer)
+    if not IsValidAlivePlayer(referencePlayer) then
+        return nil
+    end
+
+    local referenceOrigin = referencePlayer:GetAbsOrigin()
+    local bestAny = nil
+    local bestAnyDist = math.huge
+
+    local players = entities.FindByClass("CTFPlayer")
+    for _, player in pairs(players) do
+        if IsValidAlivePlayer(player) and player ~= referencePlayer then
+            local distance = (player:GetAbsOrigin() - referenceOrigin):Length()
+            if distance < bestAnyDist then
+                bestAnyDist = distance
+                bestAny = player
+            end
+        end
+    end
+
+    return bestAny
+end
+
+local function isOverlayActive()
+    local localPlayer = entities.GetLocalPlayer()
+    if not localPlayer then
+        return false
+    end
+    if localPlayer:IsAlive() then
+        return false
+    end
+    if engine.Con_IsVisible() or engine.IsGameUIVisible() then
+        return false
+    end
+    return is_spectating
+end
+
+local function getUserIDForEntity(ent)
+    if not ent or not ent:IsValid() then
+        return nil
+    end
+    local idx = ent:GetIndex()
+    if not idx then
+        return nil
+    end
+    local info = client.GetPlayerInfo(idx)
+    if not info or not info.UserID then
+        return nil
+    end
+    return tonumber(info.UserID)
+end
+
+local function getSteamIDForEntity(ent)
+    if not ent or not ent:IsValid() then
+        return nil
+    end
+    local idx = ent:GetIndex()
+    if not idx then
+        return nil
+    end
+    local info = client.GetPlayerInfo(idx)
+    if not info or not info.SteamID then
+        return nil
+    end
+    return tostring(info.SteamID)
+end
+
+local function getNameForEntity(ent)
+    if not ent or not ent:IsValid() then
+        return nil
+    end
+    local idx = ent:GetIndex()
+    if not idx then
+        return nil
+    end
+    local info = client.GetPlayerInfo(idx)
+    if info and info.Name then
+        return tostring(info.Name)
+    end
+    return ent:GetName()
+end
+
+local function setDesiredAnchor(ent)
+    desired_anchor_steam = getSteamIDForEntity(ent)
+    desired_anchor_name = getNameForEntity(ent)
+end
+
+local function findAlivePlayerBySteamID(steamID)
+    if not steamID then
+        return nil
+    end
+    local players = entities.FindByClass("CTFPlayer")
+    for _, player in pairs(players) do
+        if IsValidAlivePlayer(player) then
+            local sid = getSteamIDForEntity(player)
+            if sid == steamID then
+                return player
+            end
+        end
+    end
+    return nil
+end
+
+local function setEngineSpectateTarget(ent, forceFirstPerson)
+    if not ent or not ent:IsValid() then
+        return false
+    end
+
+    local uid = getUserIDForEntity(ent)
+    if not uid or uid <= 0 then
+        return false
+    end
+
+    local now = globals.RealTime()
+    if last_engine_spectate_uid == uid and (now - last_engine_spectate_time) < 0.75 then
+        return true
+    end
+
+    last_engine_spectate_uid = uid
+    last_engine_spectate_time = now
+    if forceFirstPerson then
+        client.Command("spec_mode 4", true)
+    end
+    client.Command("spec_player " .. tostring(uid), true)
+    return true
+end
+
+local function disableSpectateLock()
+    if not spectate_locked then
+        return
+    end
+
+    if stored_class then
+        client.Command("join_class " .. stored_class, true)
+    end
+    spectate_locked = false
+end
+
+local function ApplySpectateTargetFromAnchor()
+    local now = globals.RealTime()
+    if (not IsValidAlivePlayer(spectate_anchor_player)) and desired_anchor_steam and (now - last_anchor_reacquire_time) >= 0.25 then
+        last_anchor_reacquire_time = now
+        local reacquired = findAlivePlayerBySteamID(desired_anchor_steam)
+        if reacquired then
+            spectate_anchor_player = reacquired
+        end
+    end
+
+    if not IsValidAlivePlayer(spectate_anchor_player) then
+        target_player = nil
+        desired_engine_spectate_target = nil
+        return false
+    end
+
+    if not vanish_mode then
+        target_player = spectate_anchor_player
+        desired_engine_spectate_target = target_player
+        return true
+    end
+
+    local localPlayer = entities.GetLocalPlayer()
+    local localTeam = localPlayer and localPlayer:GetTeamNumber() or nil
+    local anchorTeam = spectate_anchor_player:GetTeamNumber()
+    local anchorIsFriendlyToLocal = (localTeam ~= nil and anchorTeam == localTeam)
+
+    local proxyPlayer = FindClosestTeammateToReference(spectate_anchor_player)
+    if proxyPlayer then
+        target_player = proxyPlayer
+    else
+        if anchorIsFriendlyToLocal then
+            target_player = spectate_anchor_player
+        else
+            target_player = FindClosestAnyToReference(spectate_anchor_player) or spectate_anchor_player
+        end
+    end
+
+    desired_engine_spectate_target = target_player
+    return true
+end
+
 local function GetEnemyPlayers()
     local enemy_players = {}
     local local_player = entities.GetLocalPlayer()
@@ -417,7 +652,10 @@ end
 local function CycleNextEnemy()
     local enemies = GetEnemyPlayers()
     if #enemies == 0 then
+        spectate_anchor_player = nil
         target_player = nil
+        desired_anchor_steam = nil
+        desired_anchor_name = nil
         first_person_mode = false
         free_camera = false
         visited_players = {}
@@ -445,15 +683,24 @@ local function CycleNextEnemy()
     end
 
     for _, player in ipairs(available_enemies) do
-        if player and player:IsValid() and player:IsAlive() and not player:IsDormant() then
-            target_player = player
+        if IsValidAlivePlayer(player) then
+            spectate_anchor_player = player
+            setDesiredAnchor(player)
+            ApplySpectateTargetFromAnchor()
             table.insert(visited_players, player)
             break
         end
     end
 
-    if target_player then
-        print("Now spectating: " .. target_player:GetName() .. " (" .. #visited_players .. "/" .. #enemies .. " visited)")
+    if IsValidAlivePlayer(spectate_anchor_player) then
+        local anchorName = spectate_anchor_player:GetName() or "Unknown"
+        local targetName = target_player and target_player:GetName() or "Unknown"
+        if vanish_mode and target_player ~= spectate_anchor_player then
+            print("Now tracking enemy: " ..
+                anchorName .. " via " .. targetName .. " (" .. #visited_players .. "/" .. #enemies .. " visited)")
+        else
+            print("Now spectating enemy: " .. anchorName .. " (" .. #visited_players .. "/" .. #enemies .. " visited)")
+        end
     end
 end
 
@@ -491,7 +738,10 @@ end
 local function CycleAllPlayers(forward)
     local all_players = GetAllPlayers()
     if #all_players == 0 then
+        spectate_anchor_player = nil
         target_player = nil
+        desired_anchor_steam = nil
+        desired_anchor_name = nil
         first_person_mode = false
         free_camera = false
         return
@@ -509,9 +759,17 @@ local function CycleAllPlayers(forward)
         end
     end
 
-    target_player = all_players[current_all_player_index]
-    if target_player then
-        print("Now spectating: " .. target_player:GetName())
+    spectate_anchor_player = all_players[current_all_player_index]
+    setDesiredAnchor(spectate_anchor_player)
+    ApplySpectateTargetFromAnchor()
+    if spectate_anchor_player then
+        local anchorName = spectate_anchor_player:GetName() or "Unknown"
+        local targetName = target_player and target_player:GetName() or "Unknown"
+        if vanish_mode and target_player ~= spectate_anchor_player then
+            print("Now tracking: " .. anchorName .. " via " .. targetName)
+        else
+            print("Now spectating: " .. anchorName)
+        end
     end
 end
 
@@ -519,7 +777,10 @@ end
 local function CycleFriendlyPlayers()
     local friendly_players = GetFriendlyPlayers()
     if #friendly_players == 0 then
+        spectate_anchor_player = nil
         target_player = nil
+        desired_anchor_steam = nil
+        desired_anchor_name = nil
         first_person_mode = false
         free_camera = false
         return
@@ -530,9 +791,17 @@ local function CycleFriendlyPlayers()
         friendly_player_index = 1
     end
 
-    target_player = friendly_players[friendly_player_index]
-    if target_player then
-        print("Now spectating friendly: " .. target_player:GetName())
+    spectate_anchor_player = friendly_players[friendly_player_index]
+    setDesiredAnchor(spectate_anchor_player)
+    ApplySpectateTargetFromAnchor()
+    if spectate_anchor_player then
+        local anchorName = spectate_anchor_player:GetName() or "Unknown"
+        local targetName = target_player and target_player:GetName() or "Unknown"
+        if vanish_mode and target_player ~= spectate_anchor_player then
+            print("Now tracking teammate: " .. anchorName .. " via " .. targetName)
+        else
+            print("Now spectating friendly: " .. anchorName)
+        end
     end
 end
 
@@ -559,6 +828,10 @@ local function ToggleSpectateLock()
     end
 
     if not spectate_locked then
+        if not isOverlayActive() then
+            print("Infinite spectate requires the spectator overlay to be visible.")
+            return
+        end
         StoreCurrentClass()
         client.Command("menuopen", true)
         spectate_locked = true
@@ -576,6 +849,39 @@ end
 local function ToggleHidePlayerModel()
     hide_player_model = not hide_player_model
     print("Hide player model in first person: " .. (hide_player_model and "ENABLED" or "DISABLED"))
+end
+
+local function ToggleVanishMode()
+    vanish_mode = not vanish_mode
+    ApplySpectateTargetFromAnchor()
+    print("Vanish mode: " .. (vanish_mode and "ENABLED" or "DISABLED"))
+end
+
+local function RefreshInfiniteSpectateLock()
+    if not spectate_locked then
+        return
+    end
+
+    if not isOverlayActive() then
+        return
+    end
+
+    if not IsCasualMatch() then
+        return
+    end
+
+    local respawnTime = GetRespawnTime()
+    if respawnTime <= 0 or respawnTime > RESPAWN_RELOCK_THRESHOLD then
+        return
+    end
+
+    local now = globals.RealTime()
+    if now - lastMenuRefreshTime < MENU_REFRESH_COOLDOWN then
+        return
+    end
+
+    client.Command("menuopen", true)
+    lastMenuRefreshTime = now
 end
 
 local function HandleMovement()
@@ -661,7 +967,7 @@ local function HandleKillfeedEvent(event)
         is_in_game = false
     elseif event:GetName() == "team_control_point_captured" then
         -- Reset our target wave when a point is captured
-        targetWaveTime = nil
+        lockedWaveTime = nil
         current_wave_start = globals.CurTime()
     end
 end
@@ -759,7 +1065,7 @@ local function DrawKillfeed()
 end
 
 -- Make sure to set death_time when player dies
-callbacks.Register("FireGameEvent", function(event)
+local function OnLocalPlayerDeathEvent(event)
     if event:GetName() == "player_death" then
         local localPlayer = entities.GetLocalPlayer()
         if not localPlayer then return end
@@ -770,17 +1076,16 @@ callbacks.Register("FireGameEvent", function(event)
             current_wave_start = 0 -- Reset current wave
         end
     end
-end)
+end
 
 -- Track when points are captured to reset wave timing
 local function OnGameEvent(event)
     if event:GetName() == "team_control_point_captured" then
         -- Reset our target wave when a point is captured
-        targetWaveTime = nil
+        lockedWaveTime = nil
         current_wave_start = globals.CurTime()
     end
 end
-callbacks.Register("FireGameEvent", "point_capture_hook", OnGameEvent)
 
 -- Update DrawSpectatorHUD
 local function DrawSpectatorHUD()
@@ -822,14 +1127,41 @@ local function DrawSpectatorHUD()
         )
     end
 
-    if not target_player or free_camera then return end
+    local haveAnyTarget = (target_player ~= nil and not free_camera)
+    if not haveAnyTarget then
+        local wantName = desired_anchor_name or "No Target"
+        draw.SetFont(hud_font)
+        local textW, textH = draw.GetTextSize(wantName)
+        local nameY = math.floor(fullscreen_height - 140)
+        draw.Color(0, 0, 0, 130)
+        draw.FilledRectFade(
+            math.floor(fullscreen_width / 2 - textW / 2 - 60),
+            nameY - 5,
+            math.floor(fullscreen_width / 2 + textW / 2 + 60),
+            nameY + textH + 5,
+            100,
+            50,
+            true
+        )
+        draw.Color(255, 255, 255, 120)
+        draw.TextShadow(math.floor(fullscreen_width / 2 - textW / 2), nameY, wantName)
+        draw.SetFont(title_font)
+        draw.Color(255, 255, 255, 200)
+        draw.TextShadow(math.floor(fullscreen_width / 2 - textW / 2 - 50), nameY + 4, "< MOUSE2")
+        draw.TextShadow(math.floor(fullscreen_width / 2 + textW / 2 + 10), nameY + 4, "MOUSE1 >")
+        return
+    end
 
     local health = target_player:GetHealth()
     if not health then return end
     local maxHealth = target_player:GetMaxHealth()
     if not maxHealth then return end
-    local playerName = target_player:GetName()
-    if not playerName then return end
+    local actualName = target_player:GetName()
+    if not actualName then return end
+    local desiredName = desired_anchor_name or actualName
+    local anchorName = spectate_anchor_player and spectate_anchor_player:IsValid() and spectate_anchor_player:GetName() or
+        desiredName
+    local isProxying = (spectate_anchor_player and target_player and target_player ~= spectate_anchor_player)
 
     local healthColor = {
         r = math.floor(255 * (1 - (health / maxHealth))),
@@ -845,15 +1177,17 @@ local function DrawSpectatorHUD()
 
     -- Get team colors
     local team_colors = {
-        [2] = { r = 255, g = 64, b = 64 }, -- RED
+        [2] = { r = 255, g = 64, b = 64 },  -- RED
         [3] = { r = 153, g = 204, b = 255 } -- BLU
     }
-    local team_color = team_colors[target_player:GetTeamNumber()] or { r = 255, g = 255, b = 255 }
+    local teamEntity = spectate_anchor_player and spectate_anchor_player:IsValid() and spectate_anchor_player or
+        target_player
+    local team_color = team_colors[teamEntity:GetTeamNumber()] or { r = 255, g = 255, b = 255 }
 
     draw.SetFont(hud_font)
 
-    -- Draw name with team-colored background and class icon
-    local nameW, textH = draw.GetTextSize(playerName)
+    local nameAlpha = isProxying and 50 or 255
+    local nameW, textH = draw.GetTextSize(desiredName)
     local nameBgPadding = 20
     local iconSize = 32
     local nameY = math.floor(fullscreen_height - 140)
@@ -872,15 +1206,27 @@ local function DrawSpectatorHUD()
     )
 
     -- Draw name text (shifted right to make room for icon)
-    draw.Color(255, 255, 255, 255)
+    draw.Color(255, 255, 255, nameAlpha)
     draw.TextShadow(
         math.floor(fullscreen_width / 2 - totalWidth / 2 + iconSize + 10),
         nameY,
-        playerName
+        desiredName
     )
 
+    draw.SetFont(title_font)
+    draw.Color(255, 255, 255, 200)
+    draw.TextShadow(math.floor(fullscreen_width / 2 - totalWidth / 2 - 50), nameY + 4, "< MOUSE2")
+    draw.TextShadow(math.floor(fullscreen_width / 2 + totalWidth / 2 + 10), nameY + 4, "MOUSE1 >")
+
+    if isProxying then
+        local proxyText = actualName
+        local proxyW, proxyH = draw.GetTextSize(proxyText)
+        draw.Color(255, 255, 255, 255)
+        draw.TextShadow(math.floor(fullscreen_width / 2 - proxyW / 2), nameY - proxyH - 8, proxyText)
+    end
+
     -- Draw class icon using our custom materials
-    local playerClass = target_player:GetPropInt("m_iClass")
+    local playerClass = teamEntity:GetPropInt("m_iClass")
     local classIcon = class_icon_materials[playerClass]
     if classIcon then
         draw.Color(255, 255, 255, 255)
@@ -954,9 +1300,15 @@ local function HandleCameraControls()
         last_key_press = current_time
     end
 
-    if input.IsButtonPressed(KEY_LCONTROL) and current_time - last_key_press > key_delay then
+    if (input.IsButtonPressed(KEY_LCONTROL) or input.IsButtonPressed(KEY_RCONTROL) or input.IsButtonPressed(KEY_F11)) and current_time - last_key_press > key_delay then
         persistent_fullscreen = not persistent_fullscreen
         fullscreen_mode = persistent_fullscreen
+        print("Fullscreen: " .. (fullscreen_mode and "ON" or "OFF"))
+        last_key_press = current_time
+    end
+
+    if input.IsButtonPressed(KEY_V) and current_time - last_key_press > key_delay then
+        ToggleVanishMode()
         last_key_press = current_time
     end
 
@@ -993,7 +1345,7 @@ local function HandleCameraControls()
         if first_person_mode then
             free_camera = false
             camera_position = target_player:GetAbsOrigin() +
-            target_player:GetPropVector("localdata", "m_vecViewOffset[0]")
+                target_player:GetPropVector("localdata", "m_vecViewOffset[0]")
             local pitch = target_player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[0]") or 0
             local yaw = target_player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[1]") or 0
             camera_angles = EulerAngles(pitch, yaw, 0)
@@ -1025,8 +1377,33 @@ local function HandleCameraControls()
     end
 end
 
+local function SyncFullscreenCameraOrigin()
+    local localPlayer = entities.GetLocalPlayer()
+    if not localPlayer then
+        return
+    end
+
+    if localPlayer:IsAlive() then
+        return
+    end
+
+    if not persistent_fullscreen then
+        return
+    end
+
+    if camera_position == Vector3(0, 0, 0) then
+        return
+    end
+
+    localPlayer:SetPropVector(camera_position, "tfnonlocaldata", "m_vecOrigin")
+
+    local pitch, yaw, _ = camera_angles:Unpack()
+    localPlayer:SetPropFloat(pitch, "tfnonlocaldata", "m_angEyeAngles[0]")
+    localPlayer:SetPropFloat(yaw, "tfnonlocaldata", "m_angEyeAngles[1]")
+end
+
 -- Modified DrawModel callback to hide cosmetics in first-person mode
-callbacks.Register("DrawModel", function(ctx)
+local function OnDrawModel(ctx)
     -- Skip all processing if not spectating
     if not is_spectating then return end
 
@@ -1051,9 +1428,15 @@ callbacks.Register("DrawModel", function(ctx)
             ctx:ForcedMaterialOverride(cosmeticInvisibleMaterial)
         end
     end
-end)
+end
 
-callbacks.Register("CreateMove", function(cmd)
+local function OnCreateMove(cmd)
+    local overlayActive = isOverlayActive()
+    if last_overlay_active and not overlayActive then
+        disableSpectateLock()
+    end
+    last_overlay_active = overlayActive
+
     local localPlayer = entities.GetLocalPlayer()
     if localPlayer and localPlayer:IsAlive() then
         has_spawned_once = true
@@ -1069,12 +1452,18 @@ callbacks.Register("CreateMove", function(cmd)
         own_view_angles.y = own_view_angles.y + mouse_x
         own_view_angles.x = math.max(-89, math.min(89, own_view_angles.x + mouse_y))
     end
-end)
 
-callbacks.Register("PostRenderView", function(view)
+    if overlayActive then
+        engine.SetViewAngles(own_view_angles)
+    end
+end
+
+local function OnPostRenderView(view)
     if engine.Con_IsVisible() or engine.IsGameUIVisible() then
         return
     end
+
+    fullscreen_width, fullscreen_height = draw.GetScreenSize()
 
     if not materials_initialized or not windowed_material or not fullscreen_material then
         if not InitializeAllMaterials() then
@@ -1100,8 +1489,11 @@ callbacks.Register("PostRenderView", function(view)
     -- Only show spectator window if we've spawned before and are actually in-game
     if not has_spawned_once or not is_in_game then return end
 
-    local current_texture = persistent_fullscreen and fullscreen_texture or windowed_texture
-    local current_material = persistent_fullscreen and fullscreen_material or windowed_material
+    local active_fullscreen = persistent_fullscreen
+    fullscreen_mode = active_fullscreen
+
+    local current_texture = active_fullscreen and fullscreen_texture or windowed_texture
+    local current_material = active_fullscreen and fullscreen_material or windowed_material
 
     if not current_texture or not current_material then return end
 
@@ -1110,7 +1502,9 @@ callbacks.Register("PostRenderView", function(view)
         own_view_angles = engine.GetViewAngles()
 
         if last_killer and last_killer:IsValid() and last_killer:IsAlive() and not last_killer:IsDormant() then
-            target_player = last_killer
+            spectate_anchor_player = last_killer
+            setDesiredAnchor(last_killer)
+            ApplySpectateTargetFromAnchor()
             first_person_mode = true
             free_camera = false
         else
@@ -1123,31 +1517,51 @@ callbacks.Register("PostRenderView", function(view)
         fullscreen_mode = persistent_fullscreen
     end
 
-    -- Clean up invalid target player
-    if target_player and (not target_player:IsValid() or not target_player:IsAlive() or target_player:IsDormant()) then
-        visited_players = {}
-        target_player = nil
-        CycleNextEnemy()
-    end
+    ApplySpectateTargetFromAnchor()
 
     HandleCameraControls()
+    RefreshInfiniteSpectateLock()
+
+    if isOverlayActive() then
+        if desired_engine_spectate_target and desired_engine_spectate_target:IsValid() then
+            local forceFP = first_person_mode and not vanish_mode
+            setEngineSpectateTarget(desired_engine_spectate_target, forceFP)
+        end
+    end
 
     local customView = view
     customView.origin = camera_position
     customView.angles = camera_angles
 
-    if first_person_mode then
-        customView.fov = 120
+    local desiredFov = 90
+    local fovRaw = client.GetConVar("fov_desired")
+    if type(fovRaw) == "number" then
+        desiredFov = fovRaw
+    elseif type(fovRaw) == "string" then
+        local n = tonumber(fovRaw)
+        if n then
+            desiredFov = n
+        end
     end
+    local fov = desiredFov
+    if first_person_mode then
+        if target_player and target_player:IsValid() then
+            local isZoomed = target_player:GetPropBool("m_bZoomed")
+            if isZoomed then
+                fov = 20
+            end
+        end
+    end
+    customView.fov = fov
 
     render.Push3DView(customView, E_ClearFlags.VIEW_CLEAR_COLOR | E_ClearFlags.VIEW_CLEAR_DEPTH, current_texture)
     render.ViewDrawScene(true, true, customView)
     render.PopView()
 
-    local render_x = fullscreen_mode and 0 or camera_x_position
-    local render_y = fullscreen_mode and 0 or camera_y_position
-    local render_width = fullscreen_mode and fullscreen_width or camera_width
-    local render_height = fullscreen_mode and fullscreen_height or camera_height
+    local render_x = active_fullscreen and 0 or camera_x_position
+    local render_y = active_fullscreen and 0 or camera_y_position
+    local render_width = active_fullscreen and fullscreen_width or camera_width
+    local render_height = active_fullscreen and fullscreen_height or camera_height
 
     render.DrawScreenSpaceRectangle(
         current_material,
@@ -1157,9 +1571,9 @@ callbacks.Register("PostRenderView", function(view)
         render_width, render_height,
         render_width, render_height
     )
-end)
+end
 
-callbacks.Register("Draw", function()
+local function OnDraw()
     if engine.Con_IsVisible() or engine.IsGameUIVisible() then
         return
     end
@@ -1176,7 +1590,20 @@ callbacks.Register("Draw", function()
         if fullscreen_mode then
             DrawSpectatorHUD()
             DrawKillfeed()
-            return -- Early return to skip drawing borders and controls in fullscreen
+
+            -- Keep essential controls visible in fullscreen so you can recover state.
+            draw.SetFont(title_font)
+            draw.Color(0, 0, 0, 140)
+            draw.FilledRect(10, 10, 430, 120)
+            draw.Color(255, 255, 255, 230)
+            draw.Text(20, 20, "Spectate Controls")
+            draw.Text(20, 35, "Ctrl / F11 - Toggle fullscreen")
+            draw.Text(20, 50, "Space - First/Third person")
+            draw.Text(20, 65, "Tab - Next enemy | CapsLock - Next friendly")
+            draw.Text(20, 80, "Mouse1/Mouse2 - Cycle players | WASD + E/Q - Move")
+            draw.Text(20, 95, "V - Toggle vanish mode | Shift - Infinite spectate")
+
+            return
         end
 
         -- Only draw borders and controls in windowed mode
@@ -1244,6 +1671,7 @@ callbacks.Register("Draw", function()
         end
 
         table.insert(controls, "Ctrl - Toggle fullscreen")
+        table.insert(controls, "V - Toggle vanish mode")
 
         for i, text in ipairs(controls) do
             draw.Text(
@@ -1257,23 +1685,42 @@ callbacks.Register("Draw", function()
         local mode_text = "Camera mode: " .. camera_view_mode
         local hide_text = "Hide player model: " .. (hide_player_model and "ON" or "OFF")
         local nohats_text = "Hide cosmetics: " .. (first_person_mode and cosmetic_settings.hide_hats and "ON" or "OFF")
+        local vanish_text = "Vanish mode: " .. (vanish_mode and "ON" or "OFF")
         local game_mode_text = "Game mode: " .. (IsCasualMatch() and "Casual" or "Non-Casual")
         local offset_info_y = math.floor(camera_y_position + camera_height + 5 + (#controls * 15))
 
         draw.Text(math.floor(camera_x_position + 5), offset_info_y, mode_text)
         draw.Text(math.floor(camera_x_position + 5), offset_info_y + 15, hide_text)
         draw.Text(math.floor(camera_x_position + 5), offset_info_y + 30, nohats_text)
-        draw.Text(math.floor(camera_x_position + 5), offset_info_y + 45, game_mode_text)
+        draw.Text(math.floor(camera_x_position + 5), offset_info_y + 45, vanish_text)
+        draw.Text(math.floor(camera_x_position + 5), offset_info_y + 60, game_mode_text)
     end
-end)
+end
 
-callbacks.Register("FireGameEvent", HandleKillfeedEvent)
-InitializeAllMaterials()
-
-callbacks.Register("Unload", function()
+local function OnUnload()
     CleanupMaterials()
     CleanupState()
-end)
+end
+
+pcall(callbacks.Unregister, "FireGameEvent", "Spectate_LocalDeath")
+pcall(callbacks.Unregister, "FireGameEvent", "point_capture_hook")
+pcall(callbacks.Unregister, "FireGameEvent", "Spectate_Killfeed")
+pcall(callbacks.Unregister, "DrawModel", "Spectate_DrawModel")
+pcall(callbacks.Unregister, "CreateMove", "Spectate_CreateMove")
+pcall(callbacks.Unregister, "PostRenderView", "Spectate_PostRenderView")
+pcall(callbacks.Unregister, "Draw", "Spectate_Draw")
+pcall(callbacks.Unregister, "PostPropUpdate", "Spectate_FullscreenCameraSync")
+pcall(callbacks.Unregister, "Unload", "Spectate_Unload")
+
+callbacks.Register("FireGameEvent", "Spectate_LocalDeath", OnLocalPlayerDeathEvent)
+callbacks.Register("FireGameEvent", "point_capture_hook", OnGameEvent)
+callbacks.Register("FireGameEvent", "Spectate_Killfeed", HandleKillfeedEvent)
+callbacks.Register("DrawModel", "Spectate_DrawModel", OnDrawModel)
+callbacks.Register("CreateMove", "Spectate_CreateMove", OnCreateMove)
+callbacks.Register("PostRenderView", "Spectate_PostRenderView", OnPostRenderView)
+callbacks.Register("Draw", "Spectate_Draw", OnDraw)
+callbacks.Register("PostPropUpdate", "Spectate_FullscreenCameraSync", SyncFullscreenCameraOrigin)
+callbacks.Register("Unload", "Spectate_Unload", OnUnload)
 
 -- Print script initialization message
 print("Spectate script loaded")

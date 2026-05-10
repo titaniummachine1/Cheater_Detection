@@ -30,6 +30,7 @@ local DuckSpeed = require("Cheater_Detection.detectors.duck_speed")
 local Bhop = require("Cheater_Detection.detectors.bhop")
 local WarpDT = require("Cheater_Detection.detectors.warp_dt")
 local FakeLag = require("Cheater_Detection.detectors.fake_lag")
+local CosmeticAbuse = require("Cheater_Detection.detectors.cosmetic_abuse")
 
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
@@ -233,11 +234,26 @@ local function OnCreateMove(cmd)
 			goto continue
 		end
 
+		if ply:IsDormant() then
+			local sid = Common.GetSteamID64(ply)
+			if sid then
+				local id = tostring(sid)
+				local state = PlayerCache.GetByID(id)
+				if state and not state.wasDormant then
+					HistoryManager.ClearPlayer(id)
+					state.wasDormant = true
+				end
+			end
+			goto continue
+		end
+
 		local isLocalPlayer = (ply == localPlayer)
 		local pState = PlayerCache.Get(ply)
 		if not pState then
 			goto continue
 		end
+
+		pState.wasDormant = false
 
 		-- In normal mode: exclude local player's friends and party members.
 		-- In debug mode: process everyone including self and friends.
@@ -271,6 +287,7 @@ local function OnCreateMove(cmd)
 		runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
 		runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
 		runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
+		runDetector("CosmeticAbuse", CosmeticAbuse.ProcessPlayer, pState, cmd)
 		enforceValveAutoDisconnect(pState)
 		if valveDisconnectTriggered then
 			return

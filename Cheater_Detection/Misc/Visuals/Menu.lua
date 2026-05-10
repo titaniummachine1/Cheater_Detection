@@ -150,6 +150,8 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
+		Advanced.Cosmetics = TimMenu.Checkbox("Cosmetic Exploit Detection", Advanced.Cosmetics == true)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 
 		TimMenu.BeginSector("Movement Detection")

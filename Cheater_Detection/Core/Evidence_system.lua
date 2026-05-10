@@ -303,7 +303,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 	end
 
 	-- Add weight
-	reason.Weight = reason.Weight + weight
+	reason.Weight = math.max(0, reason.Weight + weight)
 	evidence.Dirty = true
 
 	-- Recalculate total and check if player should be marked

@@ -19,7 +19,8 @@ local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local SilentAim = {}
 
-local MIN_SNAP_DEGREES = 8.0
+local MIN_SNAP_DEGREES = 4.0
+local SMALL_SNAP_DECAY = 0.5
 
 local SNIPER_BIG_SNAP_DEGREES = 90.0
 local SNIPER_HEAD_MAX_ERROR_DEGREES = 6.0
@@ -327,9 +328,13 @@ function SilentAim.ProcessPlayer(playerState)
 	if not playerData[id] then
 		playerData[id] = {
 			shotPending = nil,
+			lastSmallSnapDecay = 0,
 		}
 	end
 	local pdata = playerData[id]
+	if pdata.lastSmallSnapDecay == nil then
+		pdata.lastSmallSnapDecay = 0
+	end
 
 	local pending = pdata.shotPending
 	if not pending then
@@ -486,6 +491,11 @@ function SilentAim.ProcessPlayer(playerState)
 
 	-- Minimum snap threshold to avoid noise
 	if shotDev < MIN_SNAP_DEGREES then
+		local now = globals.RealTime()
+		if (now - (pdata.lastSmallSnapDecay or 0)) >= 1.0 and (playerState.score or 0) > 0 then
+			DetectorUtils.ApplyPlayerFlag(playerState, -SMALL_SNAP_DECAY, nil, "SilentAim decay")
+			pdata.lastSmallSnapDecay = now
+		end
 		if Common.IsDebugEnabled() then
 			print(string.format("[SilentAim] %s snap too small: %.1f° (min %.1f°)", id, shotDev, MIN_SNAP_DEGREES))
 		end
@@ -521,7 +531,9 @@ function SilentAim.ProcessPlayer(playerState)
 
 	-- 6. Score calculation
 	-- High alignment (low returnDev relative to shotDev) indicates silent aim snapping back.
-	local alignmentFactor = math.max(0.0, 1.0 - bestReturnDev / math.max(shotDev, 1.0))
+	local alignmentRatioFactor = math.max(0.0, 1.0 - bestReturnDev / math.max(shotDev, 1.0))
+	local alignmentAbsFactor = math.max(0.0, 1.0 - bestReturnDev / 2.0)
+	local alignmentFactor = alignmentRatioFactor * alignmentAbsFactor
 
 	local scoreGain = 0.0
 	local headError = nil
@@ -576,7 +588,7 @@ function SilentAim.ProcessPlayer(playerState)
 		scoreGain = (shotDev ^ 1.25) * (aimFactor ^ 2.0) * (returnFactor ^ 2.0) * (1.0 + bigSnapFactor) + baseline
 	else
 		-- Default: prior model
-		scoreGain = (shotDev ^ 1.5) * (alignmentFactor ^ 2) * 10.0 * sanityFactor
+		scoreGain = (shotDev ^ 1.5) * (alignmentFactor ^ 6.0) * 12.0 * sanityFactor
 	end
 
 	if Common.IsDebugEnabled() then
@@ -598,7 +610,8 @@ function SilentAim.ProcessPlayer(playerState)
 	end
 
 	if scoreGain > 1.0 then
-		local reason = string.format("SilentAim Anomaly (%.1f° snap, %.2f align)", shotDev, alignmentFactor)
+		local reason = string.format("SilentAim Anomaly (%.1f° snap, %.1f° return, %.3f align)", shotDev, bestReturnDev,
+			alignmentFactor)
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
 	end
 end

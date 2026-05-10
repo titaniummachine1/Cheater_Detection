@@ -37,7 +37,8 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 		playerState.flags = playerState.flags | hardFlag
 		playerState.score = 100
 	else
-		playerState.score = math.min(99, playerState.score + scoreIncrement)
+		local nextScore = (playerState.score or 0) + (scoreIncrement or 0)
+		playerState.score = math.max(0, math.min(99, nextScore))
 
 		if playerState.score >= Constants.Threshold.HIGH_RISK then
 			playerState.flags = playerState.flags | Constants.Flags.HIGH_RISK
@@ -47,9 +48,17 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 		end
 	end
 
+	local effectiveReason = reason
+	if not hardFlag and scoreIncrement and scoreIncrement < 0 then
+		local existing = Database.GetCheater(playerState.id)
+		if existing and type(existing.Reason) == "string" and existing.Reason ~= "" then
+			effectiveReason = existing.Reason
+		end
+	end
+
 	Database.UpsertCheater(playerState.id, {
 		name = playerState.wrap:GetName(),
-		reason = reason,
+		reason = effectiveReason,
 		flags = playerState.flags,
 		score = playerState.score,
 	})
