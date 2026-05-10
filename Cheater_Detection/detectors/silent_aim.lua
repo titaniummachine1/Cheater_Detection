@@ -13,6 +13,7 @@
 local Events = require("Cheater_Detection.Core.Events")
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
+local Constants = require("Cheater_Detection.Core.constants")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
@@ -20,7 +21,11 @@ local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local SilentAim = {}
 
 local MIN_SNAP_DEGREES = 4.0
-local SMALL_SNAP_DECAY = 0.5
+local SMALL_SNAP_DECAY = 0.0625
+
+local HARD_SNAP_CHEATER_DEGREES = 90.0
+local INSTA_KILL_RETURN_MAX_DEGREES = 5.0
+local INSTA_KILL_HEAD_MAX_ERROR_DEGREES = 6.0
 
 local SNIPER_BIG_SNAP_DEGREES = 90.0
 local SNIPER_HEAD_MAX_ERROR_DEGREES = 6.0
@@ -270,6 +275,7 @@ local function onDamageEvent(event)
 			crit = (event:GetInt("crit") or 0) ~= 0,
 			minicrit = (event:GetInt("minicrit") or 0) ~= 0,
 			damage = event:GetInt("damageamount"),
+			victimHealthAfter = event:GetInt("health"),
 			shooterEyePos = nil,
 			victimEyePos = nil,
 			victimOrigin = nil,
@@ -389,6 +395,7 @@ function SilentAim.ProcessPlayer(playerState)
 	local isSniperOrSpy = (attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
 
 	local sanityFactor = 1.0
+	local bestAimError = nil
 	if not isSniperOrSpy then
 		local victimID = pending.victimID
 		local victimWrap = PlayerCache.GetBySteamID(victimID)
@@ -402,13 +409,19 @@ function SilentAim.ProcessPlayer(playerState)
 		if eyePos then
 			if headPos then
 				local p, y = getAngleToPos(eyePos, headPos)
-				if angularDist(shotAngles.pitch, shotAngles.yaw, p, y) < SANITY_MAX_DEGREES then
+				local headErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
+				bestAimError = headErr
+				if headErr < SANITY_MAX_DEGREES then
 					aimedAtTarget = true
 				end
 			end
 			if not aimedAtTarget and bodyPos then
 				local p, y = getAngleToPos(eyePos, bodyPos)
-				if angularDist(shotAngles.pitch, shotAngles.yaw, p, y) < SANITY_MAX_DEGREES then
+				local bodyErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
+				if bestAimError == nil or bodyErr < bestAimError then
+					bestAimError = bodyErr
+				end
+				if bodyErr < SANITY_MAX_DEGREES then
 					aimedAtTarget = true
 				end
 			end
@@ -537,7 +550,22 @@ function SilentAim.ProcessPlayer(playerState)
 
 	local scoreGain = 0.0
 	local headError = nil
-	local bestAimError = nil
+	local nonSniperBestAimError = bestAimError
+
+	if shotDev >= HARD_SNAP_CHEATER_DEGREES and sanityFactor >= 1.0 then
+		local headOk = (nonSniperBestAimError ~= nil and nonSniperBestAimError <= INSTA_KILL_HEAD_MAX_ERROR_DEGREES)
+		if bestReturnDev <= INSTA_KILL_RETURN_MAX_DEGREES and headOk then
+			local reason = string.format("Insta kill (%.1f° snap, %.1f° return)", shotDev, bestReturnDev)
+			DetectorUtils.ApplyPlayerFlag(playerState, 100, Constants.Flags.CHEATER, reason)
+			return
+		end
+	end
+
+	if shotDev >= HARD_SNAP_CHEATER_DEGREES and sanityFactor >= 1.0 and bestReturnDev <= INSTA_KILL_RETURN_MAX_DEGREES then
+		local reason = string.format("Guaranteed aimbot (%.1f° snap, %.1f° return)", shotDev, bestReturnDev)
+		DetectorUtils.ApplyPlayerFlag(playerState, 100, Constants.Flags.CHEATER, reason)
+		return
+	end
 
 	if attackerClass == TF_CLASS_SNIPER then
 		local victimID = pending.victimID
