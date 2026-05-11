@@ -1,7 +1,7 @@
 local TickEntityCache = {}
 
 local lastTick = -1
-local playerByIndex = {}
+local playerIndexPresent = {}
 
 local function clearMap(map)
 	for k in pairs(map) do
@@ -16,7 +16,7 @@ local function refreshFromFindByClass()
 	end
 	lastTick = curTick
 
-	clearMap(playerByIndex)
+	clearMap(playerIndexPresent)
 
 	local players = entities.FindByClass("CTFPlayer") or {}
 	for i = 1, #players do
@@ -24,7 +24,7 @@ local function refreshFromFindByClass()
 		if ent and ent:IsValid() then
 			local idx = ent:GetIndex()
 			if idx then
-				playerByIndex[idx] = ent
+				playerIndexPresent[idx] = true
 			end
 		end
 	end
@@ -39,7 +39,7 @@ function TickEntityCache.RefreshTick(curTick, playerEntities)
 	end
 	lastTick = curTick
 
-	clearMap(playerByIndex)
+	clearMap(playerIndexPresent)
 
 	if type(playerEntities) ~= "table" then
 		return
@@ -50,7 +50,7 @@ function TickEntityCache.RefreshTick(curTick, playerEntities)
 		if ent and ent:IsValid() then
 			local idx = ent:GetIndex()
 			if idx then
-				playerByIndex[idx] = ent
+				playerIndexPresent[idx] = true
 			end
 		end
 	end
@@ -61,7 +61,10 @@ function TickEntityCache.GetPlayerByIndex(index)
 		return nil
 	end
 	refreshFromFindByClass()
-	local ent = playerByIndex[index]
+	if playerIndexPresent[index] ~= true then
+		return nil
+	end
+	local ent = entities.GetByIndex(index)
 	if not ent or not ent:IsValid() then
 		return nil
 	end
@@ -70,7 +73,7 @@ end
 
 function TickEntityCache.Invalidate()
 	lastTick = -1
-	clearMap(playerByIndex)
+	clearMap(playerIndexPresent)
 end
 
 return TickEntityCache
