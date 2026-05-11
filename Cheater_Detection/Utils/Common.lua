@@ -1,5 +1,11 @@
 ---@diagnostic disable: duplicate-set-field, undefined-field
 
+--[[ Common.lua usage
+     - Use Utils/MathUtils for all math/geometry primitives (angle wrap, angular distance, angle-to-pos, lerp, normalize, etc.)
+     - Use Common for non-math shared utilities (SteamID handling, menu/debug helpers, player validation, network stability gates, etc.)
+     - Avoid duplicating helpers in detectors/actions; import the utility module and alias hot functions to locals.
+]]
+
 --[[ Imports ]]
 --
 local Common = {
@@ -343,61 +349,7 @@ function Common.isJson(content)
 	return firstChar == "{" or firstChar == "["
 end
 
--- Cache frequently used engine functions for performance
-local vectorDivide = vector.Divide
-local vectorLength = vector.Length
-local vectorDistance = vector.Distance
-local abs = math.abs
-local sqrt = math.sqrt
-local deg = math.deg
-local atan = math.atan
 local WORLD2SCREEN = client.WorldToScreen
-local Vec3 = Vector3
-
--- Clamp a value between min and max
-function Common.clamp(value, minVal, maxVal)
-	return math.max(minVal, math.min(maxVal, value))
-end
-
--- 2D cross product for orientation testing
-function Common.cross2D(a, b, c)
-	return (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1])
-end
-
--- Rotate local vector by angles (transform to world space)
-function Common.vecRot(localVec, angles)
-	return (angles:Forward() * localVec.x) + (angles:Right() * localVec.y) + (angles:Up() * localVec.z)
-end
-
-function Common.wrapAngle(degrees)
-	return (degrees + 180) % 360 - 180
-end
-
-function Common.angularDist(p1, y1, p2, y2)
-	local dp = abs(Common.wrapAngle(p1 - p2))
-	local dy = abs(Common.wrapAngle(y1 - y2))
-	return sqrt(dp * dp + dy * dy)
-end
-
-function Common.angleToPos(sourcePos, targetPos)
-	local dx = targetPos.x - sourcePos.x
-	local dy = targetPos.y - sourcePos.y
-	local dz = targetPos.z - sourcePos.z
-	local dist = sqrt(dx * dx + dy * dy)
-	local pitch = -deg(atan(dz, dist))
-	local yaw = deg(atan(dy, dx))
-	return pitch, yaw
-end
-
-function Common.angleToXYZ(sourcePos, tx, ty, tz)
-	local dx = tx - sourcePos.x
-	local dy = ty - sourcePos.y
-	local dz = tz - sourcePos.z
-	local dist = sqrt(dx * dx + dy * dy)
-	local pitch = -deg(atan(dz, dist))
-	local yaw = deg(atan(dy, dx))
-	return pitch, yaw
-end
 
 function Common.worldToScreenXY(pos)
 	local screenPos = WORLD2SCREEN(pos)
@@ -407,89 +359,6 @@ function Common.worldToScreenXY(pos)
 	return nil, nil
 end
 
--- Linear interpolation between angles (handles wraparound)
-function Common.lerpAngle(a, b, t)
-	local diff = (b - a + 180) % 360 - 180
-	return a + diff * t
-end
-
--- Linear interpolation between vectors
-function Common.lerpVector(startVector, endVector, interpolationFactor)
-	return startVector + (endVector - startVector) * interpolationFactor
-end
-
--- Convert velocity vector to angles
-function Common.velocityToAngles(vel)
-	local speed = vel:Length()
-	if speed < 0.001 then
-		return EulerAngles(0, 0, 0)
-	end
-
-	-- Fixed pitch calculation for proper velocity-to-angle conversion
-	local pitch = -math.deg(math.asin(vel.z / speed))
-	local yaw = math.deg(math.atan(vel.y, vel.x))
-
-	return EulerAngles(pitch, yaw, 0)
-end
-
--- Alternative velocity to angles (more robust for edge cases)
-function Common.velocityToAnglesRobust(vel)
-	local speed = vel:Length()
-	if speed < 0.001 then
-		return EulerAngles(0, 0, 0)
-	end
-
-	local pitch = math.deg(math.atan(vel.z, math.sqrt(vel.x * vel.x + vel.y * vel.y)))
-	local yaw = math.deg(math.atan(vel.y, vel.x))
-
-	return EulerAngles(pitch, yaw, 0)
-end
-
--- Check if plane normal faces downward (for ground detection)
-function Common.surfaceFacesDown(plane, threshold)
-	return plane.z < -threshold
-end
-
--- Vector normalization with safety check
-function Common.normalize(vec)
-	local len = vectorLength(vec)
-	if type(len) ~= "number" or len < 0.0001 then
-		return Vec3(0, 0, 0)
-	end
-	return vectorDivide(vec, len)
-end
-
--- Dot product wrapper
-function Common.dot(a, b)
-	return a:Dot(b)
-end
-
--- Cross product wrapper
-function Common.cross(a, b)
-	return a:Cross(b)
-end
-
--- Get 2D length of vector
-function Common.length2D(vec)
-	return vec:Length2D()
-end
-
--- Calculate 2D distance between vectors
-function Common.distance2D(a, b)
-	return (a - b):Length2D()
-end
-
--- Calculate 3D distance between vectors
-function Common.distance3D(a, b)
-	return vectorDistance(a, b)
-end
-
--- Get angles from vector direction
-function Common.anglesFromVector(vec)
-	return vec:Angles()
-end
-
--- Check if trace result hit something
 function Common.TraceHit(result)
 	return result.fraction ~= 1
 end

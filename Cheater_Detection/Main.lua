@@ -36,6 +36,7 @@ local CosmeticAbuse = require("Cheater_Detection.detectors.cosmetic_abuse")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
+local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 -- Actions
 local NotificationService = require("Cheater_Detection.services.notification_service")
@@ -43,7 +44,6 @@ local Visuals = require("Cheater_Detection.actions.visuals")
 local BridgePrompt = require("Cheater_Detection.services.bridge_prompt")
 
 local hasSearchedGroup = false
-local detectorErrorSeen = {}
 local valveDisconnectTriggered = false
 local wasInServer = false
 local cleanedFriendIDs = {}
@@ -143,29 +143,13 @@ local function isDebugEnabled()
 	return Common.IsDebugEnabled()
 end
 
-local function runDetector(detectorName, detectorFn, playerState, ...)
-	local ok, err = pcall(detectorFn, playerState, ...)
-	if not ok then
-		if not detectorErrorSeen[detectorName] then
-			print(string.format("[CD][DetectorError] %s failed: %s", detectorName, tostring(err)))
-			detectorErrorSeen[detectorName] = true
-		end
-		return false
-	end
-
-	if detectorErrorSeen[detectorName] then
-		detectorErrorSeen[detectorName] = nil
-	end
-	return true
-end
-
 -- [[ Initialization ]]
 local function Init()
 	Events.Reset()
 	JoinNotifications.Init()
 	NotificationService.Init()
 	BridgePrompt.Init()
-	pcall(engine.PlaySound, "hl1/fvox/activated.wav")
+	engine.PlaySound("hl1/fvox/activated.wav")
 
 	-- Filter out engine warnings for out-of-range eye angles (Anti-Aim noise)
 	client.Command('con_filter_enable 1; con_filter_text_out "Out-of-range value"', true)
@@ -187,7 +171,9 @@ end
 
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
+	TickProfiler.BeginSection("CreateMove_Total")
 	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
+		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
 
@@ -203,21 +189,56 @@ local function OnCreateMove(cmd)
 			hasSearchedGroup = false
 			valveDisconnectTriggered = false
 		end
+		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
 	wasInServer = true
 
 	local localPlayer = entities.GetLocalPlayer()
 	if not localPlayer or not localPlayer:IsValid() then
+		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
 
 	if valveDisconnectTriggered then
+		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
 
-	-- Advance history ring buffer once per tick
-	HistoryManager.NewTick()
+	local menu = G.Menu
+	local mainMenu = menu and menu.Main or nil
+	local adv = menu and menu.Advanced or nil
+
+	local enableValveCheck = mainMenu and mainMenu.ValveCheck == true
+	local enableSilent = adv and adv.SilentAimbot == true
+	local enableAimLock = enableSilent and (adv.AimLock ~= false)
+	local enableAntiAim = adv and adv.AntiAim == true
+	local enableDuckSpeed = adv and adv.DuckSpeed == true
+	local enableBhop = adv and adv.Bhop == true
+	local enableWarp = adv and adv.Warp == true
+	local enableChoke = adv and adv.Choke == true
+	local enableCosmetics = adv and adv.Cosmetics == true
+
+	local tagsEnabled = mainMenu == nil or mainMenu.Cheater_Tags ~= false
+	local anyDetectorsEnabled = enableValveCheck
+		or enableSilent
+		or enableAntiAim
+		or enableDuckSpeed
+		or enableBhop
+		or enableWarp
+		or enableChoke
+		or enableCosmetics
+	if not anyDetectorsEnabled and not tagsEnabled then
+		TickProfiler.EndSection("CreateMove_Total")
+		return
+	end
+
+	local historyEnabled = enableSilent or enableWarp or enableChoke
+	if historyEnabled then
+		TickProfiler.BeginSection("History_NewTick")
+		HistoryManager.NewTick()
+		TickProfiler.EndSection("History_NewTick")
+	end
 
 	if not hasSearchedGroup then
 		SteamLookup.RefreshValveGroup()
@@ -226,9 +247,12 @@ local function OnCreateMove(cmd)
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 
 	-- Scan currently encountered players
+	TickProfiler.BeginSection("PlayerScan_Find")
 	local players = entities.FindByClass("CTFPlayer")
+	TickProfiler.EndSection("PlayerScan_Find")
 	local isDebug = isDebugEnabled()
 
+	TickProfiler.BeginSection("PlayerScan_Loop")
 	for i = 1, #players do
 		local ply = players[i]
 		-- Sanity check: validate entity before using
@@ -278,29 +302,59 @@ local function OnCreateMove(cmd)
 			assert(pState.id, "OnCreateMove: pState.id missing")
 		end
 
-		-- Update history snapshot (entity valid at entry, safe for whole tick)
-		HistoryManager.Push(pState.wrap)
+		if historyEnabled then
+			TickProfiler.BeginSection("History_Push")
+			HistoryManager.Push(pState.wrap)
+			TickProfiler.EndSection("History_Push")
+		end
 
-		-- Layer 1-3 Detections (entity validity checked once at entry)
-		runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState, cmd)
-		runDetector("SilentAim", SilentAim.ProcessPlayer, pState, cmd)
-		runDetector("AimLock", AimLock.ProcessPlayer, pState, cmd)
-		runDetector("AntiAim", AntiAim.ProcessPlayer, pState, cmd)
-		runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState, cmd)
-		runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
-		runDetector("WarpDT", WarpDT.ProcessPlayer, pState, cmd)
-		runDetector("FakeLag", FakeLag.ProcessPlayer, pState, cmd)
-		runDetector("CosmeticAbuse", CosmeticAbuse.ProcessPlayer, pState, cmd)
-		enforceValveAutoDisconnect(pState)
+		TickProfiler.BeginSection("Detectors")
+		if enableValveCheck then
+			ValveCheck.ProcessPlayer(pState, cmd)
+		end
+		if enableSilent then
+			SilentAim.ProcessPlayer(pState, cmd)
+			if enableAimLock then
+				AimLock.ProcessPlayer(pState, cmd)
+			end
+		end
+		if enableAntiAim then
+			AntiAim.ProcessPlayer(pState, cmd)
+		end
+		if enableDuckSpeed then
+			DuckSpeed.ProcessPlayer(pState, cmd)
+		end
+		if enableBhop then
+			Bhop.ProcessPlayer(pState, cmd)
+		end
+		if enableWarp then
+			WarpDT.ProcessPlayer(pState, cmd)
+		end
+		if enableChoke then
+			FakeLag.ProcessPlayer(pState, cmd)
+		end
+		if enableCosmetics then
+			CosmeticAbuse.ProcessPlayer(pState, cmd)
+		end
+		TickProfiler.EndSection("Detectors")
+
+		if enableValveCheck then
+			enforceValveAutoDisconnect(pState)
+		end
 		if valveDisconnectTriggered then
+			TickProfiler.EndSection("PlayerScan_Loop")
+			TickProfiler.EndSection("CreateMove_Total")
 			return
 		end
 
 		::continue::
 	end
+	TickProfiler.EndSection("PlayerScan_Loop")
+	TickProfiler.EndSection("CreateMove_Total")
 end
 
 local function OnDraw()
+	TickProfiler.SetEnabled(G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true)
 	Scheduler.Tick()
 	Visuals.DrawTags()
 	BridgePrompt.Draw()
@@ -351,7 +405,7 @@ end
 
 local function OnUnload()
 	print("[CD] Unloading system...")
-	pcall(engine.PlaySound, "hl1/fvox/deactivated.wav")
+	engine.PlaySound("hl1/fvox/deactivated.wav")
 	-- Save config synchronously — fast io.open write, acceptable stutter on unload.
 	if G.Menu then
 		Config.CreateCFG(G.Menu)

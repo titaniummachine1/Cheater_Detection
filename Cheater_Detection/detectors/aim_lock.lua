@@ -1,5 +1,6 @@
 local Events = require("Cheater_Detection.Core.Events")
 local Common = require("Cheater_Detection.Utils.Common")
+local MathUtils = require("Cheater_Detection.Utils.MathUtils")
 local G = require("Cheater_Detection.Utils.Globals")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
@@ -26,10 +27,10 @@ local AIMLOCK_STATIONARY_COOLDOWN_TICKS = 30
 local AIMLOCK_EXP_K = 4.0
 local AIMLOCK_MAX_GAIN = 6.0
 
-local wrapAngle = Common.wrapAngle
-local angularDist = Common.angularDist
-local getAngleToPos = Common.angleToPos
-local getAngleToXYZ = Common.angleToXYZ
+local wrapAngle = MathUtils.wrapAngle
+local angularDist = MathUtils.angularDist
+local getAngleToPos = MathUtils.angleToPos
+local getAngleToXYZ = MathUtils.angleToXYZ
 
 local function aimlockGainFromConsecutive(consecutiveTicks, errDegrees)
 	if type(consecutiveTicks) ~= "number" or type(errDegrees) ~= "number" then
@@ -93,6 +94,12 @@ local function ensurePlayerData(id)
 end
 
 local function onDamageEvent(event)
+	local menu = G.Menu
+	local adv = menu and menu.Advanced or nil
+	if not adv or adv.SilentAimbot ~= true then
+		return
+	end
+
 	local attackerUID = event:GetInt("attacker")
 	local victimUID = event:GetInt("userid")
 	if not attackerUID or not victimUID or attackerUID == victimUID then

@@ -12,6 +12,7 @@
 
 local Events = require("Cheater_Detection.Core.Events")
 local Common = require("Cheater_Detection.Utils.Common")
+local MathUtils = require("Cheater_Detection.Utils.MathUtils")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
@@ -100,8 +101,8 @@ local function canPrintRecorded(now)
 	return true
 end
 
-local wrapAngle = Common.wrapAngle
-local angularDist = Common.angularDist
+local wrapAngle = MathUtils.wrapAngle
+local angularDist = MathUtils.angularDist
 
 local function snapWeight(shotDev)
 	if type(shotDev) ~= "number" then
@@ -157,8 +158,8 @@ local function snapWeight(shotDev)
 	return stage2Out + (1.0 - stage2Out) * expScaled
 end
 
-local getAngleToPos = Common.angleToPos
-local getAngleToXYZ = Common.angleToXYZ
+local getAngleToPos = MathUtils.angleToPos
+local getAngleToXYZ = MathUtils.angleToXYZ
 
 local function bestAimDistToTarget(eyePos, headPos, bodyPos, pitch, yaw)
 	if not eyePos then
@@ -858,6 +859,12 @@ end
 local function onDamageEvent(event)
 	local eventName = event:GetName()
 	if eventName ~= "player_hurt" then
+		return
+	end
+
+	local menu = G.Menu
+	local adv = menu and menu.Advanced or nil
+	if not adv or adv.SilentAimbot ~= true then
 		return
 	end
 
