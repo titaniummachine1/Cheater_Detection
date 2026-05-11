@@ -57,11 +57,34 @@ end
 
 Common.PR = PlayerResource
 
-local cachedSteamIDs = {}
-local lastTick = -1
+local cachedSteamID64Value = {}
+local cachedSteamID64Tick = {}
 local localSteamFallbackWarnTick = 0
 
 local STEAM64_BASE = 76561197960265728
+
+local partyCacheTick = -1
+local partyMemberSet = {}
+
+local function refreshPartyMemberSet()
+	local currentTick = globals.TickCount()
+	if partyCacheTick == currentTick then
+		return
+	end
+	partyCacheTick = currentTick
+
+	for k in pairs(partyMemberSet) do
+		partyMemberSet[k] = nil
+	end
+
+	local partyMembers = party.GetMembers()
+	if not partyMembers then
+		return
+	end
+	for i = 1, #partyMembers do
+		partyMemberSet[partyMembers[i]] = true
+	end
+end
 
 local function convertSteamStringTo64(rawSteamID)
 	if not rawSteamID then
@@ -137,21 +160,17 @@ function Common.IsFriend(entity, includeParty)
 	end
 
 	if includeParty then
-		local partyMembers = party.GetMembers()
-		if partyMembers then
-			for _, member in ipairs(partyMembers) do
-				if member == playerInfo.SteamID then
-					return true
-				end
-			end
-		end
+		refreshPartyMemberSet()
+		return partyMemberSet[playerInfo.SteamID] == true
 	end
 
 	return false
 end
 
 function Common.GetSteamID(Player)
-	assert(Player, "Player is nil")
+	if not Player then
+		return "[U:1:0]"
+	end
 	local playerIndex = Player:GetIndex()
 	local playerInfo = client.GetPlayerInfo(playerIndex)
 	return playerInfo and playerInfo.SteamID or "[U:1:0]"
@@ -168,40 +187,31 @@ function Common.GetSteamID64(Player)
 		return nil
 	end
 
-	-- Reset cache on new tick
-	if lastTick ~= currentTick then
-		for k in pairs(cachedSteamIDs) do
-			cachedSteamIDs[k] = nil
-		end
-		lastTick = currentTick
+	if cachedSteamID64Tick[playerIndex] == currentTick then
+		return cachedSteamID64Value[playerIndex]
 	end
 
-	-- Retrieve cached result or calculate it
-	local result = cachedSteamIDs[playerIndex]
-	if not result then
-		local playerInfo = client.GetPlayerInfo(playerIndex)
-
-		if playerInfo then
-			local steamID = playerInfo.SteamID
-			if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
-				result = "BOT_" .. tostring(playerInfo.UserID or playerIndex)
-			elseif steamID then
-				result = convertSteamStringTo64(steamID)
-			end
-		end
-
-		-- Loopback/local edge-case: local player may not have resolvable SteamID info yet.
-		-- Use deterministic local fallback so cache/state logic still runs.
-		if not result and playerIndex == client.GetLocalPlayerIndex() then
-			result = "LOCAL_" .. tostring(playerIndex)
-			if (currentTick - localSteamFallbackWarnTick) >= 300 then
-				localSteamFallbackWarnTick = currentTick
-				print(string.format("[Common][WARN] Local SteamID64 unavailable, using fallback id=%s", result))
-			end
+	local result = nil
+	local playerInfo = client.GetPlayerInfo(playerIndex)
+	if playerInfo then
+		local steamID = playerInfo.SteamID
+		if playerInfo.IsBot or playerInfo.IsHLTV or steamID == "[U:1:0]" then
+			result = "BOT_" .. tostring(playerInfo.UserID or playerIndex)
+		elseif steamID then
+			result = convertSteamStringTo64(steamID)
 		end
 	end
 
-	cachedSteamIDs[playerIndex] = result
+	if not result and playerIndex == client.GetLocalPlayerIndex() then
+		result = "LOCAL_" .. tostring(playerIndex)
+		if (currentTick - localSteamFallbackWarnTick) >= 300 then
+			localSteamFallbackWarnTick = currentTick
+			print(string.format("[Common][WARN] Local SteamID64 unavailable, using fallback id=%s", result))
+		end
+	end
+
+	cachedSteamID64Tick[playerIndex] = currentTick
+	cachedSteamID64Value[playerIndex] = result
 	return result
 end
 
@@ -249,7 +259,8 @@ function Common.IsCheater(playerInfo)
 			Constants.Flags.COMM_BANNED
 		inDatabase = (flags & cheaterMask) ~= 0
 	end
-	local priorityCheater = playerlist.GetPriority(steamId) == 10
+	local PRIORITY_CHEATER = 10
+	local priorityCheater = playerlist.GetPriority(steamId) == PRIORITY_CHEATER
 
 	return inDatabase or priorityCheater
 end
@@ -259,7 +270,9 @@ end
 ---@param checkDormant boolean?
 ---@param skipEntity any? Optional entity to skip (e.g., the local player)
 function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
-	assert(entity, "Common.IsValidPlayer: entity missing")
+	if not entity then
+		return false
+	end
 
 	-- Simple validation checks
 	if not entity:IsValid() then
@@ -288,7 +301,7 @@ function Common.IsValidPlayer(entity, checkFriend, checkDormant, skipEntity)
 
 	-- Skip friends (default behavior unless debug enabled or explicitly disabled)
 	local isFriend = Common.IsFriend(entity)
-	if not G.Menu.Advanced.debug and checkFriend ~= false and isFriend then
+	if not Common.IsDebugEnabled() and checkFriend ~= false and isFriend then
 		return false
 	end
 
@@ -397,7 +410,11 @@ end
 
 -- Vector normalization with safety check
 function Common.normalize(vec)
-	return vectorDivide(vec, vectorLength(vec))
+	local len = vectorLength(vec)
+	if type(len) ~= "number" or len < 0.0001 then
+		return Vector3(0, 0, 0)
+	end
+	return vectorDivide(vec, len)
 end
 
 -- Dot product wrapper
@@ -510,10 +527,17 @@ end
 --   • Any outgoing choke > 0 → our end is queuing packets → timing is off
 function Common.IsConnectionStableForDetection()
 	local tickInterval = globals.TickInterval()
+	if type(tickInterval) ~= "number" or tickInterval <= 0 then
+		return false
+	end
 	local tickRate = 1.0 / tickInterval
 
 	-- FPS gate: must be able to process at tick frequency
-	local fps = 1.0 / globals.FrameTime()
+	local ft = globals.FrameTime()
+	if type(ft) ~= "number" or ft <= 0 then
+		return false
+	end
+	local fps = 1.0 / ft
 	if fps < tickRate then
 		return false
 	end
@@ -526,7 +550,8 @@ function Common.IsConnectionStableForDetection()
 	-- Latency threshold: ~180 ms (≈12 ticks at 66 Hz).
 	-- Latency is measured in seconds; compare directly against the equivalent time value.
 	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
-	if latency > math.floor(12.0 / 66.0 / tickInterval + 0.5) * tickInterval then
+	local maxLatency = tickInterval * 12.0
+	if latency > maxLatency then
 		return false
 	end
 
@@ -544,20 +569,5 @@ function Common.IsConnectionStableForDetection()
 
 	return true
 end
-
---[[ Registrations and final actions ]]
---
-local function OnUnload()
-	pcall(engine.PlaySound, "hl1/fvox/deactivated.wav")
-end
-
--- Unregister previous callbacks
-callbacks.Unregister("Unload", "CD_Unload") -- unregister the "Unload" callback
-
--- Register callbacks
-callbacks.Register("Unload", "CD_Unload", OnUnload) -- Register the "Unload" callback
-
--- Play sound when loaded
-engine.PlaySound("hl1/fvox/activated.wav")
 
 return Common

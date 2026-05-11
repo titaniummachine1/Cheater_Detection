@@ -25,6 +25,7 @@ local Fetcher = require("Cheater_Detection.Database.Fetcher")
 -- Detectors
 local ValveCheck = require("Cheater_Detection.detectors.valve_check")
 local SilentAim = require("Cheater_Detection.detectors.silent_aim")
+local AimLock = require("Cheater_Detection.detectors.aim_lock")
 local AntiAim = require("Cheater_Detection.detectors.antiaim")
 local DuckSpeed = require("Cheater_Detection.detectors.duck_speed")
 local Bhop = require("Cheater_Detection.detectors.bhop")
@@ -164,6 +165,7 @@ local function Init()
 	JoinNotifications.Init()
 	NotificationService.Init()
 	BridgePrompt.Init()
+	pcall(engine.PlaySound, "hl1/fvox/activated.wav")
 
 	-- Filter out engine warnings for out-of-range eye angles (Anti-Aim noise)
 	client.Command('con_filter_enable 1; con_filter_text_out "Out-of-range value"', true)
@@ -282,6 +284,7 @@ local function OnCreateMove(cmd)
 		-- Layer 1-3 Detections (entity validity checked once at entry)
 		runDetector("ValveCheck", ValveCheck.ProcessPlayer, pState, cmd)
 		runDetector("SilentAim", SilentAim.ProcessPlayer, pState, cmd)
+		runDetector("AimLock", AimLock.ProcessPlayer, pState, cmd)
 		runDetector("AntiAim", AntiAim.ProcessPlayer, pState, cmd)
 		runDetector("DuckSpeed", DuckSpeed.ProcessPlayer, pState, cmd)
 		runDetector("Bhop", Bhop.ProcessPlayer, pState, cmd)
@@ -348,6 +351,7 @@ end
 
 local function OnUnload()
 	print("[CD] Unloading system...")
+	pcall(engine.PlaySound, "hl1/fvox/deactivated.wav")
 	-- Save config synchronously — fast io.open write, acceptable stutter on unload.
 	if G.Menu then
 		Config.CreateCFG(G.Menu)

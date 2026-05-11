@@ -17,10 +17,11 @@ local Constants = require("Cheater_Detection.Core.constants")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
 
 local SilentAim = {}
 
-local MIN_SNAP_DEGREES = 4.0
+local MIN_SNAP_DEGREES = 2.0
 local SMALL_SNAP_DECAY = 0.0625
 
 local HARD_SNAP_CHEATER_DEGREES = 90.0
@@ -63,18 +64,6 @@ local LILAC_GAIN_RETURN = 1.0
 local playerData = {}
 local NON_SNIPER_COOLDOWN_TICKS = 6
 local lastNonSniperTickByUserID = {}
-local AIMLOCK_TARGET_TTL_TICKS = 66
-local AIMLOCK_SAMPLE_TICKS = 6
-local AIMLOCK_MIN_DIST_SQR = 300 * 300
-local AIMLOCK_MAX_ERROR_DEGREES = 0.8
-local AIMLOCK_TIGHT_ERROR_DEGREES = 0.15
-local AIMLOCK_IDEAL_MOVE_MIN_DEGREES = 0.35
-local AIMLOCK_VIEW_MOVE_MIN_DEGREES = 0.25
-local AIMLOCK_TRACK_DIFF_MAX_DEGREES = 1.0
-local AIMLOCK_STATIONARY_GAIN = 0.02
-local AIMLOCK_STATIONARY_COOLDOWN_TICKS = 30
-local AIMLOCK_EXP_K = 4.0
-local AIMLOCK_MAX_GAIN = 6.0
 
 local debugFilterWindowStart = 0
 local debugFilterWindowCount = 0
@@ -213,47 +202,6 @@ local function bestAimDistToTarget(eyePos, headPos, bodyPos, pitch, yaw)
 		end
 	end
 	return best
-end
-
-local function aimlockGainFromConsecutive(consecutiveTicks, errDegrees)
-	if type(consecutiveTicks) ~= "number" or type(errDegrees) ~= "number" then
-		return 0.0
-	end
-	if consecutiveTicks <= 0 then
-		return 0.0
-	end
-	if errDegrees < 0.0 then
-		errDegrees = 0.0
-	end
-	if errDegrees >= AIMLOCK_MAX_ERROR_DEGREES then
-		return 0.0
-	end
-
-	local denom = math.log(1.0 + AIMLOCK_MAX_ERROR_DEGREES)
-	if denom <= 0.0 then
-		return 0.0
-	end
-	local tErr = math.log(1.0 + errDegrees) / denom
-	if tErr < 0.0 then
-		tErr = 0.0
-	end
-	if tErr > 1.0 then
-		tErr = 1.0
-	end
-	local errWeight = 1.0 - tErr
-	errWeight = errWeight * errWeight
-
-	local t = consecutiveTicks / (AIMLOCK_TARGET_TTL_TICKS * 0.5)
-	if t < 0.0 then
-		t = 0.0
-	end
-	if t > 1.0 then
-		t = 1.0
-	end
-
-	local k = math.max(0.0001, AIMLOCK_EXP_K)
-	local expScaled = (math.exp(k * t) - 1.0) / (math.exp(k) - 1.0)
-	return AIMLOCK_MAX_GAIN * errWeight * expScaled
 end
 
 local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePos, headPos, bodyPos)
@@ -961,10 +909,6 @@ local function onDamageEvent(event)
 	local curTick = globals.TickCount()
 	local attackerClass = attackerPly:GetPropInt("m_iClass")
 	local weaponID = event:GetInt("weaponid")
-	local isHitscan = false
-	local projType = nil
-	local weaponClass = nil
-	local weaponSpread = nil
 	local weaponName = event.GetString and event:GetString("weapon") or nil
 
 	if attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
@@ -975,101 +919,7 @@ local function onDamageEvent(event)
 		lastNonSniperTickByUserID[attackerUID] = curTick
 	end
 
-	-- Use weapon APIs if we can get the active weapon
-	local activeWeapon = attackerPly:GetPropEntity("m_hActiveWeapon")
-	if activeWeapon and activeWeapon:IsValid() then
-		weaponClass = activeWeapon.GetClass and activeWeapon:GetClass() or nil
-		if activeWeapon.GetWeaponSpread then
-			weaponSpread = activeWeapon:GetWeaponSpread()
-		end
-
-		local token = tostring(weaponClass or weaponName or ""):lower()
-		local classNonHitscan = token:find("rocketlauncher")
-			or token:find("grenadelauncher")
-			or token:find("pipebomb")
-			or token:find("compoundbow")
-			or token:find("flamethrower")
-			or token:find("particlecannon")
-			or token:find("flare")
-			or token:find("crossbow")
-			or token:find("syringe")
-			or token:find("cannon")
-			or token:find("sticky")
-			or token:find("knife")
-			or token:find("bat")
-			or token:find("bottle")
-			or token:find("shovel")
-			or token:find("wrench")
-			or token:find("fists")
-			or token:find("bonesaw")
-			or token:find("sword")
-			or token:find("club")
-			or token:find("whip")
-			or token:find("robotarm")
-			or token:find("breakablesign")
-			or token:find("breakable")
-			or token:find("sign")
-			or token:find("rocket")
-			or token:find("grenade")
-			or token:find("pipe")
-			or token:find("arrow")
-			or token:find("bow")
-			or token:find("flame")
-
-		if classNonHitscan then
-			isHitscan = false
-		elseif weaponSpread ~= nil then
-			isHitscan = true
-		else
-			local getProjType = activeWeapon.GetWeaponProjectileType
-			if type(getProjType) == "function" then
-				projType = activeWeapon:GetWeaponProjectileType()
-				if projType ~= nil and projType ~= 0 and projType ~= TF_PROJECTILE_BULLET then
-					isHitscan = false
-				else
-					isHitscan = true
-				end
-			else
-				local nameToken = tostring(weaponName or weaponClass or ""):lower()
-				local isProjectileName = nameToken:find("tf_projectile")
-					or nameToken:find("rocket")
-					or nameToken:find("pipe")
-					or nameToken:find("grenade")
-					or nameToken:find("arrow")
-					or nameToken:find("bow")
-					or nameToken:find("crossbow")
-					or nameToken:find("flare")
-					or nameToken:find("flame")
-					or nameToken:find("robotarm")
-					or nameToken:find("breakable")
-					or nameToken:find("sign")
-					or nameToken:find("knife")
-					or nameToken:find("bat")
-					or nameToken:find("wrench")
-				local isHitscanName = nameToken:find("sniper")
-					or nameToken:find("scatter")
-					or nameToken:find("shotgun")
-					or nameToken:find("pistol")
-					or nameToken:find("revolver")
-					or nameToken:find("smg")
-					or nameToken:find("minigun")
-				if isProjectileName then
-					isHitscan = false
-				elseif isHitscanName then
-					isHitscan = true
-				else
-					isHitscan = true
-				end
-			end
-		end
-	end
-
-	-- Extra check: filter out common non-direct damage sources using weaponID
-	-- 54: SENTRY_BULLET, 55: SENTRY_ROCKET, 68: DISPENSER_GUN etc.
-	if weaponID == 54 or weaponID == 55 or weaponID == 68 then
-		isHitscan = false
-	end
-
+	local isHitscan, weaponClass, weaponSpread, projType = HitscanInfo.Classify(attackerPly, weaponName, weaponID)
 	if not isHitscan then
 		return
 	end
@@ -1098,15 +948,7 @@ local function onDamageEvent(event)
 	if not pdata then
 		pdata = {
 			shotPending = nil,
-			lastVictimID = nil,
-			lastVictimTick = 0,
-			aimLockConsecTicks = 0,
-			aimLockLastApplyTick = 0,
-			aimLockPrevIdealPitch = nil,
-			aimLockPrevIdealYaw = nil,
-			aimLockPrevViewPitch = nil,
-			aimLockPrevViewYaw = nil,
-			aimLockLastStationaryTick = 0,
+			lastSmallSnapDecay = 0,
 		}
 		playerData[attackerID] = pdata
 	end
@@ -1146,9 +988,6 @@ local function onDamageEvent(event)
 			victimBodyPos = nil,
 			victimOrigin = nil,
 		}
-
-		pdata.lastVictimID = victimID
-		pdata.lastVictimTick = curTick
 
 		local origin = attackerPly:GetAbsOrigin()
 		local viewOffset = attackerPly:GetPropVector("localdata", "m_vecViewOffset[0]")
@@ -1202,8 +1041,6 @@ function SilentAim.ProcessPlayer(playerState)
 	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
 		return
 	end
-	local adv = G and G.Menu and G.Menu.Advanced or nil
-	local aimLockEnabled = adv == nil or adv.AimLock ~= false
 
 	local id = playerState.id
 	local ply = playerState.wrap:GetRawEntity()
@@ -1214,15 +1051,6 @@ function SilentAim.ProcessPlayer(playerState)
 	if not playerData[id] then
 		playerData[id] = {
 			shotPending = nil,
-			lastVictimID = nil,
-			lastVictimTick = 0,
-			aimLockConsecTicks = 0,
-			aimLockLastApplyTick = 0,
-			aimLockPrevIdealPitch = nil,
-			aimLockPrevIdealYaw = nil,
-			aimLockPrevViewPitch = nil,
-			aimLockPrevViewYaw = nil,
-			aimLockLastStationaryTick = 0,
 			lastSmallSnapDecay = 0,
 		}
 	end
@@ -1232,117 +1060,6 @@ function SilentAim.ProcessPlayer(playerState)
 	end
 
 	local curTick = globals.TickCount()
-
-	if aimLockEnabled then
-		local targetID = pdata.lastVictimID
-		local targetTick = pdata.lastVictimTick or 0
-		if targetID and (curTick - targetTick) <= AIMLOCK_TARGET_TTL_TICKS then
-			local attackerData = playerState.current
-			local attackerAngles = attackerData and attackerData[HistoryManager.Fields.Angles] or nil
-			local attackerEyePos = attackerData and attackerData[HistoryManager.Fields.EyePosition] or nil
-			if attackerAngles and attackerEyePos then
-				local victimState = PlayerCache.GetByID(targetID)
-				local victimData = victimState and victimState.current or nil
-				local victimEyePos = victimData and victimData[HistoryManager.Fields.EyePosition] or nil
-				local victimEnt = victimState and victimState.wrap and victimState.wrap:GetRawEntity() or nil
-				if victimEyePos and victimEnt and victimEnt:IsValid() then
-					local myTeam = ply:GetTeamNumber()
-					local vTeam = victimEnt:GetTeamNumber()
-					if myTeam and vTeam and myTeam ~= 0 and vTeam ~= 0 and myTeam ~= vTeam then
-						local dx = victimEyePos.x - attackerEyePos.x
-						local dy = victimEyePos.y - attackerEyePos.y
-						local dz = victimEyePos.z - attackerEyePos.z
-						local distSqr = dx * dx + dy * dy + dz * dz
-						if distSqr >= AIMLOCK_MIN_DIST_SQR then
-							local p0 = attackerAngles.pitch
-							local y0 = wrapAngle(attackerAngles.yaw)
-							local hp, hy = getAngleToPos(attackerEyePos, victimEyePos)
-							local headErr = angularDist(p0, y0, hp, hy)
-							local bp, by = getAngleToXYZ(attackerEyePos, victimEyePos.x, victimEyePos.y,
-								victimEyePos.z - 40.0)
-							local bodyErr = angularDist(p0, y0, bp, by)
-							local idealPitch = hp
-							local idealYaw = hy
-							local err = headErr
-							if bodyErr < err then
-								err = bodyErr
-								idealPitch = bp
-								idealYaw = by
-							end
-
-							local prevIdealPitch = pdata.aimLockPrevIdealPitch
-							local prevIdealYaw = pdata.aimLockPrevIdealYaw
-							local prevViewPitch = pdata.aimLockPrevViewPitch
-							local prevViewYaw = pdata.aimLockPrevViewYaw
-
-							pdata.aimLockPrevIdealPitch = idealPitch
-							pdata.aimLockPrevIdealYaw = idealYaw
-							pdata.aimLockPrevViewPitch = p0
-							pdata.aimLockPrevViewYaw = y0
-
-							local idealDelta = 0.0
-							if type(prevIdealPitch) == "number" and type(prevIdealYaw) == "number" then
-								idealDelta = angularDist(prevIdealPitch, prevIdealYaw, idealPitch, idealYaw)
-							end
-							local viewDelta = 0.0
-							if type(prevViewPitch) == "number" and type(prevViewYaw) == "number" then
-								viewDelta = angularDist(prevViewPitch, prevViewYaw, p0, y0)
-							end
-
-							local movedIdeal = idealDelta >= AIMLOCK_IDEAL_MOVE_MIN_DEGREES
-							local movedView = viewDelta >= AIMLOCK_VIEW_MOVE_MIN_DEGREES
-							local follows = false
-							if movedIdeal and movedView then
-								local diff = math.abs(viewDelta - idealDelta)
-								if diff <= AIMLOCK_TRACK_DIFF_MAX_DEGREES then
-									follows = true
-								end
-							end
-
-							if not movedIdeal then
-								pdata.aimLockConsecTicks = 0
-							elseif err <= AIMLOCK_MAX_ERROR_DEGREES then
-								if follows then
-									pdata.aimLockConsecTicks = (pdata.aimLockConsecTicks or 0) + 1
-								else
-									local c = pdata.aimLockConsecTicks or 0
-									if c > 0 then
-										pdata.aimLockConsecTicks = math.max(0, c - 2)
-									else
-										pdata.aimLockConsecTicks = 0
-									end
-								end
-							else
-								pdata.aimLockConsecTicks = 0
-							end
-
-							if (curTick - (pdata.aimLockLastApplyTick or 0)) >= AIMLOCK_SAMPLE_TICKS then
-								pdata.aimLockLastApplyTick = curTick
-								local consec = pdata.aimLockConsecTicks or 0
-								local gain = 0.0
-								if follows then
-									gain = aimlockGainFromConsecutive(consec, err)
-								else
-									local lastStationary = pdata.aimLockLastStationaryTick or 0
-									if (not movedIdeal) and err <= AIMLOCK_TIGHT_ERROR_DEGREES
-										and (curTick - lastStationary) >= AIMLOCK_STATIONARY_COOLDOWN_TICKS then
-										pdata.aimLockLastStationaryTick = curTick
-										gain = AIMLOCK_STATIONARY_GAIN
-									end
-								end
-								if gain >= 0.5 and consec >= 12 then
-									local reason = string.format("AimLock (%.1f° err, %d ticks)", err, consec)
-									DetectorUtils.ApplyPlayerFlag(playerState, gain, nil, reason)
-								end
-							end
-						end
-					end
-				end
-			end
-		else
-			pdata.aimLockConsecTicks = 0
-		end
-	end
 
 	if not pdata.shotPending then
 		simulateSilentAimLocal(playerState, pdata)

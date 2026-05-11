@@ -42,7 +42,7 @@ local function tryGetTFNonLocalEyeAngles(player)
 	if type(pitch) ~= "number" or type(yaw) ~= "number" then
 		return nil
 	end
-	return { pitch = pitch, yaw = yaw }
+	return pitch, yaw
 end
 
 local FIELD_BUILDERS = {
@@ -50,9 +50,9 @@ local FIELD_BUILDERS = {
 		local localPlayer = entities.GetLocalPlayer and entities.GetLocalPlayer() or nil
 		if localPlayer and localPlayer.IsValid and localPlayer:IsValid() then
 			if localPlayer.GetIndex and player.GetIndex and localPlayer:GetIndex() == player:GetIndex() then
-				local angNL = tryGetTFNonLocalEyeAngles(player)
-				if angNL then
-					return angNL
+				local pitchNL, yawNL = tryGetTFNonLocalEyeAngles(player)
+				if pitchNL ~= nil and yawNL ~= nil then
+					return pitchNL, yawNL
 				end
 			end
 		end
@@ -65,7 +65,7 @@ local FIELD_BUILDERS = {
 		if pitch == nil or yaw == nil then
 			return nil
 		end
-		return { pitch = pitch, yaw = yaw }
+		return pitch, yaw
 	end,
 	[HistoryManager.Fields.EyePosition] = function(player)
 		return player.GetEyePos and player:GetEyePos()
@@ -103,8 +103,22 @@ local FIELD_BUILDERS = {
 }
 
 local function clearBucket(bucket)
+	local pool = bucket._pool
+	if not pool then
+		pool = {}
+		bucket._pool = pool
+	end
 	for k in pairs(bucket) do
-		bucket[k] = nil
+		if k ~= "_tick" and k ~= "_pool" then
+			local v = bucket[k]
+			if type(v) == "table" then
+				for fk in pairs(v) do
+					v[fk] = nil
+				end
+				pool[#pool + 1] = v
+			end
+			bucket[k] = nil
+		end
 	end
 end
 
@@ -118,7 +132,7 @@ function HistoryManager.Initialize(retentionTicks, fields)
 	ringCapacity = maxRetentionTicks
 
 	for i = 1, ringCapacity do
-		ringBuffer[i] = {}
+		ringBuffer[i] = { _pool = {} }
 	end
 
 	ringHead = 0
@@ -220,17 +234,38 @@ function HistoryManager.Push(player)
 		currentBucket = ringBuffer[ringHead]
 	end
 
+	local pool = currentBucket._pool
 	local existingPlayerData = currentBucket[steamID]
 	if not existingPlayerData then
-		existingPlayerData = {}
+		if pool and #pool > 0 then
+			existingPlayerData = pool[#pool]
+			pool[#pool] = nil
+		else
+			existingPlayerData = {}
+		end
 		currentBucket[steamID] = existingPlayerData
 	end
 
 	for field in pairs(activeFields) do
 		local builder = FIELD_BUILDERS[field]
 		if builder then
-			local value = builder(player)
-			existingPlayerData[field] = value
+			if field == HistoryManager.Fields.Angles then
+				local pitch, yaw = builder(player)
+				if pitch ~= nil and yaw ~= nil then
+					local ang = existingPlayerData[field]
+					if type(ang) ~= "table" then
+						ang = {}
+						existingPlayerData[field] = ang
+					end
+					ang.pitch = pitch
+					ang.yaw = yaw
+				else
+					existingPlayerData[field] = nil
+				end
+			else
+				local value = builder(player)
+				existingPlayerData[field] = value
+			end
 		end
 	end
 
@@ -247,9 +282,15 @@ function HistoryManager.MarkDamageDealt(steamID)
 	if not currentBucket then
 		return
 	end
+	local pool = currentBucket._pool
 	local playerData = currentBucket[steamID]
 	if not playerData then
-		playerData = {}
+		if pool and #pool > 0 then
+			playerData = pool[#pool]
+			pool[#pool] = nil
+		else
+			playerData = {}
+		end
 		currentBucket[steamID] = playerData
 	end
 	playerData.damageDealt = true
@@ -288,14 +329,26 @@ function HistoryManager.PushAngles(steamID, pitch, yaw)
 		return
 	end
 
+	local pool = currentBucket._pool
 	local playerData = currentBucket[steamID]
 	if not playerData then
-		playerData = {}
+		if pool and #pool > 0 then
+			playerData = pool[#pool]
+			pool[#pool] = nil
+		else
+			playerData = {}
+		end
 		currentBucket[steamID] = playerData
 	end
 
 	if pitch ~= nil and yaw ~= nil then
-		playerData[HistoryManager.Fields.Angles] = { pitch = pitch, yaw = yaw }
+		local ang = playerData[HistoryManager.Fields.Angles]
+		if type(ang) ~= "table" then
+			ang = {}
+			playerData[HistoryManager.Fields.Angles] = ang
+		end
+		ang.pitch = pitch
+		ang.yaw = yaw
 	end
 end
 

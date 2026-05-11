@@ -6,11 +6,6 @@ local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 
--- Safety: Polyfill Vector3 if missing (Lmaobox usually provides it globally)
-local _Vector3 = Vector3 or function(x, y, z)
-	return { x = x, y = y, z = z }
-end
-
 ---@diagnostic disable: undefined-global, undefined-field, duplicate-doc-field
 ---@class WrappedPlayer
 local WrappedPlayer = {}
