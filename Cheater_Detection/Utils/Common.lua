@@ -119,13 +119,11 @@ local function convertSteamStringTo64(rawSteamID)
 		end
 	end
 
-	if steam and type(steam.ToSteamID64) == "function" then
-		local ok, converted = pcall(steam.ToSteamID64, idStr)
-		if ok and converted then
-			local convertedString = tostring(converted):match("(765%d+)")
-			if convertedString and #convertedString >= 17 then
-				return convertedString
-			end
+	if steam and steam.ToSteamID64 then
+		local converted = steam.ToSteamID64(idStr)
+		local convertedString = tostring(converted):match("(765%d+)")
+		if convertedString and #convertedString >= 17 then
+			return convertedString
 		end
 	end
 
@@ -349,6 +347,12 @@ end
 local vectorDivide = vector.Divide
 local vectorLength = vector.Length
 local vectorDistance = vector.Distance
+local abs = math.abs
+local sqrt = math.sqrt
+local deg = math.deg
+local atan = math.atan
+local WORLD2SCREEN = client.WorldToScreen
+local Vec3 = Vector3
 
 -- Clamp a value between min and max
 function Common.clamp(value, minVal, maxVal)
@@ -363,6 +367,44 @@ end
 -- Rotate local vector by angles (transform to world space)
 function Common.vecRot(localVec, angles)
 	return (angles:Forward() * localVec.x) + (angles:Right() * localVec.y) + (angles:Up() * localVec.z)
+end
+
+function Common.wrapAngle(degrees)
+	return (degrees + 180) % 360 - 180
+end
+
+function Common.angularDist(p1, y1, p2, y2)
+	local dp = abs(Common.wrapAngle(p1 - p2))
+	local dy = abs(Common.wrapAngle(y1 - y2))
+	return sqrt(dp * dp + dy * dy)
+end
+
+function Common.angleToPos(sourcePos, targetPos)
+	local dx = targetPos.x - sourcePos.x
+	local dy = targetPos.y - sourcePos.y
+	local dz = targetPos.z - sourcePos.z
+	local dist = sqrt(dx * dx + dy * dy)
+	local pitch = -deg(atan(dz, dist))
+	local yaw = deg(atan(dy, dx))
+	return pitch, yaw
+end
+
+function Common.angleToXYZ(sourcePos, tx, ty, tz)
+	local dx = tx - sourcePos.x
+	local dy = ty - sourcePos.y
+	local dz = tz - sourcePos.z
+	local dist = sqrt(dx * dx + dy * dy)
+	local pitch = -deg(atan(dz, dist))
+	local yaw = deg(atan(dy, dx))
+	return pitch, yaw
+end
+
+function Common.worldToScreenXY(pos)
+	local screenPos = WORLD2SCREEN(pos)
+	if screenPos then
+		return screenPos[1], screenPos[2]
+	end
+	return nil, nil
 end
 
 -- Linear interpolation between angles (handles wraparound)
@@ -410,7 +452,11 @@ end
 
 -- Vector normalization with safety check
 function Common.normalize(vec)
-	return vectorDivide(vec, vectorLength(vec))
+	local len = vectorLength(vec)
+	if type(len) ~= "number" or len < 0.0001 then
+		return Vec3(0, 0, 0)
+	end
+	return vectorDivide(vec, len)
 end
 
 -- Dot product wrapper
@@ -465,16 +511,11 @@ function Common.IsFrameGap()
 	local frameTime = currentTime - lastFrameTime
 	lastFrameTime = currentTime
 
-	if frameTime > 0 then
-		local fps = 1 / frameTime
-		local tickInterval = globals.TickInterval()
-		if tickInterval > 0 then
-			local tickRate = 1 / tickInterval
-			-- If FPS drops below tickrate, we can't trust simtime deltas
-			if fps < tickRate then
-				return true
-			end
-		end
+	local fps = 1 / frameTime
+	local tickInterval = globals.TickInterval()
+	local tickRate = 1 / tickInterval
+	if fps < tickRate then
+		return true
 	end
 
 	return gap > getFrameGapThreshold()
@@ -523,17 +564,10 @@ end
 --   • Any outgoing choke > 0 → our end is queuing packets → timing is off
 function Common.IsConnectionStableForDetection()
 	local tickInterval = globals.TickInterval()
-	if type(tickInterval) ~= "number" or tickInterval <= 0 then
-		return false
-	end
 	local tickRate = 1.0 / tickInterval
 
 	-- FPS gate: must be able to process at tick frequency
-	local ft = globals.FrameTime()
-	if type(ft) ~= "number" or ft <= 0 then
-		return false
-	end
-	local fps = 1.0 / ft
+	local fps = 1.0 / globals.FrameTime()
 	if fps < tickRate then
 		return false
 	end

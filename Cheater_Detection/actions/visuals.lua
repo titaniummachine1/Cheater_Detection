@@ -6,6 +6,7 @@
 local Constants = require("Cheater_Detection.Core.constants")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local G = require("Cheater_Detection.Utils.Globals")
+local Common = require("Cheater_Detection.Utils.Common")
 
 local Visuals = {}
 
@@ -13,20 +14,12 @@ local fontTag = draw.CreateFont("Tahoma", 12, 800, 0x200)
 local LINE_HEIGHT = 14 -- Pixels between stacked tag lines
 local Vec3 = Vector3
 local FLOOR = math.floor
-local WORLD2SCREEN = client.WorldToScreen
+local WorldToScreenXY = Common.worldToScreenXY
 local DRAW_COLOR = draw.Color
 local DRAW_SETFONT = draw.SetFont
 local DRAW_GETTEXTSIZE = draw.GetTextSize
 local DRAW_TEXT = draw.Text
 local DRAW_TEXTSHADOW = draw.TextShadow
-
-local function WorldToScreen(pos)
-	local screenPos = WORLD2SCREEN(pos)
-	if screenPos then
-		return screenPos[1], screenPos[2]
-	end
-	return nil, nil
-end
 
 -- Build the ordered list of tags to show for this player
 -- Returns: array of { text, r, g, b } up to MAX_TAGS entries
@@ -108,7 +101,7 @@ function Visuals.DrawTags()
 					end
 					headPos = absOrigin + Vec3(0, 0, 72)
 				end
-				local x, y = WorldToScreen(headPos)
+				local x, y = WorldToScreenXY(headPos)
 
 				if x and y then
 					DRAW_SETFONT(fontTag)

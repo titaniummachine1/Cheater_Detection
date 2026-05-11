@@ -100,15 +100,8 @@ local function canPrintRecorded(now)
 	return true
 end
 
-local function wrapAngle(d)
-	return (d + 180) % 360 - 180
-end
-
-local function angularDist(p1, y1, p2, y2)
-	local dp = math.abs(wrapAngle(p1 - p2))
-	local dy = math.abs(wrapAngle(y1 - y2))
-	return math.sqrt(dp * dp + dy * dy)
-end
+local wrapAngle = Common.wrapAngle
+local angularDist = Common.angularDist
 
 local function snapWeight(shotDev)
 	if type(shotDev) ~= "number" then
@@ -164,25 +157,8 @@ local function snapWeight(shotDev)
 	return stage2Out + (1.0 - stage2Out) * expScaled
 end
 
-local function getAngleToPos(sourcePos, targetPos)
-	local dx = targetPos.x - sourcePos.x
-	local dy = targetPos.y - sourcePos.y
-	local dz = targetPos.z - sourcePos.z
-	local dist = math.sqrt(dx * dx + dy * dy)
-	local pitch = -math.deg(math.atan(dz, dist))
-	local yaw = math.deg(math.atan(dy, dx))
-	return pitch, yaw
-end
-
-local function getAngleToXYZ(sourcePos, tx, ty, tz)
-	local dx = tx - sourcePos.x
-	local dy = ty - sourcePos.y
-	local dz = tz - sourcePos.z
-	local dist = math.sqrt(dx * dx + dy * dy)
-	local pitch = -math.deg(math.atan(dz, dist))
-	local yaw = math.deg(math.atan(dy, dx))
-	return pitch, yaw
-end
+local getAngleToPos = Common.angleToPos
+local getAngleToXYZ = Common.angleToXYZ
 
 local function bestAimDistToTarget(eyePos, headPos, bodyPos, pitch, yaw)
 	if not eyePos then
