@@ -167,6 +167,8 @@ local function DrawMenu()
 		TimMenu.BeginSector("Aim Detection")
 		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot == true)
 		TimMenu.NextLine()
+		Advanced.AimLock = TimMenu.Checkbox("AimLock Detection", Advanced.AimLock ~= false)
+		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Notifications" then

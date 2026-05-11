@@ -63,6 +63,18 @@ local LILAC_GAIN_RETURN = 1.0
 local playerData = {}
 local NON_SNIPER_COOLDOWN_TICKS = 6
 local lastNonSniperTickByUserID = {}
+local AIMLOCK_TARGET_TTL_TICKS = 66
+local AIMLOCK_SAMPLE_TICKS = 6
+local AIMLOCK_MIN_DIST_SQR = 300 * 300
+local AIMLOCK_MAX_ERROR_DEGREES = 0.8
+local AIMLOCK_TIGHT_ERROR_DEGREES = 0.15
+local AIMLOCK_IDEAL_MOVE_MIN_DEGREES = 0.35
+local AIMLOCK_VIEW_MOVE_MIN_DEGREES = 0.25
+local AIMLOCK_TRACK_DIFF_MAX_DEGREES = 1.0
+local AIMLOCK_STATIONARY_GAIN = 0.02
+local AIMLOCK_STATIONARY_COOLDOWN_TICKS = 30
+local AIMLOCK_EXP_K = 4.0
+local AIMLOCK_MAX_GAIN = 6.0
 
 local debugFilterWindowStart = 0
 local debugFilterWindowCount = 0
@@ -164,14 +176,22 @@ local function snapWeight(shotDev)
 end
 
 local function getAngleToPos(sourcePos, targetPos)
-	local delta = {
-		x = targetPos.x - sourcePos.x,
-		y = targetPos.y - sourcePos.y,
-		z = targetPos.z - sourcePos.z,
-	}
-	local dist = math.sqrt(delta.x * delta.x + delta.y * delta.y)
-	local pitch = -math.deg(math.atan(delta.z, dist))
-	local yaw = math.deg(math.atan(delta.y, delta.x))
+	local dx = targetPos.x - sourcePos.x
+	local dy = targetPos.y - sourcePos.y
+	local dz = targetPos.z - sourcePos.z
+	local dist = math.sqrt(dx * dx + dy * dy)
+	local pitch = -math.deg(math.atan(dz, dist))
+	local yaw = math.deg(math.atan(dy, dx))
+	return pitch, yaw
+end
+
+local function getAngleToXYZ(sourcePos, tx, ty, tz)
+	local dx = tx - sourcePos.x
+	local dy = ty - sourcePos.y
+	local dz = tz - sourcePos.z
+	local dist = math.sqrt(dx * dx + dy * dy)
+	local pitch = -math.deg(math.atan(dz, dist))
+	local yaw = math.deg(math.atan(dy, dx))
 	return pitch, yaw
 end
 
@@ -193,6 +213,47 @@ local function bestAimDistToTarget(eyePos, headPos, bodyPos, pitch, yaw)
 		end
 	end
 	return best
+end
+
+local function aimlockGainFromConsecutive(consecutiveTicks, errDegrees)
+	if type(consecutiveTicks) ~= "number" or type(errDegrees) ~= "number" then
+		return 0.0
+	end
+	if consecutiveTicks <= 0 then
+		return 0.0
+	end
+	if errDegrees < 0.0 then
+		errDegrees = 0.0
+	end
+	if errDegrees >= AIMLOCK_MAX_ERROR_DEGREES then
+		return 0.0
+	end
+
+	local denom = math.log(1.0 + AIMLOCK_MAX_ERROR_DEGREES)
+	if denom <= 0.0 then
+		return 0.0
+	end
+	local tErr = math.log(1.0 + errDegrees) / denom
+	if tErr < 0.0 then
+		tErr = 0.0
+	end
+	if tErr > 1.0 then
+		tErr = 1.0
+	end
+	local errWeight = 1.0 - tErr
+	errWeight = errWeight * errWeight
+
+	local t = consecutiveTicks / (AIMLOCK_TARGET_TTL_TICKS * 0.5)
+	if t < 0.0 then
+		t = 0.0
+	end
+	if t > 1.0 then
+		t = 1.0
+	end
+
+	local k = math.max(0.0001, AIMLOCK_EXP_K)
+	local expScaled = (math.exp(k * t) - 1.0) / (math.exp(k) - 1.0)
+	return AIMLOCK_MAX_GAIN * errWeight * expScaled
 end
 
 local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePos, headPos, bodyPos)
@@ -1037,6 +1098,15 @@ local function onDamageEvent(event)
 	if not pdata then
 		pdata = {
 			shotPending = nil,
+			lastVictimID = nil,
+			lastVictimTick = 0,
+			aimLockConsecTicks = 0,
+			aimLockLastApplyTick = 0,
+			aimLockPrevIdealPitch = nil,
+			aimLockPrevIdealYaw = nil,
+			aimLockPrevViewPitch = nil,
+			aimLockPrevViewYaw = nil,
+			aimLockLastStationaryTick = 0,
 		}
 		playerData[attackerID] = pdata
 	end
@@ -1076,6 +1146,9 @@ local function onDamageEvent(event)
 			victimBodyPos = nil,
 			victimOrigin = nil,
 		}
+
+		pdata.lastVictimID = victimID
+		pdata.lastVictimTick = curTick
 
 		local origin = attackerPly:GetAbsOrigin()
 		local viewOffset = attackerPly:GetPropVector("localdata", "m_vecViewOffset[0]")
@@ -1129,6 +1202,8 @@ function SilentAim.ProcessPlayer(playerState)
 	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
 		return
 	end
+	local adv = G and G.Menu and G.Menu.Advanced or nil
+	local aimLockEnabled = adv == nil or adv.AimLock ~= false
 
 	local id = playerState.id
 	local ply = playerState.wrap:GetRawEntity()
@@ -1139,6 +1214,15 @@ function SilentAim.ProcessPlayer(playerState)
 	if not playerData[id] then
 		playerData[id] = {
 			shotPending = nil,
+			lastVictimID = nil,
+			lastVictimTick = 0,
+			aimLockConsecTicks = 0,
+			aimLockLastApplyTick = 0,
+			aimLockPrevIdealPitch = nil,
+			aimLockPrevIdealYaw = nil,
+			aimLockPrevViewPitch = nil,
+			aimLockPrevViewYaw = nil,
+			aimLockLastStationaryTick = 0,
 			lastSmallSnapDecay = 0,
 		}
 	end
@@ -1147,23 +1231,131 @@ function SilentAim.ProcessPlayer(playerState)
 		pdata.lastSmallSnapDecay = 0
 	end
 
+	local curTick = globals.TickCount()
+
+	if aimLockEnabled then
+		local targetID = pdata.lastVictimID
+		local targetTick = pdata.lastVictimTick or 0
+		if targetID and (curTick - targetTick) <= AIMLOCK_TARGET_TTL_TICKS then
+			local attackerData = playerState.current
+			local attackerAngles = attackerData and attackerData[HistoryManager.Fields.Angles] or nil
+			local attackerEyePos = attackerData and attackerData[HistoryManager.Fields.EyePosition] or nil
+			if attackerAngles and attackerEyePos then
+				local victimState = PlayerCache.GetByID(targetID)
+				local victimData = victimState and victimState.current or nil
+				local victimEyePos = victimData and victimData[HistoryManager.Fields.EyePosition] or nil
+				local victimEnt = victimState and victimState.wrap and victimState.wrap:GetRawEntity() or nil
+				if victimEyePos and victimEnt and victimEnt:IsValid() then
+					local myTeam = ply:GetTeamNumber()
+					local vTeam = victimEnt:GetTeamNumber()
+					if myTeam and vTeam and myTeam ~= 0 and vTeam ~= 0 and myTeam ~= vTeam then
+						local dx = victimEyePos.x - attackerEyePos.x
+						local dy = victimEyePos.y - attackerEyePos.y
+						local dz = victimEyePos.z - attackerEyePos.z
+						local distSqr = dx * dx + dy * dy + dz * dz
+						if distSqr >= AIMLOCK_MIN_DIST_SQR then
+							local p0 = attackerAngles.pitch
+							local y0 = wrapAngle(attackerAngles.yaw)
+							local hp, hy = getAngleToPos(attackerEyePos, victimEyePos)
+							local headErr = angularDist(p0, y0, hp, hy)
+							local bp, by = getAngleToXYZ(attackerEyePos, victimEyePos.x, victimEyePos.y,
+								victimEyePos.z - 40.0)
+							local bodyErr = angularDist(p0, y0, bp, by)
+							local idealPitch = hp
+							local idealYaw = hy
+							local err = headErr
+							if bodyErr < err then
+								err = bodyErr
+								idealPitch = bp
+								idealYaw = by
+							end
+
+							local prevIdealPitch = pdata.aimLockPrevIdealPitch
+							local prevIdealYaw = pdata.aimLockPrevIdealYaw
+							local prevViewPitch = pdata.aimLockPrevViewPitch
+							local prevViewYaw = pdata.aimLockPrevViewYaw
+
+							pdata.aimLockPrevIdealPitch = idealPitch
+							pdata.aimLockPrevIdealYaw = idealYaw
+							pdata.aimLockPrevViewPitch = p0
+							pdata.aimLockPrevViewYaw = y0
+
+							local idealDelta = 0.0
+							if type(prevIdealPitch) == "number" and type(prevIdealYaw) == "number" then
+								idealDelta = angularDist(prevIdealPitch, prevIdealYaw, idealPitch, idealYaw)
+							end
+							local viewDelta = 0.0
+							if type(prevViewPitch) == "number" and type(prevViewYaw) == "number" then
+								viewDelta = angularDist(prevViewPitch, prevViewYaw, p0, y0)
+							end
+
+							local movedIdeal = idealDelta >= AIMLOCK_IDEAL_MOVE_MIN_DEGREES
+							local movedView = viewDelta >= AIMLOCK_VIEW_MOVE_MIN_DEGREES
+							local follows = false
+							if movedIdeal and movedView then
+								local diff = math.abs(viewDelta - idealDelta)
+								if diff <= AIMLOCK_TRACK_DIFF_MAX_DEGREES then
+									follows = true
+								end
+							end
+
+							if not movedIdeal then
+								pdata.aimLockConsecTicks = 0
+							elseif err <= AIMLOCK_MAX_ERROR_DEGREES then
+								if follows then
+									pdata.aimLockConsecTicks = (pdata.aimLockConsecTicks or 0) + 1
+								else
+									local c = pdata.aimLockConsecTicks or 0
+									if c > 0 then
+										pdata.aimLockConsecTicks = math.max(0, c - 2)
+									else
+										pdata.aimLockConsecTicks = 0
+									end
+								end
+							else
+								pdata.aimLockConsecTicks = 0
+							end
+
+							if (curTick - (pdata.aimLockLastApplyTick or 0)) >= AIMLOCK_SAMPLE_TICKS then
+								pdata.aimLockLastApplyTick = curTick
+								local consec = pdata.aimLockConsecTicks or 0
+								local gain = 0.0
+								if follows then
+									gain = aimlockGainFromConsecutive(consec, err)
+								else
+									local lastStationary = pdata.aimLockLastStationaryTick or 0
+									if (not movedIdeal) and err <= AIMLOCK_TIGHT_ERROR_DEGREES
+										and (curTick - lastStationary) >= AIMLOCK_STATIONARY_COOLDOWN_TICKS then
+										pdata.aimLockLastStationaryTick = curTick
+										gain = AIMLOCK_STATIONARY_GAIN
+									end
+								end
+								if gain >= 0.5 and consec >= 12 then
+									local reason = string.format("AimLock (%.1f° err, %d ticks)", err, consec)
+									DetectorUtils.ApplyPlayerFlag(playerState, gain, nil, reason)
+								end
+							end
+						end
+					end
+				end
+			end
+		else
+			pdata.aimLockConsecTicks = 0
+		end
+	end
+
 	if not pdata.shotPending then
 		simulateSilentAimLocal(playerState, pdata)
 	end
 
 	local pending = pdata.shotPending
-	if not pending then
-		return
+	if pending then
+		if curTick <= pending.shotTick then
+			return
+		end
+		pdata.shotPending = nil
+		analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
-
-	local curTick = globals.TickCount()
-	-- Wait until the shot bucket is at least 1 tick in the past
-	if curTick <= pending.shotTick then
-		return
-	end
-
-	pdata.shotPending = nil
-	analyzePendingShot(playerState, ply, pdata, pending, curTick)
 end
 
 Events.Subscribe("OnPlayerDisconnect", function(id)
