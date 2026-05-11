@@ -148,4 +148,8 @@ Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerCooldowns[id] = nil
 end)
 
+Events.Subscribe("OnPlayerRemoved", function(id)
+	playerCooldowns[id] = nil
+end)
+
 return FakeLag

@@ -95,11 +95,16 @@ function Visuals.DrawTags()
 					-- print(string.format("[Visuals] Drawing %d tags for local player", #tagList))
 				end
 
-				-- Calculate head position for the tag stack
-				local absOrigin = ent:GetAbsOrigin()
-				-- Fallback view offset if m_vecViewOffset[0] is not found
-				local viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
-				local headPos = absOrigin + viewOffset + _Vector3(0, 0, 15)
+				local headPos = wrap:GetEyePos()
+				if headPos then
+					headPos = headPos + _Vector3(0, 0, 15)
+				else
+					local absOrigin = ent:GetAbsOrigin()
+					if not absOrigin then
+						goto continue
+					end
+					headPos = absOrigin + _Vector3(0, 0, 72)
+				end
 				local x, y = WorldToScreen(headPos)
 
 				if x and y then

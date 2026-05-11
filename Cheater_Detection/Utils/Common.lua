@@ -10,6 +10,7 @@ local Common = {
 Common.Json = require("Cheater_Detection.Libs.Json")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
+local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 
 --[[ Inlined PlayerResource (from lnxLib/TF2/PlayerResource.lua) ]]
 local PlayerResource = {}
@@ -217,7 +218,7 @@ function Common.IsCheater(playerInfo)
 
 	if type(playerInfo) == "number" and playerInfo < 101 then
 		-- playerInfo is a player index; resolve to SteamID64 via entity
-		local ent = entities.GetByIndex(playerInfo)
+		local ent = TickEntityCache.GetPlayerByIndex(playerInfo)
 		if ent then
 			steamId = Common.GetSteamID64(ent)
 			if type(steamId) ~= "string" then

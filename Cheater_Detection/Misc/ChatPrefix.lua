@@ -8,6 +8,7 @@ local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Database = require("Cheater_Detection.Database.Database")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 local Constants = require("Cheater_Detection.Core.constants")
+local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 
 local ChatPrefix = {}
 
@@ -21,7 +22,7 @@ local function GetPlayerFromName(playerName)
 	for i = 1, maxClients do
 		local info = client.GetPlayerInfo(i)
 		if info and info.Name == playerName then
-			return entities.GetByIndex(i)
+			return TickEntityCache.GetPlayerByIndex(i)
 		end
 	end
 	return nil

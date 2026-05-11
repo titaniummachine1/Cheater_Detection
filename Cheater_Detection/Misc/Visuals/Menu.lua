@@ -134,6 +134,8 @@ local function DrawMenu()
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
 		TimMenu.NextLine()
+		Advanced.SilentAimSimulate = TimMenu.Checkbox("Simulate SilentAim (local)", Advanced.SilentAimSimulate == true)
+		TimMenu.NextLine()
 		Advanced.LogLevel = TimMenu.Combo(
 			"Log Level",
 			Advanced.LogLevel or { false, true, false, false },

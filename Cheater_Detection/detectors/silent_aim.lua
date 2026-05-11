@@ -28,12 +28,41 @@ local INSTA_KILL_ALIGN_MAX_DEGREES = 5.0
 local INSTA_KILL_HEAD_MAX_ERROR_DEGREES = 6.0
 local INSTA_KILL_DIR_MIN = 0.5
 
-local SNIPER_BIG_SNAP_DEGREES = 90.0
 local SNIPER_HEAD_MAX_ERROR_DEGREES = 6.0
-local SNIPER_RETURN_MAX_DEGREES = 3.0
+local ALIGN_TIGHT_MAX_DEGREES = 2.0
+local ALIGN_FLOOR = 0.05
+local SNAP_STAGE1_MAX_DEGREES = 15.0
+local SNAP_STAGE1_OUTPUT = 0.20
+local SNAP_STAGE1_LOG_K = 3.0
+local SNAP_STAGE2_MAX_DEGREES = 30.0
+local SNAP_STAGE2_OUTPUT = 0.40
+local SNAP_STAGE2_LOG_K = 2.0
+local SNAP_SPIKE_EXP_K = 5.0
+local DIR_MIN_DELTA_DEGREES = 7.0
+local DISCONT_SNAP_MIN_DEGREES = 45.0
+local DISCONT_AIMERR_MIN_DEGREES = 25.0
 
 local SANITY_MAX_DEGREES = 16.0
+local LILAC_WINDOW_TICKS = 33
+local LILAC_SNAP_DELTA1_DEGREES = 10.0
+local LILAC_SNAP_DELTA2_DEGREES = 5.0
+local LILAC_SNAP_RATIO1 = 0.2
+local LILAC_SNAP_RATIO2 = 0.1
+local LILAC_RETURN_MIN_SNAP_DEGREES = 10.0
+local LILAC_RETURN_ALIGN_MAX_DEGREES = 2.0
+local LILAC_RETURN_DIR_MIN = 0.5
+
+local LILAC_FLAG_SNAP = 1
+local LILAC_FLAG_SNAP2 = 2
+local LILAC_FLAG_RETURN = 4
+
+local LILAC_GAIN_SNAP = 2.0
+local LILAC_GAIN_SNAP2 = 1.2
+local LILAC_GAIN_RETURN = 1.0
+
 local playerData = {}
+local NON_SNIPER_COOLDOWN_TICKS = 6
+local lastNonSniperTickByUserID = {}
 
 local debugFilterWindowStart = 0
 local debugFilterWindowCount = 0
@@ -80,6 +109,60 @@ local function angularDist(p1, y1, p2, y2)
 	return math.sqrt(dp * dp + dy * dy)
 end
 
+local function snapWeight(shotDev)
+	if type(shotDev) ~= "number" then
+		return 0.0
+	end
+	if shotDev <= MIN_SNAP_DEGREES then
+		return 0.0
+	end
+
+	local stage1Max = SNAP_STAGE1_MAX_DEGREES
+	if stage1Max <= MIN_SNAP_DEGREES then
+		stage1Max = MIN_SNAP_DEGREES + 0.001
+	end
+
+	local stage2Max = SNAP_STAGE2_MAX_DEGREES
+	if stage2Max <= stage1Max then
+		stage2Max = stage1Max + 0.001
+	end
+
+	local stage1Out = math.max(0.0, math.min(1.0, SNAP_STAGE1_OUTPUT))
+	local stage2Out = math.max(stage1Out, math.min(1.0, SNAP_STAGE2_OUTPUT))
+
+	if shotDev <= stage1Max then
+		local t = (shotDev - MIN_SNAP_DEGREES) / (stage1Max - MIN_SNAP_DEGREES)
+		t = math.max(0.0, math.min(1.0, t))
+		local k = math.max(0.0001, SNAP_STAGE1_LOG_K)
+		local logScaled = math.log(1.0 + t * k) / math.log(1.0 + k)
+		return stage1Out * logScaled
+	end
+
+	if shotDev <= stage2Max then
+		local t = (shotDev - stage1Max) / (stage2Max - stage1Max)
+		t = math.max(0.0, math.min(1.0, t))
+		local k = math.max(0.0001, SNAP_STAGE2_LOG_K)
+		local logScaled = math.log(1.0 + t * k) / math.log(1.0 + k)
+		return stage1Out + (stage2Out - stage1Out) * logScaled
+	end
+
+	if shotDev >= HARD_SNAP_CHEATER_DEGREES then
+		return 1.0
+	end
+
+	local denom = HARD_SNAP_CHEATER_DEGREES - stage2Max
+	if denom <= 0.0 then
+		return stage2Out
+	end
+
+	local t = (shotDev - stage2Max) / denom
+	t = math.max(0.0, math.min(1.0, t))
+
+	local k = math.max(0.0001, SNAP_SPIKE_EXP_K)
+	local expScaled = (math.exp(k * t) - 1.0) / (math.exp(k) - 1.0)
+	return stage2Out + (1.0 - stage2Out) * expScaled
+end
+
 local function getAngleToPos(sourcePos, targetPos)
 	local delta = {
 		x = targetPos.x - sourcePos.x,
@@ -92,9 +175,261 @@ local function getAngleToPos(sourcePos, targetPos)
 	return pitch, yaw
 end
 
+local function bestAimDistToTarget(eyePos, headPos, bodyPos, pitch, yaw)
+	if not eyePos then
+		return nil
+	end
+
+	local best = nil
+	if headPos then
+		local hp, hy = getAngleToPos(eyePos, headPos)
+		best = angularDist(pitch, yaw, hp, hy)
+	end
+	if bodyPos then
+		local bp, by = getAngleToPos(eyePos, bodyPos)
+		local bodyErr = angularDist(pitch, yaw, bp, by)
+		if best == nil or bodyErr < best then
+			best = bodyErr
+		end
+	end
+	return best
+end
+
+local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePos, headPos, bodyPos)
+	if not id or type(shotOffset) ~= "number" or type(shotTick) ~= "number" then
+		return 0.0, 0.0, 0.0, 0
+	end
+	if not shotAngles or type(shotAngles.pitch) ~= "number" or type(shotAngles.yaw) ~= "number" then
+		return 0.0, 0.0, 0.0, 0
+	end
+	if not eyePos or (not headPos and not bodyPos) then
+		return 0.0, 0.0, 0.0, 0
+	end
+
+	local flags = 0
+	local maxDelta = 0.0
+	local totalDelta = 0.0
+
+	local aimDist = bestAimDistToTarget(eyePos, headPos, bodyPos, shotAngles.pitch, shotAngles.yaw)
+	if aimDist == nil then
+		return 0.0, 0.0, 0.0, 0
+	end
+
+	local langPitch = shotAngles.pitch
+	local langYaw = shotAngles.yaw
+	local lastAimDist = aimDist
+
+	for i = 1, LILAC_WINDOW_TICKS do
+		local bucket = HistoryManager.GetBucketAt(shotOffset + i)
+		if not bucket or bucket._tick ~= (shotTick - i) then
+			break
+		end
+
+		local ang = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.Angles)
+		if ang and type(ang.pitch) == "number" and type(ang.yaw) == "number" then
+			local p = ang.pitch
+			local y = wrapAngle(ang.yaw)
+
+			local tdelta = angularDist(langPitch, langYaw, p, y)
+			if tdelta > maxDelta then
+				maxDelta = tdelta
+			end
+			totalDelta = totalDelta + tdelta
+
+			local laimdist = bestAimDistToTarget(eyePos, headPos, bodyPos, p, y)
+			if laimdist ~= nil and laimdist > 0.0001 then
+				if (lastAimDist < (laimdist * LILAC_SNAP_RATIO1)) and (tdelta > LILAC_SNAP_DELTA1_DEGREES) then
+					flags = flags | LILAC_FLAG_SNAP
+				end
+				if (lastAimDist < (laimdist * LILAC_SNAP_RATIO2)) and (tdelta > LILAC_SNAP_DELTA2_DEGREES) then
+					flags = flags | LILAC_FLAG_SNAP2
+				end
+				lastAimDist = laimdist
+			end
+
+			langPitch = p
+			langYaw = y
+		end
+	end
+
+	local gain = 0.0
+	if (flags & LILAC_FLAG_SNAP) ~= 0 then
+		gain = gain + LILAC_GAIN_SNAP
+	end
+	if (flags & LILAC_FLAG_SNAP2) ~= 0 then
+		gain = gain + LILAC_GAIN_SNAP2
+	end
+
+	return gain, maxDelta, totalDelta, flags
+end
+
 local TF_PROJECTILE_BULLET = 1
 local TF_CLASS_SNIPER = 2
 local TF_CLASS_SPY = 8
+
+local AIMERR_MIN_WEIGHT = 0.1
+local AIMERR_MIN_AT_DEGREES = 5.0
+
+local function aimErrorWeight(errDegrees)
+	if type(errDegrees) ~= "number" then
+		return 0.0
+	end
+	if errDegrees <= 0 then
+		return 1.0
+	end
+	if errDegrees >= AIMERR_MIN_AT_DEGREES then
+		return AIMERR_MIN_WEIGHT
+	end
+	local t = math.log(1.0 + errDegrees) / math.log(1.0 + AIMERR_MIN_AT_DEGREES)
+	return 1.0 - (1.0 - AIMERR_MIN_WEIGHT) * t
+end
+
+local function getHitboxCenter(ent, hitboxIndex)
+	if not ent or not ent.GetHitboxes then
+		return nil
+	end
+	local hitboxes = ent:GetHitboxes()
+	if type(hitboxes) ~= "table" then
+		return nil
+	end
+	local hb = hitboxes[hitboxIndex]
+	if type(hb) ~= "table" then
+		return nil
+	end
+	local mins = hb[1]
+	local maxs = hb[2]
+	if not mins or not maxs then
+		return nil
+	end
+	if type(mins.x) ~= "number" or type(mins.y) ~= "number" or type(mins.z) ~= "number" then
+		return nil
+	end
+	if type(maxs.x) ~= "number" or type(maxs.y) ~= "number" or type(maxs.z) ~= "number" then
+		return nil
+	end
+	return Vector3((mins.x + maxs.x) * 0.5, (mins.y + maxs.y) * 0.5, (mins.z + maxs.z) * 0.5)
+end
+
+local function tryFindAnyEnemy()
+	local localPly = entities.GetLocalPlayer()
+	if not localPly or not localPly:IsValid() then
+		return nil
+	end
+	local myTeam = localPly:GetTeamNumber()
+	local players = entities.FindByClass("CTFPlayer") or {}
+	for i = 1, #players do
+		local p = players[i]
+		if p and p:IsValid() and p:IsPlayer() and p:IsAlive() and not p:IsDormant() then
+			local team = p:GetTeamNumber()
+			if team and team ~= myTeam and team ~= 1 then
+				return p
+			end
+		end
+	end
+	return nil
+end
+
+local function simulateSilentAimLocal(playerState, pdata)
+	if not Common.IsDebugEnabled() then
+		return
+	end
+	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimSimulate) then
+		return
+	end
+	if not playerState or not playerState.wrap then
+		return
+	end
+	local localEnt = entities.GetLocalPlayer()
+	if not localEnt or not localEnt:IsValid() then
+		return
+	end
+	local ent = playerState.wrap:GetRawEntity()
+	if not ent or not ent:IsValid() then
+		return
+	end
+	if ent:GetIndex() ~= localEnt:GetIndex() then
+		return
+	end
+
+	G.Menu.Advanced.SilentAimSimulate = false
+
+	local curTick = globals.TickCount()
+	if HistoryManager.GetRingCount() < 8 then
+		return
+	end
+
+	local victim = tryFindAnyEnemy()
+	if not victim then
+		return
+	end
+
+	local eyePos = playerState.wrap:GetEyePos()
+	if not eyePos then
+		return
+	end
+
+	local victimID = tostring(Common.GetSteamID64(victim))
+	if not victimID then
+		return
+	end
+
+	local vOrigin = victim:GetAbsOrigin()
+	local vViewOffset = victim:GetPropVector("localdata", "m_vecViewOffset[0]")
+	local victimEyePos = nil
+	if vOrigin and vViewOffset then
+		victimEyePos = vOrigin + vViewOffset
+	end
+
+	local victimHeadPos = getHitboxCenter(victim, 1) or victimEyePos
+	local victimBodyPos = getHitboxCenter(victim, 4)
+	if not victimBodyPos and vOrigin then
+		victimBodyPos = vOrigin + Vector3(0, 0, 40)
+	end
+	if not victimHeadPos then
+		return
+	end
+
+	local targetPitch, targetYaw = getAngleToPos(eyePos, victimHeadPos)
+	local basePitch = targetPitch
+	local baseYaw0 = wrapAngle(targetYaw - 83.0)
+
+	local function setAnglesAt(offset, pitch, yaw)
+		HistoryManager.DebugSetPlayerFieldAt(offset, playerState.id, HistoryManager.Fields.Angles,
+			{ pitch = pitch, yaw = yaw })
+	end
+
+	setAnglesAt(6, basePitch, baseYaw0)
+	setAnglesAt(5, basePitch, baseYaw0 + 1.0)
+	setAnglesAt(4, basePitch, baseYaw0 + 2.0)
+	setAnglesAt(3, targetPitch, targetYaw)
+	setAnglesAt(2, basePitch, baseYaw0 + 4.0)
+	setAnglesAt(1, basePitch, baseYaw0 + 5.0)
+	setAnglesAt(0, basePitch, baseYaw0 + 6.0)
+
+	local shotTick = HistoryManager.GetTickAt(3)
+	if not shotTick then
+		return
+	end
+
+	pdata.shotPending = {
+		shotTick = shotTick,
+		victimID = victimID,
+		weaponID = 17,
+		weaponClass = "CTFSniperRifle",
+		projType = nil,
+		weaponSpread = 0.0,
+		weaponName = "sim_sniper",
+		crit = false,
+		minicrit = false,
+		damage = 50,
+		victimHealthAfter = 100,
+		shooterEyePos = eyePos,
+		victimEyePos = victimEyePos,
+		victimHeadPos = victimHeadPos,
+		victimBodyPos = victimBodyPos,
+		victimOrigin = vOrigin,
+	}
+end
 
 local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	if not playerState or not ply or not pdata or not pending then
@@ -103,7 +438,11 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	local id = playerState.id
 
-	if Common.IsDebugEnabled() then
+	local attackerClass = ply:GetPropInt("m_iClass")
+	local debugInterested = Common.IsDebugEnabled() and
+		(attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
+
+	if debugInterested then
 		print(string.format("[SilentAim] Analyzing shot for %s (tick %d)", id, pending.shotTick))
 	end
 
@@ -125,7 +464,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 	shotAngles = { pitch = shotAngles.pitch, yaw = wrapAngle(shotAngles.yaw) }
 
-	if Common.IsDebugEnabled() then
+	if debugInterested then
 		print(string.format(
 			"[SilentAim] shot context id=%s weaponid=%s projType=%s class=%s damage=%s",
 			id,
@@ -136,51 +475,47 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		))
 	end
 
-	-- SANITY CHECK: Was the player aiming remotely close to the victim? (degrees)
-	-- Skip this check for Sniper (2) and Spy (8)
-	local attackerClass = ply:GetPropInt("m_iClass")
-	local isSniperOrSpy = (attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
-
 	local sanityFactor = 1.0
 	local bestAimError = nil
-	if not isSniperOrSpy then
-		local victimID = pending.victimID
-		local victimWrap = PlayerCache.GetBySteamID(victimID)
-		local headPos = victimWrap and victimWrap:GetHitboxPos(1) or nil
-		local bodyPos = victimWrap and victimWrap:GetHitboxPos(4) or nil
-		local eyePos = pending.shooterEyePos or
-			HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition) or
-			playerState.wrap:GetEyePos()
 
-		local aimedAtTarget = false
-		if eyePos then
-			if headPos then
-				local p, y = getAngleToPos(eyePos, headPos)
-				local headErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
-				bestAimError = headErr
-				if headErr < SANITY_MAX_DEGREES then
-					aimedAtTarget = true
-				end
+	local headPos = pending.victimHeadPos or pending.victimEyePos
+	local bodyPos = pending.victimBodyPos
+	if not bodyPos and pending.victimOrigin then
+		bodyPos = pending.victimOrigin + Vector3(0, 0, 40)
+	end
+
+	local eyePos = pending.shooterEyePos
+		or HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition)
+		or playerState.wrap:GetEyePos()
+
+	local aimedAtTarget = false
+	if eyePos then
+		if headPos then
+			local p, y = getAngleToPos(eyePos, headPos)
+			local headErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
+			bestAimError = headErr
+			if headErr < SANITY_MAX_DEGREES then
+				aimedAtTarget = true
 			end
-			if not aimedAtTarget and bodyPos then
-				local p, y = getAngleToPos(eyePos, bodyPos)
-				local bodyErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
-				if bestAimError == nil or bodyErr < bestAimError then
-					bestAimError = bodyErr
-				end
-				if bodyErr < SANITY_MAX_DEGREES then
-					aimedAtTarget = true
-				end
-			end
-		else
-			aimedAtTarget = true
 		end
-
-		if not aimedAtTarget then
-			sanityFactor = 0.15
-			if Common.IsDebugEnabled() then
-				print(string.format("[SilentAim] %s sanity miss (outside %.0f° bubble)", id, SANITY_MAX_DEGREES))
+		if not aimedAtTarget and bodyPos then
+			local p, y = getAngleToPos(eyePos, bodyPos)
+			local bodyErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
+			if bestAimError == nil or bodyErr < bestAimError then
+				bestAimError = bodyErr
 			end
+			if bodyErr < SANITY_MAX_DEGREES then
+				aimedAtTarget = true
+			end
+		end
+	else
+		aimedAtTarget = true
+	end
+
+	if not aimedAtTarget and attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
+		sanityFactor = 0.15
+		if Common.IsDebugEnabled() then
+			print(string.format("[SilentAim] %s sanity miss (outside %.0f° bubble)", id, SANITY_MAX_DEGREES))
 		end
 	end
 
@@ -256,7 +591,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			DetectorUtils.ApplyPlayerFlag(playerState, -SMALL_SNAP_DECAY, nil, "SilentAim decay")
 			pdata.lastSmallSnapDecay = now
 		end
-		if Common.IsDebugEnabled() then
+		if debugInterested then
 			print(string.format("[SilentAim] %s snap too small: %.1f° (min %.1f°)", id, shotDev, MIN_SNAP_DEGREES))
 		end
 		return
@@ -267,6 +602,10 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	local bestAlignDev = nil
 	local bestAlignTick = nil
 	local bestDirFactor = 0.0
+	local bestDirMeaningful = false
+	local alignDev1 = nil
+	local dirFactor1 = nil
+	local dirMeaningful1 = nil
 
 	local prevActualAngles = shotAngles
 	local prevPredPitch = predShotPitch
@@ -295,17 +634,29 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 					local actualLen = math.sqrt(actualDPitch * actualDPitch + actualDYaw * actualDYaw)
 					local predLen = math.sqrt(predDPitch * predDPitch + predDYaw * predDYaw)
 					local dirFactor = 0.0
-					if actualLen > 0.01 and predLen > 0.01 then
+					local dirMeaningful = (actualLen >= DIR_MIN_DELTA_DEGREES) and (predLen >= DIR_MIN_DELTA_DEGREES)
+					if dirMeaningful then
 						local dot = actualDPitch * predDPitch + actualDYaw * predDYaw
 						dirFactor = math.max(0.0, math.min(1.0, dot / (actualLen * predLen)))
 					else
-						dirFactor = 1.0
+						dirFactor = 0.5
 					end
 
-					if (not bestAlignDev) or alignDev < bestAlignDev or (alignDev == bestAlignDev and dirFactor > bestDirFactor) then
+					if k == 1 then
+						alignDev1 = alignDev
+						dirFactor1 = dirFactor
+						dirMeaningful1 = dirMeaningful
+					end
+
+					if (not bestAlignDev)
+						or alignDev < bestAlignDev
+						or (alignDev == bestAlignDev and (dirMeaningful and not bestDirMeaningful))
+						or (alignDev == bestAlignDev and dirMeaningful == bestDirMeaningful and dirFactor > bestDirFactor)
+					then
 						bestAlignDev = alignDev
 						bestAlignTick = postTick
 						bestDirFactor = dirFactor
+						bestDirMeaningful = dirMeaningful
 					end
 
 					prevActualAngles = postShotAngles
@@ -317,24 +668,52 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	if not bestAlignDev then
-		return
+		bestAlignDev = shotDev
+		bestAlignTick = pending.shotTick
+		bestDirFactor = 0.5
+		bestDirMeaningful = false
 	end
 
 	local alignDev = bestAlignDev
 	local alignTick = bestAlignTick
 	local dirFactor = bestDirFactor
+	local dirMeaningful = bestDirMeaningful
 
 	-- 6. Score calculation
-	-- Align01 is intentionally strict: even ~1 degree should not explode score.
-	local align01 = math.max(0.0, 1.0 - (alignDev / 5.0))
+	local snap01 = snapWeight(shotDev)
+
+	local alignWeight = 0.0
+	if alignDev <= ALIGN_TIGHT_MAX_DEGREES then
+		local t = 1.0 - (alignDev / ALIGN_TIGHT_MAX_DEGREES)
+		alignWeight = ALIGN_FLOOR + (1.0 - ALIGN_FLOOR) * (t * t)
+	else
+		local excess = alignDev - ALIGN_TIGHT_MAX_DEGREES
+		local denom = 1.0 + math.log(1.0 + excess * 2.0)
+		alignWeight = ALIGN_FLOOR / (denom * denom)
+	end
 
 	local scoreGain = 0.0
 	local headError = nil
 	local nonSniperBestAimError = bestAimError
+	local aimFactor = 0.0
+	if bestAimError ~= nil then
+		aimFactor = aimErrorWeight(bestAimError)
+	end
+	local discontGain = 0.0
+	if not aimedAtTarget and bestAimError ~= nil and bestAimError >= DISCONT_AIMERR_MIN_DEGREES and shotDev >= DISCONT_SNAP_MIN_DEGREES then
+		local snapExcess = shotDev - DISCONT_SNAP_MIN_DEGREES
+		local snapHard = 1.0 - math.exp(-snapExcess / 10.0)
+		snapHard = math.max(0.0, math.min(1.0, snapHard))
+		local aimExcess = bestAimError - DISCONT_AIMERR_MIN_DEGREES
+		local aimHard = 1.0 - math.exp(-aimExcess / 10.0)
+		aimHard = math.max(0.0, math.min(1.0, aimHard))
+		discontGain = (shotDev ^ 1.0) * (snapHard ^ 2.0) * (aimHard ^ 2.0) * 0.35
+		discontGain = math.min(discontGain, 6.0)
+	end
 
 	if shotDev >= HARD_SNAP_CHEATER_DEGREES and sanityFactor >= 1.0 then
 		local headOk = (nonSniperBestAimError ~= nil and nonSniperBestAimError <= INSTA_KILL_HEAD_MAX_ERROR_DEGREES)
-		if alignDev <= INSTA_KILL_ALIGN_MAX_DEGREES and dirFactor >= INSTA_KILL_DIR_MIN and headOk then
+		if alignDev <= INSTA_KILL_ALIGN_MAX_DEGREES and dirMeaningful and dirFactor >= INSTA_KILL_DIR_MIN and headOk then
 			local reason = string.format("Insta kill (%.1f° snap, %.1f° align, dir=%.2f)", shotDev, alignDev, dirFactor)
 			DetectorUtils.ApplyPlayerFlag(playerState, 100, Constants.Flags.CHEATER, reason)
 			return
@@ -348,59 +727,98 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		return
 	end
 
+	local alignGain = 0.0
+	local noAlignGain = 0.0
+	local lilacGain = 0.0
+	local lilacMaxDelta = 0.0
+	local lilacTotalDelta = 0.0
+	local lilacFlags = 0
+
+	local alignExcess = math.max(0.0, alignDev - ALIGN_TIGHT_MAX_DEGREES)
+	local noAlignWeight = 1.0 / (1.0 + math.log(1.0 + alignExcess * 2.0))
+	local dirSoft = 0.25 + 0.75 * dirFactor
+
 	if attackerClass == TF_CLASS_SNIPER then
 		local victimID = pending.victimID
-		local victimWrap = PlayerCache.GetBySteamID(victimID)
-		local headPos = pending.victimEyePos or (victimWrap and victimWrap:GetHitboxPos(1) or nil)
-		local bodyPos = nil
-		if pending.victimOrigin then
-			bodyPos = pending.victimOrigin + Vector3(0, 0, 40)
-		else
-			bodyPos = victimWrap and victimWrap:GetHitboxPos(4) or nil
+		local sniperHeadPos = pending.victimHeadPos or pending.victimEyePos
+		local sniperBodyPos = pending.victimBodyPos
+		if not sniperBodyPos and pending.victimOrigin then
+			sniperBodyPos = pending.victimOrigin + Vector3(0, 0, 40)
 		end
 		local eyePos = pending.shooterEyePos
 			or HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition)
 			or playerState.wrap:GetEyePos()
 
-		if eyePos and headPos then
-			local hp, hy = getAngleToPos(eyePos, headPos)
+		if eyePos and sniperHeadPos then
+			local hp, hy = getAngleToPos(eyePos, sniperHeadPos)
 			headError = angularDist(shotAngles.pitch, shotAngles.yaw, hp, hy)
 			bestAimError = headError
 		end
-		if bestAimError == nil and eyePos and bodyPos then
-			local bp, by = getAngleToPos(eyePos, bodyPos)
+		if bestAimError == nil and eyePos and sniperBodyPos then
+			local bp, by = getAngleToPos(eyePos, sniperBodyPos)
 			bestAimError = angularDist(shotAngles.pitch, shotAngles.yaw, bp, by)
 		end
 
-		local bigSnapFactor = 0.0
-		if shotDev >= SNIPER_BIG_SNAP_DEGREES then
-			bigSnapFactor = math.min(1.0, (shotDev - SNIPER_BIG_SNAP_DEGREES) / 90.0 + 1.0)
-		end
-
-		local aimFactor = 0.0
 		if bestAimError ~= nil then
-			aimFactor = math.max(0.0, 1.0 - (bestAimError / SNIPER_HEAD_MAX_ERROR_DEGREES))
+			aimFactor = aimErrorWeight(bestAimError)
 		else
 			-- No positional context: still allow detection but with weaker weight
 			aimFactor = 0.25
 		end
 
-		local alignFactor = math.max(0.0, 1.0 - (alignDev / SNIPER_RETURN_MAX_DEGREES))
+		local rawGain = 0.0
+		if pending.crit == true then
+			rawGain, lilacMaxDelta, lilacTotalDelta, lilacFlags = lilacAimbotHeuristics(id, shotOffset, pending.shotTick,
+				shotAngles, eyePos, sniperHeadPos, sniperBodyPos)
+		end
+		if alignDev1 ~= nil and dirMeaningful1 and dirFactor1 ~= nil then
+			if shotDev >= LILAC_RETURN_MIN_SNAP_DEGREES
+				and alignDev1 <= LILAC_RETURN_ALIGN_MAX_DEGREES
+				and dirFactor1 >= LILAC_RETURN_DIR_MIN
+			then
+				lilacFlags = lilacFlags | LILAC_FLAG_RETURN
+				rawGain = rawGain + LILAC_GAIN_RETURN
+			end
+		end
+		lilacGain = rawGain * (aimFactor ^ 2.0)
+		lilacGain = math.min(lilacGain, 4.0)
+
 		local dirWeight = dirFactor ^ 4.0
 
-		-- Baseline for huge flicks that land precisely, even if snap-back isn't immediate.
-		local baseline = 0.0
-		if shotDev >= SNIPER_BIG_SNAP_DEGREES and aimFactor > 0.5 then
-			baseline = (shotDev - SNIPER_BIG_SNAP_DEGREES) * (aimFactor ^ 2.0)
-		end
+		alignGain = (shotDev ^ 1.2) * (snap01 ^ 2.0) * (alignWeight ^ 4.0) * dirWeight * (aimFactor ^ 2.0) * 18.0
+		noAlignGain = (shotDev ^ 1.0) * (snap01 ^ 1.5) * (aimFactor ^ 2.0) * (dirSoft ^ 2.0) * (noAlignWeight ^ 2.0) *
+			1.25
+		noAlignGain = math.min(noAlignGain, 2.5)
 
-		-- Sniper: prioritize huge flicks that land precisely and snap back to predicted motion.
-		scoreGain = ((shotDev ^ 1.25) * (aimFactor ^ 2.0) * (alignFactor ^ 2.0) * dirWeight * (1.0 + bigSnapFactor) + baseline)
+		scoreGain = alignGain + noAlignGain + discontGain + lilacGain
 		scoreGain = math.min(scoreGain, 25.0)
 	else
-		-- Default: prior model
 		local dirWeight = dirFactor ^ 4.0
-		scoreGain = (shotDev ^ 1.5) * (align01 ^ 6.0) * dirWeight * 12.0 * sanityFactor
+		alignGain = (shotDev ^ 1.4) * (snap01 ^ 2.0) * (alignWeight ^ 4.0) * dirWeight * (aimFactor ^ 2.0) * 6.0 *
+			sanityFactor
+		noAlignGain = (shotDev ^ 1.1) * (snap01 ^ 1.5) * (aimFactor ^ 2.0) * (dirSoft ^ 2.0) * (noAlignWeight ^ 2.0) *
+			0.75 *
+			sanityFactor
+		noAlignGain = math.min(noAlignGain, 1.5)
+
+		local rawGain = 0.0
+		if (attackerClass == TF_CLASS_SPY) and (pending.crit == true) then
+			rawGain, lilacMaxDelta, lilacTotalDelta, lilacFlags = lilacAimbotHeuristics(id, shotOffset, pending.shotTick,
+				shotAngles, eyePos, headPos, bodyPos)
+		end
+		if alignDev1 ~= nil and dirMeaningful1 and dirFactor1 ~= nil then
+			if shotDev >= LILAC_RETURN_MIN_SNAP_DEGREES
+				and alignDev1 <= LILAC_RETURN_ALIGN_MAX_DEGREES
+				and dirFactor1 >= LILAC_RETURN_DIR_MIN
+			then
+				lilacFlags = lilacFlags | LILAC_FLAG_RETURN
+				rawGain = rawGain + LILAC_GAIN_RETURN
+			end
+		end
+		lilacGain = rawGain * (aimFactor ^ 2.0) * sanityFactor
+		lilacGain = math.min(lilacGain, 3.0)
+
+		scoreGain = alignGain + noAlignGain + discontGain + lilacGain
 		scoreGain = math.min(scoreGain, 15.0)
 	end
 
@@ -409,8 +827,12 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		if bestAimError ~= nil then
 			headErrText = string.format("%.1f°", bestAimError)
 		end
+		local align01 = alignWeight
+		local gainAlignText = string.format("%.1f", alignGain)
+		local gainNoAlignText = string.format("%.1f", noAlignGain)
+		local gainLilacText = string.format("%.1f", lilacGain)
 		print(string.format(
-			"[SilentAim] %s | Snap: %.1f° | AlignDev: %.1f° (t=%s) | Dir: %.2f | Align01: %.3f | AimErr: %s | Gain: %.1f",
+			"[SilentAim] %s | Snap: %.1f° | AlignDev: %.1f° (t=%s) | Dir: %.2f | Align01: %.3f | AimErr: %s | Gain: %.1f (A=%s N=%s D=%.1f L=%s)",
 			id,
 			shotDev,
 			alignDev,
@@ -418,8 +840,16 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			dirFactor,
 			align01,
 			headErrText,
-			scoreGain
+			scoreGain,
+			gainAlignText,
+			gainNoAlignText,
+			discontGain,
+			gainLilacText
 		))
+		if lilacFlags ~= 0 then
+			print(string.format("          | Lilac: flags=%d maxΔ=%.1f totalΔ=%.1f", lilacFlags, lilacMaxDelta,
+				lilacTotalDelta))
+		end
 		print(string.format(
 			"          | Pred: P%.1f Y%.1f | Actual: P%.1f Y%.1f",
 			predShotPitch,
@@ -432,6 +862,10 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	if scoreGain > 1.0 then
 		local reason = string.format("SilentAim Anomaly (%.1f° snap, %.1f° align, dir=%.2f)", shotDev, alignDev,
 			dirFactor)
+		if discontGain > alignGain and discontGain > noAlignGain then
+			local err = nonSniperBestAimError or 0
+			reason = string.format("View Discontinuity (%.1f° snap, aimerr=%.1f°)", shotDev, err)
+		end
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
 	end
 end
@@ -463,12 +897,22 @@ local function onDamageEvent(event)
 	end
 
 	-- 1. Check weaponid from event (authoritative for hitscan vs projectile)
+	local curTick = globals.TickCount()
+	local attackerClass = attackerPly:GetPropInt("m_iClass")
 	local weaponID = event:GetInt("weaponid")
 	local isHitscan = false
 	local projType = nil
 	local weaponClass = nil
 	local weaponSpread = nil
 	local weaponName = event.GetString and event:GetString("weapon") or nil
+
+	if attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
+		local lastTick = lastNonSniperTickByUserID[attackerUID] or -999999
+		if (curTick - lastTick) < NON_SNIPER_COOLDOWN_TICKS then
+			return
+		end
+		lastNonSniperTickByUserID[attackerUID] = curTick
+	end
 
 	-- Use weapon APIs if we can get the active weapon
 	local activeWeapon = attackerPly:GetPropEntity("m_hActiveWeapon")
@@ -600,7 +1044,6 @@ local function onDamageEvent(event)
 		pdata.lastSmallSnapDecay = 0
 	end
 
-	local curTick = globals.TickCount()
 	if pdata.shotPending and pdata.shotPending.shotTick < curTick then
 		local state = PlayerCache.GetByID(attackerID)
 		if state and state.wrap and attackerPly and attackerPly:IsValid() then
@@ -629,6 +1072,8 @@ local function onDamageEvent(event)
 			victimHealthAfter = event:GetInt("health"),
 			shooterEyePos = nil,
 			victimEyePos = nil,
+			victimHeadPos = nil,
+			victimBodyPos = nil,
 			victimOrigin = nil,
 		}
 
@@ -647,7 +1092,16 @@ local function onDamageEvent(event)
 			end
 		end
 
-		if Common.IsDebugEnabled() then
+		local vHead = getHitboxCenter(victimPly, 1)
+		if vHead then
+			pdata.shotPending.victimHeadPos = vHead
+		end
+		local vBody = getHitboxCenter(victimPly, 4)
+		if vBody then
+			pdata.shotPending.victimBodyPos = vBody
+		end
+
+		if Common.IsDebugEnabled() and (attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY) then
 			local now = globals.RealTime()
 			if canPrintRecorded(now) then
 				print(string.format(
@@ -693,6 +1147,10 @@ function SilentAim.ProcessPlayer(playerState)
 		pdata.lastSmallSnapDecay = 0
 	end
 
+	if not pdata.shotPending then
+		simulateSilentAimLocal(playerState, pdata)
+	end
+
 	local pending = pdata.shotPending
 	if not pending then
 		return
@@ -709,6 +1167,10 @@ function SilentAim.ProcessPlayer(playerState)
 end
 
 Events.Subscribe("OnPlayerDisconnect", function(id)
+	playerData[id] = nil
+end)
+
+Events.Subscribe("OnPlayerRemoved", function(id)
 	playerData[id] = nil
 end)
 

@@ -175,4 +175,8 @@ Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerStats[id] = nil
 end)
 
+Events.Subscribe("OnPlayerRemoved", function(id)
+	playerStats[id] = nil
+end)
+
 return WarpDT

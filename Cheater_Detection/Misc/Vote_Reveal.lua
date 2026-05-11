@@ -3,6 +3,7 @@
 --[[ Imports ]]
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
+local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 
 local VoteReveal = {}
 
@@ -268,7 +269,7 @@ local function countEligibleTeamVoters(team)
 	for i = 1, maxClients do
 		local info = client.GetPlayerInfo(i)
 		if info and not info.IsBot and not info.IsHLTV then
-			local player = entities.GetByIndex(i)
+			local player = TickEntityCache.GetPlayerByIndex(i)
 			if player and player.IsValid and player:IsValid() and player.GetTeamNumber then
 				if player:GetTeamNumber() == team then
 					eligible = eligible + 1

@@ -14,6 +14,8 @@ local Scheduler = {}
 function Scheduler.Tick()
     local currentTick = globals.TickCount()
 
+    PlayerCache.SyncTick()
+
     -- Periodic player state validation (cleanup orphaned players)
     PlayerCache.ValidateStates()
 

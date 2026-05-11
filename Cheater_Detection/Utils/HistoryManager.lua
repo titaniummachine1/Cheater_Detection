@@ -33,8 +33,29 @@ local ringHead = 0
 local ringCount = 0
 local ringCapacity = 0
 
+local function tryGetTFNonLocalEyeAngles(player)
+	if not player or not player.GetPropFloat then
+		return nil
+	end
+	local pitch = player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[0]")
+	local yaw = player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[1]")
+	if type(pitch) ~= "number" or type(yaw) ~= "number" then
+		return nil
+	end
+	return { pitch = pitch, yaw = yaw }
+end
+
 local FIELD_BUILDERS = {
 	[HistoryManager.Fields.Angles] = function(player)
+		local localPlayer = entities.GetLocalPlayer and entities.GetLocalPlayer() or nil
+		if localPlayer and localPlayer.IsValid and localPlayer:IsValid() then
+			if localPlayer.GetIndex and player.GetIndex and localPlayer:GetIndex() == player:GetIndex() then
+				local angNL = tryGetTFNonLocalEyeAngles(player)
+				if angNL then
+					return angNL
+				end
+			end
+		end
 		local ang = player.GetEyeAngles and player:GetEyeAngles()
 		if not ang then
 			return nil
@@ -288,6 +309,33 @@ function HistoryManager.GetActiveFields()
 		copy[field] = true
 	end
 	return copy
+end
+
+function HistoryManager.DebugSetPlayerFieldAt(bufferOffset, steamID, fieldName, value)
+	if not initialized then
+		return false
+	end
+	if bufferOffset == nil or bufferOffset < 0 then
+		return false
+	end
+	if not steamID or not fieldName then
+		return false
+	end
+	local id = tostring(steamID)
+	if not PlayerCache.GetByID(id) then
+		return false
+	end
+	local bucket = HistoryManager.GetBucketAt(bufferOffset)
+	if not bucket then
+		return false
+	end
+	local playerData = bucket[id]
+	if not playerData then
+		playerData = {}
+		bucket[id] = playerData
+	end
+	playerData[fieldName] = value
+	return true
 end
 
 return HistoryManager

@@ -73,4 +73,8 @@ Events.Subscribe("OnPlayerDisconnect", function(id)
 	tickCounters[id] = nil
 end)
 
+Events.Subscribe("OnPlayerRemoved", function(id)
+	tickCounters[id] = nil
+end)
+
 return DuckSpeed

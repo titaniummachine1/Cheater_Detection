@@ -15,6 +15,7 @@ local playerData = {}
 
 -- Constant override: some scripts use 2 ticks to bypass simple anticheats
 local MAX_GROUND_TICKS = 2
+local CHAIN_BREAK_SECONDS = 1.5
 
 function Bhop.ProcessPlayer(playerState)
 	if not playerState or not playerState.wrap or not playerState.id then
@@ -22,7 +23,30 @@ function Bhop.ProcessPlayer(playerState)
 	end
 
 	local entity = playerState.wrap:GetRawEntity()
-	if not entity or not entity:IsValid() or not entity:IsAlive() then
+	if not entity or not entity:IsValid() then
+		return
+	end
+
+	local id = playerState.id
+	local data = playerData[id]
+
+	if entity.IsDormant and entity:IsDormant() then
+		if data then
+			data.wasOnGround = false
+			data.groundTicks = 0
+			data.consecutivePerfects = 0
+			data.lastJumpTime = nil
+		end
+		return
+	end
+
+	if not entity:IsAlive() then
+		if data then
+			data.wasOnGround = false
+			data.groundTicks = 0
+			data.consecutivePerfects = 0
+			data.lastJumpTime = nil
+		end
 		return
 	end
 
@@ -31,15 +55,20 @@ function Bhop.ProcessPlayer(playerState)
 		return
 	end
 
-	local id = playerState.id
-	if not playerData[id] then
-		playerData[id] = {
+	if not data then
+		data = {
 			wasOnGround = false,
 			groundTicks = 0,
 			consecutivePerfects = 0,
+			lastJumpTime = nil,
 		}
+		playerData[id] = data
 	end
-	local data = playerData[id]
+
+	local now = globals.RealTime()
+	if data.lastJumpTime and (now - data.lastJumpTime) > CHAIN_BREAK_SECONDS then
+		data.consecutivePerfects = 0
+	end
 
 	local flags = entity:GetPropInt("m_fFlags")
 	local onGround = (flags & 1) ~= 0 -- FL_ONGROUND
@@ -50,6 +79,7 @@ function Bhop.ProcessPlayer(playerState)
 	else
 		-- Transitioned from ground to air (The moment of the jump)
 		if data.wasOnGround then
+			data.lastJumpTime = now
 			-- Check if it was a "perfect" jump window (0-2 ticks)
 			if data.groundTicks >= 0 and data.groundTicks <= MAX_GROUND_TICKS then
 				data.consecutivePerfects = data.consecutivePerfects + 1
@@ -67,7 +97,7 @@ function Bhop.ProcessPlayer(playerState)
 
 					if Common.IsDebugEnabled() then
 						print(string.format("[Bhop] %s perfect jump #%d (ground_ticks=%d) gain=%d", id,
-						data.consecutivePerfects, data.groundTicks, increment))
+							data.consecutivePerfects, data.groundTicks, increment))
 					end
 				end
 			else
@@ -83,6 +113,10 @@ end
 
 -- Cleanup
 Events.Subscribe("OnPlayerDisconnect", function(id)
+	playerData[id] = nil
+end)
+
+Events.Subscribe("OnPlayerRemoved", function(id)
 	playerData[id] = nil
 end)
 

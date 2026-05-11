@@ -63,7 +63,11 @@ local function DrawVisuals()
 
 		if showTag then
 			local padding = Vector3(0, 0, 7)
-			local headPos = (entity:GetAbsOrigin() + entity:GetPropVector("localdata", "m_vecViewOffset[0]")) + padding
+			local headPos = entity:GetEyePos()
+			if not headPos then
+				goto continue
+			end
+			headPos = headPos + padding
 			headPos = (gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0)
 					and headPos + Vector3(0, 0, 17)
 				or headPos

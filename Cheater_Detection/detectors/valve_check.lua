@@ -540,6 +540,12 @@ Events.Subscribe("OnPlayerDisconnect", function(id)
 	pendingBadgeProfileVerification[id] = nil
 end)
 
+Events.Subscribe("OnPlayerRemoved", function(id)
+	lastProfileCheck[id] = nil
+	deferredQueue[id] = nil
+	pendingBadgeProfileVerification[id] = nil
+end)
+
 Events.Subscribe("OnPlayerJoinTeam", function(id, _ent)
 	queueDeferredCheck(id)
 end)

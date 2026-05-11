@@ -24,6 +24,13 @@ local NotificationService = {}
 
 -- Global rate limiter (safety net against unexpected event bursts)
 local lastNotifyTimes = {} -- Array of timestamps for global frequency limiting
+local notifiedMaskByID = {}
+
+local NOTIFY_VALVE = 1
+local NOTIFY_CHEATER = 2
+local NOTIFY_VAC = 4
+local NOTIFY_COMM = 8
+local NOTIFY_SUS = 16
 
 -- Resolve which channels table to use for a given detection type
 local function ResolveChannels(cfg, isValve, isCheater)
@@ -76,7 +83,7 @@ local function OnStateChange(playerState, reason)
 		return
 	end
 
-	local id = playerState.id
+	local id = tostring(playerState.id)
 	local name = playerState.wrap:GetName()
 	local flags = playerState.flags
 	local score = playerState.score
@@ -111,6 +118,27 @@ local function OnStateChange(playerState, reason)
 			return
 		end
 	end
+
+	local cat = 0
+	if isValve then
+		cat = NOTIFY_VALVE
+	elseif isCheater then
+		cat = NOTIFY_CHEATER
+	elseif isVacBanned then
+		cat = NOTIFY_VAC
+	elseif isCommBanned then
+		cat = NOTIFY_COMM
+	elseif isSus then
+		cat = NOTIFY_SUS
+	end
+	if cat == 0 then
+		return
+	end
+	local prior = notifiedMaskByID[id] or 0
+	if (prior & cat) ~= 0 then
+		return
+	end
+	notifiedMaskByID[id] = prior | cat
 
 	table.insert(lastNotifyTimes, now)
 
@@ -177,6 +205,14 @@ end
 
 function NotificationService.Init()
 	Events.Subscribe("OnPlayerStateChange", OnStateChange)
+	Events.Register("FireGameEvent", "CD_Notify_Reset", function(event)
+		if event:GetName() ~= "game_newmap" then
+			return
+		end
+		for k in pairs(notifiedMaskByID) do
+			notifiedMaskByID[k] = nil
+		end
+	end, "game_newmap")
 end
 
 return NotificationService

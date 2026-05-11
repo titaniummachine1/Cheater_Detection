@@ -20,6 +20,7 @@ local WrappedPlayer   = require("Cheater_Detection.Utils.WrappedPlayer")
 local Common          = require("Cheater_Detection.Utils.Common")
 local Events          = require("Cheater_Detection.Core.Events")
 local G               = require("Cheater_Detection.Utils.Globals")
+local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 
 local PlayerCache     = {}
 
@@ -171,6 +172,74 @@ local function newCheckFlags()
 	}
 end
 
+local lastSyncTick = -1
+local seenTickByID = {}
+
+local function syncActivePlayersTick()
+	local curTick = globals.TickCount()
+	if curTick == lastSyncTick then
+		return
+	end
+	lastSyncTick = curTick
+
+	refreshLocal()
+
+	local liveEntities = entities.FindByClass("CTFPlayer") or {}
+	TickEntityCache.RefreshTick(curTick, liveEntities)
+	for i = 1, #liveEntities do
+		local ent = liveEntities[i]
+		if ent and ent:IsValid() then
+			local steamID = Common.GetSteamID64(ent)
+			if steamID then
+				local id = tostring(steamID)
+				seenTickByID[id] = curTick
+
+				local state = activeSet[id]
+				if not state then
+					local wrap = WrappedPlayer.FromEntity(ent, steamID)
+					if wrap then
+						local dbEntry   = G.DataBase[id]
+						local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
+						local initScore = dbEntry and dbEntry.Score or 0
+
+						activeSet[id] = {
+							id              = id,
+							wrap            = wrap,
+							flags           = initFlags,
+							score           = initScore,
+							externalChecked = false,
+							checkFlags      = newCheckFlags(),
+							isFriend        = Common.IsFriend and Common.IsFriend(ent, true) or false,
+							lastUpdate      = curTick,
+							lastScoreDecay  = globals.RealTime(),
+							autoPrioritySusApplied = false,
+						}
+						markDirty()
+						applyAutoPriority(activeSet[id], ent)
+					end
+				else
+					state.wrap = WrappedPlayer.FromEntity(ent, steamID) or state.wrap
+					state.lastUpdate = curTick
+				end
+			end
+		end
+	end
+
+	local removedAny = false
+	for id, state in pairs(activeSet) do
+		if seenTickByID[id] ~= curTick then
+			state.current = nil
+			Events.Publish("OnPlayerRemoved", id, "missing_from_findbyclass")
+			activeSet[id] = nil
+			removedAny = true
+		end
+	end
+
+	if removedAny then
+		markDirty()
+	end
+end
+
 ---Get or create active state for a player (CreateMove / detector path)
 ---@param ply Entity
 ---@return table|nil
@@ -254,8 +323,14 @@ end
 
 ---Remove a player from the active set (called on disconnect / heartbeat)
 ---@param id string
-function PlayerCache.Remove(id)
-	activeSet[id] = nil
+function PlayerCache.Remove(id, reason)
+	local key = tostring(id)
+	local state = activeSet[key]
+	if state then
+		state.current = nil
+	end
+	Events.Publish("OnPlayerRemoved", key, reason or "explicit_remove")
+	activeSet[key] = nil
 	markDirty()
 end
 
@@ -283,6 +358,10 @@ function PlayerCache.Cleanup()
 		activeSet[k] = nil
 	end
 	markDirty()
+end
+
+function PlayerCache.SyncTick()
+	syncActivePlayersTick()
 end
 
 -- ── View API (replaces FastPlayers) ──────────────────────────────────────────

@@ -9,6 +9,7 @@ local Logger = require("Cheater_Detection.Utils.Logger")
 local VoteReveal = require("Cheater_Detection.Misc.Vote_Reveal")
 local Database = require("Cheater_Detection.Database.Database")
 local Constants = require("Cheater_Detection.Core.constants")
+local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 
 local LOG_CATEGORY = "AutoVote"
 
@@ -208,7 +209,7 @@ local function recordScorePenalties()
 
 		-- Check if target is us or our friend
 		if activeVote.targetIdx then
-			local targetEntity = entities.GetByIndex(activeVote.targetIdx)
+			local targetEntity = TickEntityCache.GetPlayerByIndex(activeVote.targetIdx)
 			if targetEntity and targetEntity:IsValid() then
 				local targetSteamID = Common.GetSteamID64(targetEntity)
 				if targetSteamID == localSteamID or isFriendEntity(targetEntity) then
@@ -256,7 +257,7 @@ local function recordVoteYesAgainstUsKarma()
 		return
 	end
 
-	local targetEntity = entities.GetByIndex(activeVote.targetIdx)
+	local targetEntity = TickEntityCache.GetPlayerByIndex(activeVote.targetIdx)
 	if not targetEntity or not targetEntity:IsValid() then
 		return
 	end
@@ -583,13 +584,13 @@ local function handleVoteStart(msg)
 	local localIndex = localPlayer and localPlayer:GetIndex() or -1
 	local localSteamID = localPlayer and localPlayer:GetSteamID64()
 
-	local voteTargetEntity = entities.GetByIndex(targetIdx)
+	local voteTargetEntity = TickEntityCache.GetPlayerByIndex(targetIdx)
 	if voteTargetEntity and voteTargetEntity:IsValid() and callerIdx ~= localIndex then
 		local voteTargetSteamID = Common.GetSteamID64(voteTargetEntity)
 		-- Is this a vote against US?
 		if voteTargetSteamID == localSteamID then
 			-- Get caller info and add to retaliation group
-			local callerEntity = entities.GetByIndex(callerIdx)
+			local callerEntity = TickEntityCache.GetPlayerByIndex(callerIdx)
 			if callerEntity and callerEntity:IsValid() then
 				local callerSteamID = Common.GetSteamID64(callerEntity)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
@@ -597,7 +598,7 @@ local function handleVoteStart(msg)
 			end
 			-- Is this a vote against our FRIEND?
 		elseif isFriendEntity(voteTargetEntity) then
-			local callerEntity = entities.GetByIndex(callerIdx)
+			local callerEntity = TickEntityCache.GetPlayerByIndex(callerIdx)
 			if callerEntity and callerEntity:IsValid() then
 				local callerSteamID = Common.GetSteamID64(callerEntity)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
@@ -614,7 +615,7 @@ local function handleVoteStart(msg)
 
 		-- Check if we're the caller AND it matches our target
 		if callerIdx == localIndex then
-			local targetEntity = entities.GetByIndex(targetIdx)
+			local targetEntity = TickEntityCache.GetPlayerByIndex(targetIdx)
 			if targetEntity and targetEntity:IsValid() then
 				local targetSteamID = Common.GetSteamID64(targetEntity)
 				if targetSteamID == State.currentTarget.steamID then
@@ -635,7 +636,7 @@ local function handleVoteStart(msg)
 		return
 	end
 
-	local targetEntity = entities.GetByIndex(targetIdx)
+	local targetEntity = TickEntityCache.GetPlayerByIndex(targetIdx)
 	logDebug(
 		string.format(
 			"VoteStart: voteIdx=%d, team=%d, callerIdx=%d, targetIdx=%d, disp=%s",
