@@ -247,34 +247,31 @@ local function OnCreateMove(cmd)
 	end
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 
-	-- Scan currently encountered players
-	TickProfiler.BeginSection("PlayerScan_Find")
-	local players = entities.FindByClass("CTFPlayer")
-	TickProfiler.EndSection("PlayerScan_Find")
+	-- Sync authoritative live-player list and tick entity cache once per tick
+	TickProfiler.BeginSection("PlayerCache_Sync")
+	PlayerCache.SyncTick()
+	TickProfiler.EndSection("PlayerCache_Sync")
+
 	local isDebug = isDebugEnabled()
+	local localID = tostring(Common.GetSteamID64(localPlayer))
+	local stateTable = PlayerCache.GetActiveTable()
 
 	TickProfiler.BeginSection("PlayerScan_Loop")
-	for i = 1, #players do
-		local ply = players[i]
-		-- Sanity check: validate entity before using
+	for id, existingState in pairs(stateTable) do
+		local wrap = existingState and existingState.wrap or nil
+		local ply = wrap and wrap:GetRawEntity() or nil
 		if not ply or not ply:IsValid() then
 			goto continue
 		end
 
 		if ply:IsDormant() then
-			local sid = Common.GetSteamID64(ply)
-			if sid then
-				local id = tostring(sid)
-				local state = PlayerCache.GetByID(id)
-				if state and not state.wasDormant then
-					HistoryManager.ClearPlayer(id)
-					state.wasDormant = true
-				end
+			if historyEnabled and not existingState.wasDormant then
+				HistoryManager.ClearPlayer(id)
+				existingState.wasDormant = true
 			end
 			goto continue
 		end
 
-		local isLocalPlayer = (ply == localPlayer)
 		local pState = PlayerCache.Get(ply)
 		if not pState then
 			goto continue
@@ -285,7 +282,7 @@ local function OnCreateMove(cmd)
 		-- In normal mode: exclude local player's friends and party members.
 		-- In debug mode: process everyone including self and friends.
 		if not isDebug then
-			if isLocalPlayer then
+			if id == localID then
 				goto continue
 			end
 			if pState.isFriend then

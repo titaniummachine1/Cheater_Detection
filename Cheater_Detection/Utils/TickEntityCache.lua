@@ -9,27 +9,6 @@ local function clearMap(map)
 	end
 end
 
-local function refreshFromFindByClass()
-	local curTick = globals.TickCount()
-	if curTick == lastTick then
-		return
-	end
-	lastTick = curTick
-
-	clearMap(playerIndexPresent)
-
-	local players = entities.FindByClass("CTFPlayer") or {}
-	for i = 1, #players do
-		local ent = players[i]
-		if ent and ent:IsValid() then
-			local idx = ent:GetIndex()
-			if idx then
-				playerIndexPresent[idx] = true
-			end
-		end
-	end
-end
-
 function TickEntityCache.RefreshTick(curTick, playerEntities)
 	if type(curTick) ~= "number" then
 		return
@@ -60,7 +39,9 @@ function TickEntityCache.GetPlayerByIndex(index)
 	if type(index) ~= "number" then
 		return nil
 	end
-	refreshFromFindByClass()
+	if globals.TickCount() ~= lastTick then
+		return nil
+	end
 	if playerIndexPresent[index] ~= true then
 		return nil
 	end
