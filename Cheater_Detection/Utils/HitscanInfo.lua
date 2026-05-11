@@ -10,6 +10,10 @@ HitscanInfo.FIREMODE = {
 
 local strFind = string.find
 
+local TF_WEAPON_SENTRY_BULLET = 54
+local TF_WEAPON_SENTRY_ROCKET = 55
+local TF_WEAPON_DISPENSER_GUN = 68
+
 local PROJECTILE_SUBSTR = {
 	"rocketlauncher",
 	"grenadelauncher",
@@ -71,7 +75,7 @@ function HitscanInfo.Classify(attackerPly, weaponName, weaponID)
 	local weaponClass = nil
 	local weaponSpread = nil
 
-	if weaponID == 54 or weaponID == 55 or weaponID == 68 then
+	if weaponID == TF_WEAPON_SENTRY_BULLET or weaponID == TF_WEAPON_SENTRY_ROCKET or weaponID == TF_WEAPON_DISPENSER_GUN then
 		return false, nil, nil, nil, mode
 	end
 
