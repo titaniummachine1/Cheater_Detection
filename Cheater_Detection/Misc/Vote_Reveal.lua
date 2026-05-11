@@ -38,6 +38,11 @@ local font_title = draw.CreateFont("Verdana", 14, 700, FONTFLAG_OUTLINE)
 local font_body = draw.CreateFont("Verdana", 12, 400, FONTFLAG_OUTLINE)
 local font_small = draw.CreateFont("Tahoma", 11, 400, FONTFLAG_OUTLINE)
 
+local FLOOR = math.floor
+local INSERT = table.insert
+local DRAW_SETFONT = draw.SetFont
+local DRAW_GETTEXTSIZE = draw.GetTextSize
+
 --[[ Helper Functions ]]
 
 local function getConfig()
@@ -99,8 +104,8 @@ local function getPlayerScore(playerIdx)
 end
 
 local function truncateText(text, maxWidth, font)
-	draw.SetFont(font)
-	local width = draw.GetTextSize(text)
+	DRAW_SETFONT(font)
+	local width = DRAW_GETTEXTSIZE(text)
 	if width <= maxWidth then
 		return text
 	end
@@ -108,9 +113,9 @@ local function truncateText(text, maxWidth, font)
 	-- Binary search for the right length
 	local left, right = 1, #text
 	while left < right do
-		local mid = math.floor((left + right + 1) / 2)
+		local mid = FLOOR((left + right + 1) / 2)
 		local sub = text:sub(1, mid) .. "..."
-		local w = draw.GetTextSize(sub)
+		local w = DRAW_GETTEXTSIZE(sub)
 		if w <= maxWidth then
 			left = mid
 		else
@@ -180,7 +185,7 @@ local function castVote(voteOption, team, playerIdx, voteidx)
 	local teamName = getTeamName(team)
 
 	-- Add to vote list
-	table.insert(activeVote.votes[option], {
+	INSERT(activeVote.votes[option], {
 		name = playerName,
 		team = team,
 		teamName = teamName,

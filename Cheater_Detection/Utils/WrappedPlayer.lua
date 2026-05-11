@@ -10,6 +10,10 @@ local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 ---@class WrappedPlayer
 local WrappedPlayer = {}
 
+local TICKCOUNT = globals.TickCount
+local Vec3 = Vector3
+local BONE_MASK_HITBOX = 0x7ff00
+
 local WrapperPool = {}
 local function getEntityByIndex(index)
 	return TickEntityCache.GetPlayerByIndex(index)
@@ -19,7 +23,7 @@ local function hydrateWrapper(wrapped, entity, cachedSteamID)
 	local currentIndex = entity:GetIndex()
 
 	wrapped._cachedIndex = currentIndex
-	wrapped._lastSeenTick = globals.TickCount()
+	wrapped._lastSeenTick = TICKCOUNT()
 
 	-- Initialize persistent cache tables if missing
 	if not wrapped._cache then
@@ -166,7 +170,7 @@ function WrappedPlayer:GetHitboxPos(hitboxIndex)
 		return nil
 	end
 	-- SetupBones is the preferred API (GetHitboxes is deprecated)
-	local bones = ent:SetupBones()
+	local bones = ent:SetupBones(BONE_MASK_HITBOX, globals.CurTime())
 	if not bones then
 		return nil
 	end
@@ -177,7 +181,7 @@ function WrappedPlayer:GetHitboxPos(hitboxIndex)
 	if not matrix then
 		return nil
 	end
-	return _Vector3(matrix[1][4], matrix[2][4], matrix[3][4])
+	return Vec3(matrix[1][4], matrix[2][4], matrix[3][4])
 end
 
 function WrappedPlayer:GetPropInt(...)
@@ -306,7 +310,7 @@ function WrappedPlayer:IsAlive()
 end
 
 function WrappedPlayer:IsDormant()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "isDormant", curTick)
 	if ok then
 		return v == true
@@ -333,7 +337,7 @@ end
 --- Returns the view offset from the player's origin as a Vector3
 ---@return Vector3|nil The player's view offset
 function WrappedPlayer:GetViewOffset()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "viewOffset", curTick)
 	if ok then
 		return v
@@ -350,7 +354,7 @@ end
 --- Returns the player's eye position in world coordinates
 ---@return Vector3|nil The player's eye position
 function WrappedPlayer:GetEyePos()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "eyePos", curTick)
 	if ok then
 		return v
@@ -368,7 +372,7 @@ end
 --- Returns the player's eye angles as an EulerAngles object
 ---@return EulerAngles|nil The player's eye angles
 function WrappedPlayer:GetEyeAngles()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "eyeAngles", curTick)
 	if ok then
 		return v
@@ -395,7 +399,7 @@ function WrappedPlayer:GetEyeAngles()
 end
 
 function WrappedPlayer:GetAbsOrigin()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "absOrigin", curTick)
 	if ok then
 		return v
@@ -407,7 +411,7 @@ function WrappedPlayer:GetAbsOrigin()
 end
 
 function WrappedPlayer:GetVelocity()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "velocity", curTick)
 	if ok then
 		return v
@@ -421,7 +425,7 @@ end
 --- Returns the world position the player is looking at by tracing a ray
 ---@return Vector3|nil The look position or nil if trace failed
 function WrappedPlayer:GetLookPos()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "lookPos", curTick)
 	if ok then
 		return v
@@ -448,7 +452,7 @@ function WrappedPlayer:GetActiveWeapon()
 end
 
 function WrappedPlayer:GetActiveWeaponID()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "weaponID", curTick)
 	if ok then
 		return v
@@ -463,7 +467,7 @@ function WrappedPlayer:GetActiveWeaponID()
 end
 
 function WrappedPlayer:GetWeaponChargeData()
-	local curTick = globals.TickCount()
+	local curTick = TICKCOUNT()
 	local v, ok = cacheGet(self, "weaponCharge", curTick)
 	if ok then
 		return v
@@ -541,7 +545,7 @@ function WrappedPlayer:SetPriority(level)
 end
 
 function WrappedPlayer.PruneInactive(currentTick)
-	currentTick = currentTick or globals.TickCount()
+	currentTick = currentTick or TICKCOUNT()
 	-- Allow 1 tick grace period so we don't wipe the pool before updating it
 	local threshold = currentTick - 1
 	for index, wrapped in pairs(WrapperPool) do

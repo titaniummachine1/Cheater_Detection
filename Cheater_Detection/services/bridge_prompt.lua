@@ -8,6 +8,15 @@ local PROMPT_LINE_1 = "To avoid in-game lag during database updates,"
 local PROMPT_LINE_2 = "please run 'StartLocalBridge.bat' in your project folder."
 local PROMPT_LINE_3 = "Click anywhere to dismiss this reminder."
 
+local REALTIME = globals.RealTime
+local FLOOR = math.floor
+local DRAW_GETSCREENSIZE = draw.GetScreenSize
+local DRAW_GETTEXTSIZE = draw.GetTextSize
+local DRAW_COLOR = draw.Color
+local DRAW_FILLEDRECT = draw.FilledRect
+local DRAW_OUTLINEDRECT = draw.OutlinedRect
+local DRAW_TEXTSHADOW = draw.TextShadow
+
 local expiresAt = 0.0
 local dismissed = false
 
@@ -28,11 +37,11 @@ local cachedMeasurements = {
 }
 
 local function UpdateMeasurements(now)
-    local screenWidth, screenHeight = draw.GetScreenSize()
-    local titleWidth, titleHeight = draw.GetTextSize(PROMPT_TITLE)
-    local line1Width, line1Height = draw.GetTextSize(PROMPT_LINE_1)
-    local line2Width, line2Height = draw.GetTextSize(PROMPT_LINE_2)
-    local line3Width, line3Height = draw.GetTextSize(PROMPT_LINE_3)
+    local screenWidth, screenHeight = DRAW_GETSCREENSIZE()
+    local titleWidth, titleHeight = DRAW_GETTEXTSIZE(PROMPT_TITLE)
+    local line1Width, line1Height = DRAW_GETTEXTSIZE(PROMPT_LINE_1)
+    local line2Width, line2Height = DRAW_GETTEXTSIZE(PROMPT_LINE_2)
+    local line3Width, line3Height = DRAW_GETTEXTSIZE(PROMPT_LINE_3)
 
     local contentWidth = titleWidth
     if line1Width > contentWidth then contentWidth = line1Width end
@@ -61,14 +70,7 @@ local function UpdateMeasurements(now)
 end
 
 local function Now()
-    local globalsTable = globals
-    if globalsTable and type(globalsTable.RealTime) == "function" then
-        local ok, value = pcall(globalsTable.RealTime)
-        if ok and type(value) == "number" then
-            return value
-        end
-    end
-    return os.clock()
+    return REALTIME()
 end
 
 function BridgePrompt.Init()
@@ -109,31 +111,31 @@ function BridgePrompt.Draw()
 
     local padding = 12
     local lineGap = 4
-    local x1 = math.floor((screenWidth - boxWidth) * 0.5)
-    local y1 = math.floor(screenHeight * 0.12)
+    local x1 = FLOOR((screenWidth - boxWidth) * 0.5)
+    local y1 = FLOOR(screenHeight * 0.12)
     local x2 = x1 + boxWidth
     local y2 = y1 + boxHeight
     local textX = x1 + padding
     local textY = y1 + padding + 4
 
-    draw.Color(20, 22, 28, 225)
-    draw.FilledRect(x1, y1, x2, y2)
-    draw.Color(255, 170, 70, 255)
-    draw.FilledRect(x1, y1, x2, y1 + 4)
-    draw.Color(255, 210, 150, 255)
-    draw.OutlinedRect(x1, y1, x2, y2)
+    DRAW_COLOR(20, 22, 28, 225)
+    DRAW_FILLEDRECT(x1, y1, x2, y2)
+    DRAW_COLOR(255, 170, 70, 255)
+    DRAW_FILLEDRECT(x1, y1, x2, y1 + 4)
+    DRAW_COLOR(255, 210, 150, 255)
+    DRAW_OUTLINEDRECT(x1, y1, x2, y2)
 
-    draw.Color(255, 240, 210, 255)
-    draw.TextShadow(textX, textY, PROMPT_TITLE)
+    DRAW_COLOR(255, 240, 210, 255)
+    DRAW_TEXTSHADOW(textX, textY, PROMPT_TITLE)
     textY = textY + titleHeight + lineGap
 
-    draw.Color(235, 235, 235, 255)
-    draw.TextShadow(textX, textY, PROMPT_LINE_1)
+    DRAW_COLOR(235, 235, 235, 255)
+    DRAW_TEXTSHADOW(textX, textY, PROMPT_LINE_1)
     textY = textY + line1Height + lineGap
-    draw.TextShadow(textX, textY, PROMPT_LINE_2)
+    DRAW_TEXTSHADOW(textX, textY, PROMPT_LINE_2)
     textY = textY + line2Height + lineGap
-    draw.Color(255, 205, 125, 255)
-    draw.TextShadow(textX, textY, PROMPT_LINE_3)
+    DRAW_COLOR(255, 205, 125, 255)
+    DRAW_TEXTSHADOW(textX, textY, PROMPT_LINE_3)
 end
 
 return BridgePrompt

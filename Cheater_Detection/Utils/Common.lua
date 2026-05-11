@@ -410,11 +410,7 @@ end
 
 -- Vector normalization with safety check
 function Common.normalize(vec)
-	local len = vectorLength(vec)
-	if type(len) ~= "number" or len < 0.0001 then
-		return Vector3(0, 0, 0)
-	end
-	return vectorDivide(vec, len)
+	return vectorDivide(vec, vectorLength(vec))
 end
 
 -- Dot product wrapper

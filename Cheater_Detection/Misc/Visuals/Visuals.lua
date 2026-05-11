@@ -9,6 +9,17 @@ local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Visuals = {}
 
 local tahoma_bold = draw.CreateFont("Tahoma", 12, 800, FONTFLAG_OUTLINE)
+local Vec3 = Vector3
+local FLOOR = math.floor
+local ABS = math.abs
+local WORLD2SCREEN = client.WorldToScreen
+local DRAW_COLOR = draw.Color
+local DRAW_SETFONT = draw.SetFont
+local DRAW_GETTEXTSIZE = draw.GetTextSize
+local DRAW_TEXT = draw.Text
+
+local PAD7 = Vec3(0, 0, 7)
+local PAD17 = Vec3(0, 0, 17)
 
 --[[ Functions ]]
 local function DrawVisuals()
@@ -25,8 +36,8 @@ local function DrawVisuals()
 		return
 	end
 
-	draw.Color(255, 255, 255, 255)
-	draw.SetFont(tahoma_bold)
+	DRAW_COLOR(255, 255, 255, 255)
+	DRAW_SETFONT(tahoma_bold)
 
 	local players = PlayerCache.GetAll()
 	for _, entity in ipairs(players) do
@@ -50,40 +61,48 @@ local function DrawVisuals()
 
 		-- Determine if we should show a tag and what type
 		local showTag = isCheater or isSuspicious
-		local tagText, tagColor
+		local tagText = nil
+		local tr = 255
+		local tg = 255
+		local tb = 255
+		local ta = 255
 		if isCheater then
 			tagText = "CHEATER"
-			tagColor = { 255, 0, 0, 255 }
+			tr = 255
+			tg = 0
+			tb = 0
 		elseif isSuspicious then
 			tagText = "SUSPICIOUS"
-			tagColor = { 255, 255, 0, 255 }
+			tr = 255
+			tg = 255
+			tb = 0
 		else
 			goto continue
 		end
 
 		if showTag then
-			local padding = Vector3(0, 0, 7)
 			local headPos = entity:GetEyePos()
 			if not headPos then
 				goto continue
 			end
-			headPos = headPos + padding
+			headPos = headPos + PAD7
 			headPos = (gui.GetValue("CLASS") == "icon" and gui.GetValue("AIM RESOLVER") == 0)
-					and headPos + Vector3(0, 0, 17)
+					and headPos + PAD17
 				or headPos
-			local feetPos = entity:GetAbsOrigin() - padding
-			local headScreenPos, feetScreenPos = client.WorldToScreen(headPos), client.WorldToScreen(feetPos)
+			local feetPos = entity:GetAbsOrigin() - PAD7
+			local headScreenPos, feetScreenPos = WORLD2SCREEN(headPos), WORLD2SCREEN(feetPos)
 
 			if headScreenPos and feetScreenPos then
-				local height = math.abs(headScreenPos[2] - feetScreenPos[2])
+				local height = ABS(headScreenPos[2] - feetScreenPos[2])
 				local width = height * 0.6
-				local x, y = math.floor(headScreenPos[1] - width * 0.5), math.floor(headScreenPos[2])
-				local w, h = math.floor(width), math.floor(height)
+				local x = FLOOR(headScreenPos[1] - width * 0.5)
+				local y = FLOOR(headScreenPos[2])
+				local w = FLOOR(width)
 
-				draw.Color(table.unpack(tagColor))
-				local tagWidth, tagHeight = draw.GetTextSize(tagText)
+				DRAW_COLOR(tr, tg, tb, ta)
+				local tagWidth = DRAW_GETTEXTSIZE(tagText)
 				y = (gui.GetValue("AIM RESOLVER") == 1) and y - 20 or y
-				draw.Text(math.floor(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
+				DRAW_TEXT(FLOOR(x + w / 2 - (tagWidth / 2)), y - 30, tagText)
 			end
 		end
 

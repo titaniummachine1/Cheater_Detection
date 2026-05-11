@@ -11,14 +11,17 @@ local Visuals = {}
 
 local fontTag = draw.CreateFont("Tahoma", 12, 800, 0x200)
 local LINE_HEIGHT = 14 -- Pixels between stacked tag lines
-
--- Safety: Polyfills for Lmaobox types if globals are missing
-local _Vector3 = Vector3 or function(x, y, z)
-	return { x = x, y = y, z = z }
-end
+local Vec3 = Vector3
+local FLOOR = math.floor
+local WORLD2SCREEN = client.WorldToScreen
+local DRAW_COLOR = draw.Color
+local DRAW_SETFONT = draw.SetFont
+local DRAW_GETTEXTSIZE = draw.GetTextSize
+local DRAW_TEXT = draw.Text
+local DRAW_TEXTSHADOW = draw.TextShadow
 
 local function WorldToScreen(pos)
-	local screenPos = client.WorldToScreen(pos)
+	local screenPos = WORLD2SCREEN(pos)
 	if screenPos then
 		return screenPos[1], screenPos[2]
 	end
@@ -97,27 +100,26 @@ function Visuals.DrawTags()
 
 				local headPos = wrap:GetEyePos()
 				if headPos then
-					headPos = headPos + _Vector3(0, 0, 15)
+					headPos = headPos + Vec3(0, 0, 15)
 				else
 					local absOrigin = ent:GetAbsOrigin()
 					if not absOrigin then
 						goto continue
 					end
-					headPos = absOrigin + _Vector3(0, 0, 72)
+					headPos = absOrigin + Vec3(0, 0, 72)
 				end
 				local x, y = WorldToScreen(headPos)
 
 				if x and y then
-					draw.SetFont(fontTag)
-					-- Draw tags top-down, each offset upward from the previous
+					DRAW_SETFONT(fontTag)
 					local totalHeight = (#tagList - 1) * LINE_HEIGHT
-					local startY = math.floor(y - totalHeight)
+					local startY = FLOOR(y - totalHeight)
 
 					for j = 1, #tagList do
 						local tag = tagList[j]
-						draw.Color(tag.r, tag.g, tag.b, 255)
-						local tw, th = draw.GetTextSize(tag.text)
-						draw.Text(math.floor(x - tw / 2), startY - th + (j - 1) * LINE_HEIGHT, tag.text)
+						DRAW_COLOR(tag.r, tag.g, tag.b, 255)
+						local tw, th = DRAW_GETTEXTSIZE(tag.text)
+						DRAW_TEXT(FLOOR(x - tw / 2), startY - th + (j - 1) * LINE_HEIGHT, tag.text)
 					end
 				end
 			end
