@@ -11,8 +11,14 @@ local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local Scheduler = {}
 
+local lastTick = -1
+
 function Scheduler.Tick()
     local currentTick = globals.TickCount()
+    if currentTick == lastTick then
+        return
+    end
+    lastTick = currentTick
 
     PlayerCache.SyncTick()
 

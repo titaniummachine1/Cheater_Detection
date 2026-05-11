@@ -47,6 +47,7 @@ local hasSearchedGroup = false
 local valveDisconnectTriggered = false
 local wasInServer = false
 local cleanedFriendIDs = {}
+local lastProfilerEnabled = nil
 
 local function isValveAutoDisconnectEnabled()
 	local menu = G.Menu
@@ -354,7 +355,11 @@ local function OnCreateMove(cmd)
 end
 
 local function OnDraw()
-	TickProfiler.SetEnabled(G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true)
+	local enabled = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
+	if lastProfilerEnabled ~= enabled then
+		lastProfilerEnabled = enabled
+		TickProfiler.SetEnabled(enabled)
+	end
 	Scheduler.Tick()
 	Visuals.DrawTags()
 	BridgePrompt.Draw()
