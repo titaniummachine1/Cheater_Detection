@@ -52,7 +52,8 @@ local function UpdateTaggedCache()
 			local isCheater = Evidence.IsMarkedCheater(id)
 			local evidenceScore = Evidence.GetScore(id)
 			local threshold = G.Menu and G.Menu.Advanced and G.Menu.Advanced.Evidence_Tolerance or 100
-			local isSuspicious = evidenceScore and evidenceScore >= math.floor(threshold / 2)
+			local halfThreshold = math.floor(threshold / 2)
+			local isSuspicious = evidenceScore and evidenceScore >= halfThreshold
 			
 			if isCheater or isSuspicious then
 				taggedPlayersCache[id] = {
@@ -85,7 +86,9 @@ local function DrawVisuals()
 		return
 	end
 
-	if engine.Con_IsVisible() or engine.IsGameUIVisible() then
+	local conVisible = engine.Con_IsVisible()
+	local gameUIVisible = engine.IsGameUIVisible()
+	if conVisible or gameUIVisible then
 		TickProfiler.EndSection("Draw_Visuals")
 		return
 	end

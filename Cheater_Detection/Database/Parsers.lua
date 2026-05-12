@@ -63,12 +63,8 @@ function Parsers.GetStatsSummary()
 		-- Check if source has any updates to report
 		local updatesInfo = ""
 		if stats.updated and stats.updated > 0 then
-			local breakdown = string.format(
-				" (name=%d/reason=%d/static=%d)",
-				stats.updName or 0,
-				stats.updReason or 0,
-				stats.updStatic or 0
-			)
+			local breakdown = string.format(" (name=%d/reason=%d/static=%d)",
+				stats.updName or 0, stats.updReason or 0, stats.updStatic or 0)
 			updatesInfo = string.format(", Updated: %d%s", stats.updated, breakdown)
 		end
 
@@ -229,23 +225,23 @@ end
 
 -- Robust SteamID conversion function (moved from Fetcher)
 -- Handles SteamID64, SteamID3 ([U:1:xxxx]), SteamID2 (STEAM_0:x:xxxx)
-function Parsers.GetSteamID64(input)
-	if not input then
+function Parsers.GetSteamID64(sid)
+	if not sid then
 		return nil
 	end
 
-	if steamIDCache[input] then
-		return steamIDCache[input]
+	if steamIDCache[sid] then
+		return steamIDCache[sid]
 	end
 
 	-- Optimization: Check if it's already a standard SteamID64 string (starts with 765, length ~17)
-	local id_str = tostring(input):match("^%s*(765%d+)")
+	local id_str = tostring(sid):match("^%s*(765%d+)")
 	if id_str and #id_str >= 17 then
 		return id_str
 	end
 
 	-- Trim and handle standard SteamID formats
-	id_str = tostring(input):match("^%s*(.-)%s*$")
+	id_str = tostring(sid):match("^%s*(.-)%s*$")
 	if not id_str or id_str == "" then
 		return nil
 	end
@@ -256,7 +252,7 @@ function Parsers.GetSteamID64(input)
 		accountID = tonumber(accountID)
 		if accountID then
 			local result = tostring(76561197960265728 + accountID)
-			steamIDCache[input] = result
+			steamIDCache[sid] = result
 			return result
 		end
 	end
@@ -267,7 +263,7 @@ function Parsers.GetSteamID64(input)
 		if success and result then
 			local result_str = tostring(result):match("(765%d+)")
 			if result_str and #result_str >= 17 then
-				steamIDCache[input] = result_str
+				steamIDCache[sid] = result_str
 				return result_str
 			end
 		end

@@ -276,7 +276,7 @@ function Fetcher.Tick()
 			local validFiles = {}
 			for _, f in ipairs(allFiles) do
 				if f:match("%.json$") or f:match("%.cfg$") or f:match("%.lua$") or f:match("%.txt$") then
-					table.insert(validFiles, f)
+					pcall(function() table.insert(validFiles, f) end)
 				end
 			end
 			state.localFiles = validFiles
@@ -427,7 +427,8 @@ function Fetcher.Tick()
 		local count = 0
 		-- When the local player is dead there is no active gameplay, so we can
 		-- process the entire list without worrying about frame-time spikes.
-		local chunkSize = ShouldRelaxFrameLimits() and math.huge or 20
+		local relaxedChunkSize = math.huge
+		local chunkSize = ShouldRelaxFrameLimits() and relaxedChunkSize or 20
 
 		local isDirtyBefore = Database.State.isDirty
 		local source = state.activeSource

@@ -17,6 +17,7 @@ require("Cheater_Detection.Utils.Commands")
 require("Cheater_Detection.Misc.ChatPrefix")
 require("Cheater_Detection.Misc.Vote_Reveal")
 require("Cheater_Detection.Misc.Auto_Vote")
+require("Cheater_Detection.Misc.SniperDotAngle")
 require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
@@ -189,7 +190,9 @@ end
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
 	TickProfiler.BeginSection("CreateMove_Total")
-	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
+	local isGameUI = engine.IsGameUIVisible()
+	local isConVisible = engine.Con_IsVisible()
+	if isGameUI or isConVisible then
 		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
@@ -232,7 +235,7 @@ local function OnCreateMove(cmd)
 	local enableAntiAim = adv and adv.AntiAim == true
 	local enableDuckSpeed = adv and adv.DuckSpeed == true
 	local enableBhop = adv and adv.Bhop == true
-	local enableWarp = adv and adv.Warp == true
+	local enableWarpDT = adv and adv["Warp"] == true
 	local enableChoke = adv and adv.Choke == true
 	local enableCosmetics = adv and adv.Cosmetics == true
 
@@ -242,7 +245,7 @@ local function OnCreateMove(cmd)
 		or enableAntiAim
 		or enableDuckSpeed
 		or enableBhop
-		or enableWarp
+		or enableWarpDT
 		or enableChoke
 		or enableCosmetics
 	if not anyDetectorsEnabled and not tagsEnabled then
@@ -250,7 +253,7 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	local historyEnabled = enableSilent or enableWarp or enableChoke
+	local historyEnabled = enableSilent or enableWarpDT or enableChoke
 	if historyEnabled then
 		TickProfiler.BeginSection("History_NewTick")
 		HistoryManager.NewTick()
@@ -341,7 +344,7 @@ local function OnCreateMove(cmd)
 		if enableBhop then
 			Bhop.ProcessPlayer(pState, cmd)
 		end
-		if enableWarp then
+		if enableWarpDT then
 			WarpDT.ProcessPlayer(pState, cmd)
 		end
 		if enableChoke then
@@ -432,15 +435,14 @@ local function OnUnload()
 	-- Database has its own DatabaseAutoSaveOnUnload listener that handles the full DB save.
 end
 
--- Re-register
+-- Register callbacks
 callbacks.Unregister("CreateMove", "CD_CreateMove")
-callbacks.Unregister("FireGameEvent", "CD_Events")
-callbacks.Unregister("Draw", "CD_Draw")
-callbacks.Unregister("Unload", "CD_Unload")
-
 callbacks.Register("CreateMove", "CD_CreateMove", OnCreateMove)
+callbacks.Unregister("FireGameEvent", "CD_Events")
 callbacks.Register("FireGameEvent", "CD_Events", OnFireGameEvent)
+callbacks.Unregister("Draw", "CD_Draw")
 callbacks.Register("Draw", "CD_Draw", OnDraw)
+callbacks.Unregister("Unload", "CD_Unload")
 callbacks.Register("Unload", "CD_Unload", OnUnload)
 
 Init()

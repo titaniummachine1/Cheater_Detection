@@ -11,6 +11,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local Events = require("Cheater_Detection.Core.Events")
 
 local EmbeddedDBs = {
 	["d3fc0n6_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
@@ -186,7 +187,8 @@ function Database.SaveDatabase(force)
 				clean.Score = v.Score
 			end
 			if type(v.Karma) == "number" and v.Karma > 0 then
-				clean.Karma = math.floor(v.Karma)
+				local karmaFloored = math.floor(v.Karma)
+				clean.Karma = karmaFloored
 			end
 			if v.Retaliation == true then
 				clean.Retaliation = true
@@ -616,7 +618,7 @@ local function DatabaseAutoSaveOnUnload()
 	Database.SaveDatabase(true)
 end
 
-callbacks.Unregister("Unload", "DatabaseAutoSaveOnUnload") -- Ensure no duplicates
+callbacks.Unregister("Unload", "DatabaseAutoSaveOnUnload")
 callbacks.Register("Unload", "DatabaseAutoSaveOnUnload", DatabaseAutoSaveOnUnload)
 
 -- Self-init

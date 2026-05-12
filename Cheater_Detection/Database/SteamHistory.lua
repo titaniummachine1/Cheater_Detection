@@ -13,6 +13,7 @@ local Database = require("Cheater_Detection.Database.Database")
 local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
 local Constants = require("Cheater_Detection.Core.constants")
 local Json = Common.Json
+local Events = require("Cheater_Detection.Core.Events")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 --[[ Constants ]]
@@ -624,16 +625,20 @@ local function handleError(message, contexts, details)
 	end
 
 	-- Adaptive backoff based on error type
+	local expBase = 2 ^ (state.errorCount - 1)
+	local delay300 = math.min(300, 30 * expBase)
+	local delay120 = math.min(120, 15 * expBase)
+	local delay60  = math.min(60,  10 * expBase)
 	local delay
 	if message:match("Rate limited") or message:match("429") then
 		-- Rate limit: longer backoff, start at 30s
-		delay = math.min(300, 30 * (2 ^ (state.errorCount - 1))) -- Max 5 minutes
+		delay = delay300 -- Max 5 minutes
 	elseif message:match("Server error") or message:match("502") or message:match("503") or message:match("504") then
 		-- Server errors: moderate backoff, start at 15s
-		delay = math.min(120, 15 * (2 ^ (state.errorCount - 1))) -- Max 2 minutes
+		delay = delay120 -- Max 2 minutes
 	else
 		-- Other errors: normal backoff, start at 10s
-		delay = math.min(60, 10 * (2 ^ (state.errorCount - 1))) -- Max 1 minute
+		delay = delay60 -- Max 1 minute
 	end
 	state.nextRetryTime = globals.RealTime() + delay
 
@@ -692,7 +697,7 @@ local function handleBatchResponse(ids, contexts, responseTable)
 	-- Check for API error messages in response
 	if responseTable.error or responseTable.message or responseTable.status == "error" then
 		local errorMsg = responseTable.error or responseTable.message or "Unknown API error"
-		handleError(string.format("API error: %s", errorMsg), contexts)
+		handleError(string.format("API error: %s", tostring(errorMsg)), contexts)
 		return
 	end
 
@@ -1046,7 +1051,6 @@ end
 --[[ Callback Registration ]]
 callbacks.Unregister("FireGameEvent", "CD_SteamHistory_Events")
 callbacks.Register("FireGameEvent", "CD_SteamHistory_Events", onGameEvent)
-
 callbacks.Unregister("CreateMove", "CD_SteamHistory_OnCreateMove")
 callbacks.Register("CreateMove", "CD_SteamHistory_OnCreateMove", onCreateMove)
 

@@ -845,6 +845,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		))
 	end
 
+	local CLEAN_SHOT_DECAY = -0.5
+	local CLEAN_SHOT_MAX_DEV = MIN_SNAP_DEGREES * 3
 	if scoreGain > 1.0 then
 		local reason = string.format("SilentAim Anomaly (%.1f° snap, %.1f° align, dir=%.2f)", shotDev, alignDev,
 			dirFactor)
@@ -852,7 +854,10 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			local err = nonSniperBestAimError or 0
 			reason = string.format("View Discontinuity (%.1f° snap, aimerr=%.1f°)", shotDev, err)
 		end
+		print(string.format("[SilentAim] +%.1f score on %s | %s", scoreGain, id, reason))
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
+	elseif aimedAtTarget and shotDev < CLEAN_SHOT_MAX_DEV and (playerState.score or 0) > 0 then
+		DetectorUtils.ApplyPlayerFlag(playerState, CLEAN_SHOT_DECAY, nil, nil)
 	end
 end
 
@@ -996,20 +1001,15 @@ local function onDamageEvent(event)
 			pdata.shotPending.victimBodyPos = vBody
 		end
 
-		if Common.IsDebugEnabled() and (attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY) then
-			local now = globals.RealTime()
-			if canPrintRecorded(now) then
-				print(string.format(
-					"[SilentAim] player_hurt recorded %s -> %s weaponid=%s projType=%s spread=%s class=%s name=%s",
-					attackerID,
-					victimID,
-					tostring(weaponID),
-					tostring(projType),
-					tostring(weaponSpread),
-					tostring(weaponClass),
-					tostring(weaponName)
-				))
-			end
+		local now = globals.RealTime()
+		if canPrintRecorded(now) then
+			print(string.format(
+				"[SilentAim] shot recorded %s -> %s weapon=%s class=%s",
+				attackerID,
+				victimID,
+				tostring(weaponName),
+				tostring(weaponClass)
+			))
 		end
 	end
 end

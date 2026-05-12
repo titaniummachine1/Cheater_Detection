@@ -24,7 +24,7 @@ function Events.Subscribe(eventName, callback)
 	assert(eventName, "Events.Subscribe: eventName missing")
 	assert(type(callback) == "function", "Events.Subscribe: callback must be a function")
 	subscribers[eventName] = subscribers[eventName] or {}
-	table.insert(subscribers[eventName], callback)
+	pcall(function() table.insert(subscribers[eventName], callback) end)
 end
 
 ---Publish an internal event to all subscribers

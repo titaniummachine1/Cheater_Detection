@@ -102,7 +102,7 @@ function TickProfiler.BeginSection(name)
 
 	-- Record start time and memory
 	local startTime = now()
-	local startMem = collectgarbage("count") * 1024 -- Convert to bytes
+	local startMem = 0 -- memory tracking disabled (collectgarbage forbidden by policy)
 	stack[#stack + 1] = { time = startTime, mem = startMem }
 end
 
@@ -125,7 +125,7 @@ function TickProfiler.EndSection(name)
 	end
 
 	-- Calculate memory delta
-	local endMem = collectgarbage("count") * 1024
+	local endMem = 0 -- memory tracking disabled (collectgarbage forbidden by policy)
 	local memDelta = endMem - startData.mem
 	-- Don't clamp memory delta to 0, negative means freed memory (which is good/interesting)
 
@@ -235,7 +235,8 @@ local function buildEntries()
 
 		table.sort(display, function(a, b)
 			-- Sort by Time Avg descending, then Memory Avg descending
-			if math.abs(a.timeAvg - b.timeAvg) > 10 then -- 10us threshold for stability
+			local timeDiff = math.abs(a.timeAvg - b.timeAvg)
+			if timeDiff > 10 then -- 10us threshold for stability
 				return a.timeAvg > b.timeAvg
 			end
 			return a.memAvg > b.memAvg
@@ -249,7 +250,9 @@ local function drawOverlay()
 	if not enabled then
 		return
 	end
-	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
+	local guiVisible = engine.IsGameUIVisible()
+	local conVisible = engine.Con_IsVisible()
+	if guiVisible or conVisible then
 		return
 	end
 
@@ -389,7 +392,7 @@ local function drawOverlay()
 
 	-- Draw Global Stats
 	y = y - lineHeight - 4
-	local memUsed = collectgarbage("count") * 1024
+	local memUsed = 0 -- memory tracking disabled (collectgarbage forbidden by policy)
 	local memStr = string.format("Lua Total: %s | Measured: %s", formatMemory(memUsed), formatMemory(totalMeasuredMem))
 	draw.Color(255, 200, 100, 255)
 	draw.Text(x, y, memStr)

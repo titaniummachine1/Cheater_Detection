@@ -47,7 +47,7 @@ end
 
 local FIELD_BUILDERS = {
 	[HistoryManager.Fields.Angles] = function(player)
-		local localPlayer = entities.GetLocalPlayer and entities.GetLocalPlayer() or nil
+		local localPlayer = entities.GetLocalPlayer()
 		if localPlayer and localPlayer.IsValid and localPlayer:IsValid() then
 			if localPlayer.GetIndex and player.GetIndex and localPlayer:GetIndex() == player:GetIndex() then
 				local pitchNL, yawNL = tryGetTFNonLocalEyeAngles(player)

@@ -65,7 +65,9 @@ end
 
 function Visuals.DrawTags()
 	local pLocal = entities.GetLocalPlayer()
-	if not pLocal or engine.Con_IsVisible() or engine.IsGameUIVisible() then
+	local conVis = engine.Con_IsVisible()
+	local guiVis = engine.IsGameUIVisible()
+	if not pLocal or conVis or guiVis then
 		return
 	end
 

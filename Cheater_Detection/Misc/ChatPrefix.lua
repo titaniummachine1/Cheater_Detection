@@ -45,9 +45,10 @@ local function rgbToHex(r, g, b)
 			hex = string.sub("0123456789ABCDEF", index, index) .. hex
 		end
 
-		if string.len(hex) == 0 then
+		local hexLen = string.len(hex)
+		if hexLen == 0 then
 			hex = "00"
-		elseif string.len(hex) == 1 then
+		elseif hexLen == 1 then
 			hex = "0" .. hex
 		end
 

@@ -10,6 +10,7 @@ local VoteReveal = require("Cheater_Detection.Misc.Vote_Reveal")
 local Database = require("Cheater_Detection.Database.Database")
 local Constants = require("Cheater_Detection.Core.constants")
 local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
+local Events = require("Cheater_Detection.Core.Events")
 
 local LOG_CATEGORY = "AutoVote"
 
@@ -186,6 +187,21 @@ local function isFriendEntity(entity)
 	return entity and Common.IsFriend(entity) or false
 end
 
+--- Returns true when a voter (identified by steamID) is a steam friend or
+--- party member of the local player.  Used to skip or reduce karma penalties
+--- for trusted players who vote against our interests.
+local function isTrustedFriendVoter(voterSteamID)
+	if not voterSteamID then return false end
+	local partyMembers = party.GetMembers() or {}
+	for _, sid in ipairs(partyMembers) do
+		if tostring(sid) == tostring(voterSteamID) then return true end
+	end
+	if steam and steam.IsFriend then
+		if steam.IsFriend(voterSteamID) then return true end
+	end
+	return false
+end
+
 --- Record score penalties for players who voted against our interests
 --- Does NOT add them to retaliation group, just increases kick priority score
 local function recordScorePenalties()
@@ -236,7 +252,11 @@ local function recordScorePenalties()
 
 	for _, voter in ipairs(againstVoters) do
 		if voter.steamID then
-			persistRetaliationKarma(voter.steamID, voter.name, KARMA_DELTA_OPPOSE_INTENT, "opposed our vote intent")
+			-- Friends/party members who oppose our vote intent are trusted –
+			-- they may have a legitimate reason (e.g. defending a friend).
+			if not isTrustedFriendVoter(voter.steamID) then
+				persistRetaliationKarma(voter.steamID, voter.name, KARMA_DELTA_OPPOSE_INTENT, "opposed our vote intent")
+			end
 		end
 	end
 end
@@ -270,7 +290,17 @@ local function recordVoteYesAgainstUsKarma()
 	local yesVoters = VoteReveal.GetYesVoters()
 	for _, voter in ipairs(yesVoters) do
 		if voter.steamID then
-			persistRetaliationKarma(voter.steamID, voter.name, KARMA_DELTA_VOTE_YES_ON_ME, "voted YES against us")
+			-- A trusted friend voting YES to kick us is unusual but possible;
+			-- apply only half the normal karma penalty.
+			local delta
+			if isTrustedFriendVoter(voter.steamID) then
+				delta = KARMA_DELTA_VOTE_YES_ON_ME / 2
+			else
+				delta = KARMA_DELTA_VOTE_YES_ON_ME
+			end
+			if delta > 0 then
+				persistRetaliationKarma(voter.steamID, voter.name, delta, "voted YES against us")
+			end
 		end
 	end
 end
@@ -594,7 +624,14 @@ local function handleVoteStart(msg)
 			if callerEntity and callerEntity:IsValid() then
 				local callerSteamID = Common.GetSteamID64(callerEntity)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
-				recordRetaliationCaller(callerSteamID, callerName)
+				-- Friends/party members calling a vote on us still get penalised,
+				-- but at reduced karma (they may have misclicked).
+				if isTrustedFriendVoter(callerSteamID) then
+					persistRetaliationKarma(callerSteamID, callerName,
+						math.floor(KARMA_DELTA_CALLED_ON_ME / 4), "friend called vote on us")
+				else
+					recordRetaliationCaller(callerSteamID, callerName)
+				end
 			end
 			-- Is this a vote against our FRIEND?
 		elseif isFriendEntity(voteTargetEntity) then
@@ -602,7 +639,13 @@ local function handleVoteStart(msg)
 			if callerEntity and callerEntity:IsValid() then
 				local callerSteamID = Common.GetSteamID64(callerEntity)
 				local callerName = client.GetPlayerNameByIndex(callerIdx)
-				recordRetaliationCaller(callerSteamID, callerName)
+				-- If a trusted friend is calling a vote on another friend, reduce penalty.
+				if isTrustedFriendVoter(callerSteamID) then
+					persistRetaliationKarma(callerSteamID, callerName,
+						math.floor(KARMA_DELTA_CALLED_ON_ME / 4), "friend called vote on our friend")
+				else
+					recordRetaliationCaller(callerSteamID, callerName)
+				end
 			end
 		end
 	end
@@ -911,10 +954,10 @@ end
 
 -- Register callbacks to enable auto-voting
 callbacks.Unregister("CreateMove", "CD_AutoVote_CreateMove")
-callbacks.Unregister("DispatchUserMessage", "CD_AutoVote_UserMsg")
-callbacks.Unregister("FireGameEvent", "CD_AutoVote_Event")
 callbacks.Register("CreateMove", "CD_AutoVote_CreateMove", AutoVote.OnCreateMove)
+callbacks.Unregister("DispatchUserMessage", "CD_AutoVote_UserMsg")
 callbacks.Register("DispatchUserMessage", "CD_AutoVote_UserMsg", AutoVote.OnDispatchUserMessage)
+callbacks.Unregister("FireGameEvent", "CD_AutoVote_Event")
 callbacks.Register("FireGameEvent", "CD_AutoVote_Event", AutoVote.OnFireGameEvent)
 
 return AutoVote

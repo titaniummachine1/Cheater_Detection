@@ -208,7 +208,8 @@ local function DispatchCheaterAlert(config, params)
 	end
 
 	local reason = params.reason or "Unknown"
-	local tail = params.tail or string.format("is in the server (Suspected of: %s)", reason)
+	local defaultTail = string.format("is in the server (Suspected of: %s)", reason)
+	local tail = params.tail or defaultTail
 	local allowParty = params.allowParty
 	if allowParty == nil then
 		allowParty = false
@@ -286,7 +287,7 @@ local function ValidateAllPlayers()
 
 	local validatedCount = 0
 	local players = entities.FindByClass("CTFPlayer")
-	for _, player in ipairs(players) do
+	for _, player in pairs(players) do
 		if player and player:IsValid() then
 			validatedCount = validatedCount + 1
 			local steamID64 = NormalizeSteamID64(Common.GetSteamID64(player))

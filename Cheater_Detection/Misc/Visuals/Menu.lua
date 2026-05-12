@@ -250,72 +250,69 @@ local function DrawMenu()
 			TimMenu.NextLine()
 		end
 	else
-		TimMenu.BeginSector("Privacy Mode")
 		Misc.Privacy = Misc.Privacy or {}
+		Misc.Privacy.YouFriendTags = true -- always enabled
+
+		TimMenu.BeginSector("Chat Options")
 		local PM = Misc.Privacy
-		PM.YouFriendTags = TimMenu.Checkbox("You / Friend chat tags", PM.YouFriendTags == true)
+		PM.MuteBotChat = TimMenu.Checkbox("Mute bot/cheater chat messages", PM.MuteBotChat == true)
 		TimMenu.NextLine()
-		PM.MuteBotChat = TimMenu.Checkbox("Mute bot/cheater-bot chat", PM.MuteBotChat == true)
-		TimMenu.NextLine()
-		PM.BlockServerMessages = TimMenu.Checkbox("Block server chat messages", PM.BlockServerMessages == true)
+		PM.BlockServerMessages = TimMenu.Checkbox("Block server broadcast messages", PM.BlockServerMessages == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Vote Automation")
-		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote == true)
+		TimMenu.BeginSector("Auto Vote")
+		Misc.Autovote = TimMenu.Checkbox("Enable Auto Vote", Misc.Autovote == true)
 		TimMenu.NextLine()
 		if Misc.Autovote then
-			Misc.AutovoteAutoCast = TimMenu.Checkbox("Auto Cast Votes", Misc.AutovoteAutoCast == true)
+			Misc.AutovoteAutoCast = TimMenu.Checkbox("Auto Cast (no confirm)", Misc.AutovoteAutoCast == true)
 			TimMenu.NextLine()
-
 			Misc.intent = Misc.intent or {}
-			local voteTargets =
-			{ "Retaliation", "Bots (Cheat)", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
+			local voteTargets = { "Retaliation", "Bots", "Cheaters", "Valve Employees", "Legit Players", "Friends" }
 			local voteTable = {
 				Misc.intent.retaliation ~= false,
 				Misc.intent.bot ~= false,
 				Misc.intent.cheater ~= false,
 				Misc.intent.valve ~= false,
 				Misc.intent.legit ~= false,
-				Misc.intent.friend == true,
+				Misc.intent.friend ~= false,
 			}
-			voteTable = TimMenu.Combo("Vote Targets", voteTable, voteTargets)
+			voteTable = TimMenu.Combo("Kick Targets", voteTable, voteTargets)
 			Misc.intent.retaliation, Misc.intent.bot, Misc.intent.cheater, Misc.intent.valve, Misc.intent.legit, Misc.intent.friend =
 				voteTable[1], voteTable[2], voteTable[3], voteTable[4], voteTable[5], voteTable[6]
 			TimMenu.NextLine()
 		end
 		TimMenu.EndSector()
+		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Summary")
+		TimMenu.BeginSector("Status")
 		local dbCount = 0
 		if type(G.DataBase) == "table" then
 			for _ in pairs(G.DataBase) do
 				dbCount = dbCount + 1
 			end
 		end
-		TimMenu.Text("Database Entries: " .. dbCount)
+		TimMenu.Text("Known cheaters: " .. dbCount)
 		TimMenu.NextLine()
-
 		local lastFetch = G.Database and G.Database.State and G.Database.State.lastSave
 		if lastFetch and lastFetch > 0 then
-			TimMenu.Text("Last Sync: " .. os.date("%H:%M:%S", lastFetch))
+			TimMenu.Text("Last save: " .. os.date("%H:%M:%S", lastFetch))
 		else
-			TimMenu.Text("Last Sync: Never")
+			TimMenu.Text("Last save: Never")
 		end
 		TimMenu.NextLine()
-
-		local bridgeText = "Bridge: Offline (safe fallback)"
+		local bridgeText = "HTTP bridge: Offline"
 		if HttpQueue and HttpQueue.IsBridgeAlive and HttpQueue.IsBridgeAlive() then
-			bridgeText = "Bridge: Connected (local)"
+			bridgeText = "HTTP bridge: Connected"
 		end
 		TimMenu.Text(bridgeText)
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
-		TimMenu.BeginSector("Vote Management")
+		TimMenu.BeginSector("Vote Reveal")
 		Misc.Vote_Reveal = Misc.Vote_Reveal or {}
-		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Vote Reveal", Misc.Vote_Reveal.Enable == true)
+		Misc.Vote_Reveal.Enable = TimMenu.Checkbox("Show who voted", Misc.Vote_Reveal.Enable == true)
 		TimMenu.NextLine()
 
 		if Misc.Vote_Reveal.Enable then
@@ -348,10 +345,10 @@ local function DrawMenu()
 		end
 		TimMenu.EndSector()
 
-		TimMenu.BeginSector("Class Change Alerts")
+		TimMenu.BeginSector("Class Change Tracking")
 		Misc.Class_Change_Reveal = Misc.Class_Change_Reveal or {}
 		Misc.Class_Change_Reveal.Enable =
-			TimMenu.Checkbox("Class Change Reveal", Misc.Class_Change_Reveal.Enable == true)
+			TimMenu.Checkbox("Alert on class changes", Misc.Class_Change_Reveal.Enable == true)
 		TimMenu.NextLine()
 		if Misc.Class_Change_Reveal.Enable then
 			Misc.Class_Change_Reveal.EnemyOnly =

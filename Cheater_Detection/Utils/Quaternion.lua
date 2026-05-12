@@ -50,8 +50,9 @@ function Quaternion.toEuler(qw, qx, qy, qz)
 
 	-- Pitch
 	local sinp = 2 * (w * y - z * x)
+	local absSinp = math.abs(sinp)
 	local pitch
-	if math.abs(sinp) >= 1 then
+	if absSinp >= 1 then
 		pitch = math.pi / 2 * (sinp < 0 and -1 or 1)
 	else
 		pitch = math.asin(sinp)
