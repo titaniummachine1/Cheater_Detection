@@ -193,18 +193,13 @@ local function syncServerBoundaryState()
 			printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Server changed - resetting per-match scan state")
 			resetState(true)
 			state.scanning = false
-		elseif oldServerIP == "" and serverIP ~= "" then
-			-- Fresh script load while already in server (e.g., after unloadlua)
-			-- Reset state to ensure initial scan triggers
-			printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Script loaded in server - initializing scan state")
-			resetState(true)
-			state.scanning = false
 		end
 		state.currentServerIP = serverIP
 	end
 
 	return serverIP ~= ""
 end
+
 local function getInactiveReason()
 	local cfg = getConfig()
 	local scannerEnabled = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.SteamHistory == true
