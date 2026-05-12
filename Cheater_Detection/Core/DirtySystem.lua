@@ -60,10 +60,12 @@ function DirtySystem.MarkDirty(playerID, flags)
         local addedFlags = newFlags & ~existing
         
         -- Add player to relevant queues (iterate through all defined flags)
-        for flagBit = 1, DirtySystem.FLAGS.ALL, flagBit * 2 do
+        local flagBit = 1
+        while flagBit <= DirtySystem.FLAGS.ALL do
             if (addedFlags & flagBit) ~= 0 then
                 dirtyQueues[flagBit][playerID] = true
             end
+            flagBit = flagBit * 2
         end
         
         playerDirtyFlags[playerID] = newFlags
@@ -82,7 +84,8 @@ function DirtySystem.ProcessDirty(flags, callback)
     local processedCount = 0
     
     -- Process each flag type
-    for flagBit = 1, DirtySystem.FLAGS.ALL, flagBit * 2 do
+    local flagBit = 1
+    while flagBit <= DirtySystem.FLAGS.ALL do
         if (flags & flagBit) ~= 0 then
             local queue = dirtyQueues[flagBit]
             
@@ -105,6 +108,7 @@ function DirtySystem.ProcessDirty(flags, callback)
             -- Clear the queue
             dirtyQueues[flagBit] = {}
         end
+        flagBit = flagBit * 2
     end
     
     stats.processesTotal = stats.processesTotal + processedCount
@@ -174,10 +178,12 @@ function DirtySystem.ClearDirty(playerID, flags)
         end
         
         -- Remove from specific queues
-        for flagBit = 1, DirtySystem.FLAGS.ALL, flagBit * 2 do
+        local flagBit = 1
+        while flagBit <= DirtySystem.FLAGS.ALL do
             if (flags & flagBit) ~= 0 then
                 dirtyQueues[flagBit][playerID] = nil
             end
+            flagBit = flagBit * 2
         end
     end
 end

@@ -197,6 +197,11 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		return
 	end
 
+	-- Basic check: must be connected to server (but not 100% stability required)
+	if not Common.IsPlayerConnected() then
+		return
+	end
+
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then
 		return
 	end

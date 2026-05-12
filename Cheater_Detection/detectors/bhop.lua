@@ -23,6 +23,11 @@ function Bhop.ProcessPlayer(playerState)
 		return
 	end
 
+	-- Basic check: must be connected to server (but not 100% stability required)
+	if not Common.IsPlayerConnected() then
+		return
+	end
+
 	local id = playerState.id
 	local pdata = playerState.pdata
 	local data = playerData[id]

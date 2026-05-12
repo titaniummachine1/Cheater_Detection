@@ -444,6 +444,15 @@ function Common.CheckConnectionState()
 	return true
 end
 
+-- Returns true if client is connected to a server (signon state >= CONNECTED)
+-- Use this for detectors that need basic server connection but not perfect stability
+function Common.IsPlayerConnected()
+	local signonState = clientstate.GetClientSignonState()
+	-- States: 0=NONE, 1=CHALLENGE, 2=CONNECTED, 3=NEW, 4=PRESPAWN, 5=SPAWN, 6=FULL
+	-- We require at least CONNECTED (state 2) to process detections
+	return signonState >= 2
+end
+
 -- Returns true when the local connection is stable enough to trust
 -- simulation-time-based detectors (WarpDT, FakeLag).
 --

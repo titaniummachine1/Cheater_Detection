@@ -109,6 +109,12 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
+
+	-- Basic check: must be connected to server (but not 100% stability required)
+	if not Common.IsPlayerConnected() then
+		return
+	end
+
 	if not isEnabled() then
 		return
 	end

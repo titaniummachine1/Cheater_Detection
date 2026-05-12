@@ -1017,11 +1017,16 @@ end
 Events.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
 
 function SilentAim.ProcessPlayer(playerState)
-	if not playerState or not playerState.wrap or not playerState.id then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
-	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
+	-- Basic check: must be connected to server (but not 100% stability required)
+	if not Common.IsPlayerConnected() then
+		return
+	end
+
+	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimbot) then
 		return
 	end
 
