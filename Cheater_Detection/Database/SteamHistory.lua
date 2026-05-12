@@ -172,7 +172,6 @@ local function resetState(clearScanned)
 	state.lastCompletionSignature = ""
 	state.lastDisabledLogTime = 0
 	state.lastDisabledReason = ""
-	state.currentServerIP = ""
 end
 
 local function syncServerBoundaryState()
@@ -195,10 +194,13 @@ local function syncServerBoundaryState()
 			state.scanning = false
 		elseif oldServerIP == "" and serverIP ~= "" then
 			-- Fresh script load while already in server (e.g., after unloadlua)
-			-- Reset state to ensure initial scan triggers
-			printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Script loaded in server - initializing scan state")
-			resetState(true)
-			state.scanning = false
+			-- Only reset if we have no scan activity yet (guards against double module load).
+			local hasActivity = next(state.scanned) or next(state.inFlight) or next(state.pending)
+			if not hasActivity then
+				printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Script loaded in server - initializing scan state")
+				resetState(true)
+				state.scanning = false
+			end
 		end
 		state.currentServerIP = serverIP
 	end
