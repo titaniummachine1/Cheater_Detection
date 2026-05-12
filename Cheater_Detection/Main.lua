@@ -225,6 +225,8 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	Events.DispatchEngineEvent("CreateMove", cmd)
+
 	local menu = G.Menu
 	local mainMenu = menu and menu.Main or nil
 	local adv = menu and menu.Advanced or nil

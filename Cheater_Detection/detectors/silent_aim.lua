@@ -848,16 +848,23 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	local CLEAN_SHOT_DECAY = -0.5
 	local CLEAN_SHOT_MAX_DEV = MIN_SNAP_DEGREES * 3
 	if scoreGain > 1.0 then
-		local reason = string.format("SilentAim Anomaly (%.1f° snap, %.1f° align, dir=%.2f)", shotDev, alignDev,
+		local reason = string.format("SilentAim Anomaly (%.1fdeg snap, %.1fdeg align, dir=%.2f)", shotDev, alignDev,
 			dirFactor)
 		if discontGain > alignGain and discontGain > noAlignGain then
 			local err = nonSniperBestAimError or 0
-			reason = string.format("View Discontinuity (%.1f° snap, aimerr=%.1f°)", shotDev, err)
+			reason = string.format("View Discontinuity (%.1fdeg snap, aimerr=%.1fdeg)", shotDev, err)
 		end
 		print(string.format("[SilentAim] +%.1f score on %s | %s", scoreGain, id, reason))
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
 	elseif aimedAtTarget and shotDev < CLEAN_SHOT_MAX_DEV and (playerState.score or 0) > 0 then
+		if Common.IsDebugEnabled() then
+			print(string.format("[SilentAim] clean shot decay -%.2f on %s (snap=%.1fdeg)", -CLEAN_SHOT_DECAY, id, shotDev))
+		end
 		DetectorUtils.ApplyPlayerFlag(playerState, CLEAN_SHOT_DECAY, nil, nil)
+	else
+		if Common.IsDebugEnabled() then
+			print(string.format("[SilentAim] gated out %s | snap=%.1fdeg gain=%.2f aimed=%s", id, shotDev, scoreGain, tostring(aimedAtTarget)))
+		end
 	end
 end
 
@@ -1001,15 +1008,17 @@ local function onDamageEvent(event)
 			pdata.shotPending.victimBodyPos = vBody
 		end
 
-		local now = globals.RealTime()
-		if canPrintRecorded(now) then
-			print(string.format(
-				"[SilentAim] shot recorded %s -> %s weapon=%s class=%s",
-				attackerID,
-				victimID,
-				tostring(weaponName),
-				tostring(weaponClass)
-			))
+		if Common.IsDebugEnabled() then
+			local now = globals.RealTime()
+			if canPrintRecorded(now) then
+				print(string.format(
+					"[SilentAim] shot recorded %s -> %s weapon=%s class=%s",
+					attackerID,
+					victimID,
+					tostring(weaponName),
+					tostring(weaponClass)
+				))
+			end
 		end
 	end
 end
