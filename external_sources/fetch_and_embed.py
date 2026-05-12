@@ -10,10 +10,13 @@ Sources embedded (dead or slow - safe to snapshot):
   - joekiller List        (last updated Jun 2024, slowing)
   - sleepy main/ext/nullc0re (last updated Jun 2024)
   - TF2BD Official        (PazerOP official bot list)
+  - TF2BD Community Biglist (wgetJane, ClusterConsultant meta-repo)
+  - TF2BD Community Trusted (TF2BD Discord Trusted role, ClusterConsultant meta-repo)
 
 Sources kept live (actively updated):
   - Masterbase Broadcasts (real-time API)
-  - MegaScaterbomb        (actively maintained)
+  - MegaScaterbomb        (actively maintained, also fetched live by Fetcher)
+  - qfoxb / joekiller     (live-fetched by Fetcher to catch updates between re-embeds)
 """
 
 import json
@@ -92,6 +95,24 @@ SOURCES = [
         "static_id": "tf2bd_off",
         "default_reason": "Bot (TF2BD Official)",
         "output": "tf2bd_official_embedded.lua",
+    },
+    {
+        "name": "TF2BD Community Biglist (wgetJane)",
+        "url": "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.biglist.json",
+        "parser": "tf2bd",
+        "source_label": "TF2BD Community Biglist",
+        "static_id": "cc_biglist",
+        "default_reason": "Bot (TF2BD Community Biglist)",
+        "output": "cc_biglist_embedded.lua",
+    },
+    {
+        "name": "TF2BD Community Trusted",
+        "url": "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.trusted.json",
+        "parser": "tf2bd",
+        "source_label": "TF2BD Community Trusted",
+        "static_id": "cc_trusted",
+        "default_reason": "Cheater (TF2BD Trusted)",
+        "output": "cc_trusted_embedded.lua",
     },
 ]
 
@@ -294,7 +315,7 @@ def main():
     combined_lua = generate_lua(all_entries, "External Sources Combined", "various")
     combined_lua = combined_lua.replace(
         "-- Source URL: various",
-        "-- Sources: d3fc0n6, qfoxb, joekiller, sleepy (main/ext/nullc0re), TF2BD Official",
+        "-- Sources: d3fc0n6, qfoxb, joekiller, sleepy (main/ext/nullc0re), TF2BD Official, CC Biglist, CC Trusted",
     )
     combined_path.write_text(combined_lua, encoding="utf-8")
 

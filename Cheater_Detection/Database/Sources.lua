@@ -17,19 +17,51 @@ Sources.List = {
 		parser = "broadcasts",
 		sourceID = "masterbase_broadcasts"
 	},
+	-- wgetJane's Biglist aggregated via ClusterConsultant meta-repo (large, actively updated bot list)
+	{
+		name = "TF2BD Community Biglist",
+		url = "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.biglist.json",
+		cause = "Bot (TF2BD Community Biglist)",
+		parser = "tf2db",
+		sourceID = "cc_biglist"
+	},
+	-- Curated by Trusted-role members of the official TF2BD Discord (high verification bar)
+	{
+		name = "TF2BD Community Trusted",
+		url = "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.trusted.json",
+		cause = "Cheater (TF2BD Trusted)",
+		parser = "tf2db",
+		sourceID = "cc_trusted"
+	},
+	-- qfoxb live fetch — embedded snapshot exists but live fetch picks up new entries between re-embeds
+	{
+		name = "qfoxb Player List (live)",
+		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
+		cause = "Cheater (qfoxb)",
+		parser = "tf2db",
+		sourceID = "qfoxb"
+	},
+	-- joekiller live fetch — US-East/Virginia focused, manually verified cheaters
+	{
+		name = "joekiller Player List (live)",
+		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
+		cause = "Cheater (joekiller)",
+		parser = "tf2db",
+		sourceID = "joekiller"
+	},
 }
 
 --[[ Helper/Private Functions (None) ]]
 
 --[[ Public Module Functions ]]
 -- Function to add a custom source
-function Sources.AddSource(name, url, cause, parser)
+function Sources.AddSource(name, url, cause, parser, sourceID)
 	if not name or not url or not cause or not parser then
 		print("[Database Fetcher] Error: Missing required fields for new source")
 		return false
 	end
 
-	if parser ~= "raw" and parser ~= "tf2db" and parser ~= "broadcasts" and parser ~= "ill5db" then
+	if parser ~= "raw" and parser ~= "tf2db" and parser ~= "broadcasts" then
 		print("[Database Fetcher] Error: Invalid parser type: " .. parser)
 		return false
 	end
@@ -39,6 +71,7 @@ function Sources.AddSource(name, url, cause, parser)
 		url = url,
 		cause = cause,
 		parser = parser,
+		sourceID = sourceID or nil,
 	})
 
 	print("[Database Fetcher] Added new source: " .. name)
