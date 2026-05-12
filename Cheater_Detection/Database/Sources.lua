@@ -8,7 +8,7 @@ local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 local Sources = {}
 
 --[[ Local Variables/Utilities ]]
--- List of available sources
+-- List of online sources to fetch (embedded databases are loaded directly by Database.lua)
 Sources.List = {
 	{
 		name = "Masterbase Broadcasts",
@@ -16,70 +16,6 @@ Sources.List = {
 		cause = "Masterbase Broadcast Conviction",
 		parser = "broadcasts",
 		sourceID = "masterbase_broadcasts"
-	},
-	{
-		name = "MegaScaterbomb",
-		url =
-		"https://raw.githubusercontent.com/ill5-com/megascatterbomb-tf2-cheater-database/main/megascatterbomb-tf2-cheater-database.min.json",
-		cause = "Cheater (MegaScaterbomb)",
-		parser = "ill5db",
-		sourceID = "mega_scat"
-	},
-	{
-		name = "d3fc0n6 Cheater List",
-		url = "https://raw.githubusercontent.com/d3fc0n6/CheaterList/main/CheaterFriend/64ids",
-		cause = "D3fc0n6 Cheater List",
-		parser = "raw",
-		sourceID = "d3_cheat",
-		embedded = "d3fc0n6_embedded"
-	},
-	{
-		name = "Sleepy Cheater List",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy.json",
-		cause = "Sleepy Cheater List",
-		parser = "tf2db",
-		sourceID = "sleepy_main",
-		embedded = "sleepy_main_embedded"
-	},
-	{
-		name = "Sleepy External List",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.sleepy-external.json",
-		cause = "Sleepy External",
-		parser = "tf2db",
-		sourceID = "sleepy_ext",
-		embedded = "sleepy_ext_embedded"
-	},
-	{
-		name = "Sleepy Nullc0re List",
-		url = "https://raw.githubusercontent.com/surepy/tf2db-sleepy-list/main/playerlist.nullc0re.json",
-		cause = "Sleepy Nullc0re",
-		parser = "tf2db",
-		sourceID = "sleepy_nullc0re",
-		embedded = "sleepy_nullc0re_embedded"
-	},
-	{
-		name = "TF2BD Official",
-		url = "https://raw.githubusercontent.com/PazerOP/tf2_bot_detector/master/staging/cfg/playerlist.official.json",
-		cause = "TF2BD Official",
-		parser = "tf2db",
-		sourceID = "tf2bd_off",
-		embedded = "tf2bd_official_embedded"
-	},
-	{
-		name = "qfoxb Player List",
-		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
-		cause = "TF2BD Community (qfoxb)",
-		parser = "tf2db",
-		sourceID = "qfoxb",
-		embedded = "qfoxb_embedded"
-	},
-	{
-		name = "joekiller Player List",
-		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
-		cause = "TF2BD Community (joekiller)",
-		parser = "tf2db",
-		sourceID = "joekiller",
-		embedded = "joekiller_embedded"
 	},
 }
 
@@ -122,26 +58,15 @@ function Sources.DisableSource(sourceIndex)
 	return true
 end
 
--- Get active sources (not disabled, not embedded)
+-- Get active sources (not disabled)
 function Sources.GetActiveSources()
 	local active = {}
 	for _, source in ipairs(Sources.List) do
-		if not source.__disabled and not source.embedded then
+		if not source.__disabled then
 			table.insert(active, source)
 		end
 	end
 	return active
-end
-
--- Get sources that have a local embedded Lua database
-function Sources.GetEmbeddedSources()
-	local embedded = {}
-	for _, source in ipairs(Sources.List) do
-		if source.embedded then
-			table.insert(embedded, source)
-		end
-	end
-	return embedded
 end
 
 -- Get Valve employee list from local database

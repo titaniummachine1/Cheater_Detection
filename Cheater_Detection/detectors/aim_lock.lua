@@ -6,6 +6,7 @@ local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local AimLock = {}
 
@@ -154,7 +155,7 @@ end
 Events.Register("FireGameEvent", "CD_AimLock_Event", onDamageEvent, "player_hurt")
 
 function AimLock.ProcessPlayer(playerState)
-	if not playerState or not playerState.wrap or not playerState.id then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
@@ -167,7 +168,10 @@ function AimLock.ProcessPlayer(playerState)
 	end
 
 	local id = playerState.id
-	local ply = playerState.wrap:GetRawEntity()
+	local playerdata = playerState.pdata
+	
+	-- Get entity safely (only valid for current tick)
+	local ply = PlayerData.GetEntity(playerdata)
 	if not ply or not ply:IsValid() then
 		return
 	end
@@ -192,8 +196,14 @@ function AimLock.ProcessPlayer(playerState)
 	local victimState = PlayerCache.GetByID(targetID)
 	local victimData = victimState and victimState.current or nil
 	local victimEyePos = victimData and victimData[HistoryManager.Fields.EyePosition] or nil
-	local victimEnt = victimState and victimState.wrap and victimState.wrap:GetRawEntity() or nil
-	if not victimEyePos or not victimEnt or not victimEnt:IsValid() then
+	if not victimEyePos then
+		return
+	end
+	
+	-- Get victim entity safely via PlayerData
+	local victimPdata = victimState and victimState.pdata
+	local victimEnt = victimPdata and PlayerData.GetEntity(victimPdata)
+	if not victimEnt or not victimEnt:IsValid() then
 		return
 	end
 

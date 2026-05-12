@@ -203,15 +203,20 @@ local function OnStateChange(playerState, reason)
 	Dispatch(channels, colorMsg, plainMsg)
 end
 
+function NotificationService.ResetSession()
+	for k in pairs(notifiedMaskByID) do
+		notifiedMaskByID[k] = nil
+	end
+	lastNotifyTimes = {}
+end
+
 function NotificationService.Init()
 	Events.Subscribe("OnPlayerStateChange", OnStateChange)
 	Events.Register("FireGameEvent", "CD_Notify_Reset", function(event)
 		if event:GetName() ~= "game_newmap" then
 			return
 		end
-		for k in pairs(notifiedMaskByID) do
-			notifiedMaskByID[k] = nil
-		end
+		NotificationService.ResetSession()
 	end, "game_newmap")
 end
 

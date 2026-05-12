@@ -1,12 +1,13 @@
 --[[ detectors/bhop.lua
      Detects scripted bunnyhops by counting consecutive "perfect" jumps.
-     A perfect jump is landing and leaving the ground within 1-2 ticks.
+     Uses lazy PlayerData - NO direct entity API calls.
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local Bhop = {}
 
@@ -18,19 +19,27 @@ local MAX_GROUND_TICKS = 2
 local CHAIN_BREAK_SECONDS = 1.5
 
 function Bhop.ProcessPlayer(playerState)
-	if not playerState or not playerState.wrap or not playerState.id then
-		return
-	end
-
-	local entity = playerState.wrap:GetRawEntity()
-	if not entity or not entity:IsValid() then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
 	local id = playerState.id
+	local pdata = playerState.pdata
 	local data = playerData[id]
 
-	if entity.IsDormant and entity:IsDormant() then
+	-- Use lazy cached properties from PlayerData (fetched once per tick)
+	local isDormant = pdata.isDormant
+	local isAlive = pdata.isAlive
+	local onGround = pdata.onGround
+	local flags = pdata.flags
+
+	-- If PlayerData is stale (old tick), properties return nil
+	-- This is safe - we just skip this tick and wait for fresh data
+	if isDormant == nil or isAlive == nil or onGround == nil then
+		return
+	end
+
+	if isDormant then
 		if data then
 			data.wasOnGround = false
 			data.groundTicks = 0
@@ -40,7 +49,7 @@ function Bhop.ProcessPlayer(playerState)
 		return
 	end
 
-	if not entity:IsAlive() then
+	if not isAlive then
 		if data then
 			data.wasOnGround = false
 			data.groundTicks = 0
@@ -51,7 +60,8 @@ function Bhop.ProcessPlayer(playerState)
 	end
 
 	-- Skip local player unless debug mode is enabled for testing.
-	if entity == entities.GetLocalPlayer() and not Common.IsDebugEnabled() then
+	-- Note: We check steamID instead of entity reference (safe)
+	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then
 		return
 	end
 
@@ -69,9 +79,6 @@ function Bhop.ProcessPlayer(playerState)
 	if data.lastJumpTime and (now - data.lastJumpTime) > CHAIN_BREAK_SECONDS then
 		data.consecutivePerfects = 0
 	end
-
-	local flags = entity:GetPropInt("m_fFlags")
-	local onGround = (flags & 1) ~= 0 -- FL_ONGROUND
 
 	if onGround then
 		data.groundTicks = data.groundTicks + 1

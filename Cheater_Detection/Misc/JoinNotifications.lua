@@ -28,6 +28,10 @@ local function resetSentAlerts()
 	sentAlerts = {}
 end
 
+function JoinNotifications.ResetSession()
+	resetSentAlerts()
+end
+
 local function getSentAlertState(steamID64)
 	if not sentAlerts[steamID64] then
 		sentAlerts[steamID64] = {

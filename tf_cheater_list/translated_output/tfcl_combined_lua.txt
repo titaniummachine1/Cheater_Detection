@@ -4322,7 +4322,6 @@
   ["76561198373074333"] = { Name = "WaveForm", Reason = "Cheater (TFCL Alias)", Source = "TF2 Cheater List (Alias)", Static = "tfcl_alias", Flags = 0, Timestamp = 0 }
   ["76561198373165743"] = { Name = "Zachkilla", Reason = "Cheater (TFCL Alias)", Source = "TF2 Cheater List (Alias)", Static = "tfcl_alias", Flags = 0, Timestamp = 0 }
   ["76561198373499997"] = { Name = "Unknown", Reason = "Cheater (TFCL)", Source = "TF2 Cheater List (Dev)", Static = "tfcl_dev", Flags = 1, Timestamp = 0 }
-  ["76561198373582219"] = { Name = "Unknown", Reason = "Cheater (TFCL)", Source = "TF2 Cheater List (Dev)", Static = "tfcl_dev", Flags = 1, Timestamp = 0 }
   ["76561198373802669"] = { Name = "Unknown", Reason = "Cheater (TFCL) - (INVALID EQUIP REGION)", Source = "TF2 Cheater List (Dev)", Static = "tfcl_dev", Flags = 0, Timestamp = 0 }
   ["76561198373809243"] = { Name = "Unknown", Reason = "Cheater (TFCL) - OBB PITCH | SPEEDHACK | TICKBASE ABUSE", Source = "TF2 Cheater List (Dev)", Static = "tfcl_dev", Flags = 0, Timestamp = 0 }
   ["76561198373877447"] = { Name = "Unknown", Reason = "Cheater (TFCL) - (INVALID EQUIP REGION)", Source = "TF2 Cheater List (Dev)", Static = "tfcl_dev", Flags = 0, Timestamp = 0 }

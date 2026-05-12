@@ -1,6 +1,7 @@
 --[[ detectors/warp_dt.lua
      Detects warp/dt exploits by monitoring simulation time deltas.
      Uses shared tick-bucket history from HistoryManager.
+     Uses lazy PlayerData - NO direct entity API calls.
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
@@ -9,6 +10,7 @@ local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local Common = require("Cheater_Detection.Utils.Common")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local WarpDT = {}
 
@@ -62,7 +64,7 @@ local function timeToTicks(time)
 end
 
 function WarpDT.ProcessPlayer(playerState)
-	if not playerState or not playerState.wrap or not playerState.id then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
@@ -74,17 +76,31 @@ function WarpDT.ProcessPlayer(playerState)
 		return
 	end
 
-	local entity = playerState.wrap:GetRawEntity()
-	if not entity or not entity:IsValid() or not entity:IsAlive() then
+	local pdata = playerState.pdata
+	local isAlive = pdata.isAlive
+	
+	-- If data is stale, skip this tick
+	if isAlive == nil then
+		return
+	end
+	
+	if not isAlive then
 		return
 	end
 
 	local isDebug = Common.IsDebugEnabled()
-	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not isDebug) then
+	local id = playerState.id
+	
+	-- Check bot using steamID prefix (safe, no entity needed)
+	if id:sub(1, 4) == "BOT_" then
+		return
+	end
+	
+	-- Skip local player
+	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not isDebug then
 		return
 	end
 
-	local id = playerState.id
 	if not playerStats[id] then
 		playerStats[id] = { events = {} }
 	end

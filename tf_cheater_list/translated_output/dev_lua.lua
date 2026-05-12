@@ -3158,7 +3158,6 @@ TFCLData.List = {
 	["76561198372582078"] = { Name = "Unknown", Reason = "Cheater (Rijin)", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 1, Timestamp = 0 },
 	["76561198372888206"] = { Name = "Unknown", Reason = "Cheater (Rijin)", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 1, Timestamp = 0 },
 	["76561198373499997"] = { Name = "Unknown", Reason = "Cheater (Rijin)", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 1, Timestamp = 0 },
-	["76561198373582219"] = { Name = "Unknown", Reason = "Cheater (Rijin)", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 1, Timestamp = 0 },
 	["76561198373802669"] = { Name = "Unknown", Reason = "INVALID EQUIP REGION", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 0, Timestamp = 0 },
 	["76561198373809243"] = { Name = "Unknown", Reason = "OBB PITCH | SPEEDHACK | TICKBASE ABUSE", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 0, Timestamp = 0 },
 	["76561198373877447"] = { Name = "Unknown", Reason = "INVALID EQUIP REGION", Source = "Rijin Cheater List", Static = "tfcl_dev", Flags = 0, Timestamp = 0 },

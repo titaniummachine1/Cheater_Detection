@@ -14,6 +14,7 @@ Constants.Flags = {
 	COMM_BANNED = 16, -- Community banned
 	VAC_BANNED = 32, -- VAC banned
 	HIGH_RISK = 64, -- Extremely likely cheater (Score > 70)
+	BOT = 128, -- Confirmed bot (from bot lists)
 }
 
 -- [[ Suspicion Thresholds ]]
@@ -38,6 +39,6 @@ Constants.BHOP_MAX_GROUND_TICKS = 1 -- Frame perfect (0 or 1 tick on ground)
 Constants.BHOP_MIN_CONSECUTIVE_SUCCESS = 2 -- How many times in a row it must happen before we start adding score
 
 -- [[ Bitmask for Database Persistence ]]
-Constants.PERSISTENT_MASK = Constants.Flags.CHEATER | Constants.Flags.VALVE | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED | Constants.Flags.SUSPICIOUS
+Constants.PERSISTENT_MASK = Constants.Flags.CHEATER | Constants.Flags.VALVE | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED | Constants.Flags.SUSPICIOUS | Constants.Flags.BOT
 
 return Constants

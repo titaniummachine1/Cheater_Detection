@@ -1,12 +1,14 @@
 --[[ detectors/antiaim.lua
      Detects invalid view angles (Rage AA).
 	Uses weighted hits with decay before hard-cheater marking.
+	Uses lazy PlayerData - minimal entity API calls.
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local G = require("Cheater_Detection.Utils.Globals")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local AntiAim = {}
 
@@ -191,7 +193,7 @@ local function readDetectionAngles(wrap, entity, cmd, isLocalDebug)
 end
 
 function AntiAim.ProcessPlayer(playerState, cmd)
-	if not playerState or not playerState.wrap or not playerState.id then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
@@ -200,23 +202,32 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	end
 
 	local isDebug = Common.IsDebugEnabled()
-	local entity = playerState.wrap:GetRawEntity()
-	if not entity then
+	local pdata = playerState.pdata
+	
+	-- Use lazy cached properties
+	local simTime = pdata.simTime
+	local isAlive = pdata.isAlive
+	local isDormant = pdata.isDormant
+	
+	-- If data is stale, skip this tick
+	if simTime == nil or isAlive == nil or isDormant == nil then
+		return
+	end
+	
+	if not isAlive or isDormant then
 		return
 	end
 
 	local localPlayer = entities.GetLocalPlayer()
-	local isLocalPlayer = localPlayer ~= nil and entity == localPlayer
-	local skipEntity = nil
+	local isLocalPlayer = playerState.id == tostring(Common.GetSteamID64(localPlayer))
+	
+	-- Skip friends and self (unless debug)
 	if not isDebug then
-		skipEntity = localPlayer
+		if playerState.isFriend or isLocalPlayer then
+			return
+		end
 	end
 
-	if not Common.IsValidPlayer(entity, true, true, skipEntity) then
-		return
-	end
-
-	local simTime = playerState.wrap:GetSimulationTime()
 	if not simTime or simTime <= 0 then
 		return
 	end
@@ -232,8 +243,14 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		return
 	end
 
+	-- Get entity safely for angle reading (only touch on current tick)
+	local ent = PlayerData.GetEntity(pdata)
+	if not ent then
+		return
+	end
+
 	local pitch, yaw, angleSource, candidates =
-		readDetectionAngles(playerState.wrap, entity, cmd, isDebug and isLocalPlayer)
+		readDetectionAngles(nil, ent, cmd, isDebug and isLocalPlayer)
 	local now = globals.RealTime()
 	state = antiAimStateById[playerState.id]
 	if state then
@@ -251,7 +268,9 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		end
 		-- Entity state can change between early validation and angle reads.
 		-- Re-check here to avoid flagging stale dormant/dead snapshots.
-		if (not entity:IsValid()) or entity:IsDormant() or (not entity:IsAlive()) then
+		-- Re-fetch entity to ensure it's still valid
+		ent = PlayerData.GetEntity(pdata)
+		if not ent or not ent:IsValid() or ent:IsDormant() or not ent:IsAlive() then
 			return
 		end
 		state = getState(playerState.id)

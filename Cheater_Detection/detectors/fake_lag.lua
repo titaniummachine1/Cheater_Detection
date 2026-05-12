@@ -1,6 +1,7 @@
 --[[ detectors/fake_lag.lua
      Detects excessive packet choking (Fake Lag) by monitoring simulation time deltas.
      Uses shared tick-bucket history from HistoryManager.
+     Uses lazy PlayerData - NO direct entity API calls.
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
@@ -9,6 +10,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local FakeLag = {}
 
@@ -52,7 +54,7 @@ Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Round", onMapOrRoundRefres
 Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Spawn", onPlayerSpawnRefresh, "player_spawn")
 
 function FakeLag.ProcessPlayer(playerState)
-	if not playerState or not playerState.wrap or not playerState.id then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
@@ -64,16 +66,30 @@ function FakeLag.ProcessPlayer(playerState)
 		return
 	end
 
-	local entity = playerState.wrap:GetRawEntity()
-	if not entity or not entity:IsValid() or not entity:IsAlive() then
+	local pdata = playerState.pdata
+	local isAlive = pdata.isAlive
+	
+	-- If data is stale, skip this tick
+	if isAlive == nil then
 		return
 	end
-
-	if Common.IsBot(entity) or (entity == entities.GetLocalPlayer() and not Common.IsDebugEnabled()) then
+	
+	if not isAlive then
 		return
 	end
 
 	local id = playerState.id
+	
+	-- Check bot using steamID prefix (safe, no entity needed)
+	if id:sub(1, 4) == "BOT_" then
+		return
+	end
+	
+	-- Skip local player
+	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then
+		return
+	end
+
 	local ringCount = HistoryManager.GetRingCount()
 	if ringCount < 5 then
 		return

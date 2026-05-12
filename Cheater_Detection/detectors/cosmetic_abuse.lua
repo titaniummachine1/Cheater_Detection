@@ -1,6 +1,7 @@
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local G = require("Cheater_Detection.Utils.Globals")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local CosmeticAbuse = {}
 
@@ -105,7 +106,7 @@ local function getCounts(id)
 end
 
 function CosmeticAbuse.ProcessPlayer(playerState)
-	if not playerState or not playerState.id then
+	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 	if not isEnabled() then

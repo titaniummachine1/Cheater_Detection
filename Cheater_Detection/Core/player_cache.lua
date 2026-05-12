@@ -1,17 +1,26 @@
 --[[ Core/player_cache.lua
      Single source of truth for all per-player runtime state.
-     Replaces separate FastPlayers + PlayerCache split.
-
+     Uses lazy PlayerData - stores entity INDEX, never entity reference.
+     
+     CRITICAL: Entity objects are radioactive C++ pointers. Never store them.
+     Always use PlayerData.GetEntity(pdata) to safely get entity for current tick.
+     
      Detector API (CreateMove loop):
-       PlayerCache.Get(ply)       → { id, wrap, flags, score, externalChecked, checkFlags, isFriend, history, current }
+       PlayerCache.Get(ply)       → { id, entityIndex, pdata, flags, score, ... }
        PlayerCache.GetByID(id)    → same state table, lookup by steamID64 string
+       
+     Lazy Data Access:
+       state.pdata.origin      → cached position (fetched once per tick)
+       state.pdata.velocity    → cached velocity
+       state.pdata.eyePos      → cached eye position
+       PlayerData.GetEntity(state.pdata) → safe entity access (nil if stale)
 
-     View API (render / misc path — replaces FastPlayers):
+     View API (render / misc path):
        PlayerCache.GetAll(excludeLocal)  → WrappedPlayer[]
        PlayerCache.GetTeammates()        → WrappedPlayer[]
        PlayerCache.GetEnemies()          → WrappedPlayer[]
        PlayerCache.GetLocal()            → WrappedPlayer
-       PlayerCache.GetBySteamID(id)      → WrappedPlayer
+       PlayerCache.GetBySteamID(id)      → PlayerData
        PlayerCache.IsFriend(id)          → bool
 ]]
 
@@ -21,10 +30,12 @@ local Common          = require("Cheater_Detection.Utils.Common")
 local Events          = require("Cheater_Detection.Core.Events")
 local G               = require("Cheater_Detection.Utils.Globals")
 local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
+local PlayerData      = require("Cheater_Detection.Utils.PlayerData")
 
 local PlayerCache     = {}
 
 -- ── Authoritative per-player state ───────────────────────────────────────────
+-- NOTE: Never stores entity references. Only entity INDEX and lazy PlayerData.
 
 ---@type table<string, table>
 local activeSet       = {}
@@ -69,26 +80,27 @@ local function rebuildArrays()
 
 	local allN, noLocalN, teamN, enemyN = 0, 0, 0, 0
 	for id, state in pairs(activeSet) do
-		local wrap = state.wrap
-		local ent  = wrap and wrap:GetRawEntity()
+		local pdata = state.pdata
+		-- Safely get entity only if pdata is fresh for this tick
+		local ent = pdata and PlayerData.GetEntity(pdata)
 		-- Filter to only valid, non-dormant players for the view arrays
-		if wrap and ent and ent:IsValid() and not ent:IsDormant() then
+		if ent and ent:IsValid() and not ent:IsDormant() then
 			allN = allN + 1
-			arrAll[allN] = wrap
+			arrAll[allN] = WrappedPlayer.FromEntity(ent)
 
 			if id ~= cachedLocalID then
 				noLocalN = noLocalN + 1
-				arrNoLocal[noLocalN] = wrap
+				arrNoLocal[noLocalN] = WrappedPlayer.FromEntity(ent)
 			end
 
 			if cachedLocalTeam then
 				local t = ent:GetTeamNumber()
 				if t == cachedLocalTeam then
 					teamN = teamN + 1
-					arrTeam[teamN] = wrap
+					arrTeam[teamN] = WrappedPlayer.FromEntity(ent)
 				else
 					enemyN = enemyN + 1
-					arrEnemy[enemyN] = wrap
+					arrEnemy[enemyN] = WrappedPlayer.FromEntity(ent)
 				end
 			end
 		end
@@ -112,13 +124,7 @@ local HARD_FLAGS             = Constants.Flags.CHEATER | Constants.Flags.VAC_BAN
 local SCORE_DECAY_INTERVAL   = 1.0 -- Decay every 1s
 
 local function isAutoPriorityEnabled()
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
-		return G.Menu.Advanced.AutoPriority == true
-	end
-	if G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
-		return G.Menu.Main.AutoPriority == true
-	end
-	return false
+	return G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true
 end
 
 local function applyAutoPriority(state, ent)
@@ -196,15 +202,17 @@ local function syncActivePlayersTick()
 
 				local state = activeSet[id]
 				if not state then
-					local wrap = WrappedPlayer.FromEntity(ent, steamID)
-					if wrap then
-						local dbEntry   = G.DataBase[id]
-						local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
-						local initScore = dbEntry and dbEntry.Score or 0
+					local dbEntry   = G.DataBase[id]
+					local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
+					local initScore = dbEntry and dbEntry.Score or 0
 
+					-- Create lazy PlayerData - stores INDEX, never entity reference
+					local pdata = PlayerData.ForEntity(ent)
+					if pdata then
 						activeSet[id] = {
 							id              = id,
-							wrap            = wrap,
+							entityIndex     = ent:GetIndex(), -- Store INDEX only
+							pdata           = pdata, -- Lazy data container
 							flags           = initFlags,
 							score           = initScore,
 							externalChecked = false,
@@ -218,7 +226,8 @@ local function syncActivePlayersTick()
 						applyAutoPriority(activeSet[id], ent)
 					end
 				else
-					state.wrap = WrappedPlayer.FromEntity(ent, steamID) or state.wrap
+					-- Update PlayerData for this tick (refreshes cache)
+					state.pdata = PlayerData.ForEntity(ent) or state.pdata
 					state.lastUpdate = curTick
 				end
 			end
@@ -241,6 +250,7 @@ local function syncActivePlayersTick()
 end
 
 ---Get or create active state for a player (CreateMove / detector path)
+---Uses lazy PlayerData - entity INDEX stored, never entity reference
 ---@param ply Entity
 ---@return table|nil
 function PlayerCache.Get(ply)
@@ -254,31 +264,40 @@ function PlayerCache.Get(ply)
 	end
 
 	local id = tostring(steamID)
+	local curTick = globals.TickCount()
+	
 	if not activeSet[id] then
-		local wrap = WrappedPlayer.FromEntity(ply)
-		if not wrap then
-			return nil
-		end
-
 		local dbEntry   = G.DataBase[id]
 		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initScore = dbEntry and dbEntry.Score or 0
 
+		-- Create lazy PlayerData - stores INDEX only, never entity reference
+		local pdata = PlayerData.ForEntity(ply)
+		if not pdata then
+			return nil
+		end
+
 		activeSet[id] = {
 			id              = id,
-			wrap            = wrap,
+			entityIndex     = ply:GetIndex(), -- Store INDEX only
+			pdata           = pdata, -- Lazy data container (auto-caches per tick)
 			flags           = initFlags,
 			score           = initScore,
 			externalChecked = false,
 			checkFlags      = newCheckFlags(),
 			isFriend        = Common.IsFriend and Common.IsFriend(ply, true) or false,
-			lastUpdate      = globals.TickCount(),
+			lastUpdate      = curTick,
 			lastScoreDecay  = globals.RealTime(),
 			autoPrioritySusApplied = false,
 		}
 		markDirty()
 
 		applyAutoPriority(activeSet[id], ply)
+	else
+		-- Refresh PlayerData for current tick
+		local state = activeSet[id]
+		state.pdata = PlayerData.ForEntity(ply) or state.pdata
+		state.lastUpdate = curTick
 	end
 
 	-- Lazy score decay: apply elapsed-time decay periodically
@@ -392,10 +411,18 @@ function PlayerCache.GetEnemies()
 end
 
 ---@param id string  steamID64 string
----@return table|nil  WrappedPlayer
+---@return table|nil  PlayerData
 function PlayerCache.GetBySteamID(id)
 	local state = activeSet[tostring(id)]
-	return state and state.wrap or nil
+	return state and state.pdata or nil
+end
+
+---Get entity index for a player (safe - no entity reference)
+---@param id string steamID64 string
+---@return number|nil entity index
+function PlayerCache.GetEntityIndex(id)
+	local state = activeSet[tostring(id)]
+	return state and state.entityIndex or nil
 end
 
 ---@param id string  steamID64 string
@@ -411,8 +438,8 @@ local RUNTIME_HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED 
 Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
 	assert(playerState, "PlayerCache priority subscriber: playerState missing")
 	assert(playerState.id, "PlayerCache priority subscriber: id missing")
-	local wrap = playerState.wrap
-	local ent = wrap and wrap:GetRawEntity()
+	-- Use PlayerData to safely get entity (only if on current tick)
+	local ent = playerState.pdata and PlayerData.GetEntity(playerState.pdata)
 	if not ent or not ent:IsValid() then
 		return
 	end
@@ -439,11 +466,6 @@ function PlayerCache.ValidateStates()
 		return
 	end
 	lastValidationTick = now
-
-	-- Memory management: prune inactive wrappers
-	if WrappedPlayer.PruneInactive then
-		pcall(WrappedPlayer.PruneInactive, now)
-	end
 
 	-- Get authoritative list of live players
 	local liveEntities = entities.FindByClass("CTFPlayer") or {}

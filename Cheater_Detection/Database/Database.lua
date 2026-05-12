@@ -11,7 +11,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
-local Sources = require("Cheater_Detection.Database.Sources")
 
 local EmbeddedDBs = {
 	["d3fc0n6_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
@@ -21,6 +20,7 @@ local EmbeddedDBs = {
 	["tf2bd_official_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.tf2bd_official_embedded"),
 	["qfoxb_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
 	["joekiller_embedded"]     = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
+	["megascat_embedded"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.megascat_embedded"),
 }
 
 --[[ Module Declaration ]]
@@ -59,13 +59,7 @@ local function ReapplyDetectedPriorities()
 	if not G.DataBase then
 		return
 	end
-	local autoPriorityEnabled = false
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
-		autoPriorityEnabled = G.Menu.Advanced.AutoPriority == true
-	elseif G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
-		autoPriorityEnabled = G.Menu.Main.AutoPriority == true
-	end
-	if not autoPriorityEnabled then
+	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true) then
 		return
 	end
 
@@ -112,12 +106,7 @@ function Database.SetPriority(target, priority)
 	if steamID64 then
 		local ok, err = pcall(playerlist.SetPriority, steamID64, priority)
 		if ok then
-			local autoPriorityEnabled = false
-			if G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority ~= nil then
-				autoPriorityEnabled = G.Menu.Advanced.AutoPriority == true
-			elseif G.Menu and G.Menu.Main and G.Menu.Main.AutoPriority ~= nil then
-				autoPriorityEnabled = G.Menu.Main.AutoPriority == true
-			end
+			local autoPriorityEnabled = G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true
 			if priority == 10 and autoPriorityEnabled then
 				Database.UpsertCheater(steamID64, {
 					name = "Manual Flag",
@@ -443,43 +432,33 @@ function Database.SanitizeAll()
 end
 
 function Database.LoadEmbeddedDatabases()
-	local embeddedSources = Sources.GetEmbeddedSources()
-	if not embeddedSources or #embeddedSources == 0 then
-		return
-	end
-
-	local totalLoaded = 0
 	local totalNew = 0
 
-	for _, source in ipairs(embeddedSources) do
-		local embeddedDB = EmbeddedDBs[source.embedded]
-		if type(embeddedDB) ~= "table" then
-			Logger.Warning("Database", "[DB] Missing embedded DB: " .. tostring(source.embedded))
-		else
+	for dbName, embeddedDB in pairs(EmbeddedDBs) do
+		if type(embeddedDB) == "table" then
 			local added = 0
 			for steamID, entry in pairs(embeddedDB) do
 				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
 					if not G.DataBase[steamID] then
 						G.DataBase[steamID] = {
 							Name = entry.Name or "Unknown",
-							Reason = entry.Reason or source.cause or "Cheater",
-							Source = entry.Source or source.cause,
-							Static = entry.Static or source.sourceID,
+							Reason = entry.Reason or "Cheater",
+							Source = entry.Source or "Embedded",
+							Static = entry.Static or dbName,
 							Flags = entry.Flags or 0,
 						}
 						added = added + 1
 					end
 				end
 			end
-			totalLoaded = totalLoaded + 1
 			totalNew = totalNew + added
-			Logger.Debug("Database", string.format("[DB] Embedded '%s': +%d new entries", source.name, added))
+			Logger.Debug("Database", string.format("[DB] Embedded '%s': +%d new entries", dbName, added))
 		end
 	end
 
 	if totalNew > 0 then
 		Database.State.isDirty = true
-		Logger.Info("Database", string.format("[DB] Embedded DBs loaded: %d sources, %d new entries", totalLoaded, totalNew))
+		Logger.Info("Database", string.format("[DB] Embedded DBs loaded: %d new entries", totalNew))
 	end
 end
 

@@ -219,12 +219,31 @@ function Common.GetSteamID64(Player)
 	return result
 end
 
+-- Check if player is a runtime bot (engine-reported)
 function Common.IsBot(Player)
 	if not Player then
 		return false
 	end
 	local info = client.GetPlayerInfo(Player:GetIndex())
 	return info and (info.IsBot or info.IsHLTV) or false
+end
+
+-- Check if player is a bot from bot lists (has BOT flag in database)
+function Common.IsDatabaseBot(steamId)
+	if not steamId or type(steamId) ~= "string" then
+		return false
+	end
+	-- Runtime bots (BOT_ prefix from GetSteamID64)
+	if steamId:sub(1, 4) == "BOT_" then
+		return true
+	end
+	-- Database bots (from embedded bot lists)
+	local entry = G.DataBase and G.DataBase[steamId] or nil
+	if type(entry) == "table" then
+		local flags = tonumber(entry.Flags or 0) or 0
+		return (flags & Constants.Flags.BOT) ~= 0
+	end
+	return false
 end
 
 function Common.IsCheater(playerInfo)
@@ -255,12 +274,14 @@ function Common.IsCheater(playerInfo)
 
 	-- Check if the player is marked as a cheater based on flags.
 	-- Karma/retaliation-only rows must not count as cheater status.
+	-- Bots with BOT flag are also considered "cheaters" for votekick purposes
+	-- (this allows "kick cheaters" setting to also kick bots)
 	local inDatabase = false
 	local entry = G.DataBase and G.DataBase[steamId] or nil
 	if type(entry) == "table" then
 		local flags = tonumber(entry.Flags or 0) or 0
 		local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED |
-			Constants.Flags.COMM_BANNED
+			Constants.Flags.COMM_BANNED | Constants.Flags.BOT
 		inDatabase = (flags & cheaterMask) ~= 0
 	end
 	local PRIORITY_CHEATER = 10
