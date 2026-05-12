@@ -6,6 +6,7 @@
 local Constants = require("Cheater_Detection.Core.constants")
 local Database = require("Cheater_Detection.Database.Database")
 local Events = require("Cheater_Detection.Core.Events")
+local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 
 local DetectorUtils = {}
 
@@ -28,6 +29,7 @@ local DetectorUtils = {}
 ---@return boolean flagsChanged  True when the flag set changed (new threshold crossed).
 function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, reason)
 	local oldFlags = playerState.flags
+	local oldScore = playerState.score or 0
 
 	if hardFlag then
 		if (hardFlag & Constants.Flags.CHEATER) ~= 0 then
@@ -64,6 +66,22 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 	})
 
 	local flagsChanged = playerState.flags ~= oldFlags
+	local scoreChanged = playerState.score ~= (oldScore or 0)
+	
+	-- Auto-mark dirty for systems that need to react to changes
+	if flagsChanged or scoreChanged then
+		local dirtyMask = 0
+		if flagsChanged then
+			dirtyMask = dirtyMask | DirtySystem.FLAGS.FLAGS
+		end
+		if scoreChanged then
+			dirtyMask = dirtyMask | DirtySystem.FLAGS.SCORE
+		end
+		-- Mark for session persistence - player data changed
+		dirtyMask = dirtyMask | DirtySystem.FLAGS.SESSION
+		DirtySystem.MarkDirty(playerState.id, dirtyMask)
+	end
+	
 	if flagsChanged then
 		Events.Publish("OnPlayerStateChange", playerState, reason)
 	end

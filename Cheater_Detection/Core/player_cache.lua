@@ -31,6 +31,7 @@ local Events          = require("Cheater_Detection.Core.Events")
 local G               = require("Cheater_Detection.Utils.Globals")
 local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
 local PlayerData      = require("Cheater_Detection.Utils.PlayerData")
+local DirtySystem     = require("Cheater_Detection.Core.DirtySystem")
 
 local PlayerCache     = {}
 
@@ -54,6 +55,13 @@ local cachedLocalTeam = nil
 
 local function markDirty()
 	arrDirty = true
+end
+
+-- Helper to mark a specific player as dirty (for DirtySystem)
+local function markPlayerDirty(id, flags)
+	if DirtySystem and DirtySystem.MarkDirty then
+		DirtySystem.MarkDirty(id, flags or DirtySystem.FLAGS.SCORE)
+	end
 end
 
 local function refreshLocal()
@@ -222,7 +230,7 @@ local function syncActivePlayersTick()
 							lastScoreDecay  = globals.RealTime(),
 							autoPrioritySusApplied = false,
 						}
-						markDirty()
+						markPlayerDirty(id, DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
 						applyAutoPriority(activeSet[id], ent)
 					end
 				else
@@ -290,7 +298,7 @@ function PlayerCache.Get(ply)
 			lastScoreDecay  = globals.RealTime(),
 			autoPrioritySusApplied = false,
 		}
-		markDirty()
+		markPlayerDirty(id, DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
 
 		applyAutoPriority(activeSet[id], ply)
 	else
@@ -348,6 +356,8 @@ function PlayerCache.Remove(id, reason)
 	if state then
 		state.current = nil
 	end
+	-- Mark as disconnected before removal
+	markPlayerDirty(key, DirtySystem.FLAGS.DISCONNECTED)
 	Events.Publish("OnPlayerRemoved", key, reason or "explicit_remove")
 	activeSet[key] = nil
 	markDirty()

@@ -41,4 +41,18 @@ Constants.BHOP_MIN_CONSECUTIVE_SUCCESS = 2 -- How many times in a row it must ha
 -- [[ Bitmask for Database Persistence ]]
 Constants.PERSISTENT_MASK = Constants.Flags.CHEATER | Constants.Flags.VALVE | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED | Constants.Flags.SUSPICIOUS | Constants.Flags.BOT
 
+-- [[ Dirty Flags for Change Tracking ]]
+-- Used by DirtySystem to track what changed on a player (avoid iterating all players)
+Constants.DirtyFlags = {
+	NONE = 0,
+	SCORE = 1, -- Score changed (needs visuals update)
+	FLAGS = 2, -- Flags changed (needs visuals + notifications)
+	CHECKS = 4, -- Check flags changed (needs valve_check processing)
+	SESSION = 8, -- Session state changed (needs persistence)
+	PRIORITY = 16, -- Priority changed (needs playerlist update)
+	CONNECTED = 32, -- Player just connected (needs init processing)
+	DISCONNECTED = 64, -- Player disconnected (needs cleanup)
+	ALL = 127, -- All dirty flags combined
+}
+
 return Constants

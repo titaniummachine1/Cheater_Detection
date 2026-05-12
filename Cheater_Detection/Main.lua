@@ -10,6 +10,7 @@ local Events = require("Cheater_Detection.Core.Events")
 local Constants = require("Cheater_Detection.Core.constants")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local Scheduler = require("Cheater_Detection.Core.scheduler")
+local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local Common = require("Cheater_Detection.Utils.Common")
 require("Cheater_Detection.Utils.Commands")
@@ -127,8 +128,16 @@ local function enforceValveAutoDisconnect(playerState)
 end
 
 local function persistActiveSessionPlayers()
-	for id, state in pairs(PlayerCache.GetActiveTable()) do
-		persistSessionPlayerState(id, state, nil)
+	-- Use DirtySystem - only persist players with dirty SESSION flag
+	local dirtyPlayers = DirtySystem.GetDirtyPlayers(DirtySystem.FLAGS.SESSION)
+	
+	for _, id in ipairs(dirtyPlayers) do
+		local state = PlayerCache.GetByID(id)
+		if state then
+			persistSessionPlayerState(id, state, nil)
+		end
+		-- Clear the dirty flag after persisting
+		DirtySystem.ClearDirty(id, DirtySystem.FLAGS.SESSION)
 	end
 end
 
