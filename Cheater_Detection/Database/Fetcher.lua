@@ -802,6 +802,7 @@ function Fetcher.FinishFetch()
 	end
 
 	Fetcher.State.isRunning = false
+	Database.PurgeFriendsAndSelf()
 	if Database.State.isDirty then
 		Database.SaveDatabase()
 	end

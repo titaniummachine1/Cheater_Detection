@@ -491,6 +491,47 @@ function Database.ClearLocalPlayer()
 	end
 end
 
+function Database.PurgeFriendsAndSelf()
+	if type(G.DataBase) ~= "table" then
+		return 0
+	end
+
+	local purged = 0
+
+	-- Remove local player
+	local localPlayer = entities.GetLocalPlayer()
+	if localPlayer then
+		local mySteamID = tostring(Common.GetSteamID64(localPlayer) or "")
+		if mySteamID:match("^7656119%d+$") then
+			if G.DataBase[mySteamID] then
+				G.DataBase[mySteamID] = nil
+				purged = purged + 1
+				Database.State.isDirty = true
+			end
+			pcall(playerlist.SetPriority, localPlayer, 0)
+		end
+	end
+
+	-- Remove all Steam friends
+	local ok, friends = pcall(steam.GetFriends)
+	if ok and type(friends) == "table" then
+		for _, steamID3 in ipairs(friends) do
+			local steamID64 = Common.FromSteamid3To64(tostring(steamID3))
+			if steamID64 and steamID64:match("^7656119%d+$") and G.DataBase[steamID64] then
+				G.DataBase[steamID64] = nil
+				purged = purged + 1
+				Database.State.isDirty = true
+			end
+		end
+	end
+
+	if purged > 0 then
+		Logger.Info("Database", string.format("[DB] Purged %d friend/self entries from database", purged))
+	end
+
+	return purged
+end
+
 function Database.UpsertCheater(steamID, data)
 	if not steamID or type(steamID) ~= "string" then
 		return false
