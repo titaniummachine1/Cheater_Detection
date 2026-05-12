@@ -152,6 +152,10 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
+		if Advanced.AntiAim then
+			Advanced.SniperDotViewCorrect = TimMenu.Checkbox("Sniper Dot Hard-Flag (laser dot confirms pitch AA)", Advanced.SniperDotViewCorrect == true)
+			TimMenu.NextLine()
+		end
 		Advanced.Cosmetics = TimMenu.Checkbox("Cosmetic Exploit Detection", Advanced.Cosmetics == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()

@@ -18,7 +18,8 @@ local Evidence  = require("Cheater_Detection.Core.Evidence_system")
 local Events    = require("Cheater_Detection.Core.Events")
 local G         = require("Cheater_Detection.Utils.Globals")
 local MathUtils = require("Cheater_Detection.Utils.MathUtils")
-local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local PlayerCache   = require("Cheater_Detection.Core.player_cache")
+local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 
 local SniperDotAngle = {}
 
@@ -112,11 +113,19 @@ local function scanDots()
 
 		Evidence.AddEvidence(steamID, "anti_aim", EVIDENCE_WEIGHT)
 
-		if isDebug then
-			print(string.format(
-				"[SniperDot] %s: net_pitch=%.1f real_pitch=%.1f → pitch AA confirmed",
-				steamID, netPitch, realPitch
-			))
+		print(string.format(
+			"[SniperDot] %s: net=%.1f real=%.1f → pitch AA confirmed",
+			steamID, netPitch, realPitch
+		))
+
+		-- View correction: hard-flag via DetectorUtils when menu option enabled
+		local viewCorrect = G.Menu and G.Menu.Advanced and G.Menu.Advanced.SniperDotViewCorrect
+		if viewCorrect then
+			local pState = PlayerCache.GetByID(steamID)
+			if pState then
+				local reason = string.format("Sniper dot pitch AA (net=%.1f real=%.1f)", netPitch, realPitch)
+				DetectorUtils.ApplyPlayerFlag(pState, 0, Constants.Flags.CHEATER, reason)
+			end
 		end
 
 		::continue::

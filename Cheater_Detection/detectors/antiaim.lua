@@ -35,6 +35,7 @@ local SCORE_THRESHOLD        = 10.0
 -- Yaw-history buffer settings (mirrors Rijin: analyse last N records)
 local YAW_HISTORY_SIZE       = 16   -- records kept per player
 local YAW_DELTA_THRESHOLD    = 25.0 -- degrees avg delta = yaw AA signal
+local YAW_MAX_DELTA_THRESHOLD= 60.0 -- single-tick jump threshold (Rijin: large snap = AA desync)
 local CHOKE_TICK_THRESHOLD   = 2    -- ticks avg simtime gap = choke signal
 local YAW_EVIDENCE_WEIGHT    = 8.0  -- evidence weight per positive detection
 local YAW_EVIDENCE_COOLDOWN  = 3.0  -- seconds between evidence additions
@@ -174,14 +175,15 @@ local function pushYawRecord(h, pitch, yaw, simTime)
 	if h.count < cap then h.count = h.count + 1 end
 end
 
--- Returns avg_yaw_delta, avg_choke_ticks (or nil if insufficient data)
+-- Returns avg_yaw_delta, avg_choke_ticks, max_yaw_delta (or nil if insufficient data)
 local function analyseYawHistory(h)
-	if h.count < 3 then return nil, nil end
+	if h.count < 3 then return nil, nil, nil end
 
 	local tickInterval = globals.TickInterval()
 	local collected = 0
 	local sumYawDelta = 0.0
 	local sumChokeTicks = 0
+	local maxYawDelta = 0.0
 
 	local cap = YAW_HISTORY_SIZE
 	-- Walk pairs: newest = head, going backwards
@@ -196,13 +198,14 @@ local function analyseYawHistory(h)
 			local rawTimeDiff = rA.simTime - rB.simTime
 			local timeDiff = math.abs(rawTimeDiff)
 			local chokeTicks = math.floor(timeDiff / tickInterval + 0.5)
+			if yawDelta > maxYawDelta then maxYawDelta = yawDelta end
 			sumYawDelta   = sumYawDelta + yawDelta
 			sumChokeTicks = sumChokeTicks + chokeTicks
 			collected = collected + 1
 		end
 	end
 
-	if collected == 0 then return nil, nil end
+	if collected == 0 then return nil, nil, nil end
 
 	local avgYawDelta = sumYawDelta / collected
 	local avgChokeTicks = sumChokeTicks / collected
@@ -212,7 +215,7 @@ local function analyseYawHistory(h)
 		avgYawDelta = avgYawDelta / avgChokeTicks
 	end
 
-	return avgYawDelta, avgChokeTicks
+	return avgYawDelta, avgChokeTicks, maxYawDelta
 end
 
 -- ── main entry ─────────────────────────────────────────────────────────────
@@ -292,22 +295,36 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		local h = getYawHistory(playerState.id)
 		pushYawRecord(h, pitch, yaw, simTime)
 
-		local avgYawDelta, avgChokeTicks = analyseYawHistory(h)
+		local avgYawDelta, avgChokeTicks, maxYawDelta = analyseYawHistory(h)
 		if avgYawDelta ~= nil then
-			local triggered = avgChokeTicks >= CHOKE_TICK_THRESHOLD or avgYawDelta >= YAW_DELTA_THRESHOLD
+			local avgTriggered  = avgChokeTicks >= CHOKE_TICK_THRESHOLD or avgYawDelta >= YAW_DELTA_THRESHOLD
+			local maxTriggered  = maxYawDelta ~= nil and maxYawDelta >= YAW_MAX_DELTA_THRESHOLD
+			local triggered = avgTriggered or maxTriggered
 
 			if triggered then
 				if (now - h.lastEvidenceTime) >= YAW_EVIDENCE_COOLDOWN then
 					h.lastEvidenceTime = now
-					Evidence.AddEvidence(playerState.id, "anti_aim", YAW_EVIDENCE_WEIGHT)
-
-					if isDebug then
-						traceLog(true, playerState, string.format(
-							"yaw AA detected avgDelta=%.1f° avgChoke=%.1f ticks",
-							avgYawDelta, avgChokeTicks
-						))
+					-- Scale weight: max-delta snap is stronger signal
+					local weight = YAW_EVIDENCE_WEIGHT
+					if maxTriggered and maxYawDelta >= 120.0 then
+						weight = weight * 1.5
 					end
+					Evidence.AddEvidence(playerState.id, "anti_aim", weight)
+
+					local trigReason = ""
+					if maxTriggered then
+						trigReason = string.format("max=%.1fdeg ", maxYawDelta)
+					end
+					print(string.format("[AntiAim] yaw AA on %s | %savg=%.1fdeg choke=%.1f w=%.1f",
+						playerState.id, trigReason, avgYawDelta, avgChokeTicks, weight))
 				end
+			end
+
+			if isDebug then
+				traceLog(true, playerState, string.format(
+					"yaw history avg=%.1fdeg max=%.1fdeg choke=%.1f triggered=%s",
+					avgYawDelta, maxYawDelta or 0, avgChokeTicks, tostring(triggered)
+				))
 			end
 		end
 	end
