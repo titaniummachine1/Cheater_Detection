@@ -1,0 +1,15 @@
+{
+  ["76561199053890738"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199236792192"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199373581410"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199483852579"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199485151981"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199522520786"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199558255735"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199562860778"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199633166688"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199659717662"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199671398815"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199673746798"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+  ["76561199681675859"] = { Name = "Unknown", Reason = "Not a Bot (TFCL)", Source = "TF2 Cheater List (Not Bot)", Static = "tfcl_notabot", Flags = 0, Timestamp = 0 }
+}

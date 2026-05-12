@@ -11,6 +11,17 @@ local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
+local Sources = require("Cheater_Detection.Database.Sources")
+
+local EmbeddedDBs = {
+	["d3fc0n6_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
+	["sleepy_main_embedded"]   = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_main_embedded"),
+	["sleepy_ext_embedded"]    = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_ext_embedded"),
+	["sleepy_nullc0re_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_nullc0re_embedded"),
+	["tf2bd_official_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.tf2bd_official_embedded"),
+	["qfoxb_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
+	["joekiller_embedded"]     = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
+}
 
 --[[ Module Declaration ]]
 local Database = {
@@ -431,6 +442,47 @@ function Database.SanitizeAll()
 	end
 end
 
+function Database.LoadEmbeddedDatabases()
+	local embeddedSources = Sources.GetEmbeddedSources()
+	if not embeddedSources or #embeddedSources == 0 then
+		return
+	end
+
+	local totalLoaded = 0
+	local totalNew = 0
+
+	for _, source in ipairs(embeddedSources) do
+		local embeddedDB = EmbeddedDBs[source.embedded]
+		if type(embeddedDB) ~= "table" then
+			Logger.Warning("Database", "[DB] Missing embedded DB: " .. tostring(source.embedded))
+		else
+			local added = 0
+			for steamID, entry in pairs(embeddedDB) do
+				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+					if not G.DataBase[steamID] then
+						G.DataBase[steamID] = {
+							Name = entry.Name or "Unknown",
+							Reason = entry.Reason or source.cause or "Cheater",
+							Source = entry.Source or source.cause,
+							Static = entry.Static or source.sourceID,
+							Flags = entry.Flags or 0,
+						}
+						added = added + 1
+					end
+				end
+			end
+			totalLoaded = totalLoaded + 1
+			totalNew = totalNew + added
+			Logger.Debug("Database", string.format("[DB] Embedded '%s': +%d new entries", source.name, added))
+		end
+	end
+
+	if totalNew > 0 then
+		Database.State.isDirty = true
+		Logger.Info("Database", string.format("[DB] Embedded DBs loaded: %d sources, %d new entries", totalLoaded, totalNew))
+	end
+end
+
 function Database.Initialize(silent)
 	if Database.State.isInitialized then
 		return
@@ -439,6 +491,7 @@ function Database.Initialize(silent)
 		G.DataBase = {}
 	end
 	Database.LoadDatabase(silent, false)
+	Database.LoadEmbeddedDatabases()
 end
 
 function Database.ClearLocalPlayer()
