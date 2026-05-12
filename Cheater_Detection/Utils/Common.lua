@@ -448,11 +448,19 @@ end
 -- simulation-time-based detectors (WarpDT, FakeLag).
 --
 -- Rules (per spec):
+--   • Must be fully connected (signon state 6 = FULL)
 --   • FPS below server tick rate → engine can't process every packet → unreliable
 --   • Incoming avg latency > 2 tick intervals → our view of remote sim times is too stale
 --   • Any incoming packet loss > 1%
 --   • Any outgoing choke > 0 → our end is queuing packets → timing is off
 function Common.IsConnectionStableForDetection()
+	-- Must be fully connected (signon state 6 = FULL)
+	-- States: 0=NONE, 1=CHALLENGE, 2=CONNECTED, 3=NEW, 4=PRESPAWN, 5=SPAWN, 6=FULL
+	local signonState = clientstate.GetClientSignonState()
+	if signonState ~= 6 then
+		return false
+	end
+
 	local tickInterval = globals.TickInterval()
 	local tickRate = 1.0 / tickInterval
 

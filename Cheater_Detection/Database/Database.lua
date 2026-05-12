@@ -21,6 +21,8 @@ local EmbeddedDBs = {
 	["qfoxb_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
 	["joekiller_embedded"]     = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
 	["megascat_embedded"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.megascat_embedded"),
+	["external_combined_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.external_combined_embedded"),
+	["tfcl_combined_lua"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.tfcl_combined_lua"),
 }
 
 --[[ Module Declaration ]]

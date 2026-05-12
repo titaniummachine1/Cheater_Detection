@@ -17,10 +17,10 @@ Sources.List = {
 		parser = "broadcasts",
 		sourceID = "masterbase_broadcasts"
 	},
-	-- wgetJane's Biglist aggregated via ClusterConsultant meta-repo (large, actively updated bot list)
+	-- wgetJane's Biglist (primary source - large, actively updated bot list)
 	{
 		name = "TF2BD Community Biglist",
-		url = "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.biglist.json",
+		url = "https://gist.githubusercontent.com/wgetJane/0bc01bd46d7695362253c5a2fa49f2e9/raw/playerlist.biglist.json",
 		cause = "Bot (TF2BD Community Biglist)",
 		parser = "tf2db",
 		sourceID = "cc_biglist"
@@ -28,7 +28,7 @@ Sources.List = {
 	-- Curated by Trusted-role members of the official TF2BD Discord (high verification bar)
 	{
 		name = "TF2BD Community Trusted",
-		url = "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.trusted.json",
+		url = "https://trusted.roto.lol/v1/steamids",
 		cause = "Cheater (TF2BD Trusted)",
 		parser = "tf2db",
 		sourceID = "cc_trusted"
