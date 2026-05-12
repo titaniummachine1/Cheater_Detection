@@ -250,6 +250,18 @@ local function DrawMenu()
 			TimMenu.NextLine()
 		end
 	else
+		TimMenu.BeginSector("Privacy Mode")
+		Misc.Privacy = Misc.Privacy or {}
+		local PM = Misc.Privacy
+		PM.YouFriendTags = TimMenu.Checkbox("You / Friend chat tags", PM.YouFriendTags == true)
+		TimMenu.NextLine()
+		PM.MuteBotChat = TimMenu.Checkbox("Mute bot/cheater-bot chat", PM.MuteBotChat == true)
+		TimMenu.NextLine()
+		PM.BlockServerMessages = TimMenu.Checkbox("Block server chat messages", PM.BlockServerMessages == true)
+		TimMenu.NextLine()
+		TimMenu.EndSector()
+		TimMenu.NextLine()
+
 		TimMenu.BeginSector("Vote Automation")
 		Misc.Autovote = TimMenu.Checkbox("Auto Vote", Misc.Autovote == true)
 		TimMenu.NextLine()

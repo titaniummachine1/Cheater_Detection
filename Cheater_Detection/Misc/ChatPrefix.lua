@@ -68,11 +68,30 @@ local function ClearBuffer(bf)
 	bf:SetCurBit(0)
 end
 
+---Check if a player is flagged as a cheating bot in our database
+---@param player Entity
+---@return boolean
+local function IsCheatingBot(player)
+	if not player then return false end
+	local steamID = tostring(Common.GetSteamID64(player))
+	if not steamID then return false end
+	local dbEntry = Database.GetCheater(steamID)
+	if type(dbEntry) == "table" then
+		local flags = tonumber(dbEntry.Flags or 0) or 0
+		if (flags & Constants.Flags.BOT) ~= 0 then
+			return true
+		end
+	end
+	local ok, prio = pcall(playerlist.GetPriority, player)
+	return ok and prio == 10
+end
+
 ---Get cheater status for a player
 ---@param player Entity
----@return string|nil status "CHEATER", "SUSPICIOUS", "VALVE" or nil
+---@param isLocalPlayer boolean
+---@return string|nil status "YOU", "FRIEND", "CHEATER", "SUSPICIOUS", "VALVE" or nil
 ---@return table color RGB color {r, g, b}
-local function GetCheaterStatus(player)
+local function GetCheaterStatus(player, isLocalPlayer)
 	if not player then
 		return nil, { 255, 255, 255 }
 	end
@@ -80,6 +99,17 @@ local function GetCheaterStatus(player)
 	local steamID = tostring(Common.GetSteamID64(player))
 	if not steamID then
 		return nil, { 255, 255, 255 }
+	end
+
+	-- You / Friend tags (Privacy Mode)
+	local pm = G.Menu and G.Menu.Misc and G.Menu.Misc.Privacy
+	if pm and pm.YouFriendTags then
+		if isLocalPlayer then
+			return "YOU", { 96, 255, 100 }
+		end
+		if Common.IsFriend(player) then
+			return "FRIEND", { 96, 255, 100 }
+		end
 	end
 
 	-- Check if Valve employee first (takes priority)
@@ -141,20 +171,43 @@ local function OnUserMessage(msg)
 	-- Read chat data (TF2's actual SayText2 structure)
 	local wantsToChat = bf:ReadByte() -- Byte 0-7: wants to chat flag
 	local clientIndex = bf:ReadByte() -- Byte 8-15: client index
-	local isChat = bf:ReadByte()     -- Byte 16-23: chat flag (THIS WAS MISSING!)
+	local isChat = bf:ReadByte()      -- Byte 16-23: chat flag
 	local chatType = bf:ReadString(256) -- Now properly aligned - e.g. "TF_Chat_Team"
 	local playerName = bf:ReadString(256)
 	local messageText = bf:ReadString(256)
 
+	local pm = G.Menu and G.Menu.Misc and G.Menu.Misc.Privacy
+
+	-- Block server chat messages (clientIndex == 0 means the server/console)
+	if pm and pm.BlockServerMessages and clientIndex == 0 then
+		ClearBuffer(bf)
+		bf:SetCurBit(0)
+		return
+	end
+
 	-- Get player entity
 	local player = GetPlayerFromName(playerName)
+
+	-- Mute chat from players we have marked as cheating bots
+	if pm and pm.MuteBotChat and player then
+		if IsCheatingBot(player) then
+			ClearBuffer(bf)
+			bf:SetCurBit(0)
+			return
+		end
+	end
+
 	if not player then
 		bf:SetCurBit(startBit)
 		return
 	end
 
+	-- Determine if this is the local player
+	local localPlayer = entities.GetLocalPlayer()
+	local isLocalPlayer = localPlayer and player == localPlayer or false
+
 	-- Get cheater status
-	local status, color = GetCheaterStatus(player)
+	local status, color = GetCheaterStatus(player, isLocalPlayer)
 
 	-- Check if this is a [CD] system message (after getting status to allow override)
 	if messageText:find("%[CD%]") then
