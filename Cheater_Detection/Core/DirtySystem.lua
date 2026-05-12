@@ -130,6 +130,24 @@ function DirtySystem.GetDirtyFlags(playerID)
     return playerDirtyFlags[playerID]
 end
 
+--- Get all player IDs with specific dirty flags
+---@param flags number Bitmask of DirtySystem.FLAGS to check
+---@return table Array of player IDs that have any of the specified flags dirty
+function DirtySystem.GetDirtyPlayers(flags)
+    local players = {}
+    if not flags or flags == 0 then
+        return players
+    end
+    
+    for playerID, playerFlags in pairs(playerDirtyFlags) do
+        if (playerFlags & flags) ~= 0 then
+            players[#players + 1] = playerID
+        end
+    end
+    
+    return players
+end
+
 --- Clear dirty flags for a player
 ---@param playerID string Player's SteamID64
 ---@param flags number|nil Bitmask of flags to clear (nil = clear all)
