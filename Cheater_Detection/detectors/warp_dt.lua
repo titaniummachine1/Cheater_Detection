@@ -68,7 +68,10 @@ function WarpDT.ProcessPlayer(playerState)
 		return
 	end
 
-	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.Warp) then
+	local menu = G.Menu
+	local advanced = menu and menu.Advanced or nil
+	local warpEnabled = advanced and advanced["Warp"] == true or false
+	if not warpEnabled then
 		return
 	end
 

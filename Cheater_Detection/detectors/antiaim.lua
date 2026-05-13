@@ -28,9 +28,9 @@ local AntiAim = {}
 local MAX_LEGAL_PITCH        = 89.30
 local MAX_SANE_ABS_ANGLE     = 540
 local DETECTION_COOLDOWN_SEC = 1.0
-local HIT_WEIGHT             = 1.0
+local HIT_WEIGHT             = 1.0  -- one confirmed tick = instant flag (HIT_WEIGHT >= SCORE_THRESHOLD)
 local SCORE_DECAY_PER_SEC    = 0.67
-local SCORE_THRESHOLD        = 6.0
+local SCORE_THRESHOLD        = 1.0
 
 -- Yaw-history buffer settings (mirrors Rijin: analyse last N records)
 local YAW_HISTORY_SIZE       = 16   -- records kept per player
@@ -106,69 +106,36 @@ end
 -- ── networked-angle reading ────────────────────────────────────────────────
 local function readNetAngles(entity, cmd, isLocalDebug)
 	if not entity then return nil, nil, "nil" end
-	local candidates = {}
 
-	local function add(src, pitch, yaw)
-		local p, y = toNum(pitch), toNum(yaw)
-		if p == nil or isCorrupted(p) then return end
-		if y ~= nil and isCorrupted(y) then return end
-		candidates[#candidates + 1] = { source = src, pitch = p, yaw = y }
-	end
-
+	-- 1. cmd angles (local debug only)
 	if isLocalDebug and cmd then
-		local ok, a, b = pcall(function() return cmd:GetViewAngles() end)
-		if ok then
-			if type(a) == "number" then add("cmd", a, b)
-			else add("cmd", tryExtractPitchYaw(a)) end
-		end
-		local ok2, va = pcall(function() return cmd.viewangles end)
-		if ok2 then add("cmd.viewangles", tryExtractPitchYaw(va)) end
+		local p, y = tryExtractPitchYaw(cmd:GetViewAngles())
+		if p ~= nil and not isCorrupted(p) then return p, y, "cmd" end
 	end
 
-	-- GetVAngles() reads the raw unclamped networked angles; m_angEyeAngles[0]
-	-- is clamped to ±90° by the engine before GetPropFloat sees it, so we
-	-- must try GetVAngles first to catch out-of-range AA pitches (e.g. 271°).
-	local ok_va, va = pcall(function() return entity:GetVAngles() end)
-	if ok_va and va then add("vangles", va.x, va.y) end
-
-	add("raw-prop",    entity:GetPropFloat("m_angEyeAngles[0]"),
-	                   entity:GetPropFloat("m_angEyeAngles[1]"))
-
-	local nv = entity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
-	if nv then add("tfnonlocaldata", nv.x, nv.y) end
-
-	nv = entity:GetPropVector("m_angEyeAngles[0]")
-	if nv then add("propvector", nv.x, nv.y) end
-
-	-- DEBUG: dump every raw source every tick
-	if Common.IsDebugEnabled() then
-		local raw_va_p  = ok_va and va and va.x or "ERR"
-		local raw_va_y  = ok_va and va and va.y or "ERR"
-		local prop0     = entity:GetPropFloat("m_angEyeAngles[0]")
-		local prop1     = entity:GetPropFloat("m_angEyeAngles[1]")
-		print(string.format("[AntiAim][RAW] vangles=%.3f/%.3f raw-prop=%.3f/%.3f candidates=%d",
-			type(raw_va_p)=="number" and raw_va_p or -9999,
-			type(raw_va_y)=="number" and raw_va_y or -9999,
-			prop0 or -9999, prop1 or -9999, #candidates))
-	end
-
-	for i = 1, #candidates do
-		local c = candidates[i]
-		if isInvalidPitch(c.pitch) then
-			return c.pitch, c.yaw, c.source
+	-- 2. GetPropVector reads the full unclamped angle vector (x=pitch, y=yaw).
+	--    lnxLib's GetEyeAngles() uses this same path internally.
+	--    GetPropFloat("m_angEyeAngles[0]") is clamped to ±90 by the engine.
+	local av = entity:GetPropVector("m_angEyeAngles[0]")
+	if av then
+		local p = toNum(av.x)
+		local y = toNum(av.y)
+		if p ~= nil and not isCorrupted(p) then
+			return p, y, "propvec"
 		end
 	end
 
-	if #candidates == 0 then return nil, nil, "nil" end
-
-	local pref = isLocalDebug and "cmd" or "raw-prop"
-	for i = 1, #candidates do
-		if candidates[i].source == pref then
-			return candidates[i].pitch, candidates[i].yaw, candidates[i].source
+	-- 3. GetVAngles fallback
+	local va = entity:GetVAngles()
+	if va then
+		local p = toNum(va.x)
+		local y = toNum(va.y)
+		if p ~= nil and not isCorrupted(p) then
+			return p, y, "vangles"
 		end
 	end
 
-	return candidates[1].pitch, candidates[1].yaw, candidates[1].source
+	return nil, nil, "nil"
 end
 
 -- ── yaw-history helpers (Rijin-derived) ───────────────────────────────────
@@ -251,19 +218,9 @@ end
 
 -- ── main entry ─────────────────────────────────────────────────────────────
 function AntiAim.ProcessPlayer(playerState, cmd)
-	print("[AntiAim][ENTER] ProcessPlayer called id=" .. tostring(playerState and playerState.id or "nil"))
-	if not playerState or not playerState.pdata or not playerState.id then
-		print("[AntiAim][EXIT] bad playerState")
-		return
-	end
-	if not Common.IsPlayerConnected() then
-		print("[AntiAim][EXIT] not connected")
-		return
-	end
-	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then
-		print("[AntiAim][EXIT] AntiAim menu off")
-		return
-	end
+	if not playerState or not playerState.pdata or not playerState.id then return end
+	if not Common.IsPlayerConnected() then return end
+	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then return end
 
 	local isDebug = Common.IsDebugEnabled()
 	local pdata   = playerState.pdata
@@ -271,37 +228,18 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local isAlive = pdata.isAlive
 	local isDorm  = pdata.isDormant
 
-	if simTime == nil or isAlive == nil or isDorm == nil then
-		print("[AntiAim][EXIT] nil pdata fields simTime=" .. tostring(simTime) .. " isAlive=" .. tostring(isAlive) .. " isDorm=" .. tostring(isDorm))
-		return
-	end
-	if not isAlive or isDorm then
-		print("[AntiAim][EXIT] not alive or dormant isAlive=" .. tostring(isAlive) .. " isDorm=" .. tostring(isDorm))
-		return
-	end
-	if not simTime or simTime <= 0 then
-		print("[AntiAim][EXIT] bad simTime=" .. tostring(simTime))
-		return
-	end
+	if simTime == nil or isAlive == nil or isDorm == nil then return end
+	if not isAlive or isDorm then return end
+	if not simTime or simTime <= 0 then return end
 
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = playerState.id == tostring(Common.GetSteamID64(localPlayer))
 	if not isDebug then
-		if playerState.isFriend then
-			print("[AntiAim][EXIT] is friend id=" .. tostring(playerState.id))
-			return
-		end
-		if isLocalPlayer then
-			print("[AntiAim][EXIT] is local player")
-			return
-		end
+		if playerState.isFriend or isLocalPlayer then return end
 	end
 
 	local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
-	if isCheater then
-		print("[AntiAim][EXIT] already flagged cheater id=" .. tostring(playerState.id))
-		return
-	end
+	if isCheater then return end
 
 	local pitchState = getPitchState(playerState.id)
 	local isNewSimTime = pitchState.lastSimTime == nil or simTime > pitchState.lastSimTime
@@ -313,20 +251,22 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local pitch, yaw, angleSource = readNetAngles(ent, cmd, isDebug and isLocalPlayer)
 	local now = globals.RealTime()
 	applyPitchDecay(pitchState, now)
+	if isDebug then
+		local pitchStr = "nil"
+		local yawStr = "nil"
+		if pitch ~= nil then
+			pitchStr = string.format("%.3f", pitch)
+		end
+		if yaw ~= nil then
+			yawStr = string.format("%.3f", yaw)
+		end
+		print(string.format("[AntiAim][TICK] id=%s pitch=%s yaw=%s src=%s sim=%.3f",
+			tostring(playerState.id), pitchStr, yawStr, tostring(angleSource), simTime))
+	end
 
 	-- ── 1. Invalid pitch detection ────────────────────────────────────────
 	-- Checked every tick regardless of simTime so choking AA players still
 	-- accumulate score (DETECTION_COOLDOWN_SEC prevents per-tick spam).
-	if isDebug then
-		local pitchStr = "nil"
-		if pitch ~= nil then pitchStr = string.format("%.3f", pitch) end
-		local yawStr2 = "nil"
-		if yaw ~= nil then yawStr2 = string.format("%.3f", yaw) end
-		print(string.format("[AntiAim][TICK] id=%s pitch=%s yaw=%s src=%s simTime=%.4f isNew=%s isAlive=%s isDorm=%s",
-			tostring(playerState.id), pitchStr, yawStr2,
-			tostring(angleSource), simTime or 0,
-			tostring(isNewSimTime), tostring(isAlive), tostring(isDorm)))
-	end
 	if pitch ~= nil and isInvalidPitch(pitch) and not isCorrupted(pitch) then
 		ent = PlayerData.GetEntity(pdata)
 		if ent and ent:IsValid() and not ent:IsDormant() and ent:IsAlive() then

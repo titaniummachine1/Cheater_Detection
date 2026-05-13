@@ -13,6 +13,7 @@ local Scheduler = require("Cheater_Detection.Core.scheduler")
 local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local Common = require("Cheater_Detection.Utils.Common")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 require("Cheater_Detection.Utils.Commands")
 require("Cheater_Detection.Misc.ChatPrefix")
 require("Cheater_Detection.Misc.Vote_Reveal")
@@ -191,8 +192,7 @@ end
 local function OnCreateMove(cmd)
 	TickProfiler.BeginSection("CreateMove_Total")
 	local isGameUI = engine.IsGameUIVisible()
-	local isConVisible = engine.Con_IsVisible()
-	if isGameUI or isConVisible then
+	if isGameUI then
 		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
@@ -242,6 +242,11 @@ local function OnCreateMove(cmd)
 	local enableCosmetics = adv and adv.Cosmetics == true
 
 	local tagsEnabled = mainMenu == nil or mainMenu.Cheater_Tags ~= false
+	if isDebugEnabled() then
+		print(string.format("[CD][DETECTOR_LOOP] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s tags=%s",
+			tostring(enableValveCheck), tostring(enableSilent), tostring(enableAntiAim), tostring(enableDuckSpeed),
+			tostring(enableBhop), tostring(enableWarpDT), tostring(enableChoke), tostring(enableCosmetics), tostring(tagsEnabled)))
+	end
 	local anyDetectorsEnabled = enableValveCheck
 		or enableSilent
 		or enableAntiAim
@@ -276,11 +281,18 @@ local function OnCreateMove(cmd)
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer))
 	local stateTable = PlayerCache.GetActiveTable()
+	if isDebug then
+		local activeCount = 0
+		for _ in pairs(stateTable) do
+			activeCount = activeCount + 1
+		end
+		print(string.format("[CD][PLAYER_SCAN] active=%d localID=%s", activeCount, tostring(localID)))
+	end
 
 	TickProfiler.BeginSection("PlayerScan_Loop")
 	for id, existingState in pairs(stateTable) do
-		local wrap = existingState and existingState.wrap or nil
-		local ply = wrap and wrap:GetRawEntity() or nil
+		local pdata = existingState and existingState.pdata or nil
+		local ply = pdata and PlayerData.GetEntity(pdata) or nil
 		if not ply or not ply:IsValid() then
 			goto continue
 		end

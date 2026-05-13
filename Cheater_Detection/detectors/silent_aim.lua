@@ -16,8 +16,9 @@ local MathUtils = require("Cheater_Detection.Utils.MathUtils")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local Logger = require("Cheater_Detection.Utils.Logger")
+local PlayerData = require("Cheater_Detection.Utils.PlayerData")
+local mathAbs = math.abs
 local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
 
 local SilentAim = {}
@@ -445,7 +446,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	if type(shotAngles.pitch) ~= "number" or type(shotAngles.yaw) ~= "number" then
 		return
 	end
-	if math.abs(shotAngles.pitch) > 180 or math.abs(shotAngles.yaw) > 1000000 then
+	if mathAbs(shotAngles.pitch) > 180 or mathAbs(shotAngles.yaw) > 1000000 then
 		return
 	end
 	shotAngles = { pitch = shotAngles.pitch, yaw = wrapAngle(shotAngles.yaw) }
@@ -516,7 +517,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		end
 		local data = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.Angles)
 		if data and type(data.pitch) == "number" and type(data.yaw) == "number" then
-			if math.abs(data.pitch) <= 180 and math.abs(data.yaw) <= 1000000 then
+			if mathAbs(data.pitch) <= 180 and mathAbs(data.yaw) <= 1000000 then
 				data = { pitch = data.pitch, yaw = wrapAngle(data.yaw) }
 			else
 				data = nil
