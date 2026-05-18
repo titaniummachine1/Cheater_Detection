@@ -93,7 +93,12 @@ end
 
 local function scanPlayerWearables(targetID)
 	if not schemaReady then initSchema() end
-	if not itemschema or type(itemschema.GetItemDefinitionByID) ~= "function" then return end
+	if not itemschema or type(itemschema.GetItemDefinitionByID) ~= "function" then
+		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+			print("[CosmeticAbuse] scan skipped: itemschema not ready")
+		end
+		return false
+	end
 
 	local data = { regions = {}, slotCounts = {} }
 
@@ -154,6 +159,7 @@ local function scanPlayerWearables(targetID)
 		print(string.format("[CosmeticAbuse] id=%s slots:{%s} regions:{%s}",
 			targetID, slotStr, regionStr))
 	end
+	return true
 end
 
 local function checkConflicts(id)
@@ -228,7 +234,8 @@ function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 
 	if not isDebug and scannedPlayers[id] then return end
 
-	scanPlayerWearables(id)
+	local scanned = scanPlayerWearables(id)
+	if not scanned then return end
 
 	local illegal, reason = checkConflicts(id)
 	if illegal then
