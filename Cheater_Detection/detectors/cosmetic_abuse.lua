@@ -234,6 +234,9 @@ function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 
 	local illegal, reason = checkConflicts(id)
 	if illegal then
+		if isDebug then
+			print(string.format("[CosmeticAbuse] FLAGGING id=%s reason=%s", id, tostring(reason)))
+		end
 		DetectorUtils.ApplyPlayerFlag(playerState, SCORE_GAIN, nil,
 			"Equip region abuse: " .. (reason or "unknown conflict"))
 	end
