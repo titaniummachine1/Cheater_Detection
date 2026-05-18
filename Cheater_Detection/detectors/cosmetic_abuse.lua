@@ -177,7 +177,12 @@ function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 
 	if not isDebug and playerState.isFriend then return end
 
-	if scannedPlayers[id] then return end
+	local localPlayer = entities.GetLocalPlayer()
+	local isLocalPlayer = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
+
+	if isLocalPlayer and not isDebug then return end
+
+	if not isLocalPlayer and scannedPlayers[id] then return end
 
 	local scanned = scanPlayerWearables(id)
 	if not scanned then return end
