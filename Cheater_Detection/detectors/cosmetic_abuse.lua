@@ -111,13 +111,6 @@ local function scanPlayerWearables(targetID)
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
 
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-		local s = ""
-		for slot, count in pairs(data.slotCounts) do s = s .. " s" .. slot .. "=" .. count end
-		local r = ""
-		for region, count in pairs(data.regions) do r = r .. " " .. region .. "=" .. count end
-		print("[CosmeticAbuse] id=" .. targetID .. " slots:{" .. s .. "} regions:{" .. r .. "}")
-	end
 	return true
 end
 
