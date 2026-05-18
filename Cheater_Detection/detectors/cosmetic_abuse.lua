@@ -133,12 +133,22 @@ local function scanPlayerWearables(targetID)
 	scannedPlayers[targetID] = true
 
 	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-		local slotStr = ""
+		local slotStr = "(none)"
+		local first = true
 		for slot, count in pairs(data.slotCounts) do
+			if first then
+				slotStr = ""
+				first = false
+			end
 			slotStr = slotStr .. string.format(" slot%d=%d", slot, count)
 		end
-		local regionStr = ""
+		local regionStr = "(none)"
+		first = true
 		for region, count in pairs(data.regions) do
+			if first then
+				regionStr = ""
+				first = false
+			end
 			regionStr = regionStr .. string.format(" %s=%d", region, count)
 		end
 		print(string.format("[CosmeticAbuse] id=%s slots:{%s} regions:{%s}",
@@ -209,7 +219,7 @@ function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 
 	if not isDebug and playerState.isFriend then return end
 
-	if scannedPlayers[id] then return end
+	if not isDebug and scannedPlayers[id] then return end
 
 	scanPlayerWearables(id)
 
