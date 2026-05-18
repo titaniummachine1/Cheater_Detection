@@ -2,7 +2,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # Cheater_Detection
-![image](https://github.com/titaniummachine1/Cheater_Detection/assets/78664175/e8743c83-95fa-4a07-8c7e-050bbc4d0592)
+<img width="534" height="460" alt="image" src="https://github.com/user-attachments/assets/a58ce056-6186-4ed8-bdd1-8397728e6889" />
+
 
 Automatic bot and cheater detection with cheater prioritization, visuals based on RijiN, and an optional local HTTP bridge for smoother online lookups.
 
@@ -22,6 +23,13 @@ Click the badges below to download required dependencies:
 > Python 3 is optional but highly recommended to run the local HTTP bridge middleware for asynchronous background fetches.
 
 ---
+
+<img width="743" height="628" alt="image" src="https://github.com/user-attachments/assets/e007993a-cee0-44ac-8338-1657f94e78a4" />
+
+<img width="536" height="651" alt="image" src="https://github.com/user-attachments/assets/83103a3a-81c2-4943-b236-ad923cdb6073" />
+
+<img width="643" height="744" alt="image" src="https://github.com/user-attachments/assets/41e758f9-a837-4d6e-ab0a-61e9a8f87f46" />
+
 
 > [!WARNING]
 > ### ⚠️ Current Active Detections Status
