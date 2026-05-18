@@ -18,6 +18,7 @@ local Constants = require("Cheater_Detection.Core.constants")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local PlayerData = require("Cheater_Detection.Utils.PlayerData")
+local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local mathAbs = math.abs
 local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
 
@@ -864,7 +865,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		DetectorUtils.ApplyPlayerFlag(playerState, CLEAN_SHOT_DECAY, nil, nil)
 	else
 		if Common.IsDebugEnabled() then
-			print(string.format("[SilentAim] gated out %s | snap=%.1fdeg gain=%.2f aimed=%s", id, shotDev, scoreGain, tostring(aimedAtTarget)))
+			print(string.format("[SilentAim] gated out %s | snap=%.1fdeg gain=%.2f aimed=%s", id, shotDev, scoreGain,
+				tostring(aimedAtTarget)))
 		end
 	end
 end
