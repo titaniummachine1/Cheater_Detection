@@ -177,15 +177,13 @@ function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
 
-	if isLocalPlayer and not isDebug then return end
-
 	if not isLocalPlayer and scannedPlayers[id] then return end
 
 	local scanned = scanPlayerWearables(id)
 	if not scanned then return end
 
 	local illegal, reason = checkConflicts(id)
-	if illegal then
+	if illegal and not isLocalPlayer then
 		DetectorUtils.ApplyPlayerFlag(playerState, SCORE_GAIN, nil,
 			"Equip region abuse: " .. (reason or "unknown conflict"))
 	end
