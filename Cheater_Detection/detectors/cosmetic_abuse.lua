@@ -211,10 +211,17 @@ end
 
 function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
-	if not Common.IsPlayerConnected() then return end
-	if not isEnabled() then return end
-
 	local isDebug = G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
+	if isDebug then print("[CosmeticAbuse] entered id=" .. tostring(playerState.id)) end
+	if not Common.IsPlayerConnected() then
+		if isDebug then print("[CosmeticAbuse] blocked: IsPlayerConnected=false") end
+		return
+	end
+	if not isEnabled() then
+		if isDebug then print("[CosmeticAbuse] blocked: isEnabled=false") end
+		return
+	end
+
 	local id = tostring(playerState.id)
 
 	if not isDebug and playerState.isFriend then return end
