@@ -46,18 +46,7 @@ end
 
 local function initSchema()
 	if schemaReady then return end
-	if not itemschema then
-		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-			print("[CosmeticAbuse] initSchema: itemschema is nil")
-		end
-		return
-	end
-	if not itemschema.GetAttributeDefinitionByName then
-		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-			print("[CosmeticAbuse] initSchema: GetAttributeDefinitionByName missing")
-		end
-		return
-	end
+	if not itemschema or not itemschema.GetAttributeDefinitionByName then return end
 
 	local ok, attrDef = pcall(itemschema.GetAttributeDefinitionByName, "equip_region")
 	if ok and attrDef then
@@ -65,10 +54,6 @@ local function initSchema()
 	end
 
 	schemaReady = true
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-		print(string.format("[CosmeticAbuse] schema ready, equipRegionAttrDef=%s",
-			tostring(equipRegionAttrDef)))
-	end
 end
 
 local function getItemRegion(defIndex)
@@ -88,12 +73,7 @@ end
 
 local function scanPlayerWearables(targetID)
 	if not schemaReady then initSchema() end
-	if not itemschema or not itemschema.GetItemDefinitionByID then
-		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-			print("[CosmeticAbuse] scan skipped: itemschema not ready")
-		end
-		return false
-	end
+	if not itemschema or not itemschema.GetItemDefinitionByID then return false end
 
 	local data = { regions = {}, slotCounts = {} }
 
@@ -131,29 +111,6 @@ local function scanPlayerWearables(targetID)
 
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
-
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
-		local slotStr = "(none)"
-		local first = true
-		for slot, count in pairs(data.slotCounts) do
-			if first then
-				slotStr = ""
-				first = false
-			end
-			slotStr = slotStr .. string.format(" slot%d=%d", slot, count)
-		end
-		local regionStr = "(none)"
-		first = true
-		for region, count in pairs(data.regions) do
-			if first then
-				regionStr = ""
-				first = false
-			end
-			regionStr = regionStr .. string.format(" %s=%d", region, count)
-		end
-		print(string.format("[CosmeticAbuse] id=%s slots:{%s} regions:{%s}",
-			targetID, slotStr, regionStr))
-	end
 	return true
 end
 
@@ -212,31 +169,21 @@ end
 
 function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
-	local isDebug = G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
-	if isDebug then print("[CosmeticAbuse] entered id=" .. tostring(playerState.id)) end
-	if not Common.IsPlayerConnected() then
-		if isDebug then print("[CosmeticAbuse] blocked: IsPlayerConnected=false") end
-		return
-	end
-	if not isEnabled() then
-		if isDebug then print("[CosmeticAbuse] blocked: isEnabled=false") end
-		return
-	end
+	if not Common.IsPlayerConnected() then return end
+	if not isEnabled() then return end
 
+	local isDebug = G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 	local id = tostring(playerState.id)
 
 	if not isDebug and playerState.isFriend then return end
 
-	if not isDebug and scannedPlayers[id] then return end
+	if scannedPlayers[id] then return end
 
 	local scanned = scanPlayerWearables(id)
 	if not scanned then return end
 
 	local illegal, reason = checkConflicts(id)
 	if illegal then
-		if isDebug then
-			print(string.format("[CosmeticAbuse] FLAGGING id=%s reason=%s", id, tostring(reason)))
-		end
 		DetectorUtils.ApplyPlayerFlag(playerState, SCORE_GAIN, nil,
 			"Equip region abuse: " .. (reason or "unknown conflict"))
 	end
