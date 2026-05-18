@@ -144,7 +144,7 @@ local function OnStateChange(playerState, reason)
 
 	-- Read Source stored by the caller (Fetcher, SteamHistory, etc.).
 	-- nil means the detection came from local in-session analysis only.
-	local dbEntry = G.DataBase and G.DataBase[id]
+	local dbEntry = G.Database and G.Database.GetCheater(id) or nil
 	local detectionSource = dbEntry and dbEntry.Source or nil
 	local fromDatabase = detectionSource ~= nil
 
@@ -191,11 +191,14 @@ local function OnStateChange(playerState, reason)
 		return
 	end
 
+	local lp = entities.GetLocalPlayer()
+	local isLp = false
+	if lp and lp:IsValid() then
+		isLp = id == tostring(Common.GetSteamID64(lp))
+	end
+
 	-- Cleanup self in debug mode to ensure fresh tests
-	if
-		(G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug)
-		and id == tostring(Common.GetSteamID64(entities.GetLocalPlayer()))
-	then
+	if (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug) and isLp then
 		Database.RemoveCheater(id)
 	end
 

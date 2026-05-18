@@ -238,7 +238,7 @@ function Common.IsDatabaseBot(steamId)
 		return true
 	end
 	-- Database bots (from embedded bot lists)
-	local entry = G.DataBase and G.DataBase[steamId] or nil
+	local entry = G.Database and G.Database.GetCheater(steamId) or nil
 	if type(entry) == "table" then
 		local flags = tonumber(entry.Flags or 0) or 0
 		return (flags & Constants.Flags.BOT) ~= 0
@@ -277,7 +277,7 @@ function Common.IsCheater(playerInfo)
 	-- Bots with BOT flag are also considered "cheaters" for votekick purposes
 	-- (this allows "kick cheaters" setting to also kick bots)
 	local inDatabase = false
-	local entry = G.DataBase and G.DataBase[steamId] or nil
+	local entry = G.Database and G.Database.GetCheater(steamId) or nil
 	if type(entry) == "table" then
 		local flags = tonumber(entry.Flags or 0) or 0
 		local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED |

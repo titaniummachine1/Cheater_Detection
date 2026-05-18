@@ -210,7 +210,7 @@ local function syncActivePlayersTick()
 
 				local state = activeSet[id]
 				if not state then
-					local dbEntry   = G.DataBase[id]
+					local dbEntry   = G.Database and G.Database.GetCheater(id) or nil
 					local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 					local initScore = dbEntry and dbEntry.Score or 0
 
@@ -275,7 +275,7 @@ function PlayerCache.Get(ply)
 	local curTick = globals.TickCount()
 	
 	if not activeSet[id] then
-		local dbEntry   = G.DataBase[id]
+		local dbEntry   = G.Database and G.Database.GetCheater(id) or nil
 		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initScore = dbEntry and dbEntry.Score or 0
 

@@ -14,17 +14,23 @@ local Logger = require("Cheater_Detection.Utils.Logger")
 local Events = require("Cheater_Detection.Core.Events")
 
 local EmbeddedDBs = {
-	["d3fc0n6_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
-	["sleepy_main_embedded"]   = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_main_embedded"),
-	["sleepy_ext_embedded"]    = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_ext_embedded"),
-	["sleepy_nullc0re_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_nullc0re_embedded"),
-	["tf2bd_official_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.tf2bd_official_embedded"),
-	["qfoxb_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
-	["joekiller_embedded"]     = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
-	["megascat_embedded"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.megascat_embedded"),
-	["external_combined_embedded"] = require("Cheater_Detection.Database.Static_Embeded_Databases.external_combined_embedded"),
-	["tfcl_combined_lua"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.tfcl_combined_lua"),
+	["d3fc0n6_embedded"]           = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
+	["sleepy_main_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_main_embedded"),
+	["sleepy_ext_embedded"]        = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_ext_embedded"),
+	["sleepy_nullc0re_embedded"]   = require(
+		"Cheater_Detection.Database.Static_Embeded_Databases.sleepy_nullc0re_embedded"),
+	["tf2bd_official_embedded"]    = require(
+		"Cheater_Detection.Database.Static_Embeded_Databases.tf2bd_official_embedded"),
+	["qfoxb_embedded"]             = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
+	["joekiller_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
+	["megascat_embedded"]          = require("Cheater_Detection.Database.Static_Embeded_Databases.megascat_embedded"),
+	["external_combined_embedded"] = require(
+		"Cheater_Detection.Database.Static_Embeded_Databases.external_combined_embedded"),
+	["tfcl_combined_lua"]          = require("Cheater_Detection.Database.Static_Embeded_Databases.tfcl_combined_lua"),
 }
+
+-- Global lookup tables for embedded databases (shared across all databases)
+local GlobalLookupTables = require("Cheater_Detection.Database.Static_Embeded_Databases.global_lookup_tables")
 
 --[[ Module Declaration ]]
 local Database = {
@@ -141,6 +147,40 @@ function Database.GetFilePath()
 	return "Lua Cheater_Detection/database.txt" -- Fallback
 end
 
+local function serializeCompressedDatabase(normalizedData)
+	local chunks = {}
+	local count = 1
+	chunks[count] =
+	"return {\n    _Metadata = {\n        Version = 4,\n        Format = \"global_lookup\"\n    },\n    Data = {\n"
+	count = count + 1
+
+	local isFirst = true
+	for k, entry in pairs(normalizedData) do
+		local entryChunks = {}
+		for i = 1, #entry do
+			local val = entry[i]
+			if type(val) == "string" then
+				local escaped = val:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r')
+				entryChunks[i] = '"' .. escaped .. '"'
+			else
+				entryChunks[i] = tostring(val)
+			end
+		end
+
+		local line = '        ["' .. k .. '"] = {' .. table.concat(entryChunks, ", ") .. '}'
+		if not isFirst then
+			chunks[count - 1] = chunks[count - 1] .. ",\n"
+		else
+			isFirst = false
+		end
+		chunks[count] = line
+		count = count + 1
+	end
+
+	chunks[count] = "\n    }\n}"
+	return table.concat(chunks)
+end
+
 function Database.SaveDatabase(force)
 	local saveStartedAt = nowSeconds()
 	if not G.DataBase then
@@ -161,48 +201,106 @@ function Database.SaveDatabase(force)
 	end
 
 	local filepath = Database.GetFilePath()
-	Logger.Debug("Database", "[DB] Synchronous save to disk...")
+	Logger.Debug("Database", "[DB] Synchronous save to disk (global lookup format)...")
 	ReapplyDetectedPriorities()
 
-	local cleanedData = {}
+	-- Use global lookup tables for compression
+	local normalizedData = {}
+
 	for k, v in pairs(G.DataBase) do
 		if type(v) == "table" and type(k) == "string" then
-			local clean = {}
-			if v.Name and v.Name ~= "Unknown" and v.Name ~= tostring(k) then
-				clean.Name = v.Name
+			if v[1] ~= nil and type(v[1]) == "number" then
+				normalizedData[k] = v
+			else
+				-- Map Source to global lookup ID or inline string
+				local sourceValue
+				if type(v.Source) == "string" and v.Source ~= "" then
+					local sourceID = GlobalLookupTables.Sources_rev and GlobalLookupTables.Sources_rev[v.Source]
+					if sourceID then
+						sourceValue = sourceID
+					else
+						sourceValue = v.Source
+					end
+				else
+					sourceValue = 0
+				end
+
+				-- Map Reason to global lookup ID or inline string
+				local reasonValue
+				if type(v.Reason) == "string" and v.Reason ~= "" and v.Reason ~= "Unknown Source" then
+					local reasonID = GlobalLookupTables.Reasons_rev and GlobalLookupTables.Reasons_rev[v.Reason]
+					if reasonID then
+						reasonValue = reasonID
+					else
+						reasonValue = v.Reason
+					end
+				else
+					reasonValue = 0
+				end
+
+				-- Map Static to global lookup ID or inline string
+				local staticValue
+				if type(v.Static) == "string" and v.Static ~= "" and v.Static ~= false then
+					local staticID = GlobalLookupTables.Statics_rev and GlobalLookupTables.Statics_rev[v.Static]
+					if staticID then
+						staticValue = staticID
+					else
+						staticValue = v.Static
+					end
+				else
+					staticValue = 0
+				end
+
+				-- Map Name to global lookup ID or inline string
+				local nameValue
+				if v.Name and type(v.Name) == "string" and v.Name ~= "" then
+					local nameID = GlobalLookupTables.Names_rev and GlobalLookupTables.Names_rev[v.Name]
+					if nameID then
+						nameValue = nameID
+					else
+						nameValue = v.Name
+					end
+				else
+					nameValue = 0
+				end
+
+				-- Add Retaliation to Flags if present
+				local flags = v.Flags or 0
+				if v.Retaliation == true then
+					flags = flags | Constants.Flags.RETALIATION
+				end
+
+				-- Build normalized array: { Flags, Source, Reason, Static, Name }
+				local entry = {
+					flags,
+					sourceValue,
+					reasonValue,
+					staticValue,
+					nameValue,
+				}
+
+				-- Add Timestamp only if present
+				if v.Timestamp and v.Timestamp ~= 0 then
+					entry[6] = v.Timestamp
+				end
+
+				-- Add Karma only if present
+				if type(v.Karma) == "number" and v.Karma ~= 0 then
+					local next_idx = entry[6] and 7 or 6
+					entry[next_idx] = math.floor(v.Karma)
+				end
+
+				normalizedData[k] = entry
 			end
-			if v.Reason and v.Reason ~= "Unknown Source" then
-				clean.Reason = v.Reason
-			end
-			if type(v.Source) == "string" then
-				clean.Source = v.Source
-			end
-			if v.Static then
-				clean.Static = v.Static
-			end
-			if v.Flags and v.Flags ~= 0 then
-				clean.Flags = v.Flags
-			end
-			if v.Score and v.Score ~= 0 then
-				clean.Score = v.Score
-			end
-			if type(v.Karma) == "number" and v.Karma > 0 then
-				local karmaFloored = math.floor(v.Karma)
-				clean.Karma = karmaFloored
-			end
-			if v.Retaliation == true then
-				clean.Retaliation = true
-			end
-			cleanedData[k] = clean
 		end
 	end
 
-	local encoded = Serializer.serializeTable(cleanedData)
+	local encoded = serializeCompressedDatabase(normalizedData)
 	if encoded then
 		if Serializer.writeFile(filepath, encoded) then
 			Database.State.isDirty = false
 			Database.State.lastSave = os.time()
-			Logger.Info("Database", "Database flushed to disk: " .. filepath)
+			Logger.Info("Database", "Database flushed to disk (global lookup): " .. filepath)
 			local elapsed = nowSeconds() - saveStartedAt
 			if elapsed >= SLOW_SAVE_WARN_SECONDS then
 				Logger.Warning(
@@ -356,15 +454,113 @@ function Database.LoadDatabase(silent, force)
 			Logger.Warning("Database", "[DB] Data might be corrupted. Resetting database base layer.")
 			G.DataBase = {}
 		else
-			-- PRE-ALLOCATION OPTIMIZATION:
-			-- Use the loaded table as the base memory for G.DataBase
-			-- Fetcher will now update this table in-place rather than creating new entries
-			G.DataBase = decodedData
-			local count = 0
-			for _ in pairs(G.DataBase) do
-				count = count + 1
+			-- Check if data is in normalized format (Version 2, 3 or 4)
+			local isNormalized = decodedData._Metadata and (decodedData._Metadata.Format == "normalized" or decodedData._Metadata.Format == "global_lookup")
+			local version = decodedData._Metadata and decodedData._Metadata.Version or 2
+
+			if isNormalized then
+				-- Decode normalized format back to verbose format for runtime compatibility
+				local sources = (version >= 4 and GlobalLookupTables.Sources) or decodedData.Sources or {}
+				local reasons = (version >= 4 and GlobalLookupTables.Reasons) or decodedData.Reasons or {}
+				local statics = (version >= 4 and GlobalLookupTables.Statics) or decodedData.Statics or {}
+				local names = (version >= 4 and GlobalLookupTables.Names) or decodedData.Names or {}
+				local data = decodedData.Data or {}
+
+				local expandedData = {}
+				for steamID, entry in pairs(data) do
+					if type(entry) == "table" and type(steamID) == "string" then
+						local expanded = {}
+						expanded.Flags = entry[1] or 0
+
+						-- Decode Source: integer ID to string
+						local sourceID = entry[2]
+						if type(sourceID) == "number" and sourceID > 0 then
+							expanded.Source = sources[sourceID] or "Unknown"
+						elseif type(sourceID) == "string" then
+							expanded.Source = sourceID
+						else
+							expanded.Source = "Unknown"
+						end
+
+						-- Decode Static: integer ID to string (Version 3: index 3)
+						local staticID = entry[3]
+						if type(staticID) == "number" and staticID > 0 then
+							expanded.Static = statics[staticID] or false
+						else
+							expanded.Static = false
+						end
+
+						-- Decode Name: integer ID to string or raw string (Version 3: index 4)
+						local nameValue = entry[4]
+						if type(nameValue) == "number" and nameValue > 0 then
+							expanded.Name = names[nameValue] or "Unknown"
+						elseif type(nameValue) == "string" and nameValue ~= "" then
+							expanded.Name = nameValue
+						else
+							expanded.Name = "Unknown"
+						end
+
+						-- Decode Reason: integer ID to string or raw string (Version 3: index 5)
+						local reasonValue = entry[5]
+						if type(reasonValue) == "number" and reasonValue > 0 then
+							expanded.Reason = reasons[reasonValue] or "Unknown"
+						elseif type(reasonValue) == "string" then
+							expanded.Reason = reasonValue
+						else
+							expanded.Reason = "Cheater"
+						end
+
+						-- Decode Timestamp (Version 3: index 6, optional)
+						-- Only set if present in file (saves runtime memory)
+						if entry[6] and type(entry[6]) == "number" and entry[6] ~= 0 then
+							expanded.Timestamp = entry[6]
+						end
+
+						-- Decode Karma (Version 3: index 6 or 7, optional)
+						-- If Timestamp is missing, Karma is at index 6
+						-- If Timestamp is present, Karma is at index 7
+						if entry[6] and type(entry[6]) == "number" and entry[6] > 0 then
+							-- entry[6] is Timestamp, check entry[7] for Karma
+							if entry[7] then
+								expanded.Karma = entry[7]
+							end
+						elseif entry[6] and type(entry[6]) == "number" and entry[6] < 0 then
+							-- entry[6] could be negative Karma (unlikely but possible)
+							expanded.Karma = entry[6]
+						elseif entry[6] == nil and entry[7] then
+							-- entry[6] is missing, entry[7] is Karma
+							expanded.Karma = entry[7]
+						elseif entry[6] == 0 and entry[7] then
+							-- entry[6] is 0 (omitted Timestamp), entry[7] is Karma
+							expanded.Karma = entry[7]
+						end
+
+						-- Decode Retaliation from Flags bit
+						expanded.Retaliation = (expanded.Flags & Constants.Flags.RETALIATION) ~= 0
+						if expanded.Retaliation then
+							expanded.Flags = expanded.Flags & ~Constants.Flags.RETALIATION
+						end
+
+						expandedData[steamID] = expanded
+					end
+				end
+
+				G.DataBase = expandedData
+				local count = 0
+				for _ in pairs(G.DataBase) do
+					count = count + 1
+				end
+				Logger.Info("Database",
+					string.format("[DB] Loaded %d entries from disk (normalized format v%d).", count, version))
+			else
+				-- Legacy format: use as-is
+				G.DataBase = decodedData
+				local count = 0
+				for _ in pairs(G.DataBase) do
+					count = count + 1
+				end
+				Logger.Info("Database", string.format("[DB] Loaded %d entries from disk (legacy format).", count))
 			end
-			Logger.Info("Database", string.format("[DB] Loaded %d entries from disk.", count))
 		end
 	end
 
@@ -408,20 +604,37 @@ function Database.SanitizeAll()
 
 	local sanitized = 0
 	for _, value in pairs(G.DataBase) do
-		if type(value.Static) == "string" then
-			local staticVal = value.Static
+		local staticVal
+		local isCompressed = (value[1] ~= nil and type(value[1]) == "number")
+		if isCompressed then
+			staticVal = value[4]
+		else
+			staticVal = value.Static
+		end
+
+		if type(staticVal) == "string" then
 			if staticVal:find("http") or #staticVal > 25 then
 				local found = false
 				for pattern, id in pairs(migrationMap) do
 					if staticVal:find(pattern) then
-						value.Static = id
+						if isCompressed then
+							local globalID = GlobalLookupTables.Statics_rev and GlobalLookupTables.Statics_rev[id]
+							value[4] = globalID or id
+						else
+							value.Static = id
+						end
 						found = true
 						break
 					end
 				end
 
 				if not found then
-					value.Static = "Ext"
+					if isCompressed then
+						local globalID = GlobalLookupTables.Statics_rev and GlobalLookupTables.Statics_rev["Ext"]
+						value[4] = globalID or "Ext"
+					else
+						value.Static = "Ext"
+					end
 				end
 				sanitized = sanitized + 1
 				Database.State.isDirty = true
@@ -440,23 +653,44 @@ function Database.LoadEmbeddedDatabases()
 
 	for dbName, embeddedDB in pairs(EmbeddedDBs) do
 		if type(embeddedDB) == "table" then
-			local added = 0
-			for steamID, entry in pairs(embeddedDB) do
-				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-					if not G.DataBase[steamID] then
-						G.DataBase[steamID] = {
-							Name = entry.Name or "Unknown",
-							Reason = entry.Reason or "Cheater",
-							Source = entry.Source or "Embedded",
-							Static = entry.Static or dbName,
-							Flags = entry.Flags or 0,
-						}
-						added = added + 1
+			-- Check if database uses global lookup format (has Data field, no individual lookup tables)
+			local usesGlobalFormat = embeddedDB.Data ~= nil and embeddedDB.Sources == nil
+
+			if usesGlobalFormat then
+				-- New format: Data arrays reference global lookup IDs
+				local added = 0
+				for steamID, entry in pairs(embeddedDB.Data) do
+					if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+						if not G.DataBase[steamID] then
+							G.DataBase[steamID] = entry
+							added = added + 1
+						end
 					end
 				end
+				totalNew = totalNew + added
+				Logger.Debug("Database",
+					string.format("[DB] Embedded '%s' (global format): +%d new entries", dbName, added))
+			else
+				-- Legacy format: individual lookup tables per file
+				local added = 0
+				for steamID, entry in pairs(embeddedDB) do
+					if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+						if not G.DataBase[steamID] then
+							G.DataBase[steamID] = {
+								Name = entry.Name or "Unknown",
+								Reason = entry.Reason or "Cheater",
+								Source = entry.Source or "Embedded",
+								Static = entry.Static or dbName,
+								Flags = entry.Flags or 0,
+							}
+							added = added + 1
+						end
+					end
+				end
+				totalNew = totalNew + added
+				Logger.Debug("Database",
+					string.format("[DB] Embedded '%s' (legacy format): +%d new entries", dbName, added))
 			end
-			totalNew = totalNew + added
-			Logger.Debug("Database", string.format("[DB] Embedded '%s': +%d new entries", dbName, added))
 		end
 	end
 
@@ -559,7 +793,7 @@ function Database.UpsertCheater(steamID, data)
 		persistentFlags = data.flags & Constants.PERSISTENT_MASK
 	end
 
-	local existing = G.DataBase[steamID]
+	local existing = Database.GetCheater(steamID)
 	local currentTime = os.time()
 	local score = data.score or 0
 	local incomingKarma = nil
@@ -629,7 +863,49 @@ function Database.GetCheater(steamID)
 	if not steamID or type(G.DataBase) ~= "table" then
 		return nil
 	end
-	return G.DataBase[steamID]
+	local entry = G.DataBase[steamID]
+	if not entry then return nil end
+
+	-- Decode compressed entries on-the-fly
+	if entry[1] ~= nil and type(entry[1]) == "number" then
+		local flags = entry[1] or 0
+		local sourceID = entry[2]
+		local reasonID = entry[3]
+		local staticID = entry[4]
+		local nameID = entry[5]
+
+		local source = type(sourceID) == "number" and GlobalLookupTables.Sources[sourceID] or sourceID or "Unknown"
+		local reason = type(reasonID) == "number" and GlobalLookupTables.Reasons[reasonID] or reasonID or "Cheater"
+		local static = type(staticID) == "number" and GlobalLookupTables.Statics[staticID] or staticID or false
+		local name = type(nameID) == "number" and GlobalLookupTables.Names[nameID] or nameID or "Unknown"
+
+		local ret = {
+			Flags = flags,
+			Source = source,
+			Reason = reason,
+			Static = static,
+			Name = name,
+		}
+
+		if entry[6] and type(entry[6]) == "number" then
+			if entry[6] > 1000 then -- Timestamp
+				ret.Timestamp = entry[6]
+				if entry[7] then ret.Karma = entry[7] end
+			else
+				ret.Karma = entry[6]
+			end
+		end
+
+		local hasRetal = (flags & Constants.Flags.RETALIATION) ~= 0
+		if hasRetal then
+			ret.Retaliation = true
+			ret.Flags = flags & ~Constants.Flags.RETALIATION
+		end
+
+		return ret
+	end
+
+	return entry
 end
 
 function Database.RemoveCheater(steamID)

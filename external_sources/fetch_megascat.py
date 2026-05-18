@@ -25,6 +25,10 @@ def main():
         name = player.get("label", "Unknown") or "Unknown"
         name = name.encode("ascii", "ignore").decode("ascii").strip() or "Unknown"
         
+        # Replace SteamID64 names with "Unknown"
+        if name.startswith("7656119") and len(name) == 17 and name.isdigit():
+            name = "Unknown"
+        
         ptype = player.get("type", "cheater")
         reason = f"MegaScaterbomb ({ptype})"
         

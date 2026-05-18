@@ -21,6 +21,7 @@ Sources kept live (actively updated):
 
 import json
 import re
+import argparse
 import urllib.request
 from pathlib import Path
 from typing import Dict, Optional
@@ -233,7 +234,14 @@ def entry_to_lua(steamid64: str, entry: dict) -> str:
     return '\t["' + steamid64 + '"] = { ' + ", ".join(fields) + " },"
 
 
-def generate_lua(entries: Dict[str, dict], source_name: str, source_url: str) -> str:
+def generate_lua(entries: Dict[str, dict], source_name: str, source_url: str, use_global_lookup=False, global_lookup_file=None) -> str:
+    if use_global_lookup:
+        return generate_lua_global_lookup(entries, source_name, source_url, global_lookup_file)
+    return generate_lua_verbose(entries, source_name, source_url)
+
+
+def generate_lua_verbose(entries: Dict[str, dict], source_name: str, source_url: str) -> str:
+    """Generate verbose Lua format (legacy)."""
     lines = [
         f"-- Embedded Cheater Database: {source_name}",
         f"-- Source URL: {source_url}",
@@ -246,6 +254,79 @@ def generate_lua(entries: Dict[str, dict], source_name: str, source_url: str) ->
     for sid in sorted(entries.keys()):
         lines.append(entry_to_lua(sid, entries[sid]))
     lines.append("}")
+    return "\n".join(lines)
+
+
+def generate_lua_global_lookup(entries: Dict[str, dict], source_name: str, source_url: str, global_lookup_file=None) -> str:
+    """Generate global lookup format (normalized with integer IDs)."""
+    # Load global lookup tables if provided to get reverse maps
+    source_id_map = {}
+    reason_id_map = {}
+    static_id_map = {}
+    name_id_map = {}
+    
+    if global_lookup_file and Path(global_lookup_file).exists():
+        try:
+            with open(global_lookup_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # Parse Sources
+            for match in re.finditer(r'\[(\d+)\]\s*=\s*"([^"]+)"', content):
+                source_id_map[match.group(2)] = int(match.group(1))
+            # Parse Reasons
+            for match in re.finditer(r'\[(\d+)\]\s*=\s*"([^"]+)"', content):
+                reason_id_map[match.group(2)] = int(match.group(1))
+            # Parse Statics
+            for match in re.finditer(r'\[(\d+)\]\s*=\s*"([^"]+)"', content):
+                static_id_map[match.group(2)] = int(match.group(1))
+            # Parse Names
+            for match in re.finditer(r'\[(\d+)\]\s*=\s*"([^"]+)"', content):
+                name_id_map[match.group(2)] = int(match.group(1))
+        except Exception as e:
+            print(f"  [WARN] Failed to load global lookup file: {e}")
+    
+    # No local lookup tables - inline unique strings directly
+    lines = [
+        f"-- Embedded Cheater Database: {source_name}",
+        f"-- Source URL: {source_url}",
+        f"-- Total Entries: {len(entries)}",
+        f"-- Usage: local DB = require('Cheater_Detection.Database.Static_Embeded_Databases.FILENAME')",
+        f"-- Access: DB.Data['76561198XXXXXXXXX']",
+        f"-- Format: Global lookup IDs (references global_lookup_tables.lua)",
+        "",
+        "return {",
+        "",
+        "\tData = {",
+    ]
+    
+    for sid in sorted(entries.keys()):
+        entry = entries[sid]
+        source = entry['Source']
+        reason = entry['Reason']
+        static = entry['Static']
+        name = entry['Name']
+        flags = entry['Flags']
+        
+        # Get IDs from global lookup (inline if not found)
+        source_id = source_id_map.get(source, source)
+        reason_id = reason_id_map.get(reason, reason)
+        static_id = static_id_map.get(static, static)
+        name_id = name_id_map.get(name, name)
+        
+        # Format values: integers as-is, strings as quoted
+        def format_value(v):
+            if isinstance(v, int):
+                return str(v)
+            else:
+                return f'"{escape_lua_string(v)}"'
+        
+        # Build normalized entry: [Flags, SourceID, ReasonID, StaticID, NameID]
+        entry_array = [format_value(flags), format_value(source_id), format_value(reason_id), format_value(static_id), format_value(name_id)]
+        
+        lines.append(f"\t\t[\"{sid}\"] = {{ {', '.join(entry_array)} }},")
+    
+    lines.append("\t},")
+    lines.append("}")
+    
     return "\n".join(lines)
 
 
@@ -274,12 +355,24 @@ def process_source(source: dict) -> Optional[Dict[str, dict]]:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="External Source Embedder")
+    parser.add_argument('--global-lookup', metavar='FILE',
+                        help='Use global lookup format (specify path to global_lookup_tables.lua)')
+    args = parser.parse_args()
+    
+    use_global_lookup = args.global_lookup is not None
+    
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
     print("External Source Embedder")
     print("=" * 60)
-    print(f"Output: {OUTPUT_DIR}\n")
+    print(f"Output: {OUTPUT_DIR}")
+    if use_global_lookup:
+        print(f"Format: Global lookup (using {args.global_lookup})")
+    else:
+        print(f"Format: Verbose (legacy)")
+    print()
 
     all_entries: Dict[str, dict] = {}
 
@@ -290,7 +383,9 @@ def main():
             continue
 
         # Write individual embedded Lua file
-        lua_out = generate_lua(entries, source["name"], source["url"])
+        lua_out = generate_lua(entries, source["name"], source["url"], 
+                              use_global_lookup=use_global_lookup, 
+                              global_lookup_file=args.global_lookup)
         out_path = OUTPUT_DIR / source["output"]
         out_path.write_text(lua_out, encoding="utf-8")
         print(f"  [SAVED] {out_path}")
@@ -312,7 +407,9 @@ def main():
 
     # Write combined
     combined_path = OUTPUT_DIR / "external_combined_embedded.lua"
-    combined_lua = generate_lua(all_entries, "External Sources Combined", "various")
+    combined_lua = generate_lua(all_entries, "External Sources Combined", "various",
+                              use_global_lookup=use_global_lookup,
+                              global_lookup_file=args.global_lookup)
     combined_lua = combined_lua.replace(
         "-- Source URL: various",
         "-- Sources: d3fc0n6, qfoxb, joekiller, sleepy (main/ext/nullc0re), TF2BD Official, CC Biglist, CC Trusted",
@@ -324,9 +421,14 @@ def main():
     print(f"[COMBINED] {len(all_entries)} total unique entries")
     print("=" * 60)
     print("\nDone! Files are ready to require() directly in Lua.")
-    print("Example:")
-    print("  local D3DB = require('Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded')")
-    print("  local entry = D3DB['76561197960376106']")
+    if use_global_lookup:
+        print("Example:")
+        print("  local D3DB = require('Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded')")
+        print("  local entry = D3DB.Data['76561197960376106']")
+    else:
+        print("Example:")
+        print("  local D3DB = require('Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded')")
+        print("  local entry = D3DB['76561197960376106']")
 
 
 if __name__ == "__main__":

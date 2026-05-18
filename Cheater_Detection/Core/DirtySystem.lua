@@ -1,16 +1,16 @@
 --[[ Core/DirtySystem.lua
      Dirty flag optimization system for player data updates.
-     
+
      Instead of constantly iterating through all players for checks/updates,
      this system tracks which players have changed data and only processes
      those specific players.
-     
+
      Dirty Flags:
        DIRTY_SCORE    - Player score changed (visuals need update)
-       DIRTY_FLAGS    - Player flags changed (visuals + DB need update)  
+       DIRTY_FLAGS    - Player flags changed (visuals + DB need update)
        DIRTY_CHECKS   - Check flags changed (valve_check needs processing)
        DIRTY_SESSION  - Session state changed (persistence needed)
-       
+
      Usage:
        DirtySystem.MarkDirty(playerID, DirtySystem.FLAGS.SCORE)
        DirtySystem.ProcessDirty(DirtySystem.FLAGS.SCORE, callback)
@@ -51,14 +51,14 @@ function DirtySystem.MarkDirty(playerID, flags)
     if not playerID or not flags or flags == 0 then
         return
     end
-    
+
     local existing = playerDirtyFlags[playerID] or 0
     local newFlags = existing | flags
-    
+
     -- Only add to queues for flags that weren't already dirty
     if newFlags ~= existing then
         local addedFlags = newFlags & ~existing
-        
+
         -- Add player to relevant queues (iterate through all defined flags)
         local flagBit = 1
         while flagBit <= DirtySystem.FLAGS.ALL do
@@ -67,7 +67,7 @@ function DirtySystem.MarkDirty(playerID, flags)
             end
             flagBit = flagBit * 2
         end
-        
+
         playerDirtyFlags[playerID] = newFlags
         stats.marksTotal = stats.marksTotal + 1
     end
@@ -80,43 +80,43 @@ function DirtySystem.ProcessDirty(flags, callback)
     if not flags or flags == 0 or not callback then
         return
     end
-    
+
     local processedCount = 0
-    
+
     -- Process each flag type
     local flagBit = 1
     while flagBit <= DirtySystem.FLAGS.ALL do
         if (flags & flagBit) ~= 0 then
             local queue = dirtyQueues[flagBit]
-            
+
             -- Process all players in this queue
             for playerID, _ in pairs(queue) do
                 callback(playerID, flagBit)
                 processedCount = processedCount + 1
-                
+
                 -- Clear this flag from player's dirty flags
                 local playerFlags = playerDirtyFlags[playerID] or 0
                 playerFlags = playerFlags & ~flagBit
                 playerDirtyFlags[playerID] = playerFlags
-                
+
                 -- If player has no more dirty flags, clean up completely
                 if playerFlags == 0 then
                     playerDirtyFlags[playerID] = nil
                 end
             end
-            
+
             -- Clear the queue
             dirtyQueues[flagBit] = {}
         end
         flagBit = flagBit * 2
     end
-    
+
     stats.processesTotal = stats.processesTotal + processedCount
     return processedCount
 end
 
 --- Check if a player has specific dirty flags
----@param playerID string Player's SteamID64  
+---@param playerID string Player's SteamID64
 ---@param flags number Bitmask of DirtySystem.FLAGS to check
 ---@return boolean True if player has any of the specified flags dirty
 function DirtySystem.IsDirty(playerID, flags)
@@ -142,13 +142,13 @@ function DirtySystem.GetDirtyPlayers(flags)
     if not flags or flags == 0 then
         return players
     end
-    
+
     for playerID, playerFlags in pairs(playerDirtyFlags) do
         if (playerFlags & flags) ~= 0 then
             players[#players + 1] = playerID
         end
     end
-    
+
     return players
 end
 
@@ -160,7 +160,7 @@ function DirtySystem.ClearDirty(playerID, flags)
     if not playerFlags then
         return
     end
-    
+
     if not flags then
         -- Clear all flags
         playerDirtyFlags[playerID] = nil
@@ -176,7 +176,7 @@ function DirtySystem.ClearDirty(playerID, flags)
         else
             playerDirtyFlags[playerID] = newFlags
         end
-        
+
         -- Remove from specific queues
         local flagBit = 1
         while flagBit <= DirtySystem.FLAGS.ALL do
@@ -197,10 +197,10 @@ function DirtySystem.GetStats()
         for _ in pairs(queue) do count = count + 1 end
         queueSizes[flag] = count
     end
-    
+
     local dirtyPlayerCount = 0
     for _ in pairs(playerDirtyFlags) do dirtyPlayerCount = dirtyPlayerCount + 1 end
-    
+
     return {
         marksTotal = stats.marksTotal,
         processesTotal = stats.processesTotal,
@@ -236,19 +236,26 @@ end
 function DirtySystem.DebugPrint()
     local stats = DirtySystem.GetStats()
     print("[DirtySystem] Debug Info:")
-    print(string.format("  Total marks: %d, Total processes: %d", 
-          stats.marksTotal, stats.processesTotal))
+    print(string.format("  Total marks: %d, Total processes: %d",
+        stats.marksTotal, stats.processesTotal))
     print(string.format("  Dirty players: %d", stats.dirtyPlayerCount))
-    
+
     for flag, size in pairs(stats.queueSizes) do
         local flagName = "UNKNOWN"
-        if flag == DirtySystem.FLAGS.SCORE then flagName = "SCORE"
-        elseif flag == DirtySystem.FLAGS.FLAGS then flagName = "FLAGS"  
-        elseif flag == DirtySystem.FLAGS.CHECKS then flagName = "CHECKS"
-        elseif flag == DirtySystem.FLAGS.SESSION then flagName = "SESSION"
-        elseif flag == DirtySystem.FLAGS.PRIORITY then flagName = "PRIORITY"
-        elseif flag == DirtySystem.FLAGS.CONNECTED then flagName = "CONNECTED"
-        elseif flag == DirtySystem.FLAGS.DISCONNECTED then flagName = "DISCONNECTED"
+        if flag == DirtySystem.FLAGS.SCORE then
+            flagName = "SCORE"
+        elseif flag == DirtySystem.FLAGS.FLAGS then
+            flagName = "FLAGS"
+        elseif flag == DirtySystem.FLAGS.CHECKS then
+            flagName = "CHECKS"
+        elseif flag == DirtySystem.FLAGS.SESSION then
+            flagName = "SESSION"
+        elseif flag == DirtySystem.FLAGS.PRIORITY then
+            flagName = "PRIORITY"
+        elseif flag == DirtySystem.FLAGS.CONNECTED then
+            flagName = "CONNECTED"
+        elseif flag == DirtySystem.FLAGS.DISCONNECTED then
+            flagName = "DISCONNECTED"
         end
         print(string.format("  Queue %s: %d players", flagName, size))
     end

@@ -7,6 +7,8 @@ local Json = Common.Json
 local G = require("Cheater_Detection.Utils.Globals")
 -- [[ Imported by: Fetcher.lua, Parsers.lua ]]
 
+local GlobalLookupTables = require("Cheater_Detection.Database.Static_Embeded_Databases.global_lookup_tables")
+
 local Parsers = {}
 
 
@@ -452,6 +454,28 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 		-- Data is pre-allocated from database.txt load. Update existing entry fields.
 		local existingEntry = existingEntries[steamID64]
 		local updName, updReason, updStatic = false, false, false
+
+		-- If it's compressed, expand it into a verbose table in-place so we can mutate it
+		if type(existingEntry[1]) == "number" then
+			local eSource = existingEntry[2]
+			local eReason = existingEntry[3]
+			local eStatic = existingEntry[4]
+			local eName = existingEntry[5]
+			existingEntries[steamID64] = {
+				Flags = existingEntry[1] or 0,
+				Source = type(eSource) == "number" and GlobalLookupTables.Sources[eSource] or eSource,
+				Reason = type(eReason) == "number" and GlobalLookupTables.Reasons[eReason] or eReason,
+				Static = type(eStatic) == "number" and GlobalLookupTables.Statics[eStatic] or eStatic,
+				Name = type(eName) == "number" and GlobalLookupTables.Names[eName] or eName,
+			}
+			if existingEntry[6] and existingEntry[6] > 1000 then
+				existingEntries[steamID64].Timestamp = existingEntry[6]
+				if existingEntry[7] then existingEntries[steamID64].Karma = existingEntry[7] end
+			else
+				if existingEntry[6] then existingEntries[steamID64].Karma = existingEntry[6] end
+			end
+			existingEntry = existingEntries[steamID64]
+		end
 
 
 		-- If existing entry has unknown name and this one has a name
