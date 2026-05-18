@@ -91,7 +91,7 @@ local function getItemRegion(defIndex)
 	return regionCache[defIndex] or nil
 end
 
-local function scanPlayerWearables(targetID, targetSteamID64)
+local function scanPlayerWearables(targetID)
 	if not schemaReady then initSchema() end
 	if not itemschema or type(itemschema.GetItemDefinitionByID) ~= "function" then return end
 
@@ -108,7 +108,7 @@ local function scanPlayerWearables(targetID, targetSteamID64)
 				local owner = readPropEntity(ent, "m_hOwnerEntity")
 				if owner and owner:IsValid() and owner:IsPlayer() then
 					local steamID64 = Common.GetSteamID64(owner)
-					if steamID64 == targetSteamID64 then
+					if tostring(steamID64) == targetID then
 						local defIndex = readPropInt(ent, "m_iItemDefinitionIndex")
 						if defIndex and defIndex > 0 then
 							local itemDef = itemschema.GetItemDefinitionByID(defIndex)
@@ -131,6 +131,19 @@ local function scanPlayerWearables(targetID, targetSteamID64)
 
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
+
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+		local slotStr = ""
+		for slot, count in pairs(data.slotCounts) do
+			slotStr = slotStr .. string.format(" slot%d=%d", slot, count)
+		end
+		local regionStr = ""
+		for region, count in pairs(data.regions) do
+			regionStr = regionStr .. string.format(" %s=%d", region, count)
+		end
+		print(string.format("[CosmeticAbuse] id=%s slots:{%s} regions:{%s}",
+			targetID, slotStr, regionStr))
+	end
 end
 
 local function checkConflicts(id)
@@ -186,19 +199,19 @@ function CosmeticAbuse.InvalidatePlayer(id)
 	playerScanData[id] = nil
 end
 
-function CosmeticAbuse.ProcessPlayer(playerState)
+function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
 	if not isEnabled() then return end
 
+	local isDebug = G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
 	local id = tostring(playerState.id)
+
+	if not isDebug and playerState.isFriend then return end
 
 	if scannedPlayers[id] then return end
 
-	local steamID64 = tonumber(playerState.id)
-	if not steamID64 then return end
-
-	scanPlayerWearables(id, steamID64)
+	scanPlayerWearables(id)
 
 	local illegal, reason = checkConflicts(id)
 	if illegal then
