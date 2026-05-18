@@ -8,6 +8,21 @@ Automatic bot and cheater detection with cheater prioritization, visuals based o
 
 ---
 
+## Requirements
+
+Click the badges below to download required dependencies:
+
+[![LuaLib](https://img.shields.io/badge/Download-lnxLib-blue?style=for-the-badge&logo=github)](https://github.com/lnx00/Lmaobox-Library/releases/latest/) 
+*Copy `lnxLib.lua` to your `%localappdata%/lua` folder.*
+
+[![TimMenu](https://img.shields.io/badge/Download-TimMenu-blue?style=for-the-badge&logo=github)](https://github.com/titaniummachine1/TimMenu/releases/download/v1.8.8/TimMenu.lua)
+*Copy `TimMenu.lua` to your `%localappdata%/lua` folder.*
+
+> [!NOTE]
+> Python 3 is optional but highly recommended to run the local HTTP bridge middleware for asynchronous background fetches.
+
+---
+
 > [!WARNING]
 > ### ⚠️ Current Active Detections Status
 > **Currently, active in-game telemetry detections (such as anti-aim, silent aimbot, bhop, duck speed, etc.) are temporarily disabled or not functioning due to game changes and ongoing logic updates.**
@@ -29,21 +44,6 @@ We have completely re-engineered the backend storage and in-memory execution pip
 * **Lazy Decompression**: Entries stay compressed in memory and are decompressed **only once** on-demand when a player joins the server.
 * **Zero-Allocation Gameplay Path**: The high-frequency callback loops (such as `CreateMove` and `Draw`) perform direct lookups against active player cache states, allocating **zero tables** during frame rendering. This completely eliminates game micro-stutters and garbage collection spikes.
 * **Instant Disk Saves**: Database flushing is optimized to complete in **~200 ms** (down from several seconds of gameplay freeze).
-
----
-
-## Requirements
-
-Click the badges below to download required dependencies:
-
-[![LuaLib](https://img.shields.io/badge/Download-lnxLib-blue?style=for-the-badge&logo=github)](https://github.com/lnx00/Lmaobox-Library/releases/latest/) 
-*Copy `lnxLib.lua` to your `%localappdata%/lua` folder.*
-
-[![TimMenu](https://img.shields.io/badge/Download-TimMenu-blue?style=for-the-badge&logo=github)](https://github.com/titaniummachine1/TimMenu/releases/download/v1.8.8/TimMenu.lua)
-*Copy `TimMenu.lua` to your `%localappdata%/lua` folder.*
-
-> [!NOTE]
-> Python 3 is optional but highly recommended to run the local HTTP bridge middleware for asynchronous background fetches.
 
 ---
 
