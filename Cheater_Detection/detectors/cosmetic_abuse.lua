@@ -46,34 +46,29 @@ end
 
 local function initSchema()
 	if schemaReady then return end
-	if not itemschema or not itemschema.EnumerateAttributes then return end
-
-	-- Find the equip_region AttributeDefinition
-	itemschema.EnumerateAttributes(function(attrDef)
-		if not equipRegionAttrDef and attrDef and attrDef.GetName then
-			local ok, name = pcall(attrDef.GetName, attrDef)
-			if ok and name == "equip_region" then
-				equipRegionAttrDef = attrDef
-			end
+	if not itemschema then
+		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+			print("[CosmeticAbuse] initSchema: itemschema is nil")
 		end
-	end)
+		return
+	end
+	if not itemschema.GetAttributeDefinitionByName then
+		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+			print("[CosmeticAbuse] initSchema: GetAttributeDefinitionByName missing")
+		end
+		return
+	end
 
-	-- Pre-cache equip_region for all item definitions
-	if equipRegionAttrDef and itemschema.Enumerate then
-		itemschema.Enumerate(function(itemDef)
-			if not itemDef or not itemDef.GetID or not itemDef.GetAttributes then return end
-			local ok, id = pcall(itemDef.GetID, itemDef)
-			if not ok or not id then return end
-			local ok2, attrs = pcall(itemDef.GetAttributes, itemDef)
-			if not ok2 or type(attrs) ~= "table" then return end
-			local region = attrs[equipRegionAttrDef]
-			if type(region) == "string" and region ~= "" then
-				regionCache[id] = region
-			end
-		end)
+	local ok, attrDef = pcall(itemschema.GetAttributeDefinitionByName, "equip_region")
+	if ok and attrDef then
+		equipRegionAttrDef = attrDef
 	end
 
 	schemaReady = true
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+		print(string.format("[CosmeticAbuse] schema ready, equipRegionAttrDef=%s",
+			tostring(equipRegionAttrDef)))
+	end
 end
 
 local function getItemRegion(defIndex)
