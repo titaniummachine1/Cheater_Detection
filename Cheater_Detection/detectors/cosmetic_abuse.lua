@@ -71,37 +71,38 @@ local function getItemRegion(defIndex)
 	return regionCache[defIndex] or nil
 end
 
-local WEARABLE_CLASSES = {
-	"CTFWearable",
-	"CTFWearableLevelableItem",
-	"CTFWearableCampaignItem",
-	"CTFWearableRobotArm",
-}
+local function findPlayerByID(targetID)
+	local players = entities.FindByClass("CTFPlayer")
+	for _, ent in pairs(players) do
+		if ent:IsValid() then
+			local sid = Common.GetSteamID64(ent)
+			if tostring(sid) == targetID then return ent end
+		end
+	end
+	return nil
+end
 
 local function scanPlayerWearables(targetID)
 	if not schemaReady then initSchema() end
 
-	local data = { regions = {}, slotCounts = {} }
+	local player = findPlayerByID(targetID)
+	if not player then return false end
 
-	for _, className in ipairs(WEARABLE_CLASSES) do
-		local ents = entities.FindByClass(className)
-		for _, ent in pairs(ents) do
-			if ent:IsValid() then
-				local owner = readPropEntity(ent, "m_hOwnerEntity")
-				if owner and owner:IsValid() and owner:IsPlayer() then
-					local sid = Common.GetSteamID64(owner)
-					if tostring(sid) == targetID then
-						local slot = readPropInt(ent, "m_nLoadoutSlot")
-						if slot and slot >= 0 then
-							data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
-						end
-						local defIndex = readPropInt(ent, "m_iItemDefinitionIndex")
-						if defIndex and defIndex > 0 then
-							local region = getItemRegion(defIndex)
-							if region then
-								data.regions[region] = (data.regions[region] or 0) + 1
-							end
-						end
+	local data = { regions = {}, slotCounts = {} }
+	local seenEntIndex = {}
+
+	for slot = 7, 12 do
+		local ok, item = pcall(player.GetEntityForLoadoutSlot, player, slot)
+		if ok and item and item:IsValid() then
+			local entIdx = item:GetIndex()
+			if not seenEntIndex[entIdx] then
+				seenEntIndex[entIdx] = true
+				data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
+				local defIndex = readPropInt(item, "m_iItemDefinitionIndex")
+				if defIndex and defIndex > 0 then
+					local region = getItemRegion(defIndex)
+					if region then
+						data.regions[region] = (data.regions[region] or 0) + 1
 					end
 				end
 			end
