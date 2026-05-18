@@ -137,19 +137,16 @@ local function checkConflicts(id)
 		end
 	end
 
-	-- 3. Slot count sanity: >1 hat slot, >1 action, >1 misc2, total cosmetics > 3
-	if (slotCounts[LOADOUT_POSITION_HEAD] or 0) > 1 then
-		return true, string.format("multiple HEAD slot items (%d)", slotCounts[LOADOUT_POSITION_HEAD])
+	-- 3. Total cosmetic wearables must not exceed 3
+	local cosmeticSlots = {
+		LOADOUT_POSITION_HEAD, LOADOUT_POSITION_MISC, LOADOUT_POSITION_MISC2, LOADOUT_POSITION_ACTION
+	}
+	local total = 0
+	for _, slot in ipairs(cosmeticSlots) do
+		total = total + (slotCounts[slot] or 0)
 	end
-	if (slotCounts[LOADOUT_POSITION_ACTION] or 0) > 1 then
-		return true, string.format("multiple ACTION slot items (%d)", slotCounts[LOADOUT_POSITION_ACTION])
-	end
-	if (slotCounts[LOADOUT_POSITION_MISC2] or 0) > 1 then
-		return true, string.format("multiple MISC2 slot items (%d)", slotCounts[LOADOUT_POSITION_MISC2])
-	end
-	local miscTotal = (slotCounts[LOADOUT_POSITION_MISC] or 0) + (slotCounts[LOADOUT_POSITION_MISC2] or 0)
-	if miscTotal > 2 then
-		return true, string.format("too many MISC slot items (%d)", miscTotal)
+	if total > 3 then
+		return true, string.format("too many cosmetic wearables (%d)", total)
 	end
 
 	return false, nil
