@@ -39,8 +39,8 @@ Click the badges below to download required dependencies:
 [![LuaLib](https://img.shields.io/badge/Download-lnxLib-blue?style=for-the-badge&logo=github)](https://github.com/lnx00/Lmaobox-Library/releases/latest/) 
 *Copy `lnxLib.lua` to your `%localappdata%/lua` folder.*
 
-[![ImMenu](https://img.shields.io/badge/Download-ImMenu-blue?style=for-the-badge&logo=github)](https://github.com/lnx00/Lmaobox-ImMenu/blob/main/src/ImMenu.lua)
-*Copy `ImMenu.lua` to your `%localappdata%/lua` folder.*
+**TimMenu** (Required for GUI)
+*Make sure `timMenu.lua` is placed in your `%localappdata%/lua` folder.*
 
 > [!NOTE]
 > Python 3 is optional but highly recommended to run the local HTTP bridge middleware for asynchronous background fetches.
