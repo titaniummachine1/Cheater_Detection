@@ -46,11 +46,11 @@ end
 
 local function initSchema()
 	if schemaReady then return end
-	if not itemschema or type(itemschema.EnumerateAttributes) ~= "function" then return end
+	if not itemschema or not itemschema.EnumerateAttributes then return end
 
 	-- Find the equip_region AttributeDefinition
 	itemschema.EnumerateAttributes(function(attrDef)
-		if not equipRegionAttrDef and type(attrDef.GetName) == "function" then
+		if not equipRegionAttrDef and attrDef and attrDef.GetName then
 			local ok, name = pcall(attrDef.GetName, attrDef)
 			if ok and name == "equip_region" then
 				equipRegionAttrDef = attrDef
@@ -59,9 +59,9 @@ local function initSchema()
 	end)
 
 	-- Pre-cache equip_region for all item definitions
-	if equipRegionAttrDef and type(itemschema.Enumerate) == "function" then
+	if equipRegionAttrDef and itemschema.Enumerate then
 		itemschema.Enumerate(function(itemDef)
-			if type(itemDef.GetID) ~= "function" or type(itemDef.GetAttributes) ~= "function" then return end
+			if not itemDef or not itemDef.GetID or not itemDef.GetAttributes then return end
 			local ok, id = pcall(itemDef.GetID, itemDef)
 			if not ok or not id then return end
 			local ok2, attrs = pcall(itemDef.GetAttributes, itemDef)
@@ -83,7 +83,7 @@ local function getItemRegion(defIndex)
 	-- Fallback: look up live if not cached (new items added at runtime)
 	if not equipRegionAttrDef then return nil end
 	local itemDef = itemschema.GetItemDefinitionByID(defIndex)
-	if not itemDef or type(itemDef.GetAttributes) ~= "function" then return nil end
+	if not itemDef or not itemDef.GetAttributes then return nil end
 	local ok, attrs = pcall(itemDef.GetAttributes, itemDef)
 	if not ok or type(attrs) ~= "table" then return nil end
 	local region = attrs[equipRegionAttrDef]
@@ -93,7 +93,7 @@ end
 
 local function scanPlayerWearables(targetID)
 	if not schemaReady then initSchema() end
-	if not itemschema or type(itemschema.GetItemDefinitionByID) ~= "function" then
+	if not itemschema or not itemschema.GetItemDefinitionByID then
 		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
 			print("[CosmeticAbuse] scan skipped: itemschema not ready")
 		end
@@ -117,7 +117,7 @@ local function scanPlayerWearables(targetID)
 						local defIndex = readPropInt(ent, "m_iItemDefinitionIndex")
 						if defIndex and defIndex > 0 then
 							local itemDef = itemschema.GetItemDefinitionByID(defIndex)
-							if itemDef and type(itemDef.GetLoadoutSlot) == "function" then
+							if itemDef and itemDef.GetLoadoutSlot then
 								local ok, slot = pcall(itemDef.GetLoadoutSlot, itemDef)
 								if ok and slot then
 									data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
