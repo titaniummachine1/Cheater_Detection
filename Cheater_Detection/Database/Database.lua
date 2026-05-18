@@ -455,103 +455,114 @@ function Database.LoadDatabase(silent, force)
 			G.DataBase = {}
 		else
 			-- Check if data is in normalized format (Version 2, 3 or 4)
-			local isNormalized = decodedData._Metadata and (decodedData._Metadata.Format == "normalized" or decodedData._Metadata.Format == "global_lookup")
+			local isNormalized = decodedData._Metadata and
+			(decodedData._Metadata.Format == "normalized" or decodedData._Metadata.Format == "global_lookup")
 			local version = decodedData._Metadata and decodedData._Metadata.Version or 2
 
 			if isNormalized then
-				-- Decode normalized format back to verbose format for runtime compatibility
-				local sources = (version >= 4 and GlobalLookupTables.Sources) or decodedData.Sources or {}
-				local reasons = (version >= 4 and GlobalLookupTables.Reasons) or decodedData.Reasons or {}
-				local statics = (version >= 4 and GlobalLookupTables.Statics) or decodedData.Statics or {}
-				local names = (version >= 4 and GlobalLookupTables.Names) or decodedData.Names or {}
-				local data = decodedData.Data or {}
+				if version >= 4 then
+					G.DataBase = decodedData.Data or {}
+					local count = 0
+					for _ in pairs(G.DataBase) do
+						count = count + 1
+					end
+					Logger.Info("Database",
+						string.format("[DB] Loaded %d entries from disk (global lookup format v%d).", count, version))
+				else
+					-- Decode normalized format back to verbose format for runtime compatibility
+					local sources = decodedData.Sources or {}
+					local reasons = decodedData.Reasons or {}
+					local statics = decodedData.Statics or {}
+					local names = decodedData.Names or {}
+					local data = decodedData.Data or {}
 
-				local expandedData = {}
-				for steamID, entry in pairs(data) do
-					if type(entry) == "table" and type(steamID) == "string" then
-						local expanded = {}
-						expanded.Flags = entry[1] or 0
+					local expandedData = {}
+					for steamID, entry in pairs(data) do
+						if type(entry) == "table" and type(steamID) == "string" then
+							local expanded = {}
+							expanded.Flags = entry[1] or 0
 
-						-- Decode Source: integer ID to string
-						local sourceID = entry[2]
-						if type(sourceID) == "number" and sourceID > 0 then
-							expanded.Source = sources[sourceID] or "Unknown"
-						elseif type(sourceID) == "string" then
-							expanded.Source = sourceID
-						else
-							expanded.Source = "Unknown"
-						end
+							-- Decode Source: integer ID to string
+							local sourceID = entry[2]
+							if type(sourceID) == "number" and sourceID > 0 then
+								expanded.Source = sources[sourceID] or "Unknown"
+							elseif type(sourceID) == "string" then
+								expanded.Source = sourceID
+							else
+								expanded.Source = "Unknown"
+							end
 
-						-- Decode Static: integer ID to string (Version 3: index 3)
-						local staticID = entry[3]
-						if type(staticID) == "number" and staticID > 0 then
-							expanded.Static = statics[staticID] or false
-						else
-							expanded.Static = false
-						end
+							-- Decode Static: integer ID to string (Version 3: index 3)
+							local staticID = entry[3]
+							if type(staticID) == "number" and staticID > 0 then
+								expanded.Static = statics[staticID] or false
+							else
+								expanded.Static = false
+							end
 
-						-- Decode Name: integer ID to string or raw string (Version 3: index 4)
-						local nameValue = entry[4]
-						if type(nameValue) == "number" and nameValue > 0 then
-							expanded.Name = names[nameValue] or "Unknown"
-						elseif type(nameValue) == "string" and nameValue ~= "" then
-							expanded.Name = nameValue
-						else
-							expanded.Name = "Unknown"
-						end
+							-- Decode Name: integer ID to string or raw string (Version 3: index 4)
+							local nameValue = entry[4]
+							if type(nameValue) == "number" and nameValue > 0 then
+								expanded.Name = names[nameValue] or "Unknown"
+							elseif type(nameValue) == "string" and nameValue ~= "" then
+								expanded.Name = nameValue
+							else
+								expanded.Name = "Unknown"
+							end
 
-						-- Decode Reason: integer ID to string or raw string (Version 3: index 5)
-						local reasonValue = entry[5]
-						if type(reasonValue) == "number" and reasonValue > 0 then
-							expanded.Reason = reasons[reasonValue] or "Unknown"
-						elseif type(reasonValue) == "string" then
-							expanded.Reason = reasonValue
-						else
-							expanded.Reason = "Cheater"
-						end
+							-- Decode Reason: integer ID to string or raw string (Version 3: index 5)
+							local reasonValue = entry[5]
+							if type(reasonValue) == "number" and reasonValue > 0 then
+								expanded.Reason = reasons[reasonValue] or "Unknown"
+							elseif type(reasonValue) == "string" then
+								expanded.Reason = reasonValue
+							else
+								expanded.Reason = "Cheater"
+							end
 
-						-- Decode Timestamp (Version 3: index 6, optional)
-						-- Only set if present in file (saves runtime memory)
-						if entry[6] and type(entry[6]) == "number" and entry[6] ~= 0 then
-							expanded.Timestamp = entry[6]
-						end
+							-- Decode Timestamp (Version 3: index 6, optional)
+							-- Only set if present in file (saves runtime memory)
+							if entry[6] and type(entry[6]) == "number" and entry[6] ~= 0 then
+								expanded.Timestamp = entry[6]
+							end
 
-						-- Decode Karma (Version 3: index 6 or 7, optional)
-						-- If Timestamp is missing, Karma is at index 6
-						-- If Timestamp is present, Karma is at index 7
-						if entry[6] and type(entry[6]) == "number" and entry[6] > 0 then
-							-- entry[6] is Timestamp, check entry[7] for Karma
-							if entry[7] then
+							-- Decode Karma (Version 3: index 6 or 7, optional)
+							-- If Timestamp is missing, Karma is at index 6
+							-- If Timestamp is present, Karma is at index 7
+							if entry[6] and type(entry[6]) == "number" and entry[6] > 0 then
+								-- entry[6] is Timestamp, check entry[7] for Karma
+								if entry[7] then
+									expanded.Karma = entry[7]
+								end
+							elseif entry[6] and type(entry[6]) == "number" and entry[6] < 0 then
+								-- entry[6] could be negative Karma (unlikely but possible)
+								expanded.Karma = entry[6]
+							elseif entry[6] == nil and entry[7] then
+								-- entry[6] is missing, entry[7] is Karma
+								expanded.Karma = entry[7]
+							elseif entry[6] == 0 and entry[7] then
+								-- entry[6] is 0 (omitted Timestamp), entry[7] is Karma
 								expanded.Karma = entry[7]
 							end
-						elseif entry[6] and type(entry[6]) == "number" and entry[6] < 0 then
-							-- entry[6] could be negative Karma (unlikely but possible)
-							expanded.Karma = entry[6]
-						elseif entry[6] == nil and entry[7] then
-							-- entry[6] is missing, entry[7] is Karma
-							expanded.Karma = entry[7]
-						elseif entry[6] == 0 and entry[7] then
-							-- entry[6] is 0 (omitted Timestamp), entry[7] is Karma
-							expanded.Karma = entry[7]
-						end
 
-						-- Decode Retaliation from Flags bit
-						expanded.Retaliation = (expanded.Flags & Constants.Flags.RETALIATION) ~= 0
-						if expanded.Retaliation then
-							expanded.Flags = expanded.Flags & ~Constants.Flags.RETALIATION
-						end
+							-- Decode Retaliation from Flags bit
+							expanded.Retaliation = (expanded.Flags & Constants.Flags.RETALIATION) ~= 0
+							if expanded.Retaliation then
+								expanded.Flags = expanded.Flags & ~Constants.Flags.RETALIATION
+							end
 
-						expandedData[steamID] = expanded
+							expandedData[steamID] = expanded
+						end
 					end
-				end
 
-				G.DataBase = expandedData
-				local count = 0
-				for _ in pairs(G.DataBase) do
-					count = count + 1
+					G.DataBase = expandedData
+					local count = 0
+					for _ in pairs(G.DataBase) do
+						count = count + 1
+					end
+					Logger.Info("Database",
+						string.format("[DB] Loaded %d entries from disk (normalized format v%d).", count, version))
 				end
-				Logger.Info("Database",
-					string.format("[DB] Loaded %d entries from disk (normalized format v%d).", count, version))
 			else
 				-- Legacy format: use as-is
 				G.DataBase = decodedData

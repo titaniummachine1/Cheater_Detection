@@ -327,10 +327,18 @@ function Evidence.IsMarkedCheater(steamID)
 	-- Ensure steamID is a string for table lookup
 	steamID = tostring(steamID)
 
-	-- Check database with strict hard-evidence flags only.
-	-- Presence in DB alone is not enough (many imported rows are metadata only).
-	local entry = G.DataBase[steamID]
-	if type(entry) == "table" then
+	-- 1. Check player_cache first (pre-cached, zero allocation)
+	local state = PlayerCache.GetByID(steamID)
+	if state then
+		local hardMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED
+		if (state.flags & hardMask) ~= 0 then
+			return true
+		end
+	end
+
+	-- 2. Fallback: Check database with strict hard-evidence flags only.
+	local entry = Database.GetCheater(steamID)
+	if entry then
 		local flags = tonumber(entry.Flags or 0) or 0
 		local hardMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED
 		if (flags & hardMask) ~= 0 then
@@ -338,7 +346,7 @@ function Evidence.IsMarkedCheater(steamID)
 		end
 	end
 
-	-- Check playerlist priority
+	-- 3. Check playerlist priority
 	local priority = playerlist.GetPriority(steamID)
 	if priority == 10 then
 		return true
