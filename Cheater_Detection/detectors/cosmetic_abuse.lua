@@ -61,7 +61,7 @@ local function getItemRegion(defIndex)
 		return regionCache[defIndex]
 	end
 	-- Fallback: look up live if not cached (new items added at runtime)
-	if not equipRegionAttrDef then return nil end
+	if not equipRegionAttrDef or not itemschema then return nil end
 	local itemDef = itemschema.GetItemDefinitionByID(defIndex)
 	if not itemDef or not itemDef.GetAttributes then return nil end
 	local ok, attrs = pcall(itemDef.GetAttributes, itemDef)
@@ -73,7 +73,6 @@ end
 
 local function scanPlayerWearables(targetID)
 	if not schemaReady then initSchema() end
-	if not itemschema or not itemschema.GetItemDefinitionByID then return false end
 
 	local data = { regions = {}, slotCounts = {} }
 
