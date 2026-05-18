@@ -13,12 +13,18 @@ local Fonts = {
 -- Try to load TimMenu (assumes it's installed globally in Lmaobox)
 local TimMenu = nil
 local timMenuLoaded, timMenuModule = pcall(require, "TimMenu")
+if not timMenuLoaded or not timMenuModule then
+	-- Fallback to store folder if not found in root lua folder
+	timMenuLoaded, timMenuModule = pcall(require, "store.TimMenu")
+end
+
 if timMenuLoaded and timMenuModule then
 	TimMenu = timMenuModule
 	print("[CD] TimMenu loaded successfully")
 else
-	error("[CD] TimMenu not found! Please install TimMenu to %localappdata%\\lmaobox\\Scripts\\TimMenu.lua")
+	error("[CD] TimMenu not found! Please install TimMenu to %localappdata%\\lua\\TimMenu.lua or %localappdata%\\lua\\store\\TimMenu.lua")
 end
+
 
 local function EditNotificationChannels(label, channels)
 	local options = { "Local Chat", "Public Chat", "Party", "Toast", "Console" }
