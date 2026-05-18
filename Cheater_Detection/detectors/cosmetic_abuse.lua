@@ -4,8 +4,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 
 local CosmeticAbuse = {}
 
-local SCAN_INTERVAL_TICKS = 66
-local CHECK_INTERVAL_TICKS = 66
 local SCORE_GAIN = 6.0
 
 -- Regions that conflict with each other when worn together.
@@ -28,13 +26,11 @@ local schemaReady = false
 -- defIndex -> equip_region string (or nil if no region / default wearable)
 local regionCache = {}
 
-local lastGlobalScanTick = -999999
-local scanGen = 0
-
 -- per-player scan results: id -> { regions = {region->count}, slotCounts = {slot->count} }
+-- nil = not yet scanned, false = scanned clean, table = conflict data
 local playerScanData = {}
-local entryGen = {}
-local lastCheckTick = {}
+-- ids that have been fully scanned this session; cleared on class change/spawn
+local scannedPlayers = {}
 
 local function readPropInt(ent, propName)
 	local ok, value = pcall(ent.GetPropInt, ent, propName)
@@ -95,14 +91,11 @@ local function getItemRegion(defIndex)
 	return regionCache[defIndex] or nil
 end
 
-local function scanWearables(curTick)
-	if not schemaReady then
-		initSchema()
-	end
+local function scanPlayerWearables(targetID, targetSteamID64)
+	if not schemaReady then initSchema() end
 	if not itemschema or type(itemschema.GetItemDefinitionByID) ~= "function" then return end
 
-	scanGen = scanGen + 1
-	lastGlobalScanTick = curTick
+	local data = { regions = {}, slotCounts = {} }
 
 	local highest = entities.GetHighestEntityIndex()
 	if type(highest) ~= "number" or highest <= 0 then return end
@@ -115,18 +108,9 @@ local function scanWearables(curTick)
 				local owner = readPropEntity(ent, "m_hOwnerEntity")
 				if owner and owner:IsValid() and owner:IsPlayer() then
 					local steamID64 = Common.GetSteamID64(owner)
-					if steamID64 then
-						local id = tostring(steamID64)
-
-						if entryGen[id] ~= scanGen then
-							entryGen[id] = scanGen
-							playerScanData[id] = { regions = {}, slotCounts = {} }
-						end
-
-						local data = playerScanData[id]
+					if steamID64 == targetSteamID64 then
 						local defIndex = readPropInt(ent, "m_iItemDefinitionIndex")
 						if defIndex and defIndex > 0 then
-							-- Track loadout slot counts
 							local itemDef = itemschema.GetItemDefinitionByID(defIndex)
 							if itemDef and type(itemDef.GetLoadoutSlot) == "function" then
 								local ok, slot = pcall(itemDef.GetLoadoutSlot, itemDef)
@@ -134,8 +118,6 @@ local function scanWearables(curTick)
 									data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
 								end
 							end
-
-							-- Track equip regions
 							local region = getItemRegion(defIndex)
 							if region then
 								data.regions[region] = (data.regions[region] or 0) + 1
@@ -146,6 +128,9 @@ local function scanWearables(curTick)
 			end
 		end
 	end
+
+	playerScanData[targetID] = data
+	scannedPlayers[targetID] = true
 end
 
 local function checkConflicts(id)
@@ -196,24 +181,24 @@ local function isEnabled()
 	return advanced.Cosmetics == true
 end
 
+function CosmeticAbuse.InvalidatePlayer(id)
+	scannedPlayers[id] = nil
+	playerScanData[id] = nil
+end
+
 function CosmeticAbuse.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
 	if not isEnabled() then return end
 
 	local id = tostring(playerState.id)
-	local curTick = globals.TickCount()
 
-	if lastCheckTick[id] and (curTick - lastCheckTick[id]) < CHECK_INTERVAL_TICKS then
-		return
-	end
-	lastCheckTick[id] = curTick
+	if scannedPlayers[id] then return end
 
-	if (curTick - lastGlobalScanTick) >= SCAN_INTERVAL_TICKS then
-		scanWearables(curTick)
-	end
+	local steamID64 = tonumber(playerState.id)
+	if not steamID64 then return end
 
-	if entryGen[id] ~= scanGen then return end
+	scanPlayerWearables(id, steamID64)
 
 	local illegal, reason = checkConflicts(id)
 	if illegal then
@@ -221,5 +206,19 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 			"Equip region abuse: " .. (reason or "unknown conflict"))
 	end
 end
+
+callbacks.Register("FireGameEvent", function(event)
+	if not event then return end
+	local name = event:GetName()
+	if name ~= "player_changeclass" and name ~= "player_spawn" then return end
+	local userID = event:GetInt("userid")
+	if not userID then return end
+	local ent = entities.GetByUserID(userID)
+	if not ent or not ent:IsValid() then return end
+	local steamID64 = Common.GetSteamID64(ent)
+	if steamID64 then
+		CosmeticAbuse.InvalidatePlayer(tostring(steamID64))
+	end
+end)
 
 return CosmeticAbuse
