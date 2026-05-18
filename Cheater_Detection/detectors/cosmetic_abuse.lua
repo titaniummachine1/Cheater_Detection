@@ -89,14 +89,11 @@ local function scanPlayerWearables(targetID)
 					local steamID64 = Common.GetSteamID64(owner)
 					if tostring(steamID64) == targetID then
 						local defIndex = readPropInt(ent, "m_iItemDefinitionIndex")
+						local slot = readPropInt(ent, "m_nLoadoutSlot")
+						if slot and slot >= 0 then
+							data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
+						end
 						if defIndex and defIndex > 0 then
-							local itemDef = itemschema.GetItemDefinitionByID(defIndex)
-							if itemDef and itemDef.GetLoadoutSlot then
-								local ok, slot = pcall(itemDef.GetLoadoutSlot, itemDef)
-								if ok and slot then
-									data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
-								end
-							end
 							local region = getItemRegion(defIndex)
 							if region then
 								data.regions[region] = (data.regions[region] or 0) + 1
