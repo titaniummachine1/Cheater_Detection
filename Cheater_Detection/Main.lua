@@ -132,7 +132,7 @@ end
 local function persistActiveSessionPlayers()
 	-- Use DirtySystem - only persist players with dirty SESSION flag
 	local dirtyPlayers = DirtySystem.GetDirtyPlayers(DirtySystem.FLAGS.SESSION)
-	
+
 	for _, id in ipairs(dirtyPlayers) do
 		local state = PlayerCache.GetByID(id)
 		if state then
@@ -243,9 +243,11 @@ local function OnCreateMove(cmd)
 
 	local tagsEnabled = mainMenu == nil or mainMenu.Cheater_Tags ~= false
 	if isDebugEnabled() then
-		print(string.format("[CD][DETECTOR_LOOP] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s tags=%s",
+		print(string.format(
+			"[CD][DETECTOR_LOOP] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s tags=%s",
 			tostring(enableValveCheck), tostring(enableSilent), tostring(enableAntiAim), tostring(enableDuckSpeed),
-			tostring(enableBhop), tostring(enableWarpDT), tostring(enableChoke), tostring(enableCosmetics), tostring(tagsEnabled)))
+			tostring(enableBhop), tostring(enableWarpDT), tostring(enableChoke), tostring(enableCosmetics),
+			tostring(tagsEnabled)))
 	end
 	local anyDetectorsEnabled = enableValveCheck
 		or enableSilent
@@ -316,6 +318,11 @@ local function OnCreateMove(cmd)
 		-- In debug mode: process everyone including self and friends.
 		if not isDebug then
 			if id == localID then
+				if not cleanedFriendIDs[id] then
+					cleanedFriendIDs[id] = true
+					Database.RemoveCheater(id)
+					pcall(playerlist.SetPriority, ply, 0)
+				end
 				goto continue
 			end
 			if pState.isFriend then
@@ -328,10 +335,8 @@ local function OnCreateMove(cmd)
 			end
 		end
 
-		if isDebug then
-			assert(pState.wrap, "OnCreateMove: pState.wrap missing for id=" .. tostring(pState.id))
-			assert(pState.id, "OnCreateMove: pState.id missing")
-		end
+		assert(pState.id, "OnCreateMove: pState.id nil after PlayerCache.Get - broken invariant")
+		assert(pState.pdata, "OnCreateMove: pState.pdata nil after PlayerCache.Get for id=" .. tostring(pState.id))
 
 		if historyEnabled then
 			TickProfiler.BeginSection("History_Push")

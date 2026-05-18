@@ -14,37 +14,37 @@
         stacks with other signals rather than immediately hard-flagging.
 ]]
 
-local Constants = require("Cheater_Detection.Core.constants")
-local Common = require("Cheater_Detection.Utils.Common")
-local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local Evidence = require("Cheater_Detection.Core.Evidence_system")
-local Events = require("Cheater_Detection.Core.Events")
-local G = require("Cheater_Detection.Utils.Globals")
-local PlayerData = require("Cheater_Detection.Utils.PlayerData")
+local Constants               = require("Cheater_Detection.Core.constants")
+local Common                  = require("Cheater_Detection.Utils.Common")
+local DetectorUtils           = require("Cheater_Detection.Utils.DetectorUtils")
+local Evidence                = require("Cheater_Detection.Core.Evidence_system")
+local Events                  = require("Cheater_Detection.Core.Events")
+local G                       = require("Cheater_Detection.Utils.Globals")
+local PlayerData              = require("Cheater_Detection.Utils.PlayerData")
 
-local AntiAim = {}
+local AntiAim                 = {}
 
 -- ── constants ──────────────────────────────────────────────────────────────
-local MAX_LEGAL_PITCH        = 89.30
-local MAX_SANE_ABS_ANGLE     = 540
-local DETECTION_COOLDOWN_SEC = 1.0
-local HIT_WEIGHT             = 1.0  -- one confirmed tick = instant flag (HIT_WEIGHT >= SCORE_THRESHOLD)
-local SCORE_DECAY_PER_SEC    = 0.67
-local SCORE_THRESHOLD        = 1.0
+local MAX_LEGAL_PITCH         = 89.30
+local MAX_SANE_ABS_ANGLE      = 540
+local DETECTION_COOLDOWN_SEC  = 1.0
+local HIT_WEIGHT              = 1.0 -- one confirmed tick = instant flag (HIT_WEIGHT >= SCORE_THRESHOLD)
+local SCORE_DECAY_PER_SEC     = 0.67
+local SCORE_THRESHOLD         = 1.0
 
 -- Yaw-history buffer settings (mirrors Rijin: analyse last N records)
-local YAW_HISTORY_SIZE       = 16   -- records kept per player
-local YAW_DELTA_THRESHOLD    = 20.0 -- degrees avg delta = yaw AA signal
-local YAW_MAX_DELTA_THRESHOLD= 45.0 -- single-tick jump threshold (Rijin: large snap = AA desync)
-local CHOKE_TICK_THRESHOLD   = 2    -- ticks avg simtime gap = choke signal
-local YAW_EVIDENCE_WEIGHT    = 15.0 -- evidence weight per positive detection
-local YAW_EVIDENCE_COOLDOWN  = 1.0  -- seconds between evidence additions
-local YAW_FLIP_THRESHOLD     = 120.0 -- legit-yaw AA: back-and-forth flip minimum degrees
+local YAW_HISTORY_SIZE        = 16    -- records kept per player
+local YAW_DELTA_THRESHOLD     = 20.0  -- degrees avg delta = yaw AA signal
+local YAW_MAX_DELTA_THRESHOLD = 45.0  -- single-tick jump threshold (Rijin: large snap = AA desync)
+local CHOKE_TICK_THRESHOLD    = 2     -- ticks avg simtime gap = choke signal
+local YAW_EVIDENCE_WEIGHT     = 15.0  -- evidence weight per positive detection
+local YAW_EVIDENCE_COOLDOWN   = 1.0   -- seconds between evidence additions
+local YAW_FLIP_THRESHOLD      = 120.0 -- legit-yaw AA: back-and-forth flip minimum degrees
 
 -- ── per-player state ───────────────────────────────────────────────────────
-local antiAimStateById = {}     -- pitch-score state
-local lastInvalidPitchLogAt = {}
-local yawHistoryById = {}       -- circular angle buffers
+local antiAimStateById        = {} -- pitch-score state
+local lastInvalidPitchLogAt   = {}
+local yawHistoryById          = {} -- circular angle buffers
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 local function isInvalidPitch(pitch)
@@ -113,11 +113,11 @@ local function readNetAngles(entity, cmd, isLocalDebug)
 		if p ~= nil and not isCorrupted(p) then return p, y, "cmd" end
 	end
 
-	-- 2. GetPropVector reads the full unclamped angle vector (x=pitch, y=yaw).
-	--    lnxLib's GetEyeAngles() uses this same path internally.
-	--    GetPropFloat("m_angEyeAngles[0]") is clamped to ±90 by the engine.
-	local av = entity:GetPropVector("m_angEyeAngles[0]")
-	if av then
+	-- 2. tfnonlocaldata table holds the full unclamped networked eye angles for
+	--    remote players. GetPropFloat("m_angEyeAngles[0]") is engine-clamped to
+	--    ±90 and must not be used here. Single-arg GetPropVector returns nil.
+	local av = entity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+	if av and (av.x ~= 0 or av.y ~= 0) then
 		local p = toNum(av.x)
 		local y = toNum(av.y)
 		if p ~= nil and not isCorrupted(p) then
@@ -127,7 +127,7 @@ local function readNetAngles(entity, cmd, isLocalDebug)
 
 	-- 3. GetVAngles fallback
 	local va = entity:GetVAngles()
-	if va then
+	if va and (va.x ~= 0 or va.y ~= 0) then
 		local p = toNum(va.x)
 		local y = toNum(va.y)
 		if p ~= nil and not isCorrupted(p) then
@@ -249,6 +249,9 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if not ent then return end
 
 	local pitch, yaw, angleSource = readNetAngles(ent, cmd, isDebug and isLocalPlayer)
+	assert(pitch ~= nil or yaw ~= nil,
+		string.format("[AntiAim] readNetAngles returned nil for live player id=%s - broken prop invariant",
+			tostring(playerState.id)))
 	local now = globals.RealTime()
 	applyPitchDecay(pitchState, now)
 	if isDebug then
@@ -307,7 +310,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 			local avgTriggered  = avgChokeTicks >= CHOKE_TICK_THRESHOLD or avgYawDelta >= YAW_DELTA_THRESHOLD
 			local maxTriggered  = maxYawDelta ~= nil and maxYawDelta >= YAW_MAX_DELTA_THRESHOLD
 			local flipTriggered = flipCount ~= nil and flipCount >= 2
-			local triggered = avgTriggered or maxTriggered or flipTriggered
+			local triggered     = avgTriggered or maxTriggered or flipTriggered
 
 			if triggered then
 				if (now - h.lastEvidenceTime) >= YAW_EVIDENCE_COOLDOWN then
@@ -344,13 +347,13 @@ end
 
 -- ── cleanup ────────────────────────────────────────────────────────────────
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	antiAimStateById[id]     = nil
-	yawHistoryById[id]       = nil
+	antiAimStateById[id]      = nil
+	yawHistoryById[id]        = nil
 	lastInvalidPitchLogAt[id] = nil
 end)
 Events.Subscribe("OnPlayerRemoved", function(id)
-	antiAimStateById[id]     = nil
-	yawHistoryById[id]       = nil
+	antiAimStateById[id]      = nil
+	yawHistoryById[id]        = nil
 	lastInvalidPitchLogAt[id] = nil
 end)
 

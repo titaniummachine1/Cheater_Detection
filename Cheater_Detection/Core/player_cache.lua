@@ -1,14 +1,14 @@
 --[[ Core/player_cache.lua
      Single source of truth for all per-player runtime state.
      Uses lazy PlayerData - stores entity INDEX, never entity reference.
-     
+
      CRITICAL: Entity objects are radioactive C++ pointers. Never store them.
      Always use PlayerData.GetEntity(pdata) to safely get entity for current tick.
-     
+
      Detector API (CreateMove loop):
        PlayerCache.Get(ply)       → { id, entityIndex, pdata, flags, score, ... }
        PlayerCache.GetByID(id)    → same state table, lookup by steamID64 string
-       
+
      Lazy Data Access:
        state.pdata.origin      → cached position (fetched once per tick)
        state.pdata.velocity    → cached velocity
@@ -215,27 +215,30 @@ local function syncActivePlayersTick()
 					local initScore = dbEntry and dbEntry.Score or 0
 
 					-- Create lazy PlayerData - stores INDEX, never entity reference
-					local pdata = PlayerData.ForEntity(ent)
+					local pdata     = PlayerData.ForEntity(ent)
 					if pdata then
 						activeSet[id] = {
-							id              = id,
-							entityIndex     = ent:GetIndex(), -- Store INDEX only
-							pdata           = pdata, -- Lazy data container
-							flags           = initFlags,
-							score           = initScore,
-							externalChecked = false,
-							checkFlags      = newCheckFlags(),
-							isFriend        = Common.IsFriend and Common.IsFriend(ent, true) or false,
-							lastUpdate      = curTick,
-							lastScoreDecay  = globals.RealTime(),
+							id                     = id,
+							entityIndex            = ent:GetIndex(), -- Store INDEX only
+							pdata                  = pdata, -- Lazy data container
+							wrap                   = WrappedPlayer.FromEntity(ent),
+							flags                  = initFlags,
+							score                  = initScore,
+							externalChecked        = false,
+							checkFlags             = newCheckFlags(),
+							isFriend               = Common.IsFriend and Common.IsFriend(ent, true) or false,
+							lastUpdate             = curTick,
+							lastScoreDecay         = globals.RealTime(),
 							autoPrioritySusApplied = false,
 						}
-						markPlayerDirty(id, DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
+						markPlayerDirty(id,
+							DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
 						applyAutoPriority(activeSet[id], ent)
 					end
 				else
-					-- Update PlayerData for this tick (refreshes cache)
-					state.pdata = PlayerData.ForEntity(ent) or state.pdata
+					-- Update PlayerData and WrappedPlayer for this tick
+					state.pdata      = PlayerData.ForEntity(ent) or state.pdata
+					state.wrap       = WrappedPlayer.FromEntity(ent) or state.wrap
 					state.lastUpdate = curTick
 				end
 			end
@@ -273,38 +276,40 @@ function PlayerCache.Get(ply)
 
 	local id = tostring(steamID)
 	local curTick = globals.TickCount()
-	
+
 	if not activeSet[id] then
 		local dbEntry   = G.Database and G.Database.GetCheater(id) or nil
 		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
 		local initScore = dbEntry and dbEntry.Score or 0
 
 		-- Create lazy PlayerData - stores INDEX only, never entity reference
-		local pdata = PlayerData.ForEntity(ply)
+		local pdata     = PlayerData.ForEntity(ply)
 		if not pdata then
 			return nil
 		end
 
 		activeSet[id] = {
-			id              = id,
-			entityIndex     = ply:GetIndex(), -- Store INDEX only
-			pdata           = pdata, -- Lazy data container (auto-caches per tick)
-			flags           = initFlags,
-			score           = initScore,
-			externalChecked = false,
-			checkFlags      = newCheckFlags(),
-			isFriend        = Common.IsFriend and Common.IsFriend(ply, true) or false,
-			lastUpdate      = curTick,
-			lastScoreDecay  = globals.RealTime(),
+			id                     = id,
+			entityIndex            = ply:GetIndex(), -- Store INDEX only
+			pdata                  = pdata, -- Lazy data container (auto-caches per tick)
+			wrap                   = WrappedPlayer.FromEntity(ply),
+			flags                  = initFlags,
+			score                  = initScore,
+			externalChecked        = false,
+			checkFlags             = newCheckFlags(),
+			isFriend               = Common.IsFriend and Common.IsFriend(ply, true) or false,
+			lastUpdate             = curTick,
+			lastScoreDecay         = globals.RealTime(),
 			autoPrioritySusApplied = false,
 		}
 		markPlayerDirty(id, DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
 
 		applyAutoPriority(activeSet[id], ply)
 	else
-		-- Refresh PlayerData for current tick
-		local state = activeSet[id]
-		state.pdata = PlayerData.ForEntity(ply) or state.pdata
+		-- Refresh PlayerData and WrappedPlayer for current tick
+		local state      = activeSet[id]
+		state.pdata      = PlayerData.ForEntity(ply) or state.pdata
+		state.wrap       = WrappedPlayer.FromEntity(ply) or state.wrap
 		state.lastUpdate = curTick
 	end
 
