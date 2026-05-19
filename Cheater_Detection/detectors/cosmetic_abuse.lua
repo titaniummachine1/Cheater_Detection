@@ -1,10 +1,10 @@
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local G = require("Cheater_Detection.Utils.Globals")
+local Constants = require("Cheater_Detection.Core.constants")
+local VDFParser = require("Cheater_Detection.Utils.VDFParser")
 
 local CosmeticAbuse = {}
-
-local SCORE_GAIN = 6.0
 
 -- Regions that conflict with each other when worn together.
 -- "whole_head" blocks all other head regions; anything in this set conflicts if worn with whole_head.
@@ -19,11 +19,10 @@ local WHOLE_HEAD_CONFLICTS = {
 	hat_lower = true,
 }
 
--- equip_region AttributeDefinition resolved once at startup
-local equipRegionAttrDef = nil
-local schemaReady = false
+-- Load items_game.txt data once at startup
+VDFParser.LoadItemsGame()
 
--- defIndex -> equip_region string (or nil if no region / default wearable)
+-- defIndex -> equip_region string (or false if no region)
 local regionCache = {}
 
 -- per-player scan results: id -> { regions = {region->count}, slotCounts = {slot->count} }
@@ -38,37 +37,26 @@ local function readPropInt(ent, propName)
 	return value
 end
 
-local function readPropEntity(ent, propName)
-	local ok, value = pcall(ent.GetPropEntity, ent, propName)
-	if not ok then return nil end
-	return value
-end
-
-local function initSchema()
-	if schemaReady then return end
-	if not itemschema or not itemschema.GetAttributeDefinitionByName then return end
-
-	local ok, attrDef = pcall(itemschema.GetAttributeDefinitionByName, "equip_region")
-	if ok and attrDef then
-		equipRegionAttrDef = attrDef
-	end
-
-	schemaReady = true
+local function getItemName(defIndex)
+	if not itemschema then return nil end
+	local itemDef = itemschema.GetItemDefinitionByID(defIndex)
+	if not itemDef then return nil end
+	local ok, name = pcall(itemDef.GetName, itemDef)
+	return (ok and type(name) == "string" and name ~= "") and name or nil
 end
 
 local function getItemRegion(defIndex)
 	if regionCache[defIndex] ~= nil then
-		return regionCache[defIndex]
+		return regionCache[defIndex] or nil
 	end
-	-- Fallback: look up live if not cached (new items added at runtime)
-	if not equipRegionAttrDef or not itemschema then return nil end
-	local itemDef = itemschema.GetItemDefinitionByID(defIndex)
-	if not itemDef or not itemDef.GetAttributes then return nil end
-	local ok, attrs = pcall(itemDef.GetAttributes, itemDef)
-	if not ok or type(attrs) ~= "table" then return nil end
-	local region = attrs[equipRegionAttrDef]
-	regionCache[defIndex] = (type(region) == "string" and region ~= "") and region or false
-	return regionCache[defIndex] or nil
+	-- Use VDF parser to get equip_region from items_game.txt
+	local region = VDFParser.GetEquipRegion(defIndex)
+	if region then
+		regionCache[defIndex] = region
+		return region
+	end
+	regionCache[defIndex] = false
+	return nil
 end
 
 local function findPlayerByID(targetID)
@@ -83,33 +71,76 @@ local function findPlayerByID(targetID)
 end
 
 local function scanPlayerWearables(targetID)
-	if not schemaReady then initSchema() end
-
 	local player = findPlayerByID(targetID)
 	if not player then return false end
 
-	local data = { regions = {}, slotCounts = {} }
+	local playerIdx = player:GetIndex()
+	local data = { regions = {}, slotNames = {} }
 	local seenEntIndex = {}
+	local itemNum = 0
 
-	for slot = 7, 12 do
-		local ok, item = pcall(player.GetEntityForLoadoutSlot, player, slot)
-		if ok and item and item:IsValid() then
-			local entIdx = item:GetIndex()
-			if not seenEntIndex[entIdx] then
-				seenEntIndex[entIdx] = true
-				data.slotCounts[slot] = (data.slotCounts[slot] or 0) + 1
-				local defIndex = readPropInt(item, "m_iItemDefinitionIndex")
-				if defIndex and defIndex > 0 then
-					local region = getItemRegion(defIndex)
-					if region then
-						data.regions[region] = (data.regions[region] or 0) + 1
-					end
-				end
+	local function processWearable(wearable)
+		if not wearable or not wearable:IsValid() then return end
+		local entIdx = wearable:GetIndex()
+		if seenEntIndex[entIdx] then return end
+		seenEntIndex[entIdx] = true
+		itemNum = itemNum + 1
+
+		local defIndex = readPropInt(wearable, "m_iItemDefinitionIndex")
+		if defIndex and defIndex > 0 then
+			local region = getItemRegion(defIndex)
+			if region then
+				data.regions[region] = (data.regions[region] or 0) + 1
 			end
+			local iname = getItemName(defIndex)
+			data.slotNames[itemNum] = string.format("%s [%d]%s",
+				iname or "?", defIndex, region and (" region=" .. region) or "")
+		else
+			data.slotNames[itemNum] = string.format("? [defIndex=%s entIdx=%d]",
+				tostring(defIndex), entIdx)
 		end
 	end
+
+	local function isOwnedByPlayer(wearable)
+		local ok, owner = pcall(wearable.GetPropEntity, wearable, "m_hOwnerEntity")
+		if ok and owner and owner:IsValid() and owner:GetIndex() == playerIdx then
+			return true
+		end
+		local ok2, parent = pcall(wearable.GetPropEntity, wearable, "m_hMoveParent")
+		if ok2 and parent and parent:IsValid() and parent:GetIndex() == playerIdx then
+			return true
+		end
+		return false
+	end
+
+	-- Primary: scan ALL live CTFWearable entities filtered by owner.
+	-- This catches extra entities that the slot system never returns.
+	local allWearables = entities.FindByClass("CTFWearable")
+	for _, wearable in pairs(allWearables) do
+		if wearable:IsValid() and isOwnedByPlayer(wearable) then
+			processWearable(wearable)
+		end
+	end
+
+	-- Secondary: loadout slots 7-12, catches anything the entity scan missed.
+	for slot = 7, 12 do
+		local ok, item = pcall(player.GetEntityForLoadoutSlot, player, slot)
+		if ok and item then
+			processWearable(item)
+		end
+	end
+
+	data.totalWearables = itemNum
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
+
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+		local parts = { string.format("[CosmeticAbuse] id=%s wearables=%d", targetID, itemNum) }
+		for i, label in pairs(data.slotNames) do
+			parts[#parts + 1] = string.format("  item%d: %s", i, label)
+		end
+		print(table.concat(parts, "\n"))
+	end
 
 	return true
 end
@@ -119,7 +150,6 @@ local function checkConflicts(id)
 	if not data then return false, nil end
 
 	local regions = data.regions
-	local slotCounts = data.slotCounts
 
 	-- 1. Any region equipped more than once = direct conflict
 	for region, count in pairs(regions) do
@@ -137,18 +167,6 @@ local function checkConflicts(id)
 		end
 	end
 
-	-- 3. Total cosmetic wearables must not exceed 3
-	local cosmeticSlots = {
-		LOADOUT_POSITION_HEAD, LOADOUT_POSITION_MISC, LOADOUT_POSITION_MISC2, LOADOUT_POSITION_ACTION
-	}
-	local total = 0
-	for _, slot in ipairs(cosmeticSlots) do
-		total = total + (slotCounts[slot] or 0)
-	end
-	if total > 3 then
-		return true, string.format("too many cosmetic wearables (%d)", total)
-	end
-
 	return false, nil
 end
 
@@ -164,6 +182,10 @@ function CosmeticAbuse.InvalidatePlayer(id)
 	playerScanData[id] = nil
 end
 
+function CosmeticAbuse.NeedsScan(id)
+	return scannedPlayers[id] == nil
+end
+
 function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
@@ -177,15 +199,24 @@ function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
 
-	if not isLocalPlayer and scannedPlayers[id] then return end
+	if scannedPlayers[id] then return end
 
 	local scanned = scanPlayerWearables(id)
 	if not scanned then return end
 
 	local illegal, reason = checkConflicts(id)
-	if illegal and not isLocalPlayer then
-		DetectorUtils.ApplyPlayerFlag(playerState, SCORE_GAIN, nil,
+	if illegal then
+		if isLocalPlayer and not isDebug then
+			-- Skip flagging local player in normal mode
+			return
+		end
+		-- Hard detection: duplicate equip_region or >3 wearables is 100% impossible
+		local flagged = DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER,
 			"Equip region abuse: " .. (reason or "unknown conflict"))
+		if isDebug then
+			print(string.format("[CosmeticAbuse] %sFLAGGED: %s (flagsChanged=%s)",
+				isLocalPlayer and "[LOCAL] " or "", reason or "unknown", tostring(flagged)))
+		end
 	end
 end
 

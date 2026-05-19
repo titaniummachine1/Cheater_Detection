@@ -7,6 +7,7 @@ local Sources = require("Cheater_Detection.Database.Sources")
 local Common = require("Cheater_Detection.Utils.Common")
 local Constants = require("Cheater_Detection.Core.constants")
 local Events = require("Cheater_Detection.Core.Events")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local lnxLoaded, lnxModule = pcall(require, "lnxLib")
 local lnxNotifs = nil
 if lnxLoaded and lnxModule and lnxModule.UI and lnxModule.UI.Notifications then
@@ -277,7 +278,7 @@ function JoinNotifications.Init()
 	return true
 end
 
--- Check all players currently in the game for Valve employees and cheaters
+-- Check all players currently in the game for Valve employees, database cheaters, and runtime detections
 -- If Valve found and auto-disconnect enabled, leave server
 local function ValidateAllPlayers()
 	local config = GetJoinNotificationsConfig()
@@ -305,8 +306,10 @@ local function ValidateAllPlayers()
 						client.Command("disconnect", true)
 						return validatedCount
 					end
-					-- Check if cheater in database
-				elseif config.CheckCheater and not sentState.cheater then
+				end
+
+				-- Check database cheaters (if not already notified)
+				if config.CheckCheater and not sentState.cheater then
 					local cheaterData = Database.GetCheater(steamID64)
 					if IsDatabaseCheaterRecord(cheaterData) and type(cheaterData) == "table" then
 						DispatchCheaterAlert(config, {
@@ -315,6 +318,24 @@ local function ValidateAllPlayers()
 							allowParty = false,
 						})
 						sentState.cheater = true
+					end
+				end
+
+				-- Check runtime detections from PlayerCache (cosmetic abuse, anti-aim, etc.)
+				if config.CheckCheater and not sentState.cheater then
+					local playerState = PlayerCache.GetByID(steamID64)
+					if playerState then
+						local flags = tonumber(playerState.flags or 0) or 0
+						if IsRuntimeCheaterFlag(flags) then
+							local dbEntry = Database.GetCheater(steamID64)
+							local alertReason = ResolveCheaterAlertReason(nil, dbEntry)
+							DispatchCheaterAlert(config, {
+								name = player:GetName(),
+								reason = alertReason,
+								allowParty = false,
+							})
+							sentState.cheater = true
+						end
 					end
 				end
 			end
