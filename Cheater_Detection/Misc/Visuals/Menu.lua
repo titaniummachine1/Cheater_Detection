@@ -22,7 +22,8 @@ if timMenuLoaded and timMenuModule then
 	TimMenu = timMenuModule
 	print("[CD] TimMenu loaded successfully")
 else
-	error("[CD] TimMenu not found! Please install TimMenu to %localappdata%\\lua\\TimMenu.lua or %localappdata%\\lua\\store\\TimMenu.lua")
+	error(
+	"[CD] TimMenu not found! Please install TimMenu to %localappdata%\\lua\\TimMenu.lua or %localappdata%\\lua\\store\\TimMenu.lua")
 end
 
 
@@ -152,14 +153,17 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Exploit Detection")
-		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke == true)
-		TimMenu.NextLine()
-		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp == true)
-		TimMenu.NextLine()
+		--Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke == true)
+		Advanced.Choke = false
+		--TimMenu.NextLine()
+		--Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp == true)
+		Advanced.Warp = false
+		--TimMenu.NextLine()
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
 		if Advanced.AntiAim then
-			Advanced.SniperDotViewCorrect = TimMenu.Checkbox("Sniper Dot Hard-Flag (laser dot confirms pitch AA)", Advanced.SniperDotViewCorrect == true)
+			Advanced.SniperDotViewCorrect = TimMenu.Checkbox("Sniper Dot Hard-Flag (laser dot confirms pitch AA)",
+				Advanced.SniperDotViewCorrect == true)
 			TimMenu.NextLine()
 		end
 		Advanced.Cosmetics = TimMenu.Checkbox("Cosmetic Exploit Detection", Advanced.Cosmetics == true)

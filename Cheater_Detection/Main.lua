@@ -346,30 +346,30 @@ local function OnCreateMove(cmd)
 
 		TickProfiler.BeginSection("Detectors")
 		if enableValveCheck then
-			ValveCheck.ProcessPlayer(pState, cmd)
+			ValveCheck.ProcessPlayer(pState)
 		end
 		if enableSilent then
-			SilentAim.ProcessPlayer(pState, cmd)
+			SilentAim.ProcessPlayer(pState)
 			if enableAimLock then
-				AimLock.ProcessPlayer(pState, cmd)
+				AimLock.ProcessPlayer(pState)
 			end
 		end
 		if enableAntiAim then
 			AntiAim.ProcessPlayer(pState, cmd)
 		end
 		if enableDuckSpeed then
-			DuckSpeed.ProcessPlayer(pState, cmd)
+			DuckSpeed.ProcessPlayer(pState)
 		end
 		if enableBhop then
-			Bhop.ProcessPlayer(pState, cmd)
+			Bhop.ProcessPlayer(pState)
 		end
 		if enableWarpDT then
-			WarpDT.ProcessPlayer(pState, cmd)
+			WarpDT.ProcessPlayer(pState)
 		end
 		if enableChoke then
-			FakeLag.ProcessPlayer(pState, cmd)
+			FakeLag.ProcessPlayer(pState)
 		end
-		if enableCosmetics then
+		if enableCosmetics and CosmeticAbuse.NeedsScan(id) then
 			CosmeticAbuse.ProcessPlayer(pState, cmd)
 		end
 		TickProfiler.EndSection("Detectors")

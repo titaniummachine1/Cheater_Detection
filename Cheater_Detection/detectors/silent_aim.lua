@@ -19,6 +19,7 @@ local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local mathAbs = math.abs
 local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
 
