@@ -84,7 +84,14 @@ local function OnStateChange(playerState, reason)
 	end
 
 	local id = tostring(playerState.id)
-	local name = playerState.wrap:GetName()
+	-- Safely get player name with nil checks
+	local name = id
+	if playerState.wrap and playerState.wrap.GetName then
+		local ok, n = pcall(playerState.wrap.GetName, playerState.wrap)
+		if ok and n then
+			name = n
+		end
+	end
 	local flags = playerState.flags
 	local score = playerState.score
 	local now = globals.CurTime()

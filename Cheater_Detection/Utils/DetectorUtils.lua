@@ -58,8 +58,17 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 		end
 	end
 
+	-- Safely get player name with nil checks
+	local playerName = playerState.id
+	if playerState.wrap and playerState.wrap.GetName then
+		local ok, name = pcall(playerState.wrap.GetName, playerState.wrap)
+		if ok and name then
+			playerName = name
+		end
+	end
+
 	Database.UpsertCheater(playerState.id, {
-		name = playerState.wrap:GetName(),
+		name = playerName,
 		reason = effectiveReason,
 		flags = playerState.flags,
 		score = playerState.score,
@@ -67,7 +76,7 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 
 	local flagsChanged = playerState.flags ~= oldFlags
 	local scoreChanged = playerState.score ~= (oldScore or 0)
-	
+
 	-- Auto-mark dirty for systems that need to react to changes
 	if flagsChanged or scoreChanged then
 		local dirtyMask = 0
@@ -81,7 +90,7 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 		dirtyMask = dirtyMask | DirtySystem.FLAGS.SESSION
 		DirtySystem.MarkDirty(playerState.id, dirtyMask)
 	end
-	
+
 	if flagsChanged then
 		Events.Publish("OnPlayerStateChange", playerState, reason)
 	end
