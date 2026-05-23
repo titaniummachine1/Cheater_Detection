@@ -31,7 +31,7 @@ local RHYTHM_TOLERANCE_TICKS      = 2    -- ±2 ticks tolerance (was ±1)
 local AVG_CHOKE_THRESHOLD         = 3.8
 local AVG_CHOKE_MIN_SAMPLES       = 3   -- require more samples for average calculation
 local AVG_CHOKE_EVIDENCE_W        = 1.5 -- evidence weight per trigger (lighter for SUS behavior)
-local AVG_CHOKE_COOLDOWN_S        = 3.5 -- 3.5 second cooldown between detections
+local AVG_CHOKE_COOLDOWN_S        = 4.0 -- 4 second cooldown between detections
 
 local playerCooldowns             = {}  -- tick-based cooldown for rhythmic check
 local avgChokeCooldowns           = {}  -- realtime-based cooldown for avg-choke check

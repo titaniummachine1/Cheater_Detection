@@ -38,8 +38,10 @@ Evidence.Config = {
 	},
 
 	-- Thresholds
-	Evidence_Tolerance = 50, -- Evidence threshold % (0–100) to mark as cheater
-	MinWeightFloor = 0,   -- Cannot decay below this
+	Evidence_Tolerance = 50,  -- Evidence threshold % (0–100) to mark as cheater
+	MinWeightFloor = 0,       -- Cannot decay below this
+	AutoPriorityThreshold = 8.0, -- Evidence score threshold to trigger SUSPICIOUS flag
+	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
 
 	-- Category mappings (only implemented detections)
 	Categories = {
@@ -186,7 +188,8 @@ local function tryApplyAutoPriority(steamID, evidence)
 	)
 
 	if evidence.TotalScore < threshold then
-		Logger.Debug("Evidence", "Score below threshold, returning")
+		Logger.Debug("Evidence",
+			string.format("Score %.1f below threshold %.1f, returning", evidence.TotalScore, threshold))
 		return
 	end
 
