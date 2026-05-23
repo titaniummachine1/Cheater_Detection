@@ -232,16 +232,32 @@ local function tryApplyAutoPriority(steamID, evidence)
 	if autoPriorityEnabled then
 		Evidence.SetPriorityForSteamID(steamID, 10)
 
-		-- Also set CHEATER flag for exploit evidence (DT, AA, fakelag)
+		-- Set SUSPICIOUS flag for exploit evidence (DT, AA, fakelag) - not full CHEATER
 		local wrap = PlayerCache.GetByID(steamID)
 		if wrap then
+			-- Convert evidence score (0-200) to playerState score (0-99) for display
+			local displayScore = math.min(99, math.floor(evidence.TotalScore / 2))
+
+			Logger.Debug("Evidence",
+				string.format("Setting wrap.score to %d (evidence score %.1f)", displayScore, evidence.TotalScore))
+
 			-- Try direct flag setting on wrap
 			if wrap.SetFlag and type(wrap.SetFlag) == "function" then
-				wrap:SetFlag(Constants.Flags.CHEATER, true)
+				wrap:SetFlag(Constants.Flags.SUSPICIOUS, true)
+				if wrap.SetScore then
+					wrap:SetScore(displayScore)
+				else
+					wrap.score = displayScore
+				end
+
+				-- Mark score as dirty so visuals update
+				local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
+				DirtySystem.MarkDirty(steamID, "score")
+				DirtySystem.MarkDirty(steamID, "flags")
 				Logger.Info(
 					"Evidence",
 					string.format(
-						"CHEATER flag set for %s (Score: %.1f >= %.1f) – Exploit evidence",
+						"SUSPICIOUS flag set for %s (Score: %.1f >= %.1f) – Exploit evidence",
 						playerName,
 						evidence.TotalScore,
 						threshold
@@ -249,7 +265,14 @@ local function tryApplyAutoPriority(steamID, evidence)
 				)
 				-- Try setting through flags field
 			elseif wrap.flags ~= nil then
-				wrap.flags = wrap.flags | Constants.Flags.CHEATER
+				wrap.flags = wrap.flags | Constants.Flags.SUSPICIOUS
+				wrap.score = displayScore
+				Logger.Debug("Evidence", string.format("Setting wrap.score via flags field to %d", displayScore))
+
+				-- Mark score as dirty so visuals update
+				local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
+				DirtySystem.MarkDirty(steamID, "score")
+				DirtySystem.MarkDirty(steamID, "flags")
 				-- Store detection reason for display - use actual method name
 				local primaryMethod = "Exploit"
 				for method, reason in pairs(evidence.Reasons or {}) do
@@ -268,7 +291,7 @@ local function tryApplyAutoPriority(steamID, evidence)
 				Logger.Info(
 					"Evidence",
 					string.format(
-						"CHEATER flag set for %s (Score: %.1f >= %.1f) – %s evidence (via flags field)",
+						"SUSPICIOUS flag set for %s (Score: %.1f >= %.1f) – %s evidence (via flags field)",
 						playerName,
 						evidence.TotalScore,
 						threshold,
@@ -276,7 +299,7 @@ local function tryApplyAutoPriority(steamID, evidence)
 					)
 				)
 			else
-				Logger.Debug("Evidence", "Cannot set CHEATER flag - no SetFlag method or flags field on wrap")
+				Logger.Debug("Evidence", "Cannot set SUSPICIOUS flag - no SetFlag method or flags field on wrap")
 			end
 		else
 			Logger.Debug("Evidence", "PlayerCache wrap not found for " .. steamID)
