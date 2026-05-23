@@ -30,7 +30,7 @@ Evidence.Config = {
 			closeAim = 1.5, -- Extra decay when aiming close to enemy
 		},
 		Exploit = {
-			default = 0.1, -- Very slow decay for exploits (DT, AA, fakelag)
+			default = 0.8, -- Faster decay for exploits (DT, AA, fakelag) to reduce false positive persistence
 		},
 		Movement = {
 			default = 1.0, -- 1 decay per second for fake lag
