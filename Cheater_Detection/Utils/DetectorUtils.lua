@@ -78,17 +78,15 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 	local scoreChanged = playerState.score ~= (oldScore or 0)
 
 	-- Auto-mark dirty for systems that need to react to changes
+	if flagsChanged then
+		DirtySystem.MarkDirty(playerState.id, "flags")
+	end
+	if scoreChanged then
+		DirtySystem.MarkDirty(playerState.id, "score")
+	end
+	-- Mark for session persistence - player data changed
 	if flagsChanged or scoreChanged then
-		local dirtyMask = 0
-		if flagsChanged then
-			dirtyMask = dirtyMask | DirtySystem.FLAGS.FLAGS
-		end
-		if scoreChanged then
-			dirtyMask = dirtyMask | DirtySystem.FLAGS.SCORE
-		end
-		-- Mark for session persistence - player data changed
-		dirtyMask = dirtyMask | DirtySystem.FLAGS.SESSION
-		DirtySystem.MarkDirty(playerState.id, dirtyMask)
+		DirtySystem.MarkDirty(playerState.id, "session")
 	end
 
 	if flagsChanged then

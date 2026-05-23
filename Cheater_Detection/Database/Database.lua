@@ -47,6 +47,11 @@ local Database = {
 	},
 }
 
+-- Cache for decoded database entries (avoids repeated decoding of compressed entries)
+local decodedCache = {}
+local cacheHits = 0
+local cacheMisses = 0
+
 local HARD_PRIORITY_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 local LOCAL_DEAD_SAVE_INTERVAL = 3
 local MIN_NONFORCED_SAVE_INTERVAL = 20
@@ -56,8 +61,8 @@ local SLOW_SAVE_WARN_SECONDS = 0.015
 
 local function nowSeconds()
 	if globals and type(globals.RealTime) == "function" then
-		local ok, t = pcall(globals.RealTime)
-		if ok and type(t) == "number" then
+		local t = globals.RealTime()
+		if type(t) == "number" then
 			return t
 		end
 	end
@@ -75,7 +80,7 @@ local function ReapplyDetectedPriorities()
 	for steamID, entry in pairs(G.DataBase) do
 		local flags = type(entry) == "table" and tonumber(entry.Flags or 0) or 0
 		if type(steamID) == "string" and (flags & HARD_PRIORITY_FLAGS) ~= 0 then
-			pcall(playerlist.SetPriority, steamID, 10)
+			playerlist.SetPriority(steamID, 10)
 		end
 	end
 end
@@ -89,19 +94,12 @@ function Database.SetPriority(target, priority)
 
 	-- Try entity or numeric index directly
 	if type(target) == "userdata" or (type(target) == "number" and target < 101) then
-		local ok, err = pcall(playerlist.SetPriority, target, priority)
-		if ok then
+		local success, err = playerlist.SetPriority(target, priority)
+		if success then
 			return true
 		end
-		Logger.Error(
-			"Database",
-			string.format(
-				"[DB] SetPriority(entity/index) failed for target=%s priority=%s err=%s",
-				tostring(target),
-				tostring(priority),
-				tostring(err)
-			)
-		)
+		Logger.ErrorFmt("Database", "[DB] SetPriority(entity/index) failed for target=%s priority=%s err=%s",
+			tostring(target), tostring(priority), tostring(err))
 	end
 
 	-- Resolve to SteamID64 and try
@@ -113,8 +111,8 @@ function Database.SetPriority(target, priority)
 	end
 
 	if steamID64 then
-		local ok, err = pcall(playerlist.SetPriority, steamID64, priority)
-		if ok then
+		local success, err = playerlist.SetPriority(steamID64, priority)
+		if success then
 			local autoPriorityEnabled = G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true
 			if priority == 10 and autoPriorityEnabled then
 				Database.UpsertCheater(steamID64, {
@@ -124,15 +122,8 @@ function Database.SetPriority(target, priority)
 			end
 			return true
 		end
-		Logger.Error(
-			"Database",
-			string.format(
-				"[DB] SetPriority(steamID64) failed for id=%s priority=%s err=%s",
-				tostring(steamID64),
-				tostring(priority),
-				tostring(err)
-			)
-		)
+		Logger.ErrorFmt("Database", "[DB] SetPriority(steamID64) failed for id=%s priority=%s err=%s",
+			tostring(steamID64), tostring(priority), tostring(err))
 	end
 
 	return false
@@ -456,7 +447,7 @@ function Database.LoadDatabase(silent, force)
 		else
 			-- Check if data is in normalized format (Version 2, 3 or 4)
 			local isNormalized = decodedData._Metadata and
-			(decodedData._Metadata.Format == "normalized" or decodedData._Metadata.Format == "global_lookup")
+				(decodedData._Metadata.Format == "normalized" or decodedData._Metadata.Format == "global_lookup")
 			local version = decodedData._Metadata and decodedData._Metadata.Version or 2
 
 			if isNormalized then
@@ -718,6 +709,10 @@ function Database.Initialize(silent)
 	if type(G.DataBase) ~= "table" then
 		G.DataBase = {}
 	end
+	-- Clear cache on init
+	decodedCache = {}
+	cacheHits = 0
+	cacheMisses = 0
 	Database.LoadDatabase(silent, false)
 	Database.LoadEmbeddedDatabases()
 end
@@ -753,13 +748,13 @@ function Database.PurgeFriendsAndSelf()
 				purged = purged + 1
 				Database.State.isDirty = true
 			end
-			pcall(playerlist.SetPriority, localPlayer, 0)
+			playerlist.SetPriority(localPlayer, 0)
 		end
 	end
 
 	-- Remove all Steam friends
-	local ok, friends = pcall(steam.GetFriends)
-	if ok and type(friends) == "table" then
+	local friends = steam.GetFriends()
+	if type(friends) == "table" then
 		for _, steamID3 in ipairs(friends) do
 			local steamID64 = Common.FromSteamid3To64(tostring(steamID3))
 			if steamID64 and steamID64:match("^7656119%d+$") and G.DataBase[steamID64] then
@@ -865,6 +860,8 @@ function Database.UpsertCheater(steamID, data)
 		Retaliation = finalRetaliation,
 	}
 
+	-- Invalidate cache for this entry
+	decodedCache[steamID] = nil
 	Database.State.isDirty = true
 
 	return true
@@ -874,6 +871,14 @@ function Database.GetCheater(steamID)
 	if not steamID or type(G.DataBase) ~= "table" then
 		return nil
 	end
+
+	-- Check cache first
+	local cached = decodedCache[steamID]
+	if cached then
+		cacheHits = cacheHits + 1
+		return cached
+	end
+
 	local entry = G.DataBase[steamID]
 	if not entry then return nil end
 
@@ -916,6 +921,10 @@ function Database.GetCheater(steamID)
 		return ret
 	end
 
+	-- Cache the decoded entry
+	decodedCache[steamID] = entry
+	cacheMisses = cacheMisses + 1
+
 	return entry
 end
 
@@ -925,6 +934,7 @@ function Database.RemoveCheater(steamID)
 	end
 	if G.DataBase[steamID] then
 		G.DataBase[steamID] = nil
+		decodedCache[steamID] = nil
 		Database.State.isDirty = true
 		Logger.Debug("Database", "[DB] Removed cheater: " .. steamID)
 		return true

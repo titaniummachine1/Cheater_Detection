@@ -110,7 +110,7 @@ local function DrawMenu()
 		Scanner.SteamHistory = TimMenu.Checkbox(shLabel, Scanner.SteamHistory == true and shHasKey)
 		TimMenu.NextLine()
 		if not shHasKey then
-			TimMenu.Text("-> Get key at steamhistory.net")
+			TimMenu.Text("-> Get API key at steamhistory.net/api")
 			TimMenu.NextLine()
 			TimMenu.Text("-> Type: steamhistory <key> in console")
 			TimMenu.NextLine()
@@ -148,7 +148,12 @@ local function DrawMenu()
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
 		TimMenu.NextLine()
-		Advanced.SilentAimSimulate = TimMenu.Checkbox("Simulate SilentAim (local)", Advanced.SilentAimSimulate == true)
+		-- Debug category selector to reduce console spam
+		Advanced.DebugCategory = TimMenu.Combo(
+			"Debug Category",
+			Advanced.DebugCategory or { true, false, false, false, false, false, false, false },
+			{ "All", "SilentAim", "AntiAim", "Warp/DT", "Choke", "Cosmetics", "ValveCheck", "Database" }
+		)
 		TimMenu.NextLine()
 		Advanced.LogLevel = TimMenu.Combo(
 			"Log Level",
@@ -161,10 +166,9 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Exploit Detection")
 		--Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke == true)
-		Advanced.Choke = false
-		--TimMenu.NextLine()
-		--Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection", Advanced.Warp == true)
-		Advanced.Warp = false
+		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection (Experimental)", Advanced.Choke == true)
+		TimMenu.NextLine()
+		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection (Experimental)", Advanced.Warp == true)
 		--TimMenu.NextLine()
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()

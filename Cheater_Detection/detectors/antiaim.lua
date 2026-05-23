@@ -1,9 +1,9 @@
 --[[ detectors/antiaim.lua
      Detects rage anti-aim via two complementary methods:
 
-     1. Invalid Pitch  – networked eye pitch outside ±89.3° (classic AA tell).
+     1. Invalid Pitch  – networked eye pitch outside ±89.9° (classic AA tell).
         Accumulates a weighted hit score with decay; crossing SCORE_THRESHOLD
-        hard-flags the player as CHEATER.
+        (3+ ticks) hard-flags the player as CHEATER.
 
      2. Yaw-Delta History – analyses HistoryManager buckets for yaw AA patterns:
           • repeatTriggered : A→B→A angle alternation (RijiN angle_repeat) —
@@ -32,12 +32,14 @@ local FLOW_OUTGOING           = 0
 local FLOW_INCOMING           = 1
 
 -- ── constants ──────────────────────────────────────────────────────────────
-local MAX_LEGAL_PITCH         = 89.30
+-- Pitch threshold: legit players can hit ~89.5 when looking up (rocket jumps)
+-- Cheats usually send exactly 90 or -90, so 89.9 catches them while avoiding false positives
+local MAX_LEGAL_PITCH         = 89.90
 local MAX_SANE_ABS_ANGLE      = 540
-local DETECTION_COOLDOWN_SEC  = 1.0
-local HIT_WEIGHT              = 1.0 -- one confirmed tick = instant flag (HIT_WEIGHT >= SCORE_THRESHOLD)
-local SCORE_DECAY_PER_SEC     = 0.67
-local SCORE_THRESHOLD         = 1.0
+-- No cooldown for pitch - check every tick for continuous invalid pitch
+local HIT_WEIGHT              = 0.34
+local SCORE_DECAY_PER_TICK    = 0.05 -- Small per-tick decay (slower than accumulation)
+local SCORE_THRESHOLD         = 1.0  -- 3 ticks of invalid pitch = flag
 
 -- Yaw-history settings (using HistoryManager as single source of truth)
 local YAW_HISTORY_SIZE        = 16    -- records to read from HistoryManager
@@ -86,8 +88,8 @@ local function tryExtractPitchYaw(ao)
 	return toNum(p) or toNum(x), toNum(y) or toNum(yy)
 end
 
-local function traceLog(isDebug, playerState, detail)
-	if not isDebug then return end
+local function traceLog(playerState, detail)
+	if not Common.IsDebugCategoryEnabled("AntiAim") then return end
 	local id = playerState and playerState.id or "nil"
 	local msg = string.format("[AntiAim] id=%s %s", tostring(id), tostring(detail or ""))
 	print(msg)
@@ -109,7 +111,9 @@ local function applyPitchDecay(state, now)
 	if not state then return end
 	local elapsed = now - (state.lastDecayTime or now)
 	if elapsed > 0 then
-		local decayed = (state.score or 0) - SCORE_DECAY_PER_SEC * elapsed
+		-- Per-tick decay (approx 66 ticks/sec at 66 tickrate)
+		local ticks = math.floor(elapsed / globals.TickInterval())
+		local decayed = (state.score or 0) - (SCORE_DECAY_PER_TICK * ticks)
 		state.score = mathMax(0, decayed)
 		state.lastDecayTime = now
 	end
@@ -187,44 +191,44 @@ local function analyseYawHistoryFromManager(id)
 	local recordCount   = 0
 	local lastRecord    = nil
 
-	for i = 0, YAW_HISTORY_SIZE - 1 do
-		local bucket = HistoryManager.GetBucketAt(i)
-		if not bucket then break end
+	local history       = HistoryManager.GetPlayerHistory(id)
+	if not history then return nil, nil, nil, nil, nil, false, 0 end
 
-		local playerData = HistoryManager.GetPlayerDataInBucket(bucket, id)
-		if playerData then
-			local ang     = playerData[HistoryManager.Fields.Angles]
-			local simTime = playerData[HistoryManager.Fields.SimulationTime]
+	-- ipairs: history[1] = current tick, history[2] = 1 tick ago, etc.
+	for i, playerData in ipairs(history) do
+		if i > YAW_HISTORY_SIZE then break end
 
-			if ang and simTime then
-				local yaw = ang.yaw or ang[2]
-				if yaw then
-					recordCount = recordCount + 1
-					frameYaws[recordCount] = yaw
+		local ang     = playerData[HistoryManager.Fields.Angles]
+		local simTime = playerData[HistoryManager.Fields.SimulationTime]
 
-					if lastRecord then
-						local d          = yawDelta(yaw, lastRecord.yaw)
-						local absDelta   = math.abs(d)
-						local timeDiff   = math.abs(simTime - lastRecord.simTime)
-						local chokeTicks = math.floor(timeDiff / tickInterval + 0.5)
+		if ang and simTime then
+			local yaw = ang.yaw or ang[2]
+			if yaw then
+				recordCount = recordCount + 1
+				frameYaws[recordCount] = yaw
 
-						if absDelta > maxYawDelta then maxYawDelta = absDelta end
-						sumYawDelta   = sumYawDelta + absDelta
-						sumChokeTicks = sumChokeTicks + chokeTicks
+				if lastRecord then
+					local d          = yawDelta(yaw, lastRecord.yaw)
+					local absDelta   = math.abs(d)
+					local timeDiff   = math.abs(simTime - lastRecord.simTime)
+					local chokeTicks = math.floor(timeDiff / tickInterval + 0.5)
 
-						if absDelta >= YAW_FLIP_THRESHOLD then
-							local sign = d > 0 and 1 or -1
-							if lastDeltaSign ~= 0 and sign ~= lastDeltaSign then
-								flipCount = flipCount + 1
-							end
-							lastDeltaSign = sign
+					if absDelta > maxYawDelta then maxYawDelta = absDelta end
+					sumYawDelta   = sumYawDelta + absDelta
+					sumChokeTicks = sumChokeTicks + chokeTicks
+
+					if absDelta >= YAW_FLIP_THRESHOLD then
+						local sign = d > 0 and 1 or -1
+						if lastDeltaSign ~= 0 and sign ~= lastDeltaSign then
+							flipCount = flipCount + 1
 						end
-
-						collected = collected + 1
-						frameDeltas[collected] = absDelta
+						lastDeltaSign = sign
 					end
-					lastRecord = { yaw = yaw, simTime = simTime }
+
+					collected = collected + 1
+					frameDeltas[collected] = absDelta
 				end
+				lastRecord = { yaw = yaw, simTime = simTime }
 			end
 		end
 	end
@@ -282,7 +286,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if not Common.IsPlayerConnected() then return end
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then return end
 
-	local isDebug = Common.IsDebugEnabled()
+	local isDebug = Common.IsDebugCategoryEnabled("AntiAim")
 	local pdata   = playerState.pdata
 	local simTime = pdata.simTime
 	local isAlive = pdata.isAlive
@@ -294,7 +298,8 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = playerState.id == tostring(Common.GetSteamID64(localPlayer))
-	if not isDebug then
+	-- Skip friends and local player unless global debug mode is enabled
+	if not Common.IsDebugEnabled() then
 		if playerState.isFriend or isLocalPlayer then return end
 	end
 
@@ -326,12 +331,10 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 
 	-- ── 1. Invalid pitch detection ────────────────────────────────────────
 	-- Checked every tick regardless of simTime so choking AA players still
-	-- accumulate score (DETECTION_COOLDOWN_SEC prevents per-tick spam).
+	-- accumulate score. No cooldown - every invalid pitch tick adds weight.
 	if pitch ~= nil and isInvalidPitch(pitch) and not isCorrupted(pitch) then
-		if (now - (pitchState.lastHitTime or 0)) >= DETECTION_COOLDOWN_SEC then
-			pitchState.score = pitchState.score + HIT_WEIGHT
-			pitchState.lastHitTime = now
-		end
+		pitchState.score = pitchState.score + HIT_WEIGHT
+		pitchState.lastHitTime = now
 
 		if isDebug then
 			local yawStr = "nil"
@@ -398,6 +401,14 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 				end
 				Evidence.AddEvidence(playerState.id, "anti_aim", weight)
 
+				-- Hard flag for sustained yaw AA (similar to pitch)
+				if repeatTriggered or (maxTriggered and maxYawDelta >= 120.0) or flipTriggered then
+					local reason = string.format("Yaw AA detected (%s)",
+						repeatTriggered and "repeat" or (flipTriggered and "flip" or "snap"))
+					DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
+					yawEvidenceCooldownById[playerState.id] = nil -- Reset cooldown after flag
+				end
+
 				local trigReason = ""
 				if repeatTriggered then
 					trigReason = string.format("repeat=%d ", repeatCount)
@@ -412,7 +423,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		end
 
 		if isDebug then
-			traceLog(true, playerState, string.format(
+			traceLog(playerState, string.format(
 				"yaw history avg=%.1fdeg max=%.1fdeg choke=%.1f flips=%d repeats=%d bracketed=%s triggered=%s",
 				avgYawDelta, maxYawDelta or 0, avgChokeTicks, flipCount or 0, repeatCount,
 				tostring(snapBracketed), tostring(triggered)

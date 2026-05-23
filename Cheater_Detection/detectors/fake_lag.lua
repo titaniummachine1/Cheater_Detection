@@ -28,12 +28,12 @@ local RHYTHM_MIN_EVENTS           = 3
 -- Rijin-derived: avg choke-tick threshold
 -- avg simtime gap >= 2 ticks across the window = fakelag signal
 local AVG_CHOKE_THRESHOLD         = 2.0
-local AVG_CHOKE_MIN_SAMPLES       = 5 -- need at least this many deltas
+local AVG_CHOKE_MIN_SAMPLES       = 5   -- need at least this many deltas
 local AVG_CHOKE_EVIDENCE_W        = 6.0 -- evidence weight per trigger
 local AVG_CHOKE_COOLDOWN_S        = 4.0 -- seconds between evidence additions
 
-local playerCooldowns             = {} -- tick-based cooldown for rhythmic check
-local avgChokeCooldowns           = {} -- realtime-based cooldown for avg-choke check
+local playerCooldowns             = {}  -- tick-based cooldown for rhythmic check
+local avgChokeCooldowns           = {}  -- realtime-based cooldown for avg-choke check
 
 local svMaxUnlag                  = 0.2
 
@@ -79,16 +79,20 @@ function FakeLag.ProcessPlayer(playerState)
 
 	local id = playerState.id
 	if id:sub(1, 4) == "BOT_" then return end
-	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then return end
+	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugCategoryEnabled("Choke") then return end
 
-	local ringCount = HistoryManager.GetRingCount()
-	if ringCount < 5 then return end
+	local history = HistoryManager.GetPlayerHistory(id)
+	if not history then return end
 
-	-- Collect simulation times from history (newest first)
+	-- Need at least 5 records
+	local count = 0
+	for _ in ipairs(history) do count = count + 1 end
+	if count < 5 then return end
+
+	-- Collect simulation times from history (newest first, history[1] = current)
 	local simTimes = {}
-	for i = 0, ringCount - 1 do
-		local bucket  = HistoryManager.GetBucketAt(i)
-		local simTime = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.SimulationTime)
+	for _, record in ipairs(history) do
+		local simTime = record[HistoryManager.Fields.SimulationTime]
 		if simTime then
 			simTimes[#simTimes + 1] = simTime
 		end
@@ -113,7 +117,7 @@ function FakeLag.ProcessPlayer(playerState)
 	local curTick       = globals.TickCount()
 	local cooldownTicks = math.floor(FAKELAG_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	local now           = globals.RealTime()
-	local isDebug       = Common.IsDebugEnabled()
+	local isDebug       = Common.IsDebugCategoryEnabled("Choke")
 
 	-- ── 1. Rhythmic (original) ────────────────────────────────────────────
 	if #deltaTicks >= RHYTHM_MIN_EVENTS then

@@ -28,7 +28,6 @@ local Default_Config = {
 		DuckSpeed = true,                   -- Duck speed detection
 		AntiAim = true,                     -- Anti-aim detection
 		SilentAimbot = true,                -- Silent aimbot (extrapolation) detection
-		SilentAimSimulate = false,          -- Simulate silent aim for local testing (debug)
 		Cosmetics = true,                   -- Cosmetic exploit detection
 		AimLock = true,                     -- AimLock detection (requires SilentAimbot)
 	},

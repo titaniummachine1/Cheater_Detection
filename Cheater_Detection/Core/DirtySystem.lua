@@ -1,150 +1,125 @@
 --[[ Core/DirtySystem.lua
-     Dirty flag optimization system for player data updates.
+     Simplified dirty flag system for player data updates.
 
-     Instead of constantly iterating through all players for checks/updates,
-     this system tracks which players have changed data and only processes
-     those specific players.
-
-     Dirty Flags:
-       DIRTY_SCORE    - Player score changed (visuals need update)
-       DIRTY_FLAGS    - Player flags changed (visuals + DB need update)
-       DIRTY_CHECKS   - Check flags changed (valve_check needs processing)
-       DIRTY_SESSION  - Session state changed (persistence needed)
+     For 32-100 player servers, we don't need complex bitmask queues.
+     A simple hash table with per-player dirty reason sets is:
+     - O(1) lookups
+     - No bitwise operations
+     - No queue synchronization
+     - Cleaner code
 
      Usage:
-       DirtySystem.MarkDirty(playerID, DirtySystem.FLAGS.SCORE)
-       DirtySystem.ProcessDirty(DirtySystem.FLAGS.SCORE, callback)
+       DirtySystem.MarkDirty(playerID, "score")
+       DirtySystem.MarkDirty(playerID, "flags")
+       DirtySystem.ProcessDirty("score", callback)
 ]]
 
 local Constants = require("Cheater_Detection.Core.constants")
 
 local DirtySystem = {}
 
--- Import flags from centralized constants for consistency
-DirtySystem.FLAGS = Constants.DirtyFlags
-
--- Queue of dirty player IDs by flag type (all flag types from Constants)
-local dirtyQueues = {
-    [DirtySystem.FLAGS.SCORE]        = {},
-    [DirtySystem.FLAGS.FLAGS]        = {},
-    [DirtySystem.FLAGS.CHECKS]       = {},
-    [DirtySystem.FLAGS.SESSION]      = {},
-    [DirtySystem.FLAGS.PRIORITY]     = {},
-    [DirtySystem.FLAGS.CONNECTED]    = {},
-    [DirtySystem.FLAGS.DISCONNECTED] = {},
+-- Valid dirty reasons (string keys for clarity)
+DirtySystem.REASONS = {
+    SCORE        = "score",
+    FLAGS        = "flags",
+    CHECKS       = "checks",
+    SESSION      = "session",
+    PRIORITY     = "priority",
+    CONNECTED    = "connected",
+    DISCONNECTED = "disconnected",
 }
 
--- Track which flags each player has dirty
-local playerDirtyFlags = {}
+-- Single table: [playerID] = {reason1=true, reason2=true, ...}
+local dirtyPlayers = {}
 
--- Statistics for debugging
+-- Stats
 local stats = {
     marksTotal = 0,
     processesTotal = 0,
-    lastResetTime = 0,
 }
 
---- Mark a player as dirty with specific flags
+--- Mark a player as dirty with specific reason
 ---@param playerID string Player's SteamID64
----@param flags number Bitmask of DirtySystem.FLAGS
-function DirtySystem.MarkDirty(playerID, flags)
-    if not playerID or not flags or flags == 0 then
+---@param reason string One of DirtySystem.REASONS
+function DirtySystem.MarkDirty(playerID, reason)
+    if not playerID or not reason then
         return
     end
 
-    local existing = playerDirtyFlags[playerID] or 0
-    local newFlags = existing | flags
+    local playerEntry = dirtyPlayers[playerID]
+    if not playerEntry then
+        playerEntry = {}
+        dirtyPlayers[playerID] = playerEntry
+    end
 
-    -- Only add to queues for flags that weren't already dirty
-    if newFlags ~= existing then
-        local addedFlags = newFlags & ~existing
-
-        -- Add player to relevant queues (iterate through all defined flags)
-        local flagBit = 1
-        while flagBit <= DirtySystem.FLAGS.ALL do
-            if (addedFlags & flagBit) ~= 0 then
-                dirtyQueues[flagBit][playerID] = true
-            end
-            flagBit = flagBit * 2
-        end
-
-        playerDirtyFlags[playerID] = newFlags
+    if not playerEntry[reason] then
+        playerEntry[reason] = true
         stats.marksTotal = stats.marksTotal + 1
     end
 end
 
---- Process dirty players for specific flag types
----@param flags number Bitmask of DirtySystem.FLAGS to process
----@param callback function Called for each dirty player: callback(playerID, flagMask)
-function DirtySystem.ProcessDirty(flags, callback)
-    if not flags or flags == 0 or not callback then
-        return
+--- Process dirty players for specific reason
+---@param reason string One of DirtySystem.REASONS to process
+---@param callback function Called for each dirty player: callback(playerID)
+function DirtySystem.ProcessDirty(reason, callback)
+    if not reason or not callback then
+        return 0
     end
 
     local processedCount = 0
 
-    -- Process each flag type
-    local flagBit = 1
-    while flagBit <= DirtySystem.FLAGS.ALL do
-        if (flags & flagBit) ~= 0 then
-            local queue = dirtyQueues[flagBit]
+    for playerID, reasons in pairs(dirtyPlayers) do
+        if reasons[reason] then
+            callback(playerID)
+            processedCount = processedCount + 1
 
-            -- Process all players in this queue
-            for playerID, _ in pairs(queue) do
-                callback(playerID, flagBit)
-                processedCount = processedCount + 1
+            -- Clear this reason
+            reasons[reason] = nil
 
-                -- Clear this flag from player's dirty flags
-                local playerFlags = playerDirtyFlags[playerID] or 0
-                playerFlags = playerFlags & ~flagBit
-                playerDirtyFlags[playerID] = playerFlags
-
-                -- If player has no more dirty flags, clean up completely
-                if playerFlags == 0 then
-                    playerDirtyFlags[playerID] = nil
-                end
+            -- If no more reasons, remove player entry entirely
+            if not next(reasons) then
+                dirtyPlayers[playerID] = nil
             end
-
-            -- Clear the queue
-            dirtyQueues[flagBit] = {}
         end
-        flagBit = flagBit * 2
     end
 
     stats.processesTotal = stats.processesTotal + processedCount
     return processedCount
 end
 
---- Check if a player has specific dirty flags
+--- Check if a player has specific dirty reason
 ---@param playerID string Player's SteamID64
----@param flags number Bitmask of DirtySystem.FLAGS to check
----@return boolean True if player has any of the specified flags dirty
-function DirtySystem.IsDirty(playerID, flags)
-    local playerFlags = playerDirtyFlags[playerID]
-    if not playerFlags or not flags then
+---@param reason string One of DirtySystem.REASONS
+---@return boolean True if player has this reason dirty
+function DirtySystem.IsDirty(playerID, reason)
+    local playerEntry = dirtyPlayers[playerID]
+    if not playerEntry then
         return false
     end
-    return (playerFlags & flags) ~= 0
+    if reason then
+        return playerEntry[reason] == true
+    end
+    return next(playerEntry) ~= nil
 end
 
---- Get all dirty flags for a player
+--- Get all dirty reasons for a player
 ---@param playerID string Player's SteamID64
----@return number|nil Bitmask of dirty flags, or nil if not dirty
-function DirtySystem.GetDirtyFlags(playerID)
-    return playerDirtyFlags[playerID]
+---@return table|nil Table of reasons {score=true, flags=true} or nil
+function DirtySystem.GetDirtyReasons(playerID)
+    return dirtyPlayers[playerID]
 end
 
---- Get all player IDs with specific dirty flags
----@param flags number Bitmask of DirtySystem.FLAGS to check
----@return table Array of player IDs that have any of the specified flags dirty
-function DirtySystem.GetDirtyPlayers(flags)
+--- Get all player IDs with specific dirty reason
+---@param reason string One of DirtySystem.REASONS
+---@return table Array of player IDs
+function DirtySystem.GetDirtyPlayers(reason)
     local players = {}
-    if not flags or flags == 0 then
+    if not reason then
         return players
     end
 
-    for playerID, playerFlags in pairs(playerDirtyFlags) do
-        if (playerFlags & flags) ~= 0 then
+    for playerID, reasons in pairs(dirtyPlayers) do
+        if reasons[reason] then
             players[#players + 1] = playerID
         end
     end
@@ -152,61 +127,48 @@ function DirtySystem.GetDirtyPlayers(flags)
     return players
 end
 
---- Clear dirty flags for a player
+--- Clear dirty reasons for a player
 ---@param playerID string Player's SteamID64
----@param flags number|nil Bitmask of flags to clear (nil = clear all)
-function DirtySystem.ClearDirty(playerID, flags)
-    local playerFlags = playerDirtyFlags[playerID]
-    if not playerFlags then
+---@param reason string|nil Specific reason to clear (nil = clear all)
+function DirtySystem.ClearDirty(playerID, reason)
+    local playerEntry = dirtyPlayers[playerID]
+    if not playerEntry then
         return
     end
 
-    if not flags then
-        -- Clear all flags
-        playerDirtyFlags[playerID] = nil
-        -- Remove from all queues
-        for _, queue in pairs(dirtyQueues) do
-            queue[playerID] = nil
-        end
+    if not reason then
+        -- Clear all
+        dirtyPlayers[playerID] = nil
     else
-        -- Clear specific flags
-        local newFlags = playerFlags & ~flags
-        if newFlags == 0 then
-            playerDirtyFlags[playerID] = nil
-        else
-            playerDirtyFlags[playerID] = newFlags
-        end
-
-        -- Remove from specific queues
-        local flagBit = 1
-        while flagBit <= DirtySystem.FLAGS.ALL do
-            if (flags & flagBit) ~= 0 then
-                dirtyQueues[flagBit][playerID] = nil
-            end
-            flagBit = flagBit * 2
+        -- Clear specific reason
+        playerEntry[reason] = nil
+        if not next(playerEntry) then
+            dirtyPlayers[playerID] = nil
         end
     end
 end
 
---- Get statistics about dirty system usage
----@return table Statistics including marks, processes, and queue sizes
-function DirtySystem.GetStats()
-    local queueSizes = {}
-    for flag, queue in pairs(dirtyQueues) do
-        local count = 0
-        for _ in pairs(queue) do count = count + 1 end
-        queueSizes[flag] = count
+--- Clear all dirty data
+function DirtySystem.ClearAll()
+    for k in pairs(dirtyPlayers) do
+        dirtyPlayers[k] = nil
     end
+    stats.marksTotal = 0
+    stats.processesTotal = 0
+end
 
-    local dirtyPlayerCount = 0
-    for _ in pairs(playerDirtyFlags) do dirtyPlayerCount = dirtyPlayerCount + 1 end
+--- Get statistics
+---@return table Statistics
+function DirtySystem.GetStats()
+    local dirtyCount = 0
+    for _ in pairs(dirtyPlayers) do
+        dirtyCount = dirtyCount + 1
+    end
 
     return {
         marksTotal = stats.marksTotal,
         processesTotal = stats.processesTotal,
-        dirtyPlayerCount = dirtyPlayerCount,
-        queueSizes = queueSizes,
-        lastResetTime = stats.lastResetTime,
+        dirtyPlayerCount = dirtyCount,
     }
 end
 
@@ -214,51 +176,6 @@ end
 function DirtySystem.ResetStats()
     stats.marksTotal = 0
     stats.processesTotal = 0
-    stats.lastResetTime = globals.RealTime()
-end
-
---- Clear all dirty data (useful for testing or session reset)
-function DirtySystem.ClearAll()
-    playerDirtyFlags = {}
-    dirtyQueues = {
-        [DirtySystem.FLAGS.SCORE]        = {},
-        [DirtySystem.FLAGS.FLAGS]        = {},
-        [DirtySystem.FLAGS.CHECKS]       = {},
-        [DirtySystem.FLAGS.SESSION]      = {},
-        [DirtySystem.FLAGS.PRIORITY]     = {},
-        [DirtySystem.FLAGS.CONNECTED]    = {},
-        [DirtySystem.FLAGS.DISCONNECTED] = {},
-    }
-    DirtySystem.ResetStats()
-end
-
---- Debug function to print current dirty state
-function DirtySystem.DebugPrint()
-    local stats = DirtySystem.GetStats()
-    print("[DirtySystem] Debug Info:")
-    print(string.format("  Total marks: %d, Total processes: %d",
-        stats.marksTotal, stats.processesTotal))
-    print(string.format("  Dirty players: %d", stats.dirtyPlayerCount))
-
-    for flag, size in pairs(stats.queueSizes) do
-        local flagName = "UNKNOWN"
-        if flag == DirtySystem.FLAGS.SCORE then
-            flagName = "SCORE"
-        elseif flag == DirtySystem.FLAGS.FLAGS then
-            flagName = "FLAGS"
-        elseif flag == DirtySystem.FLAGS.CHECKS then
-            flagName = "CHECKS"
-        elseif flag == DirtySystem.FLAGS.SESSION then
-            flagName = "SESSION"
-        elseif flag == DirtySystem.FLAGS.PRIORITY then
-            flagName = "PRIORITY"
-        elseif flag == DirtySystem.FLAGS.CONNECTED then
-            flagName = "CONNECTED"
-        elseif flag == DirtySystem.FLAGS.DISCONNECTED then
-            flagName = "DISCONNECTED"
-        end
-        print(string.format("  Queue %s: %d players", flagName, size))
-    end
 end
 
 return DirtySystem

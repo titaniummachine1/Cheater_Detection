@@ -90,7 +90,7 @@ function WarpDT.ProcessPlayer(playerState)
 		return
 	end
 
-	local isDebug = Common.IsDebugEnabled()
+	local isDebug = Common.IsDebugCategoryEnabled("Warp/DT")
 	local id = playerState.id
 
 	-- Check bot using steamID prefix (safe, no entity needed)
@@ -112,15 +112,21 @@ function WarpDT.ProcessPlayer(playerState)
 		return
 	end
 
-	local ringCount = HistoryManager.GetRingCount()
-	if ringCount < 10 then
+	local history = HistoryManager.GetPlayerHistory(id)
+	if not history then
+		return
+	end
+
+	-- Need at least 10 records
+	local count = 0
+	for _ in ipairs(history) do count = count + 1 end
+	if count < 10 then
 		return
 	end
 
 	local simTicks = {}
-	for i = 0, ringCount - 1 do
-		local bucket = HistoryManager.GetBucketAt(i)
-		local simTime = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.SimulationTime)
+	for _, record in ipairs(history) do
+		local simTime = record[HistoryManager.Fields.SimulationTime]
 		if simTime then
 			simTicks[#simTicks + 1] = timeToTicks(simTime)
 		end

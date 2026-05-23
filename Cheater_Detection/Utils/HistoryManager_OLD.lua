@@ -1,15 +1,11 @@
 --[[ HistoryManager.lua
-     Player-centric circular buffer for tick history.
-
-     NEW Architecture:
-       - Each player has their own circular buffer: playerHistories[steamID]
-       - Buffer is an ipairs-traversable array: [1]=current tick, [2]=1 tick ago, etc.
-       - Circular overwrite: new data overwrites oldest when buffer full
-       - No per-tick bucket clearing needed
-
-     Old API Compatibility:
-       - GetBucketAt(offset) -> adapter to new structure
-       - GetPlayerDataInBucket(bucket, steamID) -> adapter
+     Tick-bucket circular buffer for player history.
+     Architecture:
+       - Circular buffer of tick-buckets
+       - Each bucket: { [steamID] = { field1 = val, field2 = val, ... }, _tick = n }
+       - Push does shallow-merge: only writes fields that are non-nil, preserves existing data
+       - Overflow = clear bucket then overwrite
+       - All detectors share same data source
 ]]
 
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
@@ -32,13 +28,10 @@ local activeFields = {}
 local maxRetentionTicks = 0
 local initialized = false
 
--- NEW: Player-centric storage
--- playerHistories[steamID] = { [1]=current, [2]=prev, ..., _head=N, _count=N, _tick=N }
-local playerHistories = {}
-
--- For old API compatibility: we maintain a "virtual" tick-based view
--- This maps tick offsets to the player history indices
-local currentTickNum = -1
+local ringBuffer = {}
+local ringHead = 0
+local ringCount = 0
+local ringCapacity = 0
 
 local function tryGetTFNonLocalEyeAngles(player)
 	if not player or not player.GetPropFloat then
@@ -109,6 +102,12 @@ local FIELD_BUILDERS = {
 	end,
 }
 
+local function clearBucket(bucket)
+	for k in pairs(bucket) do
+		bucket[k] = nil
+	end
+end
+
 function HistoryManager.Initialize(retentionTicks, fields)
 	if initialized and maxRetentionTicks == retentionTicks then
 		return
@@ -116,63 +115,57 @@ function HistoryManager.Initialize(retentionTicks, fields)
 
 	maxRetentionTicks = retentionTicks or 33
 	activeFields = fields or {}
+	ringCapacity = maxRetentionTicks
 
-	-- Clear existing histories if capacity changed
-	for steamID, history in pairs(playerHistories) do
-		-- Reinitialize with new capacity
-		history._head = 1
-		history._count = 0
-		for i = 1, maxRetentionTicks do
-			history[i] = nil
-		end
+	for i = 1, ringCapacity do
+		ringBuffer[i] = { _pool = {} }
 	end
+
+	ringHead = 0
+	ringCount = 0
 
 	initialized = true
 end
 
--- NEW API: Get player's full history array (ipairs-friendly)
--- Returns: { [1]=current, [2]=prev, ..., _head, _count, _tick }
--- Use ipairs to traverse: for i, record in ipairs(history) do ... end
-function HistoryManager.GetPlayerHistory(steamID)
-	if not initialized or not steamID then
+function HistoryManager.GetBucketAt(bufferOffset)
+	if not initialized or bufferOffset < 0 or bufferOffset >= ringCount then
 		return nil
 	end
-	return playerHistories[tostring(steamID)]
+	local idx = (ringHead - bufferOffset - 1) % ringCapacity + 1
+	return ringBuffer[idx]
 end
 
--- NEW API: Get specific record from player history by offset
--- offset=0: current tick, offset=1: 1 tick ago, etc.
-function HistoryManager.GetPlayerRecordAt(steamID, offset)
-	if not initialized or not steamID then
+function HistoryManager.GetPlayerDataInBucket(bucket, steamID)
+	if not bucket then
 		return nil
 	end
-	local history = playerHistories[tostring(steamID)]
-	if not history then
+	if not steamID then
 		return nil
 	end
-
-	-- Convert offset to array index
-	-- history[1] = current, history[2] = 1 tick ago
-	local idx = offset + 1
-	if idx > history._count then
+	if not PlayerCache.GetByID(tostring(steamID)) then
 		return nil
 	end
-
-	return history[idx]
+	return bucket[steamID]
 end
 
--- Get the maximum history depth across all players
+function HistoryManager.GetPlayerFieldAt(bucket, steamID, fieldName)
+	if not bucket or not steamID then
+		return nil
+	end
+	if not PlayerCache.GetByID(tostring(steamID)) then
+		return nil
+	end
+	local playerData = bucket[steamID]
+	return playerData and playerData[fieldName]
+end
+
+function HistoryManager.GetTickAt(bufferOffset)
+	local bucket = HistoryManager.GetBucketAt(bufferOffset)
+	return bucket and bucket._tick or nil
+end
+
 function HistoryManager.GetRingCount()
-	if not initialized then
-		return 0
-	end
-	local maxCount = 0
-	for _, history in pairs(playerHistories) do
-		if history._count > maxCount then
-			maxCount = history._count
-		end
-	end
-	return maxCount
+	return ringCount
 end
 
 function HistoryManager.IsInitialized()
@@ -190,19 +183,15 @@ function HistoryManager.NewTick()
 		return
 	end
 	lastTickCount = curTick
-	currentTickNum = curTick
 
-	-- Advance each player's circular buffer
-	for steamID, history in pairs(playerHistories) do
-		-- Move head forward (circular)
-		history._head = (history._head % maxRetentionTicks) + 1
-		-- Increase count until max
-		if history._count < maxRetentionTicks then
-			history._count = history._count + 1
-		end
-		-- Clear the slot we're about to overwrite
-		history[history._head] = nil
+	ringHead = ringHead % ringCapacity + 1
+	if ringCount < ringCapacity then
+		ringCount = ringCount + 1
 	end
+
+	local currentBucket = ringBuffer[ringHead]
+	clearBucket(currentBucket)
+	currentBucket._tick = curTick
 end
 
 function HistoryManager.Push(player)
@@ -225,20 +214,23 @@ function HistoryManager.Push(player)
 
 	TickProfiler.BeginSection("History_Write")
 
-	-- Ensure we have a history for this player
-	local history = playerHistories[tostring(steamID)]
-	if not history then
-		history = { _head = 0, _count = 0 }
-		playerHistories[tostring(steamID)] = history
-	end
-
-	local curTick = globals.TickCount()
-	if curTick ~= lastTickCount then
+	local currentBucket = ringBuffer[ringHead]
+	if not currentBucket or currentBucket._tick ~= globals.TickCount() then
 		HistoryManager.NewTick()
+		currentBucket = ringBuffer[ringHead]
 	end
 
-	-- Build record for current head position
-	local record = {}
+	local pool = currentBucket._pool
+	local existingPlayerData = currentBucket[steamID]
+	if not existingPlayerData then
+		if pool and #pool > 0 then
+			existingPlayerData = pool[#pool]
+			pool[#pool] = nil
+		else
+			existingPlayerData = {}
+		end
+		currentBucket[steamID] = existingPlayerData
+	end
 
 	for field in pairs(activeFields) do
 		local builder = FIELD_BUILDERS[field]
@@ -246,68 +238,104 @@ function HistoryManager.Push(player)
 			if field == HistoryManager.Fields.Angles then
 				local pitch, yaw = builder(player)
 				if pitch ~= nil and yaw ~= nil then
-					record[field] = { pitch = pitch, yaw = yaw }
+					local ang = existingPlayerData[field]
+					if type(ang) ~= "table" then
+						ang = {}
+						existingPlayerData[field] = ang
+					end
+					ang.pitch = pitch
+					ang.yaw = yaw
+				else
+					existingPlayerData[field] = nil
 				end
 			else
-				record[field] = builder(player)
+				local value = builder(player)
+				existingPlayerData[field] = value
 			end
 		end
 	end
 
-	record._tick = curTick
-
-	-- Write at current head position
-	history[history._head] = record
-
-	state.current = record
+	state.current = existingPlayerData
 
 	TickProfiler.EndSection("History_Write")
 end
 
 function HistoryManager.MarkDamageDealt(steamID)
-	if not initialized or not steamID then
+	if not initialized then
 		return
 	end
-
-	local history = playerHistories[tostring(steamID)]
-	if not history or history._count == 0 then
+	local currentBucket = ringBuffer[ringHead]
+	if not currentBucket then
 		return
 	end
-
-	-- Mark at current head position
-	local record = history[history._head]
-	if record then
-		record.damageDealt = true
+	local pool = currentBucket._pool
+	local playerData = currentBucket[steamID]
+	if not playerData then
+		if pool and #pool > 0 then
+			playerData = pool[#pool]
+			pool[#pool] = nil
+		else
+			playerData = {}
+		end
+		currentBucket[steamID] = playerData
 	end
+	playerData.damageDealt = true
 end
 
 function HistoryManager.ClearPlayer(steamID)
-	if not initialized or not steamID then
+	if not initialized then
 		return
 	end
-	playerHistories[tostring(steamID)] = nil
+	if not steamID then
+		return
+	end
+	local id = tostring(steamID)
+	for i = 1, ringCapacity do
+		local bucket = ringBuffer[i]
+		if bucket then
+			bucket[id] = nil
+		end
+	end
 end
 
 function HistoryManager.PushAngles(steamID, pitch, yaw)
-	if not initialized or not steamID then
+	if not initialized then
+		return
+	end
+	if not steamID then
 		return
 	end
 
-	local history = playerHistories[tostring(steamID)]
-	if not history then
-		history = { _head = 0, _count = 0 }
-		playerHistories[tostring(steamID)] = history
-	end
-
-	local curTick = globals.TickCount()
-	if curTick ~= lastTickCount then
+	local currentBucket = ringBuffer[ringHead]
+	if not currentBucket or currentBucket._tick ~= globals.TickCount() then
 		HistoryManager.NewTick()
+		currentBucket = ringBuffer[ringHead]
+	end
+	if not currentBucket then
+		return
 	end
 
-	local record = history[history._head] or {}
-	record[HistoryManager.Fields.Angles] = { pitch = pitch, yaw = yaw }
-	record._tick = curTick
-	history[history._head] = record
+	local pool = currentBucket._pool
+	local playerData = currentBucket[steamID]
+	if not playerData then
+		if pool and #pool > 0 then
+			playerData = pool[#pool]
+			pool[#pool] = nil
+		else
+			playerData = {}
+		end
+		currentBucket[steamID] = playerData
+	end
+
+	if pitch ~= nil and yaw ~= nil then
+		local ang = playerData[HistoryManager.Fields.Angles]
+		if type(ang) ~= "table" then
+			ang = {}
+			playerData[HistoryManager.Fields.Angles] = ang
+		end
+		ang.pitch = pitch
+		ang.yaw = yaw
+	end
 end
 
 function HistoryManager.GetRetentionTicks()
@@ -322,9 +350,11 @@ function HistoryManager.GetActiveFields()
 	return copy
 end
 
--- NEW API: Debug function to set a field in a player's history
 function HistoryManager.DebugSetPlayerFieldAt(bufferOffset, steamID, fieldName, value)
-	if not initialized or bufferOffset == nil or bufferOffset < 0 then
+	if not initialized then
+		return false
+	end
+	if bufferOffset == nil or bufferOffset < 0 then
 		return false
 	end
 	if not steamID or not fieldName then
@@ -334,18 +364,16 @@ function HistoryManager.DebugSetPlayerFieldAt(bufferOffset, steamID, fieldName, 
 	if not PlayerCache.GetByID(id) then
 		return false
 	end
-
-	local history = playerHistories[id]
-	if not history then
+	local bucket = HistoryManager.GetBucketAt(bufferOffset)
+	if not bucket then
 		return false
 	end
-
-	local idx = bufferOffset + 1
-	if idx > history._count then
-		return false
+	local playerData = bucket[id]
+	if not playerData then
+		playerData = {}
+		bucket[id] = playerData
 	end
-
-	history[idx][fieldName] = value
+	playerData[fieldName] = value
 	return true
 end
 

@@ -8,7 +8,7 @@ local TickProfiler = {}
 
 local sections = {}
 local stacks = {}
-local acc = {} -- Accumulator for rolling stats
+local acc = {}     -- Accumulator for rolling stats
 local display = {} -- Display entries
 local enabled = false
 local lastSnapshot = 0
@@ -61,7 +61,26 @@ local function GetColorForValue(val, t1, t2, t3)
 	end
 end
 
+-- Try to use BridgeTimer for high-precision timing, fallback to RealTime()
+local BridgeTimer = nil
 local function now()
+	-- Lazy-load BridgeTimer to avoid circular dependency
+	if not BridgeTimer then
+		local ok, bt = pcall(require, "Cheater_Detection.Utils.BridgeTimer")
+		if ok and bt then
+			BridgeTimer = bt
+		end
+	end
+
+	if BridgeTimer then
+		-- Returns microseconds, convert to seconds with micro precision
+		local us, rtt = BridgeTimer.NowMicros()
+		if us then
+			return us / 1e6
+		end
+	end
+
+	-- Fallback to standard RealTime()
 	return globals.RealTime()
 end
 
@@ -393,7 +412,20 @@ local function drawOverlay()
 	-- Draw Global Stats
 	y = y - lineHeight - 4
 	local memUsed = 0 -- memory tracking disabled (collectgarbage forbidden by policy)
-	local memStr = string.format("Lua Total: %s | Measured: %s", formatMemory(memUsed), formatMemory(totalMeasuredMem))
+
+	-- Show BridgeTimer status if active
+	local bridgeInfo = ""
+	if BridgeTimer then
+		local status = BridgeTimer.GetStatus()
+		if status and status.synced then
+			bridgeInfo = string.format(" | Bridge: %dµs ping", status.lastPingMicros)
+		else
+			bridgeInfo = " | Bridge: --"
+		end
+	end
+
+	local memStr = string.format("Lua Total: %s | Measured: %s%s", formatMemory(memUsed), formatMemory(totalMeasuredMem),
+		bridgeInfo)
 	draw.Color(255, 200, 100, 255)
 	draw.Text(x, y, memStr)
 end

@@ -65,7 +65,7 @@ local function runDeferredSweep()
 	local isDebug = (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true)
 
 	-- Get only players marked with dirty CHECKS flag (via DirtySystem)
-	local dirtyPlayers = DirtySystem.GetDirtyPlayers(DirtySystem.FLAGS.CHECKS)
+	local dirtyPlayers = DirtySystem.GetDirtyPlayers("checks")
 
 	-- Limit checks per frame to avoid lag spikes
 	local maxChecksPerFrame = 3
@@ -79,14 +79,14 @@ local function runDeferredSweep()
 		local state = PlayerCache.GetByID(id)
 		if not state then
 			-- Player no longer active, clear their dirty flag
-			DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CHECKS)
+			DirtySystem.ClearDirty(id, "checks")
 			goto continue
 		end
 
 		-- Only check if not already confirmed as Valve
 		if (state.flags & Constants.Flags.VALVE) ~= 0 then
 			-- Already confirmed Valve, clear dirty flag
-			DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CHECKS)
+			DirtySystem.ClearDirty(id, "checks")
 			goto continue
 		end
 
@@ -103,7 +103,7 @@ local function runDeferredSweep()
 		end
 
 		-- Clear dirty flag - we've processed this player
-		DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CHECKS)
+		DirtySystem.ClearDirty(id, "checks")
 
 		::continue::
 	end
@@ -338,14 +338,14 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	-- OPTIMIZATION: Only check players on join (dirty CONNECTED flag)
 	-- Valve status is permanent - cannot become Valve mid-session
-	local isNewPlayer = DirtySystem.IsDirty(id, DirtySystem.FLAGS.CONNECTED)
+	local isNewPlayer = DirtySystem.IsDirty(id, "connected")
 	if not isNewPlayer and valveCheckedThisSession[id] then
 		return -- Already checked this player this session, skip
 	end
 
 	local curTick = globals.TickCount()
 	local now = globals.CurTime()
-	local isDebug = Common.IsDebugEnabled()
+	local isDebug = Common.IsDebugCategoryEnabled("ValveCheck")
 	local checkFlags = playerState.checkFlags
 	local useSteamHistory = SteamHistory.IsEnabled and SteamHistory.IsEnabled()
 
@@ -358,19 +358,19 @@ function ValveCheck.ProcessPlayer(playerState)
 	if (playerState.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
 		-- Mark as checked so we don't re-check
 		valveCheckedThisSession[id] = true
-		DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CONNECTED)
+		DirtySystem.ClearDirty(id, "connected")
 		return
 	end
 
-	-- Skip local player unless debug mode is enabled
-	if not isDebug then
+	-- Skip local player unless global debug mode is enabled
+	if not Common.IsDebugEnabled() then
 		local localPlayer = entities.GetLocalPlayer()
 		if localPlayer then
 			local localSteamID = Common.GetSteamID64(localPlayer)
 			if localSteamID and tostring(localSteamID) == tostring(id) then
 				-- Mark local player as checked
 				valveCheckedThisSession[id] = true
-				DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CONNECTED)
+				DirtySystem.ClearDirty(id, "connected")
 				return -- Skip local player check
 			end
 		end
@@ -379,7 +379,7 @@ function ValveCheck.ProcessPlayer(playerState)
 	-- Mark this player as checked this session
 	valveCheckedThisSession[id] = true
 	-- Clear the CONNECTED dirty flag - we've processed them
-	DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CONNECTED)
+	DirtySystem.ClearDirty(id, "connected")
 
 	-- ── Layer 1: SteamID64 instant check ──────────────────────────────────────
 	-- Always log in debug so user can verify their ID matches what the engine sees,

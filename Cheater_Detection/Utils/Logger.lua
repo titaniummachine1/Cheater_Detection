@@ -6,18 +6,18 @@ local Logger = {}
 
 -- Log levels
 Logger.Levels = {
-	DEBUG = 1,   -- Detailed debug info (off by default)
-	INFO = 2,    -- General info (detections, database saves)
+	DEBUG = 1, -- Detailed debug info (off by default)
+	INFO = 2, -- General info (detections, database saves)
 	WARNING = 3, -- Warnings
-	ERROR = 4,   -- Errors
+	ERROR = 4, -- Errors
 }
 
 -- Color codes (RGBA)
 local Colors = {
-	DEBUG = {170, 170, 170, 255},   -- Gray
-	INFO = {153, 204, 255, 255},    -- Light blue
-	WARNING = {255, 170, 0, 255},   -- Orange
-	ERROR = {255, 68, 68, 255},     -- Red
+	DEBUG = { 170, 170, 170, 255 }, -- Gray
+	INFO = { 153, 204, 255, 255 }, -- Light blue
+	WARNING = { 255, 170, 0, 255 }, -- Orange
+	ERROR = { 255, 68, 68, 255 }, -- Red
 }
 
 --- Check if log level is enabled
@@ -27,11 +27,11 @@ local function isLevelEnabled(level)
 	if not G.Menu or not G.Menu.Advanced or not G.Menu.Advanced.LogLevel then
 		return level >= Logger.Levels.INFO -- Default: INFO and above
 	end
-	
+
 	-- Convert boolean table to level number: [Debug, Info, Warning, Error]
 	local logLevelTable = G.Menu.Advanced.LogLevel
 	local enabledLevel = Logger.Levels.INFO -- Default
-	
+
 	if type(logLevelTable) == "table" then
 		for i = 1, 4 do
 			if logLevelTable[i] then
@@ -42,7 +42,7 @@ local function isLevelEnabled(level)
 	elseif type(logLevelTable) == "number" then
 		enabledLevel = logLevelTable
 	end
-	
+
 	return level >= enabledLevel
 end
 
@@ -54,10 +54,10 @@ function Logger.Log(level, category, message)
 	if not isLevelEnabled(level) then
 		return
 	end
-	
+
 	local levelName = ""
 	local color = nil
-	
+
 	if level == Logger.Levels.DEBUG then
 		levelName = "DEBUG"
 		color = Colors.DEBUG
@@ -71,7 +71,7 @@ function Logger.Log(level, category, message)
 		levelName = "ERROR"
 		color = Colors.ERROR
 	end
-	
+
 	if color then
 		printc(color[1], color[2], color[3], color[4], string.format("[%s] [%s] %s", levelName, category, message))
 	else
@@ -94,6 +94,11 @@ end
 
 function Logger.Error(category, message)
 	Logger.Log(Logger.Levels.ERROR, category, message)
+end
+
+--- Error with format string (convenience for Database and similar)
+function Logger.ErrorFmt(category, fmt, ...)
+	Logger.Log(Logger.Levels.ERROR, category, string.format(fmt, ...))
 end
 
 return Logger

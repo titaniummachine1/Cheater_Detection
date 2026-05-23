@@ -625,10 +625,10 @@ local function handleError(message, contexts, details)
 	end
 
 	-- Adaptive backoff based on error type
-	local expBase = 2 ^ (state.errorCount - 1)
+	local expBase  = 2 ^ (state.errorCount - 1)
 	local delay300 = math.min(300, 30 * expBase)
 	local delay120 = math.min(120, 15 * expBase)
-	local delay60  = math.min(60,  10 * expBase)
+	local delay60  = math.min(60, 10 * expBase)
 	local delay
 	if message:match("Rate limited") or message:match("429") then
 		-- Rate limit: longer backoff, start at 30s
@@ -1058,7 +1058,7 @@ callbacks.Register("CreateMove", "CD_SteamHistory_OnCreateMove", onCreateMove)
 local function checkApiKey()
 	local cfg = getConfig()
 	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
-		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] API Key missing! Get one at https://steamhistory.net")
+		printInfo({ 255, 100, 100, 255 }, "[SteamHistory] API Key missing! Get one at https://steamhistory.net/api")
 		printInfo({ 255, 120, 120, 255 }, "[SteamHistory] Set it via console: steamhistory <your_key>")
 	end
 end

@@ -25,11 +25,23 @@ VDFParser.LoadItemsGame()
 -- defIndex -> equip_region string (or false if no region)
 local regionCache = {}
 
+-- Check if we can get equip region data (VDF or itemschema)
+local function hasVDFData()
+	-- VDFParser is preferred but not required - itemschema is fallback
+	-- Just check if VDFParser attempted to load (loaded flag is set)
+	-- The actual item regions will be fetched via getItemRegion which handles both sources
+	return true -- Always allow scanning, getItemRegion handles the fallback
+end
+
 -- per-player scan results: id -> { regions = {region->count}, slotCounts = {slot->count} }
 -- nil = not yet scanned, false = scanned clean, table = conflict data
 local playerScanData = {}
 -- ids that have been fully scanned this session; cleared on class change/spawn
 local scannedPlayers = {}
+-- Simple tick-based retry: id -> { targetTick, attempts }
+local scanRetryState = {}
+local SCAN_RETRY_TICKS = 66 -- ~1 second at 66 tick
+local MAX_SCAN_ATTEMPTS = 5 -- After 5 attempts with 0 wearables, mark as clean (likely F2P with no hats)
 
 local function readPropInt(ent, propName)
 	local ok, value = pcall(ent.GetPropInt, ent, propName)
@@ -79,11 +91,20 @@ local function scanPlayerWearables(targetID)
 	local seenEntIndex = {}
 	local itemNum = 0
 
+	local playerClass = player:GetPropInt("m_iClass")
+
 	local function processWearable(wearable)
 		if not wearable or not wearable:IsValid() then return end
 		local entIdx = wearable:GetIndex()
 		if seenEntIndex[entIdx] then return end
 		seenEntIndex[entIdx] = true
+
+		-- Skip items that don't match player's class (prevents false positives from class-switching)
+		local itemClass = readPropInt(wearable, "m_iClass")
+		if itemClass and itemClass > 0 and itemClass ~= playerClass then
+			return -- Item is for a different class, skip it
+		end
+
 		itemNum = itemNum + 1
 
 		local defIndex = readPropInt(wearable, "m_iItemDefinitionIndex")
@@ -131,10 +152,19 @@ local function scanPlayerWearables(targetID)
 	end
 
 	data.totalWearables = itemNum
+
+	-- Don't mark as scanned if we found 0 wearables - items likely not loaded yet
+	if itemNum == 0 then
+		if Common.IsDebugCategoryEnabled("Cosmetics") then
+			print(string.format("[CosmeticAbuse] id=%s - 0 wearables found, skipping scan (items not loaded)", targetID))
+		end
+		return false
+	end
+
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
 
-	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug then
+	if Common.IsDebugCategoryEnabled("Cosmetics") then
 		local parts = { string.format("[CosmeticAbuse] id=%s wearables=%d", targetID, itemNum) }
 		for i, label in pairs(data.slotNames) do
 			parts[#parts + 1] = string.format("  item%d: %s", i, label)
@@ -142,7 +172,7 @@ local function scanPlayerWearables(targetID)
 		print(table.concat(parts, "\n"))
 	end
 
-	return true
+	return data
 end
 
 local function checkConflicts(id)
@@ -180,6 +210,7 @@ end
 function CosmeticAbuse.InvalidatePlayer(id)
 	scannedPlayers[id] = nil
 	playerScanData[id] = nil
+	scanRetryState[id] = nil
 end
 
 function CosmeticAbuse.NeedsScan(id)
@@ -187,27 +218,123 @@ function CosmeticAbuse.NeedsScan(id)
 end
 
 function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
+	local isDebug = Common.IsDebugCategoryEnabled("Cosmetics")
+	local playerName = (playerState and playerState.wrap and playerState.wrap.GetName)
+		and playerState.wrap:GetName()
+		or (playerState and playerState.id) or "?"
+
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
-	if not isEnabled() then return end
 
-	local isDebug = G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug
+	if not isEnabled() then
+		if isDebug then print(string.format("[CosmeticAbuse] SKIP %s: disabled in menu", playerName)) end
+		return
+	end
+
+	if not hasVDFData() then
+		if isDebug then print(string.format("[CosmeticAbuse] SKIP %s: VDF data not loaded", playerName)) end
+		return
+	end
+
 	local id = tostring(playerState.id)
 
-	if not isDebug and playerState.isFriend then return end
+	if not Common.IsDebugEnabled() and playerState.isFriend then return end
 
 	local localPlayer = entities.GetLocalPlayer()
 	local isLocalPlayer = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
 
-	if scannedPlayers[id] then return end
+	if scannedPlayers[id] then
+		-- Already scanned, skip silently
+		return
+	end
+
+	-- Skip if player is dormant - items aren't loaded yet
+	if playerState.pdata.isDormant then
+		if isDebug then
+			print(string.format("[CosmeticAbuse] SKIP %s: player dormant", playerName))
+		end
+		return
+	end
+
+	-- Skip disguised spies (disguised class items can cause false positives)
+	local ent = playerState.wrap and playerState.wrap:GetRawEntity()
+	if ent then
+		local disguiseClass = ent:GetPropInt("m_iDisguiseTargetClass")
+		if disguiseClass and disguiseClass > 0 then
+			if isDebug then
+				print(string.format("[CosmeticAbuse] SKIP %s: disguised as class %d", playerName, disguiseClass))
+			end
+			return
+		end
+	end
+
+	-- Simple tick-based scheduling: check if it's time to scan this player
+	local curTick = globals.TickCount()
+	local retryState = scanRetryState[id]
+	if not retryState then
+		retryState = { targetTick = curTick, attempts = 0 }
+		scanRetryState[id] = retryState
+	end
+
+	-- Not time yet? Skip silently (no spam)
+	if curTick < retryState.targetTick then
+		return
+	end
+
+	-- Time to scan
+	if isDebug then
+		print(string.format("[CosmeticAbuse] SCANNING %s (attempt %d)...", playerName, retryState.attempts + 1))
+	end
 
 	local scanned = scanPlayerWearables(id)
-	if not scanned then return end
+	if not scanned then
+		-- 0 wearables found - schedule retry
+		retryState.attempts = retryState.attempts + 1
+		retryState.targetTick = curTick + SCAN_RETRY_TICKS
+
+		-- After 5 attempts, mark as clean (likely F2P with no hats)
+		if retryState.attempts >= MAX_SCAN_ATTEMPTS then
+			if isDebug then
+				print(string.format("[CosmeticAbuse] GIVING UP %s: 0 wearables after %d attempts (F2P?)", playerName,
+					MAX_SCAN_ATTEMPTS))
+			end
+			scannedPlayers[id] = true -- Mark as scanned (clean)
+			scanRetryState[id] = nil -- Clean up
+		end
+		return
+	end
+
+	if isDebug then
+		print(string.format("[CosmeticAbuse] SUCCESS %s: found %d wearables", playerName, scanned.totalWearables))
+	end
+
+	-- Debug: Print detected items and regions
+	if isDebug then
+		print(string.format("[CosmeticAbuse] Items for %s:", playerName))
+		for slotName, info in pairs(scanned.slotNames) do
+			print(string.format("  [%d] %s", slotName, info))
+		end
+		print(string.format("  Regions detected: %s", table.concat(
+			(function()
+				local t = {}
+				for region, count in pairs(scanned.regions) do
+					t[#t + 1] = region .. "=" .. count
+				end
+				return t
+			end)(), ", ")))
+	end
+
+	-- Clean up retry state - scan succeeded
+	scanRetryState[id] = nil
 
 	local illegal, reason = checkConflicts(id)
 	if illegal then
-		if isLocalPlayer and not isDebug then
-			-- Skip flagging local player in normal mode
+		-- Skip flagging local player unless global debug mode is on
+		-- (prevents self-flagging during normal gameplay)
+		if isLocalPlayer and not Common.IsDebugEnabled() then
+			if isDebug then
+				print(string.format("[CosmeticAbuse] SKIP [LOCAL]: %s (enable Debug Mode to self-flag)", reason))
+			end
 			return
 		end
 		-- Hard detection: duplicate equip_region or >3 wearables is 100% impossible

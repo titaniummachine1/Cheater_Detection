@@ -139,7 +139,40 @@ end
 --- Returns true when debug mode is active in the menu (eliminates repeated inline checks).
 ---@return boolean
 function Common.IsDebugEnabled()
-	return G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true or false
+	return G.Menu.Advanced.debug == true
+end
+
+--- Check if a specific debug category is enabled (for selective debug output).
+--- Categories: "All", "SilentAim", "AntiAim", "Warp", "Choke", "Cosmetics", "ValveCheck", "Database"
+---@param category string The debug category to check
+---@return boolean True if debug is enabled and category matches
+function Common.IsDebugCategoryEnabled(category)
+	if not Common.IsDebugEnabled() then
+		return false
+	end
+	local selected = G.Menu.Advanced.DebugCategory
+	if not selected then
+		return true -- Default to showing all if not set
+	end
+	-- Check if "All" is selected (first index)
+	if selected[1] then
+		return true
+	end
+	-- Map category names to combo indices (must match Menu.lua labels)
+	local categoryMap = {
+		["SilentAim"] = 2,
+		["AntiAim"] = 3,
+		["Warp/DT"] = 4, -- Must match combo label exactly
+		["Choke"] = 5,
+		["Cosmetics"] = 6,
+		["ValveCheck"] = 7,
+		["Database"] = 8,
+	}
+	local idx = categoryMap[category]
+	if idx and selected[idx] then
+		return true
+	end
+	return false
 end
 
 --[[ Inlined IsFriend (from lnxLib/TF2/TF2.lua) ]]

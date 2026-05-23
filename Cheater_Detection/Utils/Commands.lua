@@ -56,7 +56,7 @@ local function setupSteamHistory()
 		local key = args and args[1] or nil
 		if not key or key == "" then
 			printc(255, 100, 100, 255, "[SteamHistory] Usage: steamhistory <api_key>")
-			printc(255, 100, 100, 255, "[SteamHistory] Get your key at: https://steamhistory.net")
+			printc(255, 100, 100, 255, "[SteamHistory] Get your API key at: https://steamhistory.net/api")
 			return
 		end
 
@@ -68,6 +68,7 @@ local function setupSteamHistory()
 			printc(255, 100, 100, 255, "[SteamHistory] Invalid API key format!")
 			printc(255, 150, 100, 255, "[SteamHistory] Key must be 32 hexadecimal characters (0-9, a-f)")
 			printc(200, 200, 200, 255, "[SteamHistory] Expected length: 32, got: " .. #key)
+			printc(200, 200, 200, 255, "[SteamHistory] Get your API key at: https://steamhistory.net/api")
 			return
 		end
 		-- Normalize to lowercase for storage
@@ -101,7 +102,7 @@ local function setupSteamHistory()
 		if not valid then
 			printc(255, 100, 100, 255, "[SteamHistory] API key validation failed!")
 			printc(255, 150, 100, 255, "[SteamHistory] " .. tostring(errMsg or "Unknown error"))
-			printc(200, 200, 200, 255, "[SteamHistory] Check your key at: https://steamhistory.net")
+			printc(200, 200, 200, 255, "[SteamHistory] Check your key at: https://steamhistory.net/api")
 			return
 		end
 

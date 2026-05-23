@@ -233,8 +233,9 @@ function PlayerCache.SyncTick()
 			}
 			activeSet[id]    = state
 			anyNew           = true
-			DirtySystem.MarkDirty(id,
-				DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
+			DirtySystem.MarkDirty(id, "connected")
+			DirtySystem.MarkDirty(id, "score")
+			DirtySystem.MarkDirty(id, "flags")
 			applyAutoPriority(state, ent)
 		else
 			-- Existing player — refresh pdata fields in-place (zero allocation)
@@ -322,7 +323,7 @@ end
 ---@param id string
 function PlayerCache.Remove(id, reason)
 	local key = tostring(id)
-	DirtySystem.MarkDirty(key, DirtySystem.FLAGS.DISCONNECTED)
+	DirtySystem.MarkDirty(key, "disconnected")
 	Events.Publish("OnPlayerRemoved", key, reason or "explicit_remove")
 	activeSet[key] = nil
 	arrDirty = true

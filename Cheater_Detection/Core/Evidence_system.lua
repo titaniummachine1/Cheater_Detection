@@ -186,7 +186,7 @@ local function tryApplyAutoPriority(steamID, evidence)
 	evidence.AutoPriorityApplied = true
 
 	local playerName = "Unknown"
-	local wrap = PlayerCache.GetBySteamID(steamID)
+	local wrap = PlayerCache.GetByID(steamID)
 	if wrap then
 		local name = wrap:GetName()
 		if name and name ~= "" then
@@ -250,14 +250,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 		return
 	end
 
-	-- Convert to string and validate SteamID64 format
 	steamID = tostring(steamID)
-
-	-- SteamID64 must be 17 digits starting with 7656119 (valid Steam accounts)
-	-- Silently skip bots/invalid IDs (they won't match this pattern)
-	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
-		return -- Skip silently (bots return UserID instead of SteamID64)
-	end
 
 	-- Skip local player unless debug mode is enabled
 	if not G.Menu.Advanced.debug then
@@ -364,12 +357,7 @@ function Evidence.ApplyDecayForMethod(steamID, detectionName, decayAmount)
 		return
 	end
 
-	-- Convert to string and validate SteamID64 format
 	steamID = tostring(steamID)
-
-	if not steamID:match("^7656119%d+$") or #steamID ~= 17 then
-		return
-	end
 
 	local evidence = getOrCreateEvidence(steamID)
 	if not evidence then
@@ -484,7 +472,7 @@ function Evidence.SetPriorityForSteamID(steamID, priority)
 	end
 	steamID = tostring(steamID)
 
-	local wrap = PlayerCache.GetBySteamID(steamID)
+	local wrap = PlayerCache.GetByID(steamID)
 	if not wrap then
 		return false
 	end
@@ -492,7 +480,7 @@ function Evidence.SetPriorityForSteamID(steamID, priority)
 	if not entity then
 		return false
 	end
-	local success = pcall(playerlist.SetPriority, entity, priority)
+	local success = playerlist.SetPriority(entity, priority)
 	if success then
 		Logger.Info("Evidence", string.format("Set priority %d for %s", priority, wrap:GetName() or steamID))
 		return true

@@ -21,34 +21,36 @@ require("Cheater_Detection.Misc.Auto_Vote")
 require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
-local Fetcher                  = require("Cheater_Detection.Database.Fetcher")
+local Fetcher             = require("Cheater_Detection.Database.Fetcher")
 
 -- Detectors
-local ValveCheck               = require("Cheater_Detection.detectors.valve_check")
-local SilentAim                = require("Cheater_Detection.detectors.silent_aim")
-local AimLock                  = require("Cheater_Detection.detectors.aim_lock")
-local AntiAim                  = require("Cheater_Detection.detectors.antiaim")
-local DuckSpeed                = require("Cheater_Detection.detectors.duck_speed")
-local Bhop                     = require("Cheater_Detection.detectors.bhop")
-local WarpDT                   = require("Cheater_Detection.detectors.warp_dt")
-local FakeLag                  = require("Cheater_Detection.detectors.fake_lag")
-local CosmeticAbuse            = require("Cheater_Detection.detectors.cosmetic_abuse")
+local ValveCheck          = require("Cheater_Detection.detectors.valve_check")
+local SilentAim           = require("Cheater_Detection.detectors.silent_aim")
+local AimLock             = require("Cheater_Detection.detectors.aim_lock")
+local AntiAim             = require("Cheater_Detection.detectors.antiaim")
+local DuckSpeed           = require("Cheater_Detection.detectors.duck_speed")
+local Bhop                = require("Cheater_Detection.detectors.bhop")
+local WarpDT              = require("Cheater_Detection.detectors.warp_dt")
+local FakeLag             = require("Cheater_Detection.detectors.fake_lag")
+local CosmeticAbuse       = require("Cheater_Detection.detectors.cosmetic_abuse")
 
-local HistoryManager           = require("Cheater_Detection.Utils.HistoryManager")
-local DetectionConfig          = require("Cheater_Detection.Utils.DetectionConfig")
-local JoinNotifications        = require("Cheater_Detection.Misc.JoinNotifications")
-local TickProfiler             = require("Cheater_Detection.Utils.TickProfiler")
+local HistoryManager      = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig     = require("Cheater_Detection.Utils.DetectionConfig")
+local JoinNotifications   = require("Cheater_Detection.Misc.JoinNotifications")
+local TickProfiler        = require("Cheater_Detection.Utils.TickProfiler")
 
 -- Actions
-local NotificationService      = require("Cheater_Detection.services.notification_service")
-local Visuals                  = require("Cheater_Detection.actions.visuals")
-local BridgePrompt             = require("Cheater_Detection.services.bridge_prompt")
+local NotificationService = require("Cheater_Detection.services.notification_service")
+local Visuals             = require("Cheater_Detection.actions.visuals")
+local BridgePrompt        = require("Cheater_Detection.services.bridge_prompt")
 
-local hasSearchedGroup         = false
-local valveDisconnectTriggered = false
-local wasInServer              = false
-local cleanedFriendIDs         = {}
-local lastProfilerEnabled      = nil
+local sessionState        = {
+	groupSearched = false,
+	valveDisconnectTriggered = false,
+	inServer = false,
+	cleanedFriendIDs = {},
+	lastProfilerEnabled = nil,
+}
 
 local function isValveAutoDisconnectEnabled()
 	local menu = G.Menu
@@ -108,7 +110,7 @@ local function persistSessionPlayerState(id, state, fallbackName)
 end
 
 local function enforceValveAutoDisconnect(playerState)
-	if valveDisconnectTriggered or not playerState or not playerState.id then
+	if sessionState.valveDisconnectTriggered or not playerState or not playerState.id then
 		return
 	end
 	if not isValveAutoDisconnectEnabled() then
@@ -118,7 +120,7 @@ local function enforceValveAutoDisconnect(playerState)
 		return
 	end
 
-	valveDisconnectTriggered = true
+	sessionState.valveDisconnectTriggered = true
 	JoinNotifications.SendValveAlert({
 		name = playerState.wrap and playerState.wrap:GetName() or playerState.id,
 		tail = "is in the server - Leaving game",
@@ -129,7 +131,7 @@ end
 
 local function persistActiveSessionPlayers()
 	-- Use DirtySystem - only persist players with dirty SESSION flag
-	local dirtyPlayers = DirtySystem.GetDirtyPlayers(DirtySystem.FLAGS.SESSION)
+	local dirtyPlayers = DirtySystem.GetDirtyPlayers("session")
 
 	for _, id in ipairs(dirtyPlayers) do
 		local state = PlayerCache.GetByID(id)
@@ -137,14 +139,14 @@ local function persistActiveSessionPlayers()
 			persistSessionPlayerState(id, state, nil)
 		end
 		-- Clear the dirty flag after persisting
-		DirtySystem.ClearDirty(id, DirtySystem.FLAGS.SESSION)
+		DirtySystem.ClearDirty(id, "session")
 	end
 end
 
 local function resetRuntimeSessionState()
-	hasSearchedGroup = false
-	valveDisconnectTriggered = false
-	cleanedFriendIDs = {}
+	sessionState.groupSearched = false
+	sessionState.valveDisconnectTriggered = false
+	sessionState.cleanedFriendIDs = {}
 	PlayerCache.ResetCheckedState()
 	PlayerCache.Cleanup()
 	-- Reset notification state for new session (new round/new game)
@@ -205,19 +207,19 @@ local function OnCreateMove(cmd)
 	-- Definitive check if we are actually connected to a game server
 	local serverIP = engine.GetServerIP()
 	if not serverIP then
-		if wasInServer then
+		if sessionState.inServer then
 			persistActiveSessionPlayers()
 			Database.SaveDatabase()
 			resetRuntimeSessionState()
-			wasInServer = false
+			sessionState.inServer = false
 		else
-			hasSearchedGroup = false
-			valveDisconnectTriggered = false
+			sessionState.groupSearched = false
+			sessionState.valveDisconnectTriggered = false
 		end
 		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
-	wasInServer = true
+	sessionState.inServer = true
 
 	local localPlayer = entities.GetLocalPlayer()
 	if not localPlayer or not localPlayer:IsValid() then
@@ -225,35 +227,28 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	if valveDisconnectTriggered then
+	if sessionState.valveDisconnectTriggered then
 		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
 
 	Events.DispatchEngineEvent("CreateMove", cmd)
 
-	local menu             = G.Menu
-	local mainMenu         = menu and menu.Main or nil
-	local adv              = menu and menu.Advanced or nil
+	local menu                = G.Menu
+	local mainMenu            = menu and menu.Main or nil
+	local adv                 = menu and menu.Advanced or nil
 
-	local enableValveCheck = mainMenu and mainMenu.ValveCheck == true
-	local enableSilent     = adv and adv.SilentAimbot == true
-	local enableAimLock    = enableSilent and (adv.AimLock ~= false)
-	local enableAntiAim    = adv and adv.AntiAim == true
-	local enableDuckSpeed  = adv and adv.DuckSpeed == true
-	local enableBhop       = adv and adv.Bhop == true
-	local enableWarpDT     = adv and adv["Warp"] == true
-	local enableChoke      = adv and adv.Choke == true
-	local enableCosmetics  = adv and adv.Cosmetics == true
+	local enableValveCheck    = mainMenu and mainMenu.ValveCheck == true
+	local enableSilent        = adv and adv.SilentAimbot == true
+	local enableAimLock       = enableSilent and (adv.AimLock ~= false)
+	local enableAntiAim       = adv and adv.AntiAim == true
+	local enableDuckSpeed     = adv and adv.DuckSpeed == true
+	local enableBhop          = adv and adv.Bhop == true
+	local enableWarpDT        = adv and adv["Warp"] == true
+	local enableChoke         = adv and adv.Choke == true
+	local enableCosmetics     = adv and adv.Cosmetics == true
 
-	local tagsEnabled      = mainMenu == nil or mainMenu.Cheater_Tags ~= false
-	if isDebugEnabled() then
-		print(string.format(
-			"[CD][DETECTOR_LOOP] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s tags=%s",
-			tostring(enableValveCheck), tostring(enableSilent), tostring(enableAntiAim), tostring(enableDuckSpeed),
-			tostring(enableBhop), tostring(enableWarpDT), tostring(enableChoke), tostring(enableCosmetics),
-			tostring(tagsEnabled)))
-	end
+	local tagsEnabled         = mainMenu == nil or mainMenu.Cheater_Tags ~= false
 	local anyDetectorsEnabled = enableValveCheck
 		or enableSilent
 		or enableAntiAim
@@ -267,6 +262,20 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	-- Rate-limited scan status logging (once every 5 seconds)
+	local now = globals.RealTime()
+	if Common.IsDebugCategoryEnabled("All") then
+		if not _G.lastScanLogTime or (now - _G.lastScanLogTime) >= 5.0 then
+			_G.lastScanLogTime = now
+			print(string.format(
+				"[CD][SCAN] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s",
+				tostring(enableValveCheck), tostring(enableSilent), tostring(enableAntiAim),
+				tostring(enableDuckSpeed), tostring(enableBhop), tostring(enableWarpDT),
+				tostring(enableChoke), tostring(enableCosmetics)
+			))
+		end
+	end
+
 	local historyEnabled = enableSilent or enableWarpDT or enableChoke or enableAntiAim
 	if historyEnabled then
 		TickProfiler.BeginSection("History_NewTick")
@@ -274,9 +283,9 @@ local function OnCreateMove(cmd)
 		TickProfiler.EndSection("History_NewTick")
 	end
 
-	if not hasSearchedGroup then
+	if not sessionState.groupSearched then
 		SteamLookup.RefreshValveGroup()
-		hasSearchedGroup = true
+		sessionState.groupSearched = true
 	end
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 
@@ -288,14 +297,6 @@ local function OnCreateMove(cmd)
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer))
 	local stateTable = PlayerCache.GetActiveTable()
-	if isDebug then
-		local activeCount = 0
-		for _ in pairs(stateTable) do
-			activeCount = activeCount + 1
-		end
-		print(string.format("[CD][PLAYER_SCAN] active=%d localID=%s", activeCount, tostring(localID)))
-	end
-
 	TickProfiler.BeginSection("PlayerScan_Loop")
 	for id, existingState in pairs(stateTable) do
 		local pdata = existingState.pdata
@@ -318,8 +319,8 @@ local function OnCreateMove(cmd)
 		-- In debug mode: process everyone including self and friends.
 		if not isDebug then
 			if id == localID then
-				if not cleanedFriendIDs[id] then
-					cleanedFriendIDs[id] = true
+				if not sessionState.cleanedFriendIDs[id] then
+					sessionState.cleanedFriendIDs[id] = true
 					Database.RemoveCheater(id)
 					if pState.wrap then pState.wrap:SetPriority(0) end
 				end
@@ -327,8 +328,8 @@ local function OnCreateMove(cmd)
 			end
 			if pState.isFriend then
 				local friendID = pState.id
-				if friendID and friendID:match("^7656119%d+$") and not cleanedFriendIDs[friendID] then
-					cleanedFriendIDs[friendID] = true
+				if friendID and friendID:match("^7656119%d+$") and not sessionState.cleanedFriendIDs[friendID] then
+					sessionState.cleanedFriendIDs[friendID] = true
 					Database.RemoveCheater(friendID)
 				end
 				goto continue
@@ -374,7 +375,7 @@ local function OnCreateMove(cmd)
 		if enableValveCheck then
 			enforceValveAutoDisconnect(pState)
 		end
-		if valveDisconnectTriggered then
+		if sessionState.valveDisconnectTriggered then
 			TickProfiler.EndSection("PlayerScan_Loop")
 			TickProfiler.EndSection("CreateMove_Total")
 			return
@@ -388,8 +389,8 @@ end
 
 local function OnDraw()
 	local enabled = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	if lastProfilerEnabled ~= enabled then
-		lastProfilerEnabled = enabled
+	if sessionState.lastProfilerEnabled ~= enabled then
+		sessionState.lastProfilerEnabled = enabled
 		TickProfiler.SetEnabled(enabled)
 	end
 	Scheduler.Tick()

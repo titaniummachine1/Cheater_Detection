@@ -210,6 +210,13 @@ local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePo
 		return 0.0, 0.0, 0.0, 0
 	end
 
+	-- Get player history
+	local history = HistoryManager.GetPlayerHistory(id)
+	if not history then
+		return 0.0, 0.0, 0.0, 0
+	end
+	local shotIndex = shotOffset + 1 -- convert to 1-indexed
+
 	local flags = 0
 	local maxDelta = 0.0
 	local totalDelta = 0.0
@@ -223,13 +230,15 @@ local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePo
 	local langYaw = shotAngles.yaw
 	local lastAimDist = aimDist
 
+	-- Look at older records (higher indices) for LILAC window
 	for i = 1, LILAC_WINDOW_TICKS do
-		local bucket = HistoryManager.GetBucketAt(shotOffset + i)
-		if not bucket or bucket._tick ~= (shotTick - i) then
+		local idx = shotIndex + i
+		local record = history[idx]
+		if not record or record._tick ~= (shotTick - i) then
 			break
 		end
 
-		local ang = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.Angles)
+		local ang = record[HistoryManager.Fields.Angles]
 		if ang and type(ang.pitch) == "number" and type(ang.yaw) == "number" then
 			local p = ang.pitch
 			local y = wrapAngle(ang.yaw)
@@ -314,133 +323,18 @@ local function getHitboxCenter(ent, hitboxIndex)
 	return Vector3((mins.x + maxs.x) * 0.5, (mins.y + maxs.y) * 0.5, (mins.z + maxs.z) * 0.5)
 end
 
-local function tryFindAnyEnemy()
-	local localPly = entities.GetLocalPlayer()
-	if not localPly or not localPly:IsValid() then
-		return nil
-	end
-	local myTeam = localPly:GetTeamNumber()
-	local players = entities.FindByClass("CTFPlayer") or {}
-	for i = 1, #players do
-		local p = players[i]
-		if p and p:IsValid() and p:IsPlayer() and p:IsAlive() and not p:IsDormant() then
-			local team = p:GetTeamNumber()
-			if team and team ~= myTeam and team ~= 1 then
-				return p
-			end
-		end
-	end
-	return nil
-end
-
-local function simulateSilentAimLocal(playerState, pdata)
-	if not Common.IsDebugEnabled() then
-		return
-	end
-	if not (G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.SilentAimSimulate) then
-		return
-	end
-	if not playerState or not playerState.wrap then
-		return
-	end
-	local localEnt = entities.GetLocalPlayer()
-	if not localEnt or not localEnt:IsValid() then
-		return
-	end
-	local ent = playerState.wrap:GetRawEntity()
-	if not ent or not ent:IsValid() then
-		return
-	end
-	if ent:GetIndex() ~= localEnt:GetIndex() then
-		return
-	end
-
-	G.Menu.Advanced.SilentAimSimulate = false
-
-	local curTick = globals.TickCount()
-	if HistoryManager.GetRingCount() < 8 then
-		return
-	end
-
-	local victim = tryFindAnyEnemy()
-	if not victim then
-		return
-	end
-
-	local eyePos = playerState.wrap:GetEyePos()
-	if not eyePos then
-		return
-	end
-
-	local victimID = tostring(Common.GetSteamID64(victim))
-	if not victimID then
-		return
-	end
-
-	local vOrigin = victim:GetAbsOrigin()
-	local vViewOffset = victim:GetPropVector("localdata", "m_vecViewOffset[0]")
-	local victimEyePos = nil
-	if vOrigin and vViewOffset then
-		victimEyePos = vOrigin + vViewOffset
-	end
-
-	local victimHeadPos = getHitboxCenter(victim, 1) or victimEyePos
-	local victimBodyPos = getHitboxCenter(victim, 4)
-	if not victimBodyPos and vOrigin then
-		victimBodyPos = vOrigin + Vector3(0, 0, 40)
-	end
-	if not victimHeadPos then
-		return
-	end
-
-	local targetPitch, targetYaw = getAngleToPos(eyePos, victimHeadPos)
-	local basePitch = targetPitch
-	local baseYaw0 = wrapAngle(targetYaw - 83.0)
-
-	local function setAnglesAt(offset, pitch, yaw)
-		HistoryManager.DebugSetPlayerFieldAt(offset, playerState.id, HistoryManager.Fields.Angles,
-			{ pitch = pitch, yaw = yaw })
-	end
-
-	setAnglesAt(6, basePitch, baseYaw0)
-	setAnglesAt(5, basePitch, baseYaw0 + 1.0)
-	setAnglesAt(4, basePitch, baseYaw0 + 2.0)
-	setAnglesAt(3, targetPitch, targetYaw)
-	setAnglesAt(2, basePitch, baseYaw0 + 4.0)
-	setAnglesAt(1, basePitch, baseYaw0 + 5.0)
-	setAnglesAt(0, basePitch, baseYaw0 + 6.0)
-
-	local shotTick = HistoryManager.GetTickAt(3)
-	if not shotTick then
-		return
-	end
-
-	pdata.shotPending = {
-		shotTick = shotTick,
-		victimID = victimID,
-		weaponID = 17,
-		weaponClass = "CTFSniperRifle",
-		projType = nil,
-		weaponSpread = 0.0,
-		weaponName = "sim_sniper",
-		crit = false,
-		minicrit = false,
-		damage = 50,
-		victimHealthAfter = 100,
-		shooterEyePos = eyePos,
-		victimEyePos = victimEyePos,
-		victimHeadPos = victimHeadPos,
-		victimBodyPos = victimBodyPos,
-		victimOrigin = vOrigin,
-	}
-end
-
 local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	if not playerState or not ply or not pdata or not pending then
 		return
 	end
 
 	local id = playerState.id
+
+	-- Get player history for this analysis
+	local history = HistoryManager.GetPlayerHistory(id)
+	if not history then
+		return
+	end
 
 	-- Compute session hit rate for this player (precision multiplier).
 	-- precisionMult > 1.0 = high accuracy suspect; < 1.0 = low accuracy, suppress.
@@ -456,7 +350,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	local attackerClass = ply:GetPropInt("m_iClass")
-	local debugInterested = Common.IsDebugEnabled() and
+	local debugInterested = Common.IsDebugCategoryEnabled("SilentAim") and
 		(attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
 
 	if debugInterested then
@@ -464,12 +358,13 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	local shotOffset = curTick - pending.shotTick
-	local shotBucket = HistoryManager.GetBucketAt(shotOffset)
-	if not shotBucket or shotBucket._tick ~= pending.shotTick then
+	local shotIndex = shotOffset + 1 -- convert to 1-indexed array
+	local shotRecord = history[shotIndex]
+	if not shotRecord or shotRecord._tick ~= pending.shotTick then
 		return
 	end
 
-	local shotAngles = HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.Angles)
+	local shotAngles = shotRecord[HistoryManager.Fields.Angles]
 	if not shotAngles then
 		return
 	end
@@ -502,7 +397,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	local eyePos = pending.shooterEyePos
-		or HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition)
+		or shotRecord[HistoryManager.Fields.EyePosition]
 		or playerState.wrap:GetEyePos()
 
 	local aimedAtTarget = false
@@ -531,21 +426,24 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	if not aimedAtTarget and attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
 		sanityFactor = 0.15
-		if Common.IsDebugEnabled() then
+		if Common.IsDebugCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] %s sanity miss (outside %.0f° bubble)", id, SANITY_MAX_DEGREES))
 		end
 	end
 
 	-- 1. Gather pre-shot history for prediction (up to 5 clean ticks)
+	-- In new history array: history[1] = current, history[shotIndex] = shot tick
+	-- We want records OLDER than the shot (higher indices)
 	local historyAngles = {}
 	local historyTicks = {}
-	local offset = shotOffset + 1
-	while #historyAngles < 5 and offset < HistoryManager.GetRingCount() do
-		local bucket = HistoryManager.GetBucketAt(offset)
-		if not bucket then
-			break
-		end
-		local data = HistoryManager.GetPlayerFieldAt(bucket, id, HistoryManager.Fields.Angles)
+	local startIdx = shotIndex + 1    -- Start from record after shot (older)
+
+	for idx = startIdx, startIdx + 10 do -- Look ahead up to 10 records
+		if #historyAngles >= 5 then break end
+		local record = history[idx]
+		if not record then break end
+
+		local data = record[HistoryManager.Fields.Angles]
 		if data and type(data.pitch) == "number" and type(data.yaw) == "number" then
 			if mathAbs(data.pitch) <= 180 and mathAbs(data.yaw) <= 1000000 then
 				data = { pitch = data.pitch, yaw = wrapAngle(data.yaw) }
@@ -555,17 +453,15 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		else
 			data = nil
 		end
-		-- Skip buckets with damageDealt to keep prediction clean.
-		-- Also ensures we exclude the "current" tick since we are looking from shotOffset+1 onwards.
-		if data and not (bucket[id] and bucket[id].damageDealt) then
+		-- Skip records with damageDealt to keep prediction clean.
+		if data and not record.damageDealt then
 			table.insert(historyAngles, data)
-			table.insert(historyTicks, bucket._tick)
+			table.insert(historyTicks, record._tick)
 		end
-		offset = offset + 1
 	end
 
 	if #historyAngles < 2 then
-		if Common.IsDebugEnabled() then
+		if Common.IsDebugCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] %s extrapolation failed (only %d clean history ticks)", id, #historyAngles))
 		end
 		return
@@ -630,10 +526,15 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	for k = 1, 3 do
 		local postTick = pending.shotTick + k
-		local postShotBucket = HistoryManager.GetBucketAt(shotOffset - k)
-		if postShotBucket and postShotBucket._tick == postTick then
-			if not (postShotBucket[id] and postShotBucket[id].damageDealt) then
-				local postShotAngles = HistoryManager.GetPlayerFieldAt(postShotBucket, id, HistoryManager.Fields.Angles)
+		-- In new system: newer ticks have lower indices
+		-- shotIndex = shot record, shotIndex - 1 = 1 tick newer (if exists)
+		local postIdx = shotIndex - k
+		if postIdx < 1 then break end -- Can't go newer than current
+
+		local postRecord = history[postIdx]
+		if postRecord and postRecord._tick == postTick then
+			if not postRecord.damageDealt then
+				local postShotAngles = postRecord[HistoryManager.Fields.Angles]
 				if postShotAngles and type(postShotAngles.pitch) == "number" and type(postShotAngles.yaw) == "number" then
 					postShotAngles = { pitch = postShotAngles.pitch, yaw = wrapAngle(postShotAngles.yaw) }
 
@@ -763,7 +664,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			sniperBodyPos = pending.victimOrigin + Vector3(0, 0, 40)
 		end
 		local eyePos = pending.shooterEyePos
-			or HistoryManager.GetPlayerFieldAt(shotBucket, id, HistoryManager.Fields.EyePosition)
+			or shotRecord[HistoryManager.Fields.EyePosition]
 			or playerState.wrap:GetEyePos()
 
 		if eyePos and sniperHeadPos then
@@ -839,7 +740,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		scoreGain = math.min(scoreGain, 15.0)
 	end
 
-	if Common.IsDebugEnabled() then
+	if Common.IsDebugCategoryEnabled("SilentAim") then
 		local headErrText = "n/a"
 		if bestAimError ~= nil then
 			headErrText = string.format("%.1f°", bestAimError)
@@ -887,19 +788,19 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			local err = nonSniperBestAimError or 0
 			reason = string.format("View Discontinuity (%.1fdeg snap, aimerr=%.1fdeg)", shotDev, err)
 		end
-		if Common.IsDebugEnabled() and acc and acc.fired >= MIN_SHOTS_FOR_ACCURACY then
+		if Common.IsDebugCategoryEnabled("SilentAim") and acc and acc.fired >= MIN_SHOTS_FOR_ACCURACY then
 			print(string.format("[SilentAim] precisionMult=%.2f (hit=%d fired=%d rate=%.0f%%)",
 				precisionMult, acc.hit, acc.fired, (acc.hit / acc.fired) * 100))
 		end
 		print(string.format("[SilentAim] +%.1f score on %s | %s", scoreGain, id, reason))
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
 	elseif aimedAtTarget and shotDev < CLEAN_SHOT_MAX_DEV and (playerState.score or 0) > 0 then
-		if Common.IsDebugEnabled() then
+		if Common.IsDebugCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] clean shot decay -%.2f on %s (snap=%.1fdeg)", -CLEAN_SHOT_DECAY, id, shotDev))
 		end
-		DetectorUtils.ApplyPlayerFlag(playerState, CLEAN_SHOT_DECAY, nil, nil)
+		DetectorUtils.ApplyPlayerFlag(playerState, CLEAN_SHOT_DECAY, nil, "Clean shot decay")
 	else
-		if Common.IsDebugEnabled() then
+		if Common.IsDebugCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] gated out %s | snap=%.1fdeg gain=%.2f aimed=%s", id, shotDev, scoreGain,
 				tostring(aimedAtTarget)))
 		end
@@ -923,7 +824,7 @@ local function onDamageEvent(event)
 	local attackerUID = event:GetInt("attacker")
 	local victimUID = event:GetInt("userid")
 	if not attackerUID or not victimUID or attackerUID == victimUID then
-		if Common.IsDebugEnabled() then
+		if Common.IsDebugCategoryEnabled("SilentAim") then
 			local now = globals.RealTime()
 			if canPrintFiltered(now) then
 				print(string.format("[SilentAim] player_hurt ignored (attacker=%s victim=%s)", tostring(attackerUID),
@@ -1062,7 +963,7 @@ local function onDamageEvent(event)
 			pdata.shotPending.victimBodyPos = vBody
 		end
 
-		if Common.IsDebugEnabled() then
+		if Common.IsDebugCategoryEnabled("SilentAim") then
 			local now = globals.RealTime()
 			if canPrintRecorded(now) then
 				print(string.format(
@@ -1156,9 +1057,6 @@ function SilentAim.ProcessPlayer(playerState)
 
 	local curTick = globals.TickCount()
 
-	if not pdata.shotPending then
-		simulateSilentAimLocal(playerState, pdata)
-	end
 
 	local pending = pdata.shotPending
 	if pending then
