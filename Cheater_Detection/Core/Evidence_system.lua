@@ -38,9 +38,9 @@ Evidence.Config = {
 	},
 
 	-- Thresholds
-	Evidence_Tolerance = 50,  -- Evidence threshold % (0–100) to mark as cheater
-	MinWeightFloor = 0,       -- Cannot decay below this
-	AutoPriorityThreshold = 8.0, -- Evidence score threshold to trigger SUSPICIOUS flag
+	Evidence_Tolerance = 50,   -- Evidence threshold % (0–100) to mark as cheater
+	MinWeightFloor = 0,        -- Cannot decay below this
+	AutoPriorityThreshold = 12.0, -- Evidence score threshold to trigger SUSPICIOUS flag
 	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
 
 	-- Category mappings (only implemented detections)

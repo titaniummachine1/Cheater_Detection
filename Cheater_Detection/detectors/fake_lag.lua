@@ -28,10 +28,10 @@ local RHYTHM_TOLERANCE_TICKS      = 2    -- ±2 ticks tolerance (was ±1)
 
 -- Rijin-derived: avg choke-tick threshold
 -- avg simtime gap >= 2 ticks across the window = fakelag signal
-local AVG_CHOKE_THRESHOLD         = 3.8
-local AVG_CHOKE_MIN_SAMPLES       = 3   -- require more samples for average calculation
-local AVG_CHOKE_EVIDENCE_W        = 1.5 -- evidence weight per trigger (lighter for SUS behavior)
-local AVG_CHOKE_COOLDOWN_S        = 4.0 -- 4 second cooldown between detections
+local AVG_CHOKE_THRESHOLD         = 4.2
+local AVG_CHOKE_MIN_SAMPLES       = 4   -- require more samples for average calculation
+local AVG_CHOKE_EVIDENCE_W        = 1.5 -- evidence weight per trigger (much lighter)
+local AVG_CHOKE_COOLDOWN_S        = 5.0 -- 5 second cooldown between detections
 
 local playerCooldowns             = {}  -- tick-based cooldown for rhythmic check
 local avgChokeCooldowns           = {}  -- realtime-based cooldown for avg-choke check
@@ -102,7 +102,7 @@ function FakeLag.ProcessPlayer(playerState)
 	-- Require 3 consecutive large deltas before adding evidence (impulse-based)
 	if #deltaTicks >= 1 then
 		local firstDelta = deltaTicks[1]
-		if firstDelta >= 38 then -- 38 ticks = ~575ms at 66Hz - higher threshold for leniency
+		if firstDelta >= 42 then -- 42 ticks = ~636ms at 66Hz - higher threshold for leniency
 			-- Count consecutive large deltas
 			consecutiveChokeCount[id] = (consecutiveChokeCount[id] or 0) + 1
 
