@@ -30,7 +30,7 @@ Evidence.Config = {
 			closeAim = 1.5, -- Extra decay when aiming close to enemy
 		},
 		Exploit = {
-			default = 0.8, -- Faster decay for exploits (DT, AA, fakelag) to reduce false positive persistence
+			default = 0.55, -- Faster decay for exploits (DT, AA, fakelag) to reduce false positive persistence
 		},
 		Movement = {
 			default = 1.0, -- 1 decay per second for fake lag
@@ -250,15 +250,29 @@ local function tryApplyAutoPriority(steamID, evidence)
 				-- Try setting through flags field
 			elseif wrap.flags ~= nil then
 				wrap.flags = wrap.flags | Constants.Flags.CHEATER
-				-- Store detection reason for display
-				wrap.detectionReason = "Exploit Evidence (Double Tap)"
+				-- Store detection reason for display - use actual method name
+				local primaryMethod = "Exploit"
+				for method, reason in pairs(evidence.Reasons or {}) do
+					if reason.Weight > 0 then
+						if method == "fake_lag" then
+							primaryMethod = "Fake Lag"
+							break
+						elseif method == "warp_dt" then
+							primaryMethod = "Double Tap / Warp"
+						elseif method == "anti_aim" then
+							primaryMethod = "Anti-Aim"
+						end
+					end
+				end
+				wrap.detectionReason = primaryMethod
 				Logger.Info(
 					"Evidence",
 					string.format(
-						"CHEATER flag set for %s (Score: %.1f >= %.1f) – Exploit evidence (via flags field)",
+						"CHEATER flag set for %s (Score: %.1f >= %.1f) – %s evidence (via flags field)",
 						playerName,
 						evidence.TotalScore,
-						threshold
+						threshold,
+						primaryMethod
 					)
 				)
 			else

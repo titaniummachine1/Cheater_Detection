@@ -23,19 +23,19 @@ local FakeLag                     = {}
 
 -- ── constants ──────────────────────────────────────────────────────────────
 local FAKELAG_COOLDOWN_TICKS_66HZ = 66.0 -- 1 second cooldown at 66Hz
-local RHYTHM_MIN_EVENTS           = 5    -- require 5 consecutive large deltas for detection
+local RHYTHM_MIN_EVENTS           = 8    -- require 8 consecutive large deltas for detection (stricter)
 local RHYTHM_TOLERANCE_TICKS      = 2    -- ±2 ticks tolerance (was ±1)
 
 -- Rijin-derived: avg choke-tick threshold
 -- avg simtime gap >= 2 ticks across the window = fakelag signal
-local AVG_CHOKE_THRESHOLD         = 2.8
-local AVG_CHOKE_MIN_SAMPLES       = 3   -- require more samples for average calculation
-local AVG_CHOKE_EVIDENCE_W        = 8.0 -- evidence weight per trigger
-local AVG_CHOKE_COOLDOWN_S        = 1.0 -- 1 second cooldown between detections
+local AVG_CHOKE_THRESHOLD         = 3.8
+local AVG_CHOKE_MIN_SAMPLES       = 3    -- require more samples for average calculation
+local AVG_CHOKE_EVIDENCE_W        = 10.0 -- evidence weight per trigger (higher for extreme fake lag)
+local AVG_CHOKE_COOLDOWN_S        = 4.0  -- 4 second cooldown between detections
 
-local playerCooldowns             = {}  -- tick-based cooldown for rhythmic check
-local avgChokeCooldowns           = {}  -- realtime-based cooldown for avg-choke check
-local consecutiveChokeCount       = {}  -- count consecutive large deltas for impulse detection
+local playerCooldowns             = {}   -- tick-based cooldown for rhythmic check
+local avgChokeCooldowns           = {}   -- realtime-based cooldown for avg-choke check
+local consecutiveChokeCount       = {}   -- count consecutive large deltas for impulse detection
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 local function timeToTicks(time)
@@ -102,19 +102,19 @@ function FakeLag.ProcessPlayer(playerState)
 	-- Require 3 consecutive large deltas before adding evidence (impulse-based)
 	if #deltaTicks >= 1 then
 		local firstDelta = deltaTicks[1]
-		if firstDelta >= 28 then -- 28 ticks = ~420ms at 66Hz - sweet spot for 330ms fake lag detection
+		if firstDelta >= 38 then -- 38 ticks = ~575ms at 66Hz - higher threshold for leniency
 			-- Count consecutive large deltas
 			consecutiveChokeCount[id] = (consecutiveChokeCount[id] or 0) + 1
 
-			-- Only add evidence after 5 consecutive detections
-			if consecutiveChokeCount[id] >= 5 then
+			-- Only add evidence after 8 consecutive detections
+			if consecutiveChokeCount[id] >= 8 then
 				local lastFlag = playerCooldowns[id] or 0
 				if (curTick - lastFlag) >= cooldownTicks then
 					playerCooldowns[id] = curTick
 					-- Use evidence system instead of ApplyPlayerFlag for decay
 					Evidence.AddEvidence(id, "fake_lag", AVG_CHOKE_EVIDENCE_W)
 					if isDebug then
-						print(string.format("[FakeLag] %s large choke: %d ticks (5 consecutive, evidence +%.1f)", id,
+						print(string.format("[FakeLag] %s large choke: %d ticks (8 consecutive, evidence +%.1f)", id,
 							firstDelta, AVG_CHOKE_EVIDENCE_W))
 					end
 				end
