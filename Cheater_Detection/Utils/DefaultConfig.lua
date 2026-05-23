@@ -17,10 +17,11 @@ local Default_Config = {
 	},
 
 	Advanced = {
-		Evidence_Tolerance = 100,           -- Evidence score threshold to mark as cheater
+		Evidence_Tolerance = 15,            -- Evidence score threshold to mark as cheater (lowered for testing)
 		AutoPriority = true,
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
+		profiler = false,                   -- Tick profiler (measure performance, can cause lag)
 		-- Detection toggles (only for implemented detections)
 		Choke = false,                      -- Fake Lag detection
 		Warp = false,                       -- Warp/DT detection

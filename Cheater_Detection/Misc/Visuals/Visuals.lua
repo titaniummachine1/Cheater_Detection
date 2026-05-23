@@ -93,18 +93,24 @@ end
 
 --[[ Functions ]]
 local function DrawVisuals()
-	TickProfiler.BeginSection("Draw_Visuals")
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler then
+		TickProfiler.BeginSection("Draw_Visuals")
+	end
 
 	-- Check if feature is enabled
 	if not G.Menu or not G.Menu.Main or not G.Menu.Main.Cheater_Tags then
-		TickProfiler.EndSection("Draw_Visuals")
+		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler then
+			TickProfiler.EndSection("Draw_Visuals")
+		end
 		return
 	end
 
 	local conVisible = engine.Con_IsVisible()
 	local gameUIVisible = engine.IsGameUIVisible()
 	if conVisible or gameUIVisible then
-		TickProfiler.EndSection("Draw_Visuals")
+		if G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler then
+			TickProfiler.EndSection("Draw_Visuals")
+		end
 		return
 	end
 
@@ -154,7 +160,9 @@ local function DrawVisuals()
 		::continue::
 	end
 
-	TickProfiler.EndSection("Draw_Visuals")
+	if G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler then
+		TickProfiler.EndSection("Draw_Visuals")
+	end
 end
 
 --[[ Callbacks ]]

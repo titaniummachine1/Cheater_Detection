@@ -327,8 +327,12 @@ local function ValidateAllPlayers()
 					if playerState then
 						local flags = tonumber(playerState.flags or 0) or 0
 						if IsRuntimeCheaterFlag(flags) then
-							local dbEntry = Database.GetCheater(steamID64)
-							local alertReason = ResolveCheaterAlertReason(nil, dbEntry)
+							-- Use detectionReason from playerState if available
+							local alertReason = playerState.detectionReason or "Runtime Detection"
+							if alertReason == "Runtime Detection" then
+								local dbEntry = Database.GetCheater(steamID64)
+								alertReason = ResolveCheaterAlertReason(nil, dbEntry)
+							end
 							DispatchCheaterAlert(config, {
 								name = player:GetName(),
 								reason = alertReason,

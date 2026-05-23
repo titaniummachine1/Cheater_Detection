@@ -1,27 +1,67 @@
 --[[ detectors/warp_dt.lua
-     Detects warp/dt exploits by monitoring simulation time deltas.
-     Uses shared tick-bucket history from HistoryManager.
-     Uses lazy PlayerData - NO direct entity API calls.
+     Detects Double Tap / Warp exploit usage.
+
+     Double Tap works by choking packets (storing ticks), then releasing them
+     all at once to deal damage across multiple ticks simultaneously — typically
+     used by Scout to deal 2× damage or move through danger zones faster.
+
+     Detection strategy:
+       1. ProcessPlayer tracks each player's simtime delta history and records a
+          "pending burst" when a large isolated spike appears (not a repeated
+          fake-lag pattern).
+       2. The player_hurt game event checks if the attacker has a pending burst
+          within DT_CONFIRM_WINDOW_S seconds. Only if burst + damage are
+          correlated does evidence get added.
+
+     This eliminates fake-lag false positives: fake laggers choke continuously
+     but don't necessarily deal damage on every release; DT abusers release
+     specifically to land hits.
 ]]
 
-local Constants = require("Cheater_Detection.Core.constants")
-local G = require("Cheater_Detection.Utils.Globals")
-local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local Events = require("Cheater_Detection.Core.Events")
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-local Common = require("Cheater_Detection.Utils.Common")
+local Constants                             = require("Cheater_Detection.Core.constants")
+local G                                     = require("Cheater_Detection.Utils.Globals")
+local Evidence                              = require("Cheater_Detection.Core.Evidence_system")
+local Events                                = require("Cheater_Detection.Core.Events")
+local HistoryManager                        = require("Cheater_Detection.Utils.HistoryManager")
+local Common                                = require("Cheater_Detection.Utils.Common")
 
-local WarpDT = {}
+local WarpDT                                = {}
 
-local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
+-- ── constants ──────────────────────────────────────────────────────────────
 
-local BURST_MIN_TICKS_66HZ = 18.0
-local BURST_MAX_TICKS_66HZ = 64.0
-local WARP_COOLDOWN_TICKS_66HZ = 24.0
+local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3 -- suppress if N players burst same tick (server hitch)
 
-local playerStats = {}
+-- Burst detection: simtime spike must be in this tick range (scaled to server tickrate)
+local BURST_MIN_TICKS_66HZ                  = 0.0  -- catch same-tick DT (delta=0) and 1-tick DT
+local BURST_MAX_TICKS_66HZ                  = 66.0 -- ~1.0s: above this is a disconnect artifact, not DT
 
-local lastServerHitchTick = -math.huge
+-- A burst is only a spike if fewer than 2 other deltas in the window match it
+-- (fake lag produces repeating matching deltas; DT is a single isolated spike)
+local BURST_REPEAT_TOLERANCE                = 8 -- ticks: ±this = "similar" delta
+
+-- Correlation: damage must land within this many ticks of the burst to count.
+-- Default DT is ~24 ticks at 66Hz = ~0.36s; 33 ticks (0.5s) gives a small network buffer.
+local DT_CONFIRM_WINDOW_TICKS               = 33.0 -- ~0.5s at 66 tickrate
+
+local DT_EVIDENCE_WEIGHT                    = 30.0 -- base evidence weight at max delay (t=0.5s)
+local DT_EVIDENCE_MAX_MULT                  = 5.0  -- multiplier at t=0 (instant hit after burst)
+local DT_EVIDENCE_COOLDOWN_S                = 2.0  -- min seconds between evidence adds per player
+
+-- ── state ──────────────────────────────────────────────────────────────────
+
+-- [id] = { lastDamageTick = tickcount, lastBurstTick = tickcount, lastEvidenceTime = realtime }
+local playerState                           = {}
+
+-- Server-hitch suppression: track which ticks had simultaneous bursts
+local burstThisTick                         = {}
+local lastBurstCleanTick                    = 0
+local lastServerHitchTick                   = -math.huge
+
+-- ── helpers ────────────────────────────────────────────────────────────────
+
+local function timeToTicks(time)
+	return math.floor(0.5 + time / globals.TickInterval())
+end
 
 local function getServerHitchWindow()
 	return math.floor(1.0 / globals.TickInterval() + 0.5)
@@ -31,13 +71,8 @@ local function isInHitchWindow(curTick)
 	return (curTick - lastServerHitchTick) < getServerHitchWindow()
 end
 
-local burstThisTick = {}
-local lastBurstCleanTick = 0
-
-local function recordBurst(tick, id)
-	if not burstThisTick[tick] then
-		burstThisTick[tick] = {}
-	end
+local function recordBurstTick(tick, id)
+	if not burstThisTick[tick] then burstThisTick[tick] = {} end
 	burstThisTick[tick][#burstThisTick[tick] + 1] = id
 end
 
@@ -47,160 +82,184 @@ local function isServerHitch(tick)
 end
 
 local function cleanBurstTable(curTick)
-	if (curTick - lastBurstCleanTick) < 4 then
-		return
-	end
+	if (curTick - lastBurstCleanTick) < 4 then return end
 	lastBurstCleanTick = curTick
 	for tick in pairs(burstThisTick) do
-		if (curTick - tick) > 3 then
-			burstThisTick[tick] = nil
-		end
+		if (curTick - tick) > 3 then burstThisTick[tick] = nil end
 	end
 end
 
-local function timeToTicks(time)
-	return math.floor(0.5 + time / globals.TickInterval())
+local function getState(id)
+	if not playerState[id] then
+		playerState[id] = { lastDamageTick = 0, lastBurstTick = 0, lastEvidenceTime = 0 }
+	end
+	return playerState[id]
 end
 
-function WarpDT.ProcessPlayer(playerState)
-	if not playerState or not playerState.pdata or not playerState.id then
-		return
-	end
+local function isEnabled()
+	local adv = G.Menu and G.Menu.Advanced or nil
+	return adv and adv["Warp"] == true
+end
 
-	local menu = G.Menu
-	local advanced = menu and menu.Advanced or nil
-	local warpEnabled = advanced and advanced["Warp"] == true or false
-	if not warpEnabled then
-		return
-	end
+-- ── burst detection (called per-player each tick) ──────────────────────────
 
-	if not Common.IsConnectionStableForDetection() then
-		return
-	end
+function WarpDT.ProcessPlayer(pState)
+	if not pState or not pState.pdata or not pState.id then return end
+	if not isEnabled() then return end
+	if not Common.IsConnectionStableForDetection() then return end
 
-	local pdata = playerState.pdata
-	local isAlive = pdata.isAlive
+	local pdata = pState.pdata
+	if not pdata.isAlive then return end
 
-	-- If data is stale, skip this tick
-	if isAlive == nil then
-		return
-	end
+	local id = pState.id
+	if id:sub(1, 4) == "BOT_" then return end
 
-	if not isAlive then
-		return
-	end
-
-	local isDebug = Common.IsDebugCategoryEnabled("Warp/DT")
-	local id = playerState.id
-
-	-- Check bot using steamID prefix (safe, no entity needed)
-	if id:sub(1, 4) == "BOT_" then
-		return
-	end
-
-	-- Skip local player
-	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not isDebug then
-		return
-	end
-
-	if not playerStats[id] then
-		playerStats[id] = { events = {} }
-	end
-	local data = playerStats[id]
-
-	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
-		return
-	end
+	local isDebug = Common.IsLogCategoryEnabled("Warp/DT")
+	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then return end
+	if (pState.flags & Constants.Flags.CHEATER) ~= 0 then return end
 
 	local history = HistoryManager.GetPlayerHistory(id)
-	if not history then
-		return
-	end
-
-	-- Need at least 10 records
-	local count = 0
-	for _ in ipairs(history) do count = count + 1 end
-	if count < 10 then
-		return
-	end
+	if not history then return end
 
 	local simTicks = {}
 	for _, record in ipairs(history) do
 		local simTime = record[HistoryManager.Fields.SimulationTime]
-		if simTime then
-			simTicks[#simTicks + 1] = timeToTicks(simTime)
-		end
+		if simTime then simTicks[#simTicks + 1] = timeToTicks(simTime) end
 	end
-
-	if #simTicks < 10 then
-		return
-	end
+	if #simTicks < 10 then return end
 
 	local deltaTicks = {}
 	for i = 1, #simTicks - 1 do
-		-- simTicks[i] is newer than simTicks[i+1]
 		deltaTicks[#deltaTicks + 1] = simTicks[i] - simTicks[i + 1]
 	end
 
-	local burstMin = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
-	local burstMax = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+	local burstMin    = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+	local burstMax    = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	local burstAmount = 0
 	for _, d in ipairs(deltaTicks) do
-		if d > burstMin and d < burstMax then
+		if d >= burstMin and d < burstMax then
 			burstAmount = d
 			break
 		end
 	end
+	if burstAmount == 0 then return end
+
+	-- Spike guard: reject if 2+ other deltas are similar (= fake lag, not DT)
+	-- Count ALL deltas similar to burst, then subtract 1 for the burst itself
+	local similarCount = -1 -- start at -1 to offset the burst itself
+	for _, d in ipairs(deltaTicks) do
+		if math.abs(d - burstAmount) <= BURST_REPEAT_TOLERANCE then
+			similarCount = similarCount + 1
+		end
+	end
+	if similarCount >= 2 then return end
 
 	local curTick = globals.TickCount()
 	cleanBurstTable(curTick)
+	recordBurstTick(curTick, id)
 
-	if burstAmount > 0 then
-		recordBurst(curTick, id)
+	if isInHitchWindow(curTick) then return end
 
-		if isInHitchWindow(curTick) then
-			return
+	if isServerHitch(curTick) then
+		lastServerHitchTick = curTick
+		if isDebug then
+			print(string.format("[DoubleTap] server hitch suppressed burst for %s (tick=%d)", id, curTick))
 		end
+		return
+	end
 
-		local cooldownTicks = math.floor(WARP_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
-		if not data.lastWarpTick or (curTick - data.lastWarpTick) > cooldownTicks then
-			if isServerHitch(curTick) then
-				lastServerHitchTick = curTick
-				data.lastWarpTick = curTick
-				if isDebug then
-					print(string.format("[WarpDT] server hitch suppressed burst for %s (tick=%d)", id, curTick))
-				end
-				return
-			end
+	-- Record burst tick for reverse correlation (damage after burst)
+	local curTick = globals.TickCount()
+	local data = getState(id)
+	data.lastBurstTick = curTick
 
-			data.lastWarpTick = curTick
-			data.events[#data.events + 1] = curTick
+	-- Burst after damage = Double Tap confirmed.
+	-- Check if a prior damage event is still within the correlation window.
+	if data.lastDamageTick > 0 and (curTick - data.lastDamageTick) <= DT_CONFIRM_WINDOW_TICKS then
+		-- Damage → burst within window: DT usage.
+		-- Exponential weight: closer the burst to the damage, more suspicious.
+		-- k = ln(MAX_MULT) / WINDOW so at t=0 → MAX_MULT, at t=WINDOW → 1.0
+		local elapsedTicks = curTick - data.lastDamageTick
+		local k = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
+		local mult = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
+		local weight = DT_EVIDENCE_WEIGHT * mult
 
-			local reason = "Warp/DT (Packet Burst)"
-			local increment = (#data.events >= 2) and 15 or 5
-			DetectorUtils.ApplyPlayerFlag(playerState, increment, nil, reason)
+		data.lastDamageTick = 0 -- consume so one burst only confirms once
 
+		local now = globals.RealTime()
+		if (now - data.lastEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
+			data.lastEvidenceTime = now
+			Evidence.AddEvidence(id, "double_tap", weight)
 			if isDebug then
-				print(string.format("[WarpDT] %s packet burst detected: %d ticks", id, burstAmount))
-			end
-
-			while #data.events > 0 and (curTick - data.events[1]) > Constants.SecondsToTicks(10) do
-				table.remove(data.events, 1)
-			end
-
-			if #data.events >= 2 then
-				table.remove(data.events, 1)
+				print(string.format("[DoubleTap] %s burst after dmg (delay=%d ticks, %d ticks) → evidence +%.1f",
+					id, elapsedTicks, burstAmount, weight))
 			end
 		end
 	end
+	-- Note: bursts without prior damage are silently ignored (lag/fake lag, not DT)
 end
 
+-- ── damage recording (player_hurt event) ──────────────────────────────────
+-- Records the tick when an attacker deals damage so ProcessPlayer can
+-- check if a burst follows within DT_CONFIRM_WINDOW_TICKS.
+
+local function onPlayerHurt(event)
+	if not isEnabled() then return end
+
+	local attackerUID = event:GetInt("attacker")
+	local victimUID   = event:GetInt("userid")
+	if not attackerUID or not victimUID or attackerUID == victimUID then return end
+
+	local attackerEnt = entities.GetByUserID(attackerUID)
+	if not attackerEnt or not attackerEnt:IsValid() then return end
+
+	local attackerID = tostring(Common.GetSteamID64(attackerEnt))
+	if not attackerID or not attackerID:match("^7656119%d+$") then return end
+
+	local data = getState(attackerID)
+	local curTick = globals.TickCount()
+
+	-- Reverse correlation: damage after burst = DT
+	if data.lastBurstTick > 0 and (curTick - data.lastBurstTick) <= DT_CONFIRM_WINDOW_TICKS then
+		local elapsedTicks = curTick - data.lastBurstTick
+		local k = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
+		local mult = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
+		local weight = DT_EVIDENCE_WEIGHT * mult
+
+		data.lastBurstTick = 0 -- consume so one burst only confirms once
+
+		local now = globals.RealTime()
+		if (now - data.lastEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
+			data.lastEvidenceTime = now
+			Evidence.AddEvidence(attackerID, "double_tap", weight)
+			if Common.IsLogCategoryEnabled("Warp/DT") then
+				local damage = event:GetInt("damageamount") or event:GetInt("damage") or 0
+				print(string.format("[DoubleTap] %s dmg after burst (delay=%d ticks, dmg=%d) → evidence +%.1f",
+					attackerID, elapsedTicks, damage, weight))
+			end
+		end
+	end
+
+	-- Also record damage for forward correlation (burst after damage)
+	data.lastDamageTick = curTick
+
+	if Common.IsLogCategoryEnabled("Warp/DT") then
+		local damage = event:GetInt("damageamount") or event:GetInt("damage") or 0
+		print(string.format("[DoubleTap] %s dealt dmg=%d — watching for burst within %d ticks",
+			attackerID, damage, DT_CONFIRM_WINDOW_TICKS))
+	end
+end
+
+Events.Register("FireGameEvent", "WarpDT_PlayerHurt", onPlayerHurt, "player_hurt")
+
+-- ── cleanup ────────────────────────────────────────────────────────────────
+
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	playerStats[id] = nil
+	playerState[id] = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
-	playerStats[id] = nil
+	playerState[id] = nil
 end)
 
 return WarpDT

@@ -350,7 +350,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	local attackerClass = ply:GetPropInt("m_iClass")
-	local debugInterested = Common.IsDebugCategoryEnabled("SilentAim") and
+	local debugInterested = Common.IsLogCategoryEnabled("SilentAim") and
 		(attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
 
 	if debugInterested then
@@ -426,7 +426,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	if not aimedAtTarget and attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
 		sanityFactor = 0.15
-		if Common.IsDebugCategoryEnabled("SilentAim") then
+		if Common.IsLogCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] %s sanity miss (outside %.0f° bubble)", id, SANITY_MAX_DEGREES))
 		end
 	end
@@ -461,7 +461,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	if #historyAngles < 2 then
-		if Common.IsDebugCategoryEnabled("SilentAim") then
+		if Common.IsLogCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] %s extrapolation failed (only %d clean history ticks)", id, #historyAngles))
 		end
 		return
@@ -740,7 +740,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		scoreGain = math.min(scoreGain, 15.0)
 	end
 
-	if Common.IsDebugCategoryEnabled("SilentAim") then
+	if Common.IsLogCategoryEnabled("SilentAim") then
 		local headErrText = "n/a"
 		if bestAimError ~= nil then
 			headErrText = string.format("%.1f°", bestAimError)
@@ -788,19 +788,19 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			local err = nonSniperBestAimError or 0
 			reason = string.format("View Discontinuity (%.1fdeg snap, aimerr=%.1fdeg)", shotDev, err)
 		end
-		if Common.IsDebugCategoryEnabled("SilentAim") and acc and acc.fired >= MIN_SHOTS_FOR_ACCURACY then
+		if Common.IsLogCategoryEnabled("SilentAim") and acc and acc.fired >= MIN_SHOTS_FOR_ACCURACY then
 			print(string.format("[SilentAim] precisionMult=%.2f (hit=%d fired=%d rate=%.0f%%)",
 				precisionMult, acc.hit, acc.fired, (acc.hit / acc.fired) * 100))
 		end
 		print(string.format("[SilentAim] +%.1f score on %s | %s", scoreGain, id, reason))
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
 	elseif aimedAtTarget and shotDev < CLEAN_SHOT_MAX_DEV and (playerState.score or 0) > 0 then
-		if Common.IsDebugCategoryEnabled("SilentAim") then
+		if Common.IsLogCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] clean shot decay -%.2f on %s (snap=%.1fdeg)", -CLEAN_SHOT_DECAY, id, shotDev))
 		end
 		DetectorUtils.ApplyPlayerFlag(playerState, CLEAN_SHOT_DECAY, nil, "Clean shot decay")
 	else
-		if Common.IsDebugCategoryEnabled("SilentAim") then
+		if Common.IsLogCategoryEnabled("SilentAim") then
 			print(string.format("[SilentAim] gated out %s | snap=%.1fdeg gain=%.2f aimed=%s", id, shotDev, scoreGain,
 				tostring(aimedAtTarget)))
 		end
@@ -824,7 +824,7 @@ local function onDamageEvent(event)
 	local attackerUID = event:GetInt("attacker")
 	local victimUID = event:GetInt("userid")
 	if not attackerUID or not victimUID or attackerUID == victimUID then
-		if Common.IsDebugCategoryEnabled("SilentAim") then
+		if Common.IsLogCategoryEnabled("SilentAim") then
 			local now = globals.RealTime()
 			if canPrintFiltered(now) then
 				print(string.format("[SilentAim] player_hurt ignored (attacker=%s victim=%s)", tostring(attackerUID),
@@ -963,7 +963,7 @@ local function onDamageEvent(event)
 			pdata.shotPending.victimBodyPos = vBody
 		end
 
-		if Common.IsDebugCategoryEnabled("SilentAim") then
+		if Common.IsLogCategoryEnabled("SilentAim") then
 			local now = globals.RealTime()
 			if canPrintRecorded(now) then
 				print(string.format(

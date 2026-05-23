@@ -66,7 +66,9 @@ local function EnsureMenuState()
 end
 
 local function DrawMenu()
-	TickProfiler.BeginSection("Draw_Menu")
+	if G.Menu.Advanced.profiler then
+		TickProfiler.BeginSection("Draw_Menu")
+	end
 	EnsureMenuState()
 
 	if G.Menu.Advanced.debug and not gui.IsMenuOpen() then
@@ -76,7 +78,9 @@ local function DrawMenu()
 	end
 
 	if not TimMenu.Begin("Cheater Detection", gui.IsMenuOpen()) then
-		TickProfiler.EndSection("Draw_Menu")
+		if G.Menu.Advanced.profiler then
+			TickProfiler.EndSection("Draw_Menu")
+		end
 		return
 	end
 
@@ -147,6 +151,8 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
+		TimMenu.NextLine()
+		Advanced.profiler = TimMenu.Checkbox("Tick Profiler (Laggy)", Advanced.profiler == true)
 		TimMenu.NextLine()
 		-- Debug category selector to reduce console spam
 		Advanced.DebugCategory = TimMenu.Combo(
@@ -397,7 +403,9 @@ local function DrawMenu()
 	end
 
 	TimMenu.End()
-	TickProfiler.EndSection("Draw_Menu")
+	if G.Menu.Advanced.profiler then
+		TickProfiler.EndSection("Draw_Menu")
+	end
 end
 
 --[[ Callbacks ]]

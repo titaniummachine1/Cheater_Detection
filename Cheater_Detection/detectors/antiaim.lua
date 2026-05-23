@@ -44,14 +44,14 @@ local SCORE_THRESHOLD         = 1.0  -- 3 ticks of invalid pitch = flag
 -- Yaw-history settings (using HistoryManager as single source of truth)
 local YAW_HISTORY_SIZE        = 16    -- records to read from HistoryManager
 local YAW_DELTA_THRESHOLD     = 20.0  -- degrees avg delta = yaw AA signal
-local YAW_MAX_DELTA_THRESHOLD = 45.0  -- single-tick jump threshold (Rijin: large snap = AA desync)
+local YAW_MAX_DELTA_THRESHOLD = 65.0  -- single-tick jump threshold (Rijin: large snap = AA desync)
 local CHOKE_TICK_THRESHOLD    = 2.0   -- avg ticks gap required for avg-delta+choke trigger
 local CHOKE_MAX_SANE_TICKS    = 8.0   -- above this = player was dormant/untracked; skip detection
 local YAW_EVIDENCE_WEIGHT     = 15.0  -- evidence weight per positive detection
 local YAW_EVIDENCE_COOLDOWN   = 1.0   -- seconds between evidence additions
 local YAW_FLIP_THRESHOLD      = 120.0 -- legit-yaw AA: back-and-forth flip minimum degrees
-local YAW_REPEAT_MIN_DEG      = 5.0   -- min snap for A→B→A repeat pattern (RijiN angle_repeat)
-local YAW_REPEAT_EPSILON      = 1.0   -- max diff to consider two angles "the same" in repeat check
+local YAW_REPEAT_MIN_DEG      = 15.0  -- min snap for A→B→A repeat pattern (RijiN angle_repeat)
+local YAW_REPEAT_EPSILON      = 3.0   -- max diff to consider two angles "the same" in repeat check
 
 -- Minimum netchannel quality thresholds — below these we can't trust simtime gaps
 local OUR_MAX_LOSS_SKIP       = 0.05 -- skip if our own packet loss > 5%
@@ -89,7 +89,7 @@ local function tryExtractPitchYaw(ao)
 end
 
 local function traceLog(playerState, detail)
-	if not Common.IsDebugCategoryEnabled("AntiAim") then return end
+	if not Common.IsLogCategoryEnabled("AntiAim") then return end
 	local id = playerState and playerState.id or "nil"
 	local msg = string.format("[AntiAim] id=%s %s", tostring(id), tostring(detail or ""))
 	print(msg)
@@ -165,8 +165,8 @@ end
 -- Per-player cooldown for evidence (not stored in HistoryManager)
 local yawEvidenceCooldownById = {}
 
--- Quiet-frame threshold for noise-bracket guard (degrees) — StAC uses 0.5
-local NOISE_BRACKET_MAX_DEG = 0.5
+-- Quiet-frame threshold for noise-bracket guard (degrees)
+local NOISE_BRACKET_MAX_DEG = 2.0
 
 -- Returns avg_yaw_delta, avg_choke_ticks, max_yaw_delta, flip_count, cooldownTime,
 --         snapBracketed (bool), repeatCount (int — A→B→A desync pattern per RijiN)
@@ -286,7 +286,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if not Common.IsPlayerConnected() then return end
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then return end
 
-	local isDebug = Common.IsDebugCategoryEnabled("AntiAim")
+	local isDebug = Common.IsLogCategoryEnabled("AntiAim")
 	local pdata   = playerState.pdata
 	local simTime = pdata.simTime
 	local isAlive = pdata.isAlive
@@ -381,7 +381,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 			and avgChokeTicks >= 1 and snapBracketed
 
 		-- flipTriggered: alternating large flips (>= 120deg) while choking AND snap-bracketed.
-		local flipTriggered = flipCount >= 2 and avgChokeTicks >= 1 and snapBracketed
+		local flipTriggered = flipCount >= 3 and avgChokeTicks >= 1 and snapBracketed
 
 		local triggered = repeatTriggered or avgTriggered or maxTriggered or flipTriggered
 
@@ -402,7 +402,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 				Evidence.AddEvidence(playerState.id, "anti_aim", weight)
 
 				-- Hard flag for sustained yaw AA (similar to pitch)
-				if repeatTriggered or (maxTriggered and maxYawDelta >= 120.0) or flipTriggered then
+				if repeatTriggered or (maxTriggered and maxYawDelta >= 120.0 and repeatCount >= 1) or flipTriggered then
 					local reason = string.format("Yaw AA detected (%s)",
 						repeatTriggered and "repeat" or (flipTriggered and "flip" or "snap"))
 					DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)

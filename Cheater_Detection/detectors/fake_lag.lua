@@ -22,50 +22,25 @@ local HistoryManager              = require("Cheater_Detection.Utils.HistoryMana
 local FakeLag                     = {}
 
 -- ── constants ──────────────────────────────────────────────────────────────
-local FAKELAG_COOLDOWN_TICKS_66HZ = 22.0
-local RHYTHM_MIN_EVENTS           = 3
+local FAKELAG_COOLDOWN_TICKS_66HZ = 66.0 -- 1 second cooldown at 66Hz
+local RHYTHM_MIN_EVENTS           = 2    -- reduced from 3 for more sensitivity
+local RHYTHM_TOLERANCE_TICKS      = 2    -- ±2 ticks tolerance (was ±1)
 
 -- Rijin-derived: avg choke-tick threshold
 -- avg simtime gap >= 2 ticks across the window = fakelag signal
 local AVG_CHOKE_THRESHOLD         = 2.0
-local AVG_CHOKE_MIN_SAMPLES       = 5   -- need at least this many deltas
-local AVG_CHOKE_EVIDENCE_W        = 6.0 -- evidence weight per trigger
-local AVG_CHOKE_COOLDOWN_S        = 4.0 -- seconds between evidence additions
+local AVG_CHOKE_MIN_SAMPLES       = 2    -- reduced from 5 for faster detection
+local AVG_CHOKE_EVIDENCE_W        = 10.0 -- evidence weight per trigger
+local AVG_CHOKE_COOLDOWN_S        = 1.0  -- 1 second cooldown between detections
 
-local playerCooldowns             = {}  -- tick-based cooldown for rhythmic check
-local avgChokeCooldowns           = {}  -- realtime-based cooldown for avg-choke check
-
-local svMaxUnlag                  = 0.2
+local playerCooldowns             = {}   -- tick-based cooldown for rhythmic check
+local avgChokeCooldowns           = {}   -- realtime-based cooldown for avg-choke check
+local consecutiveChokeCount       = {}   -- count consecutive large deltas for impulse detection
 
 -- ── helpers ────────────────────────────────────────────────────────────────
-local function refreshCvarCache()
-	local val = client.GetConVar("sv_maxunlag")
-	if type(val) == "number" and val > 0 then
-		svMaxUnlag = val
-	end
-end
-
-refreshCvarCache()
-
 local function timeToTicks(time)
 	return math.floor(time / globals.TickInterval() + 0.5)
 end
-
-local function onMapOrRoundRefresh(_event)
-	refreshCvarCache()
-end
-
-local function onPlayerSpawnRefresh(event)
-	local spawnedEntity = entities.GetByUserID(event:GetInt("userid"))
-	local localPlayer = entities.GetLocalPlayer()
-	if spawnedEntity and localPlayer and spawnedEntity:GetIndex() == localPlayer:GetIndex() then
-		refreshCvarCache()
-	end
-end
-
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Map", onMapOrRoundRefresh, "game_newmap")
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Round", onMapOrRoundRefresh, "teamplay_round_start")
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Spawn", onPlayerSpawnRefresh, "player_spawn")
 
 -- ── main entry ─────────────────────────────────────────────────────────────
 function FakeLag.ProcessPlayer(playerState)
@@ -79,7 +54,7 @@ function FakeLag.ProcessPlayer(playerState)
 
 	local id = playerState.id
 	if id:sub(1, 4) == "BOT_" then return end
-	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugCategoryEnabled("Choke") then return end
+	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then return end
 
 	local history = HistoryManager.GetPlayerHistory(id)
 	if not history then return end
@@ -100,8 +75,8 @@ function FakeLag.ProcessPlayer(playerState)
 
 	if #simTimes < 5 then return end
 
-	-- Build delta-tick array (positive deltas only, cap at svMaxUnlag to ignore teleports)
-	local maxDeltaSec = svMaxUnlag
+	-- Build delta-tick array (positive deltas only, cap at 1.0s to ignore disconnect artifacts)
+	local maxDeltaSec = 1.0
 	local deltaTicks  = {}
 	local sumTicks    = 0
 
@@ -117,16 +92,47 @@ function FakeLag.ProcessPlayer(playerState)
 	local curTick       = globals.TickCount()
 	local cooldownTicks = math.floor(FAKELAG_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	local now           = globals.RealTime()
-	local isDebug       = Common.IsDebugCategoryEnabled("Choke")
+	local isDebug       = Common.IsLogCategoryEnabled("Choke")
 
-	-- ── 1. Rhythmic (original) ────────────────────────────────────────────
+	if isDebug then
+		print(string.format("[FakeLag] %s deltaTicks: %d entries, firstDelta=%d", id, #deltaTicks, deltaTicks[1] or 0))
+	end
+
+	-- ── 1. Single large delta detection (for 330ms choke patterns) ─────────────
+	-- Require 3 consecutive large deltas before adding evidence (impulse-based)
+	if #deltaTicks >= 1 then
+		local firstDelta = deltaTicks[1]
+		if firstDelta >= 20 then -- 20 ticks = ~303ms at 66Hz - higher threshold to reduce false positives
+			-- Count consecutive large deltas
+			consecutiveChokeCount[id] = (consecutiveChokeCount[id] or 0) + 1
+
+			-- Only add evidence after 3 consecutive detections
+			if consecutiveChokeCount[id] >= 3 then
+				local lastFlag = playerCooldowns[id] or 0
+				if (curTick - lastFlag) >= cooldownTicks then
+					playerCooldowns[id] = curTick
+					-- Use evidence system instead of ApplyPlayerFlag for decay
+					Evidence.AddEvidence(id, "fake_lag", AVG_CHOKE_EVIDENCE_W)
+					if isDebug then
+						print(string.format("[FakeLag] %s large choke: %d ticks (3 consecutive, evidence +%.1f)", id,
+							firstDelta, AVG_CHOKE_EVIDENCE_W))
+					end
+				end
+			end
+		else
+			-- Reset counter if delta is below threshold
+			consecutiveChokeCount[id] = 0
+		end
+	end
+
+	-- ── 2. Rhythmic (original) ────────────────────────────────────────────
 	if #deltaTicks >= RHYTHM_MIN_EVENTS then
 		local firstDelta = deltaTicks[1]
 		if firstDelta > 1 then
 			local consistent = true
 			for i = 2, #deltaTicks do
 				local diff = math.abs(deltaTicks[i] - firstDelta)
-				if diff > 1 then
+				if diff > RHYTHM_TOLERANCE_TICKS then
 					consistent = false
 					break
 				end
@@ -166,13 +172,15 @@ end
 
 -- ── cleanup ────────────────────────────────────────────────────────────────
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	playerCooldowns[id]   = nil
-	avgChokeCooldowns[id] = nil
+	playerCooldowns[id]       = nil
+	avgChokeCooldowns[id]     = nil
+	consecutiveChokeCount[id] = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
-	playerCooldowns[id]   = nil
-	avgChokeCooldowns[id] = nil
+	playerCooldowns[id]       = nil
+	avgChokeCooldowns[id]     = nil
+	consecutiveChokeCount[id] = nil
 end)
 
 return FakeLag

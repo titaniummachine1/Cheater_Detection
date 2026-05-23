@@ -345,7 +345,7 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	local curTick = globals.TickCount()
 	local now = globals.CurTime()
-	local isDebug = Common.IsDebugCategoryEnabled("ValveCheck")
+	local isDebug = Common.IsLogCategoryEnabled("ValveCheck")
 	local checkFlags = playerState.checkFlags
 	local useSteamHistory = SteamHistory.IsEnabled and SteamHistory.IsEnabled()
 

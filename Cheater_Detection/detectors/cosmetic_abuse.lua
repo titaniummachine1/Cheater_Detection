@@ -155,7 +155,7 @@ local function scanPlayerWearables(targetID)
 
 	-- Don't mark as scanned if we found 0 wearables - items likely not loaded yet
 	if itemNum == 0 then
-		if Common.IsDebugCategoryEnabled("Cosmetics") then
+		if Common.IsLogCategoryEnabled("Cosmetics") then
 			print(string.format("[CosmeticAbuse] id=%s - 0 wearables found, skipping scan (items not loaded)", targetID))
 		end
 		return false
@@ -164,7 +164,7 @@ local function scanPlayerWearables(targetID)
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
 
-	if Common.IsDebugCategoryEnabled("Cosmetics") then
+	if Common.IsLogCategoryEnabled("Cosmetics") then
 		local parts = { string.format("[CosmeticAbuse] id=%s wearables=%d", targetID, itemNum) }
 		for i, label in pairs(data.slotNames) do
 			parts[#parts + 1] = string.format("  item%d: %s", i, label)
@@ -218,7 +218,7 @@ function CosmeticAbuse.NeedsScan(id)
 end
 
 function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
-	local isDebug = Common.IsDebugCategoryEnabled("Cosmetics")
+	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
 	local playerName = (playerState and playerState.wrap and playerState.wrap.GetName)
 		and playerState.wrap:GetName()
 		or (playerState and playerState.id) or "?"

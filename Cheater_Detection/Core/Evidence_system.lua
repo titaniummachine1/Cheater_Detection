@@ -30,10 +30,10 @@ Evidence.Config = {
 			closeAim = 1.5, -- Extra decay when aiming close to enemy
 		},
 		Exploit = {
-			default = 0.5, -- Slow decay for exploits
+			default = 0.1, -- Very slow decay for exploits (DT, AA, fakelag)
 		},
 		Movement = {
-			default = 0.8, -- Medium decay for movement
+			default = 1.0, -- 1 decay per second for fake lag
 		},
 	},
 
@@ -175,12 +175,24 @@ local function tryApplyAutoPriority(steamID, evidence)
 
 	local threshold = Evidence.GetThreshold()
 
+	Logger.Debug(
+		"Evidence",
+		string.format(
+			"tryApplyAutoPriority: %s score=%.1f threshold=%.1f",
+			steamID,
+			evidence.TotalScore,
+			threshold
+		)
+	)
+
 	if evidence.TotalScore < threshold then
+		Logger.Debug("Evidence", "Score below threshold, returning")
 		return
 	end
 
 	-- Already raised priority this session? Skip to avoid spam.
 	if evidence.AutoPriorityApplied then
+		Logger.Debug("Evidence", "AutoPriority already applied, skipping")
 		return
 	end
 	evidence.AutoPriorityApplied = true
@@ -188,9 +200,16 @@ local function tryApplyAutoPriority(steamID, evidence)
 	local playerName = "Unknown"
 	local wrap = PlayerCache.GetByID(steamID)
 	if wrap then
-		local name = wrap:GetName()
-		if name and name ~= "" then
-			playerName = name
+		if wrap.GetName and type(wrap.GetName) == "function" then
+			local name = wrap:GetName()
+			if name and name ~= "" then
+				playerName = name
+			end
+		elseif wrap.entity and wrap.entity.GetName and type(wrap.entity.GetName) == "function" then
+			local name = wrap.entity:GetName()
+			if name and name ~= "" then
+				playerName = name
+			end
 		end
 	end
 
@@ -202,27 +221,54 @@ local function tryApplyAutoPriority(steamID, evidence)
 		autoPriorityEnabled = G.Menu.Main.AutoPriority == true
 	end
 
+	Logger.Debug(
+		"Evidence",
+		string.format(
+			"AutoPriority enabled: %s",
+			tostring(autoPriorityEnabled)
+		)
+	)
+
 	if autoPriorityEnabled then
 		Evidence.SetPriorityForSteamID(steamID, 10)
-		Logger.Info(
-			"Evidence",
-			string.format(
-				"Auto-priority 10 applied to %s (Score: %.1f >= %.1f) – SUSPICIOUS",
-				playerName,
-				evidence.TotalScore,
-				threshold
-			)
-		)
+
+		-- Also set CHEATER flag for exploit evidence (DT, AA, fakelag)
+		local wrap = PlayerCache.GetByID(steamID)
+		if wrap then
+			-- Try direct flag setting on wrap
+			if wrap.SetFlag and type(wrap.SetFlag) == "function" then
+				wrap:SetFlag(Constants.Flags.CHEATER, true)
+				Logger.Info(
+					"Evidence",
+					string.format(
+						"CHEATER flag set for %s (Score: %.1f >= %.1f) – Exploit evidence",
+						playerName,
+						evidence.TotalScore,
+						threshold
+					)
+				)
+				-- Try setting through flags field
+			elseif wrap.flags ~= nil then
+				wrap.flags = wrap.flags | Constants.Flags.CHEATER
+				-- Store detection reason for display
+				wrap.detectionReason = "Exploit Evidence (Double Tap)"
+				Logger.Info(
+					"Evidence",
+					string.format(
+						"CHEATER flag set for %s (Score: %.1f >= %.1f) – Exploit evidence (via flags field)",
+						playerName,
+						evidence.TotalScore,
+						threshold
+					)
+				)
+			else
+				Logger.Debug("Evidence", "Cannot set CHEATER flag - no SetFlag method or flags field on wrap")
+			end
+		else
+			Logger.Debug("Evidence", "PlayerCache wrap not found for " .. steamID)
+		end
 	else
-		Logger.Debug(
-			"Evidence",
-			string.format(
-				"%s crossed suspicion threshold (%.1f >= %.1f) but AutoPriority is off",
-				playerName,
-				evidence.TotalScore,
-				threshold
-			)
-		)
+		Logger.Debug("Evidence", "AutoPriority is disabled, not setting flag")
 	end
 
 	-- Debug breakdown of contributing detections
@@ -301,6 +347,18 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 
 	-- Recalculate total and check if player should be marked
 	recalcTotalScore(evidence)
+
+	-- Debug: log total score after adding evidence
+	Logger.Debug(
+		"Evidence",
+		string.format(
+			"Total score for %s: %.1f (added %.1f for %s)",
+			steamID,
+			evidence.TotalScore,
+			weight,
+			detectionName
+		)
+	)
 
 	tryApplyAutoPriority(steamID, evidence)
 end
@@ -476,10 +534,19 @@ function Evidence.SetPriorityForSteamID(steamID, priority)
 	if not wrap then
 		return false
 	end
-	local entity = wrap:GetRawEntity()
+
+	-- Try to get entity from wrap
+	local entity = nil
+	if wrap.GetRawEntity and type(wrap.GetRawEntity) == "function" then
+		entity = wrap:GetRawEntity()
+	elseif wrap.entity then
+		entity = wrap.entity
+	end
+
 	if not entity then
 		return false
 	end
+
 	local success = playerlist.SetPriority(entity, priority)
 	if success then
 		Logger.Info("Evidence", string.format("Set priority %d for %s", priority, wrap:GetName() or steamID))

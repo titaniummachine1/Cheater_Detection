@@ -142,11 +142,11 @@ function Common.IsDebugEnabled()
 	return G.Menu.Advanced.debug == true
 end
 
---- Check if a specific debug category is enabled (for selective debug output).
---- Categories: "All", "SilentAim", "AntiAim", "Warp", "Choke", "Cosmetics", "ValveCheck", "Database"
----@param category string The debug category to check
----@return boolean True if debug is enabled and category matches
-function Common.IsDebugCategoryEnabled(category)
+--- Check if a specific log category is enabled (controls log output only, not detection).
+--- Categories: "All", "SilentAim", "AntiAim", "Warp/DT", "Choke", "Cosmetics", "ValveCheck", "Database"
+---@param category string The log category to check
+---@return boolean True if debug mode is on and category is selected
+function Common.IsLogCategoryEnabled(category)
 	if not Common.IsDebugEnabled() then
 		return false
 	end
@@ -494,7 +494,6 @@ end
 --   • FPS below server tick rate → engine can't process every packet → unreliable
 --   • Incoming avg latency > 2 tick intervals → our view of remote sim times is too stale
 --   • Any incoming packet loss > 1%
---   • Any outgoing choke > 0 → our end is queuing packets → timing is off
 function Common.IsConnectionStableForDetection()
 	-- Must be fully connected (signon state 6 = FULL)
 	-- States: 0=NONE, 1=CHALLENGE, 2=CONNECTED, 3=NEW, 4=PRESPAWN, 5=SPAWN, 6=FULL
@@ -528,12 +527,6 @@ function Common.IsConnectionStableForDetection()
 	-- Any packet loss means we are missing data; deltas are unreliable
 	local loss = netChannel:GetAvgLoss(E_Flows.FLOW_INCOMING)
 	if loss > 0.01 then
-		return false
-	end
-
-	-- Any outgoing choke means our updates are stacking up
-	local choke = netChannel:GetAvgChoke(E_Flows.FLOW_OUTGOING)
-	if choke > 0 then
 		return false
 	end
 

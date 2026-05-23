@@ -264,9 +264,9 @@ local function OnCreateMove(cmd)
 
 	-- Rate-limited scan status logging (once every 5 seconds)
 	local now = globals.RealTime()
-	if Common.IsDebugCategoryEnabled("All") then
-		if not _G.lastScanLogTime or (now - _G.lastScanLogTime) >= 5.0 then
-			_G.lastScanLogTime = now
+	if Common.IsLogCategoryEnabled("All") then
+		if not sessionState.lastScanLogTime or (now - sessionState.lastScanLogTime) >= 5.0 then
+			sessionState.lastScanLogTime = now
 			print(string.format(
 				"[CD][SCAN] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s",
 				tostring(enableValveCheck), tostring(enableSilent), tostring(enableAntiAim),
@@ -388,10 +388,12 @@ local function OnCreateMove(cmd)
 end
 
 local function OnDraw()
-	local enabled = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true
-	if sessionState.lastProfilerEnabled ~= enabled then
-		sessionState.lastProfilerEnabled = enabled
-		TickProfiler.SetEnabled(enabled)
+	local profilerEnabled = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler == true
+	if sessionState.lastProfilerEnabled ~= profilerEnabled then
+		sessionState.lastProfilerEnabled = profilerEnabled
+		if profilerEnabled then
+			TickProfiler.SetEnabled(true)
+		end
 	end
 	Scheduler.Tick()
 	Visuals.DrawTags()
