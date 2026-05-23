@@ -12,15 +12,14 @@
         Fires Evidence.AddEvidence so it decays and stacks with other signals.
 ]]
 
-local Constants = require("Cheater_Detection.Core.constants")
-local G = require("Cheater_Detection.Utils.Globals")
-local Common = require("Cheater_Detection.Utils.Common")
-local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local Evidence = require("Cheater_Detection.Core.Evidence_system")
-local Events = require("Cheater_Detection.Core.Events")
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
+local G                           = require("Cheater_Detection.Utils.Globals")
+local Common                      = require("Cheater_Detection.Utils.Common")
+local DetectorUtils               = require("Cheater_Detection.Utils.DetectorUtils")
+local Evidence                    = require("Cheater_Detection.Core.Evidence_system")
+local Events                      = require("Cheater_Detection.Core.Events")
+local HistoryManager              = require("Cheater_Detection.Utils.HistoryManager")
 
-local FakeLag = {}
+local FakeLag                     = {}
 
 -- ── constants ──────────────────────────────────────────────────────────────
 local FAKELAG_COOLDOWN_TICKS_66HZ = 22.0
@@ -28,15 +27,15 @@ local RHYTHM_MIN_EVENTS           = 3
 
 -- Rijin-derived: avg choke-tick threshold
 -- avg simtime gap >= 2 ticks across the window = fakelag signal
-local AVG_CHOKE_THRESHOLD   = 2.0
-local AVG_CHOKE_MIN_SAMPLES = 5      -- need at least this many deltas
-local AVG_CHOKE_EVIDENCE_W  = 6.0   -- evidence weight per trigger
-local AVG_CHOKE_COOLDOWN_S  = 4.0   -- seconds between evidence additions
+local AVG_CHOKE_THRESHOLD         = 2.0
+local AVG_CHOKE_MIN_SAMPLES       = 5 -- need at least this many deltas
+local AVG_CHOKE_EVIDENCE_W        = 6.0 -- evidence weight per trigger
+local AVG_CHOKE_COOLDOWN_S        = 4.0 -- seconds between evidence additions
 
-local playerCooldowns   = {}  -- tick-based cooldown for rhythmic check
-local avgChokeCooldowns = {}  -- realtime-based cooldown for avg-choke check
+local playerCooldowns             = {} -- tick-based cooldown for rhythmic check
+local avgChokeCooldowns           = {} -- realtime-based cooldown for avg-choke check
 
-local svMaxUnlag = 0.2
+local svMaxUnlag                  = 0.2
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 local function refreshCvarCache()
@@ -64,9 +63,9 @@ local function onPlayerSpawnRefresh(event)
 	end
 end
 
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Map",   onMapOrRoundRefresh,   "game_newmap")
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Round", onMapOrRoundRefresh,   "teamplay_round_start")
-Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Spawn", onPlayerSpawnRefresh,  "player_spawn")
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Map", onMapOrRoundRefresh, "game_newmap")
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Round", onMapOrRoundRefresh, "teamplay_round_start")
+Events.Register("FireGameEvent", "FakeLag_CvarRefresh_Spawn", onPlayerSpawnRefresh, "player_spawn")
 
 -- ── main entry ─────────────────────────────────────────────────────────────
 function FakeLag.ProcessPlayer(playerState)
@@ -103,7 +102,7 @@ function FakeLag.ProcessPlayer(playerState)
 	local sumTicks    = 0
 
 	for i = 1, #simTimes - 1 do
-		local delta = simTimes[i] - simTimes[i + 1]  -- simTimes[i] is newer
+		local delta = simTimes[i] - simTimes[i + 1] -- simTimes[i] is newer
 		if delta > 0 and delta <= maxDeltaSec then
 			local t = timeToTicks(delta)
 			deltaTicks[#deltaTicks + 1] = t

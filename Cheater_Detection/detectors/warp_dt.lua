@@ -10,7 +10,6 @@ local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local Events = require("Cheater_Detection.Core.Events")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local Common = require("Cheater_Detection.Utils.Common")
-local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local WarpDT = {}
 
@@ -81,24 +80,24 @@ function WarpDT.ProcessPlayer(playerState)
 
 	local pdata = playerState.pdata
 	local isAlive = pdata.isAlive
-	
+
 	-- If data is stale, skip this tick
 	if isAlive == nil then
 		return
 	end
-	
+
 	if not isAlive then
 		return
 	end
 
 	local isDebug = Common.IsDebugEnabled()
 	local id = playerState.id
-	
+
 	-- Check bot using steamID prefix (safe, no entity needed)
 	if id:sub(1, 4) == "BOT_" then
 		return
 	end
-	
+
 	-- Skip local player
 	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not isDebug then
 		return

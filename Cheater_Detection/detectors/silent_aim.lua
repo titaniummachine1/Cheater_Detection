@@ -10,72 +10,87 @@
      Uses shared bucket structure for angle storage instead of per-player tables.
 ]]
 
-local Events = require("Cheater_Detection.Core.Events")
-local Common = require("Cheater_Detection.Utils.Common")
-local MathUtils = require("Cheater_Detection.Utils.MathUtils")
-local G = require("Cheater_Detection.Utils.Globals")
-local Constants = require("Cheater_Detection.Core.constants")
-local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local Logger = require("Cheater_Detection.Utils.Logger")
-local PlayerData = require("Cheater_Detection.Utils.PlayerData")
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-local PlayerCache = require("Cheater_Detection.Core.player_cache")
-local mathAbs = math.abs
-local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
+local Events                            = require("Cheater_Detection.Core.Events")
+local Common                            = require("Cheater_Detection.Utils.Common")
+local MathUtils                         = require("Cheater_Detection.Utils.MathUtils")
+local G                                 = require("Cheater_Detection.Utils.Globals")
+local Constants                         = require("Cheater_Detection.Core.constants")
+local DetectorUtils                     = require("Cheater_Detection.Utils.DetectorUtils")
+local Logger                            = require("Cheater_Detection.Utils.Logger")
+local PlayerData                        = require("Cheater_Detection.Utils.PlayerData")
+local HistoryManager                    = require("Cheater_Detection.Utils.HistoryManager")
+local PlayerCache                       = require("Cheater_Detection.Core.player_cache")
+local mathAbs                           = math.abs
+local HitscanInfo                       = require("Cheater_Detection.Utils.HitscanInfo")
 
-local SilentAim = {}
+local SilentAim                         = {}
 
-local MIN_SNAP_DEGREES = 2.0
-local SMALL_SNAP_DECAY = 0.0625
+local MIN_SNAP_DEGREES                  = 2.0
+local SMALL_SNAP_DECAY                  = 0.0625
 
-local HARD_SNAP_CHEATER_DEGREES = 90.0
-local INSTA_KILL_ALIGN_MAX_DEGREES = 5.0
+local HARD_SNAP_CHEATER_DEGREES         = 90.0
+local INSTA_KILL_ALIGN_MAX_DEGREES      = 5.0
 local INSTA_KILL_HEAD_MAX_ERROR_DEGREES = 6.0
-local INSTA_KILL_DIR_MIN = 0.5
+local INSTA_KILL_DIR_MIN                = 0.5
 
-local SNIPER_HEAD_MAX_ERROR_DEGREES = 6.0
-local ALIGN_TIGHT_MAX_DEGREES = 2.0
-local ALIGN_FLOOR = 0.05
-local SNAP_STAGE1_MAX_DEGREES = 15.0
-local SNAP_STAGE1_OUTPUT = 0.20
-local SNAP_STAGE1_LOG_K = 3.0
-local SNAP_STAGE2_MAX_DEGREES = 30.0
-local SNAP_STAGE2_OUTPUT = 0.40
-local SNAP_STAGE2_LOG_K = 2.0
-local SNAP_SPIKE_EXP_K = 5.0
-local DIR_MIN_DELTA_DEGREES = 7.0
-local DISCONT_SNAP_MIN_DEGREES = 45.0
-local DISCONT_AIMERR_MIN_DEGREES = 25.0
+local SNIPER_HEAD_MAX_ERROR_DEGREES     = 6.0
+local ALIGN_TIGHT_MAX_DEGREES           = 2.0
+local ALIGN_FLOOR                       = 0.05
+local SNAP_STAGE1_MAX_DEGREES           = 15.0
+local SNAP_STAGE1_OUTPUT                = 0.20
+local SNAP_STAGE1_LOG_K                 = 3.0
+local SNAP_STAGE2_MAX_DEGREES           = 30.0
+local SNAP_STAGE2_OUTPUT                = 0.40
+local SNAP_STAGE2_LOG_K                 = 2.0
+local SNAP_SPIKE_EXP_K                  = 5.0
+local DIR_MIN_DELTA_DEGREES             = 7.0
+local DISCONT_SNAP_MIN_DEGREES          = 45.0
+local DISCONT_AIMERR_MIN_DEGREES        = 25.0
 
-local SANITY_MAX_DEGREES = 16.0
-local LILAC_WINDOW_TICKS = 33
-local LILAC_SNAP_DELTA1_DEGREES = 10.0
-local LILAC_SNAP_DELTA2_DEGREES = 5.0
-local LILAC_SNAP_RATIO1 = 0.2
-local LILAC_SNAP_RATIO2 = 0.1
-local LILAC_RETURN_MIN_SNAP_DEGREES = 10.0
-local LILAC_RETURN_ALIGN_MAX_DEGREES = 2.0
-local LILAC_RETURN_DIR_MIN = 0.5
+local SANITY_MAX_DEGREES                = 16.0
+local LILAC_WINDOW_TICKS                = 33
+local LILAC_SNAP_DELTA1_DEGREES         = 10.0
+local LILAC_SNAP_DELTA2_DEGREES         = 5.0
+local LILAC_SNAP_RATIO1                 = 0.2
+local LILAC_SNAP_RATIO2                 = 0.1
+local LILAC_RETURN_MIN_SNAP_DEGREES     = 10.0
+local LILAC_RETURN_ALIGN_MAX_DEGREES    = 2.0
+local LILAC_RETURN_DIR_MIN              = 0.5
 
-local LILAC_FLAG_SNAP = 1
-local LILAC_FLAG_SNAP2 = 2
-local LILAC_FLAG_RETURN = 4
+local LILAC_FLAG_SNAP                   = 1
+local LILAC_FLAG_SNAP2                  = 2
+local LILAC_FLAG_RETURN                 = 4
 
-local LILAC_GAIN_SNAP = 2.0
-local LILAC_GAIN_SNAP2 = 1.2
-local LILAC_GAIN_RETURN = 1.0
+local LILAC_GAIN_SNAP                   = 2.0
+local LILAC_GAIN_SNAP2                  = 1.2
+local LILAC_GAIN_RETURN                 = 1.0
 
-local playerData = {}
-local NON_SNIPER_COOLDOWN_TICKS = 6
-local lastNonSniperTickByUserID = {}
+local playerData                        = {}
+local NON_SNIPER_COOLDOWN_TICKS         = 6
+local lastNonSniperTickByUserID         = {}
 
-local debugFilterWindowStart = 0
-local debugFilterWindowCount = 0
-local DEBUG_FILTER_MAX_PER_SEC = 0
+-- Fire-event cache: keyed by shooter entity index.
+-- Populated by CTEFireBullets (exact shot tick), consumed by onDamageEvent.
+-- { eyePos = Vector3, tick = n }
+local fireShotCache                     = {}
+local FIRE_CACHE_STALE_TICKS            = 8
 
-local debugRecordWindowStart = 0
-local debugRecordWindowCount = 0
-local DEBUG_RECORD_MAX_PER_SEC = 8
+-- Shot accuracy tracking: keyed by steamID64 string.
+-- Tracks hitscan shots fired and hits to compute a session hit rate.
+-- Hit rate >= PRECISION_HIGH boosts scoreGain; rate below PRECISION_LOW suppresses it.
+-- { fired = n, hit = n }
+local shotAccuracy                      = {}
+local MIN_SHOTS_FOR_ACCURACY            = 8    -- ignore until enough shots to be meaningful
+local PRECISION_HIGH                    = 0.72 -- >= this hit rate boosts score by up to 1.5x
+local PRECISION_LOW                     = 0.35 -- <= this hit rate suppresses score (legit misser)
+
+local debugFilterWindowStart            = 0
+local debugFilterWindowCount            = 0
+local DEBUG_FILTER_MAX_PER_SEC          = 0
+
+local debugRecordWindowStart            = 0
+local debugRecordWindowCount            = 0
+local DEBUG_RECORD_MAX_PER_SEC          = 8
 
 local function canPrintFiltered(now)
 	if DEBUG_FILTER_MAX_PER_SEC <= 0 then
@@ -426,6 +441,19 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	local id = playerState.id
+
+	-- Compute session hit rate for this player (precision multiplier).
+	-- precisionMult > 1.0 = high accuracy suspect; < 1.0 = low accuracy, suppress.
+	local acc = shotAccuracy[id]
+	local precisionMult = 1.0
+	if acc and acc.fired >= MIN_SHOTS_FOR_ACCURACY and acc.fired > 0 then
+		local hitRate = acc.hit / acc.fired
+		if hitRate >= PRECISION_HIGH then
+			precisionMult = 1.0 + (hitRate - PRECISION_HIGH) / (1.0 - PRECISION_HIGH) * 0.5
+		elseif hitRate <= PRECISION_LOW then
+			precisionMult = 0.5 + (hitRate / PRECISION_LOW) * 0.5
+		end
+	end
 
 	local attackerClass = ply:GetPropInt("m_iClass")
 	local debugInterested = Common.IsDebugEnabled() and
@@ -850,12 +878,18 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	local CLEAN_SHOT_DECAY = -0.5
 	local CLEAN_SHOT_MAX_DEV = MIN_SNAP_DEGREES * 3
+	scoreGain = scoreGain * precisionMult
+
 	if scoreGain > 1.0 then
 		local reason = string.format("SilentAim Anomaly (%.1fdeg snap, %.1fdeg align, dir=%.2f)", shotDev, alignDev,
 			dirFactor)
 		if discontGain > alignGain and discontGain > noAlignGain then
 			local err = nonSniperBestAimError or 0
 			reason = string.format("View Discontinuity (%.1fdeg snap, aimerr=%.1fdeg)", shotDev, err)
+		end
+		if Common.IsDebugEnabled() and acc and acc.fired >= MIN_SHOTS_FOR_ACCURACY then
+			print(string.format("[SilentAim] precisionMult=%.2f (hit=%d fired=%d rate=%.0f%%)",
+				precisionMult, acc.hit, acc.fired, (acc.hit / acc.fired) * 100))
 		end
 		print(string.format("[SilentAim] +%.1f score on %s | %s", scoreGain, id, reason))
 		DetectorUtils.ApplyPlayerFlag(playerState, scoreGain, nil, reason)
@@ -943,6 +977,14 @@ local function onDamageEvent(event)
 
 	HistoryManager.MarkDamageDealt(attackerID)
 
+	-- Count this as a confirmed hit for accuracy tracking.
+	local acc = shotAccuracy[attackerID]
+	if acc then
+		acc.hit = acc.hit + 1
+	else
+		shotAccuracy[attackerID] = { fired = 0, hit = 1 }
+	end
+
 	local pdata = playerData[attackerID]
 	if not pdata then
 		pdata = {
@@ -988,10 +1030,18 @@ local function onDamageEvent(event)
 			victimOrigin = nil,
 		}
 
-		local origin = attackerPly:GetAbsOrigin()
-		local viewOffset = attackerPly:GetPropVector("localdata", "m_vecViewOffset[0]")
-		if origin and viewOffset then
-			pdata.shotPending.shooterEyePos = origin + viewOffset
+		-- Prefer exact eye position captured at fire time via CTEFireBullets.
+		-- Fall back to current entity state (1 tick late) if cache is absent or stale.
+		local fireEntry = fireShotCache[attackerPly:GetIndex()]
+		if fireEntry and (curTick - fireEntry.tick) <= FIRE_CACHE_STALE_TICKS then
+			pdata.shotPending.shooterEyePos = fireEntry.eyePos
+			fireShotCache[attackerPly:GetIndex()] = nil
+		else
+			local origin = attackerPly:GetAbsOrigin()
+			local viewOffset = attackerPly:GetPropVector("localdata", "m_vecViewOffset[0]")
+			if origin and viewOffset then
+				pdata.shotPending.shooterEyePos = origin + viewOffset
+			end
 		end
 
 		local vOrigin = victimPly:GetAbsOrigin()
@@ -1028,6 +1078,50 @@ local function onDamageEvent(event)
 end
 
 Events.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
+
+-- CTEFireBullets fires on ProcessTempEntities at the exact tick the shot leaves the barrel.
+-- We capture the shooter's true eye position here so onDamageEvent can use it instead of
+-- the post-hoc estimate read from entity state during player_hurt (which is ~1 tick late).
+local function onProcessTempEntities(entEvtTable)
+	local curTick = globals.TickCount()
+	local localPlayer = entities.GetLocalPlayer()
+	if not localPlayer then return end
+
+	for ent, _ in pairs(entEvtTable) do
+		if ent:GetNetworkName() == "CTEFireBullets" then
+			local shooterIdx = ent:GetPropInt("m_iPlayer") + 1
+			if shooterIdx > 1 and shooterIdx ~= localPlayer:GetIndex() then
+				local shooter = entities.GetByIndex(shooterIdx)
+				if shooter and shooter:IsValid() and shooter:IsAlive() and not shooter:IsDormant() then
+					local origin = shooter:GetAbsOrigin()
+					local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]")
+					if origin and viewOffset then
+						local existing = fireShotCache[shooterIdx]
+						if existing then
+							existing.eyePos = origin + viewOffset
+							existing.tick   = curTick
+						else
+							fireShotCache[shooterIdx] = { eyePos = origin + viewOffset, tick = curTick }
+						end
+					end
+					-- Count hitscan shot fired: look up steamID for this entity index.
+					local shooterID = tostring(Common.GetSteamID64(shooter))
+					if shooterID and shooterID:match("^7656119%d+$") then
+						local acc = shotAccuracy[shooterID]
+						if acc then
+							acc.fired = acc.fired + 1
+						else
+							shotAccuracy[shooterID] = { fired = 1, hit = 0 }
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+callbacks.Unregister("ProcessTempEntities", "CD_SilentAim_FireBullets")
+callbacks.Register("ProcessTempEntities", "CD_SilentAim_FireBullets", onProcessTempEntities)
 
 function SilentAim.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
@@ -1077,11 +1171,23 @@ function SilentAim.ProcessPlayer(playerState)
 end
 
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	playerData[id] = nil
+	playerData[id]   = nil
+	shotAccuracy[id] = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
-	playerData[id] = nil
+	playerData[id]   = nil
+	shotAccuracy[id] = nil
+end)
+
+-- Flush stale fire-cache entries every disconnect to avoid index aliasing.
+Events.Subscribe("OnPlayerDisconnect", function(_id)
+	local curTick = globals.TickCount()
+	for idx, entry in pairs(fireShotCache) do
+		if (curTick - entry.tick) > FIRE_CACHE_STALE_TICKS then
+			fireShotCache[idx] = nil
+		end
+	end
 end)
 
 return SilentAim

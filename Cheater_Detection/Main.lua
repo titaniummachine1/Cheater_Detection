@@ -2,6 +2,7 @@
      New Core Entry Point for Cheater Detection Service.
 ]]
 client.Command("clear", true)
+
 ---@diagnostic disable: undefined-global, undefined-field
 -- [[ Imports ]]
 local G = require("Cheater_Detection.Utils.Globals")
@@ -13,44 +14,41 @@ local Scheduler = require("Cheater_Detection.Core.scheduler")
 local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local Common = require("Cheater_Detection.Utils.Common")
-local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 require("Cheater_Detection.Utils.Commands")
 require("Cheater_Detection.Misc.ChatPrefix")
 require("Cheater_Detection.Misc.Vote_Reveal")
 require("Cheater_Detection.Misc.Auto_Vote")
-require("Cheater_Detection.Misc.SniperDotAngle")
 require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
-require("Cheater_Detection.Database.MAC")
-local Fetcher = require("Cheater_Detection.Database.Fetcher")
+local Fetcher                  = require("Cheater_Detection.Database.Fetcher")
 
 -- Detectors
-local ValveCheck = require("Cheater_Detection.detectors.valve_check")
-local SilentAim = require("Cheater_Detection.detectors.silent_aim")
-local AimLock = require("Cheater_Detection.detectors.aim_lock")
-local AntiAim = require("Cheater_Detection.detectors.antiaim")
-local DuckSpeed = require("Cheater_Detection.detectors.duck_speed")
-local Bhop = require("Cheater_Detection.detectors.bhop")
-local WarpDT = require("Cheater_Detection.detectors.warp_dt")
-local FakeLag = require("Cheater_Detection.detectors.fake_lag")
-local CosmeticAbuse = require("Cheater_Detection.detectors.cosmetic_abuse")
+local ValveCheck               = require("Cheater_Detection.detectors.valve_check")
+local SilentAim                = require("Cheater_Detection.detectors.silent_aim")
+local AimLock                  = require("Cheater_Detection.detectors.aim_lock")
+local AntiAim                  = require("Cheater_Detection.detectors.antiaim")
+local DuckSpeed                = require("Cheater_Detection.detectors.duck_speed")
+local Bhop                     = require("Cheater_Detection.detectors.bhop")
+local WarpDT                   = require("Cheater_Detection.detectors.warp_dt")
+local FakeLag                  = require("Cheater_Detection.detectors.fake_lag")
+local CosmeticAbuse            = require("Cheater_Detection.detectors.cosmetic_abuse")
 
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
-local JoinNotifications = require("Cheater_Detection.Misc.JoinNotifications")
-local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
+local HistoryManager           = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig          = require("Cheater_Detection.Utils.DetectionConfig")
+local JoinNotifications        = require("Cheater_Detection.Misc.JoinNotifications")
+local TickProfiler             = require("Cheater_Detection.Utils.TickProfiler")
 
 -- Actions
-local NotificationService = require("Cheater_Detection.services.notification_service")
-local Visuals = require("Cheater_Detection.actions.visuals")
-local BridgePrompt = require("Cheater_Detection.services.bridge_prompt")
+local NotificationService      = require("Cheater_Detection.services.notification_service")
+local Visuals                  = require("Cheater_Detection.actions.visuals")
+local BridgePrompt             = require("Cheater_Detection.services.bridge_prompt")
 
-local hasSearchedGroup = false
+local hasSearchedGroup         = false
 local valveDisconnectTriggered = false
-local wasInServer = false
-local cleanedFriendIDs = {}
-local lastProfilerEnabled = nil
+local wasInServer              = false
+local cleanedFriendIDs         = {}
+local lastProfilerEnabled      = nil
 
 local function isValveAutoDisconnectEnabled()
 	local menu = G.Menu
@@ -176,6 +174,13 @@ local function Init()
 	-- Populate global menu config before anything else
 	Config.LoadCFG()
 
+	-- Startup notification for missing SteamHistory API key
+	local shCfg = G.Menu and G.Menu.Misc and G.Menu.Misc.SteamHistory
+	if not shCfg or not shCfg.ApiKey or shCfg.ApiKey == "" then
+		print("[CD] SteamHistory API key not set - configure in Misc tab or config.cfg")
+		client.ChatPrintf("[CD] SteamHistory API key not set! Go to Misc tab to configure.")
+	end
+
 	DetectionConfig.RegisterWithHistoryManager()
 
 	-- Automate Database Fetch (Local then Online) - Respects AutoSync setting
@@ -227,21 +232,21 @@ local function OnCreateMove(cmd)
 
 	Events.DispatchEngineEvent("CreateMove", cmd)
 
-	local menu = G.Menu
-	local mainMenu = menu and menu.Main or nil
-	local adv = menu and menu.Advanced or nil
+	local menu             = G.Menu
+	local mainMenu         = menu and menu.Main or nil
+	local adv              = menu and menu.Advanced or nil
 
 	local enableValveCheck = mainMenu and mainMenu.ValveCheck == true
-	local enableSilent = adv and adv.SilentAimbot == true
-	local enableAimLock = enableSilent and (adv.AimLock ~= false)
-	local enableAntiAim = adv and adv.AntiAim == true
-	local enableDuckSpeed = adv and adv.DuckSpeed == true
-	local enableBhop = adv and adv.Bhop == true
-	local enableWarpDT = adv and adv["Warp"] == true
-	local enableChoke = adv and adv.Choke == true
-	local enableCosmetics = adv and adv.Cosmetics == true
+	local enableSilent     = adv and adv.SilentAimbot == true
+	local enableAimLock    = enableSilent and (adv.AimLock ~= false)
+	local enableAntiAim    = adv and adv.AntiAim == true
+	local enableDuckSpeed  = adv and adv.DuckSpeed == true
+	local enableBhop       = adv and adv.Bhop == true
+	local enableWarpDT     = adv and adv["Warp"] == true
+	local enableChoke      = adv and adv.Choke == true
+	local enableCosmetics  = adv and adv.Cosmetics == true
 
-	local tagsEnabled = mainMenu == nil or mainMenu.Cheater_Tags ~= false
+	local tagsEnabled      = mainMenu == nil or mainMenu.Cheater_Tags ~= false
 	if isDebugEnabled() then
 		print(string.format(
 			"[CD][DETECTOR_LOOP] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s tags=%s",
@@ -262,7 +267,7 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	local historyEnabled = enableSilent or enableWarpDT or enableChoke
+	local historyEnabled = enableSilent or enableWarpDT or enableChoke or enableAntiAim
 	if historyEnabled then
 		TickProfiler.BeginSection("History_NewTick")
 		HistoryManager.NewTick()
@@ -293,13 +298,10 @@ local function OnCreateMove(cmd)
 
 	TickProfiler.BeginSection("PlayerScan_Loop")
 	for id, existingState in pairs(stateTable) do
-		local pdata = existingState and existingState.pdata or nil
-		local ply = pdata and PlayerData.GetEntity(pdata) or nil
-		if not ply or not ply:IsValid() then
-			goto continue
-		end
+		local pdata = existingState.pdata
+		if not pdata then goto continue end
 
-		if ply:IsDormant() then
+		if pdata.isDormant then
 			if historyEnabled and not existingState.wasDormant then
 				HistoryManager.ClearPlayer(id)
 				existingState.wasDormant = true
@@ -307,11 +309,9 @@ local function OnCreateMove(cmd)
 			goto continue
 		end
 
-		local pState = PlayerCache.Get(ply)
-		if not pState then
-			goto continue
-		end
+		if not pdata.isAlive then goto continue end
 
+		local pState = existingState
 		pState.wasDormant = false
 
 		-- In normal mode: exclude local player's friends and party members.
@@ -321,7 +321,7 @@ local function OnCreateMove(cmd)
 				if not cleanedFriendIDs[id] then
 					cleanedFriendIDs[id] = true
 					Database.RemoveCheater(id)
-					pcall(playerlist.SetPriority, ply, 0)
+					if pState.wrap then pState.wrap:SetPriority(0) end
 				end
 				goto continue
 			end
@@ -334,9 +334,6 @@ local function OnCreateMove(cmd)
 				goto continue
 			end
 		end
-
-		assert(pState.id, "OnCreateMove: pState.id nil after PlayerCache.Get - broken invariant")
-		assert(pState.pdata, "OnCreateMove: pState.pdata nil after PlayerCache.Get for id=" .. tostring(pState.id))
 
 		if historyEnabled then
 			TickProfiler.BeginSection("History_Push")

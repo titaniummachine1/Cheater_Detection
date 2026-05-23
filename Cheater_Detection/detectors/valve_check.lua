@@ -63,37 +63,37 @@ end
 -- Uses DirtySystem - only checks players explicitly marked as needing verification.
 local function runDeferredSweep()
 	local isDebug = (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true)
-	
+
 	-- Get only players marked with dirty CHECKS flag (via DirtySystem)
 	local dirtyPlayers = DirtySystem.GetDirtyPlayers(DirtySystem.FLAGS.CHECKS)
-	
+
 	-- Limit checks per frame to avoid lag spikes
 	local maxChecksPerFrame = 3
 	local checksThisFrame = 0
-	
+
 	for _, id in ipairs(dirtyPlayers) do
 		if checksThisFrame >= maxChecksPerFrame then
 			break -- Process rest next frame
 		end
-		
+
 		local state = PlayerCache.GetByID(id)
 		if not state then
 			-- Player no longer active, clear their dirty flag
 			DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CHECKS)
 			goto continue
 		end
-		
+
 		-- Only check if not already confirmed as Valve
 		if (state.flags & Constants.Flags.VALVE) ~= 0 then
 			-- Already confirmed Valve, clear dirty flag
 			DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CHECKS)
 			goto continue
 		end
-		
+
 		-- Run the deferred checks (badge, items)
 		checksThisFrame = checksThisFrame + 1
 		local found = ValveData.CheckPlayerItems(id)
-		
+
 		if found then
 			if isDebug and not layer1Logged[id] then
 				Logger.Debug("ValveCheck", string.format("[Layer 2/3] Found via badge/item check: %s", id))
@@ -101,10 +101,10 @@ local function runDeferredSweep()
 			-- Mark as Valve in database (async)
 			SteamLookup.MarkAsValve(id, "Badge/Item")
 		end
-		
+
 		-- Clear dirty flag - we've processed this player
 		DirtySystem.ClearDirty(id, DirtySystem.FLAGS.CHECKS)
-		
+
 		::continue::
 	end
 end
@@ -114,7 +114,7 @@ Events.Subscribe("OnPlayerNeedsCheck", function(playerState)
 	if not playerState or not playerState.id then
 		return
 	end
-	
+
 	-- Mark player as needing deferred check via DirtySystem
 	queueDeferredCheck(playerState.id)
 end)
@@ -335,7 +335,7 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	local id = tostring(playerState.id)
-	
+
 	-- OPTIMIZATION: Only check players on join (dirty CONNECTED flag)
 	-- Valve status is permanent - cannot become Valve mid-session
 	local isNewPlayer = DirtySystem.IsDirty(id, DirtySystem.FLAGS.CONNECTED)
@@ -351,11 +351,6 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	-- Skip Bots (Non-SteamID64)
 	if not id:match("^7656119%d%+$") or #id ~= 17 then
-		return
-	end
-
-	-- Skip if Scanner or ValveCheck is disabled
-	if not G or not G.Menu or not G.Menu.Scanner or not G.Menu.Scanner.ValveCheck then
 		return
 	end
 

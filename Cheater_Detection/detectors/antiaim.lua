@@ -5,13 +5,15 @@
         Accumulates a weighted hit score with decay; crossing SCORE_THRESHOLD
         hard-flags the player as CHEATER.
 
-     2. Yaw-Delta History (Rijin-derived) – per-player circular buffer of
-        {pitch, yaw, simTime} records.  Each tick we compute:
-          • avg_yaw_delta  : mean absolute yaw change between consecutive records
-          • avg_choke_ticks: mean simulation-time gap in ticks between records
-        Threshold: avg_choke_ticks >= 2 OR avg_yaw_delta >= 25° triggers yaw-AA
-        evidence.  This fires Evidence.AddEvidence so it decays naturally and
-        stacks with other signals rather than immediately hard-flagging.
+     2. Yaw-Delta History – analyses HistoryManager buckets for yaw AA patterns:
+          • repeatTriggered : A→B→A angle alternation (RijiN angle_repeat) —
+            primary desync AA signal, no choke gate.
+          • avgTriggered    : elevated avg choke AND large avg delta — secondary
+            signal for badly-implemented AA that also chokes packets.
+          • maxTriggered    : single large snap bracketed by quiet frames
+            (StAC aimsnapCheck).
+          • flipTriggered   : alternating 120°+ flips, snap-bracketed.
+        All fire Evidence.AddEvidence so they decay and stack.
 ]]
 
 local Constants               = require("Cheater_Detection.Core.constants")
@@ -25,6 +27,10 @@ local HistoryManager          = require("Cheater_Detection.Utils.HistoryManager"
 
 local AntiAim                 = {}
 
+-- Source engine netchannel flow direction constants
+local FLOW_OUTGOING           = 0
+local FLOW_INCOMING           = 1
+
 -- ── constants ──────────────────────────────────────────────────────────────
 local MAX_LEGAL_PITCH         = 89.30
 local MAX_SANE_ABS_ANGLE      = 540
@@ -37,14 +43,20 @@ local SCORE_THRESHOLD         = 1.0
 local YAW_HISTORY_SIZE        = 16    -- records to read from HistoryManager
 local YAW_DELTA_THRESHOLD     = 20.0  -- degrees avg delta = yaw AA signal
 local YAW_MAX_DELTA_THRESHOLD = 45.0  -- single-tick jump threshold (Rijin: large snap = AA desync)
-local CHOKE_TICK_THRESHOLD    = 2     -- ticks avg simtime gap = choke signal
+local CHOKE_TICK_THRESHOLD    = 2.0   -- avg ticks gap required for avg-delta+choke trigger
+local CHOKE_MAX_SANE_TICKS    = 8.0   -- above this = player was dormant/untracked; skip detection
 local YAW_EVIDENCE_WEIGHT     = 15.0  -- evidence weight per positive detection
 local YAW_EVIDENCE_COOLDOWN   = 1.0   -- seconds between evidence additions
 local YAW_FLIP_THRESHOLD      = 120.0 -- legit-yaw AA: back-and-forth flip minimum degrees
+local YAW_REPEAT_MIN_DEG      = 5.0   -- min snap for A→B→A repeat pattern (RijiN angle_repeat)
+local YAW_REPEAT_EPSILON      = 1.0   -- max diff to consider two angles "the same" in repeat check
+
+-- Minimum netchannel quality thresholds — below these we can't trust simtime gaps
+local OUR_MAX_LOSS_SKIP       = 0.05 -- skip if our own packet loss > 5%
+local OUR_MAX_CHOKE_SKIP      = 4    -- skip if we are choking > 4 outgoing packets
 
 -- ── per-player state ───────────────────────────────────────────────────────
 local antiAimStateById        = {} -- pitch-score state
-local lastInvalidPitchLogAt   = {}
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 local function isInvalidPitch(pitch)
@@ -139,12 +151,6 @@ local function readNetAngles(entity, cmd, isLocalDebug)
 end
 
 -- ── yaw-history helpers (using HistoryManager) ─────────────────────────────
-local function normalizeAngle(a)
-	local wrapped = a % 360
-	if wrapped > 180 then wrapped = wrapped - 360 end
-	return wrapped
-end
-
 -- Returns the shortest signed delta between two yaw angles [-180, 180]
 local function yawDelta(a, b)
 	local d = (a - b) % 360
@@ -155,44 +161,57 @@ end
 -- Per-player cooldown for evidence (not stored in HistoryManager)
 local yawEvidenceCooldownById = {}
 
--- Returns avg_yaw_delta, avg_choke_ticks, max_yaw_delta, flip_count, cooldownTime (or nil if insufficient data)
-local function analyseYawHistoryFromManager(id)
-	if not HistoryManager.IsInitialized() then return nil, nil, nil, nil, nil end
+-- Quiet-frame threshold for noise-bracket guard (degrees) — StAC uses 0.5
+local NOISE_BRACKET_MAX_DEG = 0.5
 
-	local tickInterval = globals.TickInterval()
-	local collected = 0
-	local sumYawDelta = 0.0
+-- Returns avg_yaw_delta, avg_choke_ticks, max_yaw_delta, flip_count, cooldownTime,
+--         snapBracketed (bool), repeatCount (int — A→B→A desync pattern per RijiN)
+--
+-- Real desync AA: simTime advances ~1 tick normally, yaw alternates A→B→A every tick.
+-- repeatCount detects this with no choke gate. avgTriggered is the secondary path for
+-- badly-implemented AA that also chokes packets.
+local function analyseYawHistoryFromManager(id)
+	if not HistoryManager.IsInitialized() then return nil, nil, nil, nil, nil, false, 0 end
+
+	local tickInterval  = globals.TickInterval()
+	local collected     = 0
+	local sumYawDelta   = 0.0
 	local sumChokeTicks = 0
-	local maxYawDelta = 0.0
-	local flipCount = 0
+	local maxYawDelta   = 0.0
+	local flipCount     = 0
+	local repeatCount   = 0
 	local lastDeltaSign = 0
 
-	local lastRecord = nil
+	local frameDeltas   = {}
+	local frameYaws     = {} -- raw yaw per record, index 1 = newest
+	local recordCount   = 0
+	local lastRecord    = nil
 
-	-- Read up to YAW_HISTORY_SIZE records from HistoryManager (0 = newest, going back)
 	for i = 0, YAW_HISTORY_SIZE - 1 do
 		local bucket = HistoryManager.GetBucketAt(i)
 		if not bucket then break end
 
 		local playerData = HistoryManager.GetPlayerDataInBucket(bucket, id)
 		if playerData then
-			local ang = playerData[HistoryManager.Fields.Angles]
+			local ang     = playerData[HistoryManager.Fields.Angles]
 			local simTime = playerData[HistoryManager.Fields.SimulationTime]
 
 			if ang and simTime then
 				local yaw = ang.yaw or ang[2]
 				if yaw then
+					recordCount = recordCount + 1
+					frameYaws[recordCount] = yaw
+
 					if lastRecord then
-						local d = yawDelta(yaw, lastRecord.yaw)
-						local absDelta = math.abs(d)
-						local timeDiff = math.abs(simTime - lastRecord.simTime)
+						local d          = yawDelta(yaw, lastRecord.yaw)
+						local absDelta   = math.abs(d)
+						local timeDiff   = math.abs(simTime - lastRecord.simTime)
 						local chokeTicks = math.floor(timeDiff / tickInterval + 0.5)
 
 						if absDelta > maxYawDelta then maxYawDelta = absDelta end
-						sumYawDelta = sumYawDelta + absDelta
+						sumYawDelta   = sumYawDelta + absDelta
 						sumChokeTicks = sumChokeTicks + chokeTicks
 
-						-- Flip detection: sign reversal on large deltas = jitter/legit-yaw AA
 						if absDelta >= YAW_FLIP_THRESHOLD then
 							local sign = d > 0 and 1 or -1
 							if lastDeltaSign ~= 0 and sign ~= lastDeltaSign then
@@ -202,6 +221,7 @@ local function analyseYawHistoryFromManager(id)
 						end
 
 						collected = collected + 1
+						frameDeltas[collected] = absDelta
 					end
 					lastRecord = { yaw = yaw, simTime = simTime }
 				end
@@ -209,13 +229,51 @@ local function analyseYawHistoryFromManager(id)
 		end
 	end
 
-	if collected == 0 then return nil, nil, nil, nil, nil end
+	if collected == 0 then return nil, nil, nil, nil, nil, false, 0 end
 
-	local avgYawDelta = sumYawDelta / collected
+	local avgYawDelta   = sumYawDelta / collected
 	local avgChokeTicks = sumChokeTicks / collected
-	local cooldownTime = yawEvidenceCooldownById[id] or 0
+	local cooldownTime  = yawEvidenceCooldownById[id] or 0
 
-	return avgYawDelta, avgChokeTicks, maxYawDelta, flipCount, cooldownTime
+	-- A→B→A repeat check (RijiN angle_repeat):
+	-- frameYaws[1]=newest. Pattern: yaw[k] ≈ yaw[k+2] but |yaw[k+1]-yaw[k]| >= threshold.
+	-- No choke requirement — real desync AA fires every single tick.
+	if recordCount >= 3 then
+		for k = 1, recordCount - 2 do
+			local cur         = frameYaws[k]
+			local mid         = frameYaws[k + 1]
+			local prev        = frameYaws[k + 2]
+			local curPrevDiff = math.abs(yawDelta(cur, prev))
+			local midCurDiff  = math.abs(yawDelta(mid, cur))
+			if curPrevDiff <= YAW_REPEAT_EPSILON and midCurDiff >= YAW_REPEAT_MIN_DEG then
+				repeatCount = repeatCount + 1
+			end
+		end
+	end
+
+	-- Noise-bracket: snap is software-forced when both neighbours are quiet (< 0.5deg).
+	local snapBracketed = false
+	if maxYawDelta >= YAW_MAX_DELTA_THRESHOLD and collected >= 3 then
+		local snapIdx = 1
+		for k = 2, collected do
+			if frameDeltas[k] > frameDeltas[snapIdx] then snapIdx = k end
+		end
+		local prevDelta = snapIdx > 1 and frameDeltas[snapIdx - 1] or nil
+		local nextDelta = snapIdx < collected and frameDeltas[snapIdx + 1] or nil
+		snapBracketed = (prevDelta == nil or prevDelta < NOISE_BRACKET_MAX_DEG)
+			and (nextDelta == nil or nextDelta < NOISE_BRACKET_MAX_DEG)
+	end
+
+	return avgYawDelta, avgChokeTicks, maxYawDelta, flipCount, cooldownTime, snapBracketed, repeatCount
+end
+
+-- Returns true when our own connection is too unstable to attribute gaps to the target
+local function ourConnectionUnstable()
+	local netchan = clientstate.GetNetChannel()
+	if not netchan then return false end
+	local loss  = netchan:GetAvgLoss(FLOW_INCOMING)
+	local choke = netchan:GetAvgChoke(FLOW_OUTGOING)
+	return (loss and loss > OUR_MAX_LOSS_SKIP) or (choke and choke > OUR_MAX_CHOKE_SKIP)
 end
 
 -- ── main entry ─────────────────────────────────────────────────────────────
@@ -244,16 +302,13 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if isCheater then return end
 
 	local pitchState = getPitchState(playerState.id)
-	local isNewSimTime = pitchState.lastSimTime == nil or simTime > pitchState.lastSimTime
 
 	-- Get entity safely
 	local ent = PlayerData.GetEntity(pdata)
 	if not ent then return end
 
 	local pitch, yaw, angleSource = readNetAngles(ent, cmd, isDebug and isLocalPlayer)
-	assert(pitch ~= nil or yaw ~= nil,
-		string.format("[AntiAim] readNetAngles returned nil for live player id=%s - broken prop invariant",
-			tostring(playerState.id)))
+	if pitch == nil and yaw == nil then return end -- spectator / observer slot, no angles available
 	local now = globals.RealTime()
 	applyPitchDecay(pitchState, now)
 	if isDebug then
@@ -273,68 +328,94 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	-- Checked every tick regardless of simTime so choking AA players still
 	-- accumulate score (DETECTION_COOLDOWN_SEC prevents per-tick spam).
 	if pitch ~= nil and isInvalidPitch(pitch) and not isCorrupted(pitch) then
-		ent = PlayerData.GetEntity(pdata)
-		if ent and ent:IsValid() and not ent:IsDormant() and ent:IsAlive() then
-			if (now - (pitchState.lastHitTime or 0)) >= DETECTION_COOLDOWN_SEC then
-				pitchState.score = pitchState.score + HIT_WEIGHT
-				pitchState.lastHitTime = now
-			end
+		if (now - (pitchState.lastHitTime or 0)) >= DETECTION_COOLDOWN_SEC then
+			pitchState.score = pitchState.score + HIT_WEIGHT
+			pitchState.lastHitTime = now
+		end
 
-			if isDebug then
-				local yawStr = "nil"
-				if yaw ~= nil then yawStr = string.format("%.3f", yaw) end
-				print(string.format("[AntiAim][HIT] invalid pitch=%.3f yaw=%s src=%s score=%.2f/%.2f",
-					pitch, yawStr, tostring(angleSource), pitchState.score, SCORE_THRESHOLD))
-			end
+		if isDebug then
+			local yawStr = "nil"
+			if yaw ~= nil then yawStr = string.format("%.3f", yaw) end
+			print(string.format("[AntiAim][HIT] invalid pitch=%.3f yaw=%s src=%s score=%.2f/%.2f",
+				pitch, yawStr, tostring(angleSource), pitchState.score, SCORE_THRESHOLD))
+		end
 
-			if pitchState.score >= SCORE_THRESHOLD then
-				local reason = string.format("Invalid Pitch sustained (%.3f)", pitch)
-				DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
-				antiAimStateById[playerState.id] = nil
-				yawEvidenceCooldownById[playerState.id] = nil
-				return
-			end
+		if pitchState.score >= SCORE_THRESHOLD then
+			local reason = string.format("Invalid Pitch sustained (%.3f)", pitch)
+			DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, reason)
+			antiAimStateById[playerState.id] = nil
+			yawEvidenceCooldownById[playerState.id] = nil
+			return
 		end
 	end
 
 	-- ── 2. Yaw-delta history detection (using HistoryManager) ────────────
+	-- Skip entirely when our own connection is jittery — simtime gaps would
+	-- be indistinguishable from the target choking.
+	if ourConnectionUnstable() then return end
+
 	-- HistoryManager stores angles per-tick - we analyse last 16 records
-	local avgYawDelta, avgChokeTicks, maxYawDelta, flipCount, lastCooldown = analyseYawHistoryFromManager(playerState.id)
+	local avgYawDelta, avgChokeTicks, maxYawDelta, flipCount, lastCooldown, snapBracketed, repeatCount =
+		analyseYawHistoryFromManager(playerState.id)
 	if avgYawDelta ~= nil then
-		-- Require BOTH choke >= 2 AND (yaw >= 20 OR max >= 45) to reduce false positives
-		local avgTriggered  = avgChokeTicks >= CHOKE_TICK_THRESHOLD and avgYawDelta >= YAW_DELTA_THRESHOLD
-		local maxTriggered  = maxYawDelta ~= nil and maxYawDelta >= YAW_MAX_DELTA_THRESHOLD
-		local flipTriggered = flipCount ~= nil and flipCount >= 2
-		local triggered     = avgTriggered or maxTriggered or flipTriggered
+		-- Guard: if avg choke gap is too large the player was dormant/untracked — skip.
+		if avgChokeTicks > CHOKE_MAX_SANE_TICKS then
+			return
+		end
+
+		-- repeatTriggered: A→B→A angle pattern (RijiN angle_repeat) — primary desync AA signal.
+		-- Real yaw AA chokes 0 extra ticks; yaw just alternates every tick. No choke gate needed.
+		local repeatTriggered = repeatCount >= 2
+
+		-- avgTriggered: secondary signal for badly-implemented AA that also chokes packets.
+		-- Requires BOTH elevated choke AND large avg delta to fire.
+		local avgTriggered = avgChokeTicks >= CHOKE_TICK_THRESHOLD
+			and avgYawDelta >= YAW_DELTA_THRESHOLD
+
+		-- maxTriggered: single large snap surrounded by quiet frames (StAC aimsnapCheck logic).
+		-- Requires snapBracketed — both neighbours < 0.5deg — to reject mouse flicks.
+		local maxTriggered = maxYawDelta >= YAW_MAX_DELTA_THRESHOLD
+			and avgChokeTicks >= 1 and snapBracketed
+
+		-- flipTriggered: alternating large flips (>= 120deg) while choking AND snap-bracketed.
+		local flipTriggered = flipCount >= 2 and avgChokeTicks >= 1 and snapBracketed
+
+		local triggered = repeatTriggered or avgTriggered or maxTriggered or flipTriggered
 
 		if triggered then
 			local now = globals.RealTime()
 			if (now - lastCooldown) >= YAW_EVIDENCE_COOLDOWN then
 				yawEvidenceCooldownById[playerState.id] = now
-				-- Scale weight by signal strength
+
+				-- Scale weight by signal strength.
 				local weight = YAW_EVIDENCE_WEIGHT
-				if maxTriggered and maxYawDelta >= 120.0 then
-					weight = weight * 1.5
+				if repeatTriggered then
+					weight = weight * 1.5 -- strongest signal: confirmed A→B→A pattern
+				elseif maxTriggered and maxYawDelta >= 120.0 then
+					weight = weight * 1.3
 				elseif flipTriggered then
 					weight = weight * 1.2
 				end
 				Evidence.AddEvidence(playerState.id, "anti_aim", weight)
 
 				local trigReason = ""
-				if maxTriggered then
+				if repeatTriggered then
+					trigReason = string.format("repeat=%d ", repeatCount)
+				elseif maxTriggered then
 					trigReason = string.format("max=%.1fdeg ", maxYawDelta)
 				elseif flipTriggered then
 					trigReason = string.format("flips=%d ", flipCount)
 				end
-				print(string.format("[AntiAim] yaw AA on %s | %savg=%.1fdeg choke=%.1f w=%.1f",
-					playerState.id, trigReason, avgYawDelta, avgChokeTicks, weight))
+				print(string.format("[AntiAim] yaw AA on %s | %savg=%.1fdeg choke=%.1f repeats=%d w=%.1f",
+					playerState.id, trigReason, avgYawDelta, avgChokeTicks, repeatCount, weight))
 			end
 		end
 
 		if isDebug then
 			traceLog(true, playerState, string.format(
-				"yaw history avg=%.1fdeg max=%.1fdeg choke=%.1f flips=%d triggered=%s",
-				avgYawDelta, maxYawDelta or 0, avgChokeTicks, flipCount or 0, tostring(triggered)
+				"yaw history avg=%.1fdeg max=%.1fdeg choke=%.1f flips=%d repeats=%d bracketed=%s triggered=%s",
+				avgYawDelta, maxYawDelta or 0, avgChokeTicks, flipCount or 0, repeatCount,
+				tostring(snapBracketed), tostring(triggered)
 			))
 		end
 	end
@@ -344,12 +425,10 @@ end
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	antiAimStateById[id]        = nil
 	yawEvidenceCooldownById[id] = nil
-	lastInvalidPitchLogAt[id]   = nil
 end)
 Events.Subscribe("OnPlayerRemoved", function(id)
 	antiAimStateById[id]        = nil
 	yawEvidenceCooldownById[id] = nil
-	lastInvalidPitchLogAt[id]   = nil
 end)
 
 return AntiAim

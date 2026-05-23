@@ -8,11 +8,11 @@ local Default_Config = {
 		Cheater_Tags = true,
 		TagFilters = { true, true, true, true }, -- [1]=Valve [2]=Cheater [3]=VAC [4]=Sus
 		AutoSync = true,                   -- Automatically fetch databases on startup
+		ValveCheck = true,                 -- Valve employee detection
 	},
 
 	Scanner = {
-		SteamHistory = false,
-		MAC = false,
+		SteamHistory = true,
 		ValveCheck = true,
 	},
 
@@ -22,12 +22,15 @@ local Default_Config = {
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
 		-- Detection toggles (only for implemented detections)
-		Choke = true,                       -- Fake Lag detection
-		Warp = true,                        -- Warp/DT detection
+		Choke = false,                      -- Fake Lag detection
+		Warp = false,                       -- Warp/DT detection
 		Bhop = true,                        -- Bunny hop detection
 		DuckSpeed = true,                   -- Duck speed detection
 		AntiAim = true,                     -- Anti-aim detection
 		SilentAimbot = true,                -- Silent aimbot (extrapolation) detection
+		SilentAimSimulate = false,          -- Simulate silent aim for local testing (debug)
+		Cosmetics = true,                   -- Cosmetic exploit detection
+		AimLock = true,                     -- AimLock detection (requires SilentAimbot)
 	},
 
 	Notifications = {
@@ -36,7 +39,7 @@ local Default_Config = {
 		Channels = {
 			LocalChat = true, -- Only you see it (client.ChatPrintf)
 			PublicChat = false, -- Entire server sees it (say)
-			Party = false, -- Your party only (say_party)
+			Party = true, -- Your party only (say_party)
 			Toast = true, -- lnxLib corner pop-up
 			Console = true, -- Console print
 		},
@@ -63,19 +66,19 @@ local Default_Config = {
 
 	Misc = {
 		Autovote = true,
-		AutovoteAutoCast = true,
+		AutovoteAutoCast = false,
 		intent = {
-			retaliation = true,
-			legit = true,
+			retaliation = false,
+			legit = false,
 			cheater = true,
 			bot = true,
-			valve = true,
+			valve = false,
 			friend = false,
 		},
 		Vote_Reveal = {
 			Enable = true,
 			Indicator = true,
-			AutoLeaveOnGuaranteedLocalKick = false,
+			AutoLeaveOnGuaranteedLocalKick = true,
 			TargetTeam = {
 				MyTeam = true,
 				enemyTeam = true,
@@ -102,13 +105,13 @@ local Default_Config = {
 			Enable = true,
 			CheckCheater = true,
 			CheckValve = true,
-			ValveAutoDisconnect = false,
+			ValveAutoDisconnect = true,
 			-- Default output channels (used if no override)
 			DefaultOutput = {
 				LocalChat = true,
 				PublicChat = false,
-				Party = false,
-				Toast = false,
+				Party = true,
+				Toast = true,
 				Console = true,
 			},
 			-- Cheater-specific overrides
@@ -134,9 +137,10 @@ local Default_Config = {
 			Enable = false,
 			ApiKey = "",
 		},
-		MAC = {
-			BaseURL = "http://127.0.0.1:1984",
-			ApiKey = "",
+		Privacy = {
+			YouFriendTags = true,
+			MuteBotChat = false,
+			BlockServerMessages = false,
 		},
 	},
 }

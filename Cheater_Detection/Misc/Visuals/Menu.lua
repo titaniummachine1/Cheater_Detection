@@ -3,7 +3,6 @@ local Menu = {}
 local G = require("Cheater_Detection.Utils.Globals")
 local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
-local MAC = require("Cheater_Detection.Database.MAC")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 
 local Fonts = {
@@ -23,7 +22,7 @@ if timMenuLoaded and timMenuModule then
 	print("[CD] TimMenu loaded successfully")
 else
 	error(
-	"[CD] TimMenu not found! Please install TimMenu to %localappdata%\\lua\\TimMenu.lua or %localappdata%\\lua\\store\\TimMenu.lua")
+		"[CD] TimMenu not found! Please install TimMenu to %localappdata%\\lua\\TimMenu.lua or %localappdata%\\lua\\store\\TimMenu.lua")
 end
 
 
@@ -98,18 +97,26 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		Main.ValveCheck = TimMenu.Checkbox("Valve Employee Check", Main.ValveCheck == true)
 		TimMenu.NextLine()
-		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave If Valve Employee Detected", JN.ValveAutoDisconnect == true)
-		TimMenu.NextLine()
-
-		local shStatus = "Ready"
-		if not SteamHistory.HasKey() then
-			shStatus = "API key missing"
+		local shHasKey = SteamHistory.HasKey()
+		local shLabel = "Enable SteamHistory"
+		if not shHasKey then
+			shLabel = "API key missing"
+			Scanner.SteamHistory = false
 		elseif SteamHistory.IsTemporarilyDisabled() then
-			shStatus = "Rate limited (Wait)"
+			shLabel = "SteamHistory (Rate limited)"
+		else
+			shLabel = "SteamHistory (Ready)"
 		end
-		TimMenu.Text("SteamHistory: " .. shStatus)
+		Scanner.SteamHistory = TimMenu.Checkbox(shLabel, Scanner.SteamHistory == true and shHasKey)
 		TimMenu.NextLine()
-		TimMenu.Text("Public cheater lists are fetched by Auto-Sync Databases")
+		if not shHasKey then
+			TimMenu.Text("-> Get key at steamhistory.net")
+			TimMenu.NextLine()
+			TimMenu.Text("-> Type: steamhistory <key> in console")
+			TimMenu.NextLine()
+		end
+		JN.ValveAutoDisconnect = TimMenu.Checkbox("Auto Leave If Valve Employee Detected", JN.ValveAutoDisconnect == true)
+
 		TimMenu.EndSector()
 		TimMenu.NextLine()
 
@@ -161,11 +168,6 @@ local function DrawMenu()
 		--TimMenu.NextLine()
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
-		if Advanced.AntiAim then
-			Advanced.SniperDotViewCorrect = TimMenu.Checkbox("Sniper Dot Hard-Flag (laser dot confirms pitch AA)",
-				Advanced.SniperDotViewCorrect == true)
-			TimMenu.NextLine()
-		end
 		Advanced.Cosmetics = TimMenu.Checkbox("Cosmetic Exploit Detection", Advanced.Cosmetics == true)
 		TimMenu.NextLine()
 		TimMenu.EndSector()

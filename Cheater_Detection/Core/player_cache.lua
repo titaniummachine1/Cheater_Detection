@@ -1,48 +1,102 @@
 --[[ Core/player_cache.lua
      Single source of truth for all per-player runtime state.
-     Uses lazy PlayerData - stores entity INDEX, never entity reference.
 
-     CRITICAL: Entity objects are radioactive C++ pointers. Never store them.
-     Always use PlayerData.GetEntity(pdata) to safely get entity for current tick.
+     Architecture (Zero-Allocation Proxy Pattern):
+       - SyncTick() runs once per tick: single FindByClass, pushes entity map
+         to WrappedPlayer upvalue, manages proxy lifecycle.
+       - Proxy (WrappedPlayer) is allocated ONCE on player join, freed on disconnect.
+       - pdata fields (isAlive, onGround, flags, velocity, etc.) are read directly
+         from the entity into the state table once per tick in SyncTick — plain
+         table fields, no metatable, no per-tick allocation.
+       - PlayerData.GetEntity(pdata) compatibility shim: pdata._index holds the
+         entity index so duck_speed can call it without changes.
 
-     Detector API (CreateMove loop):
-       PlayerCache.Get(ply)       → { id, entityIndex, pdata, flags, score, ... }
-       PlayerCache.GetByID(id)    → same state table, lookup by steamID64 string
+     Detector API:
+       PlayerCache.Get(ply)       → state table (by entity, fallback path)
+       PlayerCache.GetByID(id)    → state table (by steamID64 string)
+       PlayerCache.GetActiveTable()→ raw activeSet for Main.lua iteration
 
-     Lazy Data Access:
-       state.pdata.origin      → cached position (fetched once per tick)
-       state.pdata.velocity    → cached velocity
-       state.pdata.eyePos      → cached eye position
-       PlayerData.GetEntity(state.pdata) → safe entity access (nil if stale)
-
-     View API (render / misc path):
-       PlayerCache.GetAll(excludeLocal)  → WrappedPlayer[]
-       PlayerCache.GetTeammates()        → WrappedPlayer[]
-       PlayerCache.GetEnemies()          → WrappedPlayer[]
-       PlayerCache.GetLocal()            → WrappedPlayer
-       PlayerCache.GetBySteamID(id)      → PlayerData
-       PlayerCache.IsFriend(id)          → bool
+     View API:
+       PlayerCache.GetAll(excludeLocal) → WrappedPlayer[]
+       PlayerCache.GetTeammates()       → WrappedPlayer[]
+       PlayerCache.GetEnemies()         → WrappedPlayer[]
+       PlayerCache.GetLocal()           → WrappedPlayer|nil
+       PlayerCache.IsFriend(id)         → bool
 ]]
 
-local Constants       = require("Cheater_Detection.Core.constants")
-local WrappedPlayer   = require("Cheater_Detection.Utils.WrappedPlayer")
-local Common          = require("Cheater_Detection.Utils.Common")
-local Events          = require("Cheater_Detection.Core.Events")
-local G               = require("Cheater_Detection.Utils.Globals")
-local TickEntityCache = require("Cheater_Detection.Utils.TickEntityCache")
-local PlayerData      = require("Cheater_Detection.Utils.PlayerData")
-local DirtySystem     = require("Cheater_Detection.Core.DirtySystem")
+local Constants              = require("Cheater_Detection.Core.constants")
+local WrappedPlayer          = require("Cheater_Detection.Utils.WrappedPlayer")
+local Common                 = require("Cheater_Detection.Utils.Common")
+local Events                 = require("Cheater_Detection.Core.Events")
+local G                      = require("Cheater_Detection.Utils.Globals")
+local DirtySystem            = require("Cheater_Detection.Core.DirtySystem")
+local TickEntityCache        = require("Cheater_Detection.Utils.TickEntityCache")
 
-local PlayerCache     = {}
-
--- ── Authoritative per-player state ───────────────────────────────────────────
--- NOTE: Never stores entity references. Only entity INDEX and lazy PlayerData.
+local PlayerCache            = {}
 
 ---@type table<string, table>
-local activeSet       = {}
+local activeSet              = {}
 
--- ── Lazy array views (rebuilt when arrDirty == true) ─────────────────────────
+local lastSyncTick           = -1
 
+-- Reusable tick-scope tables — cleared in-place, never reallocated
+local tickMap                = {}
+local seenIDs                = {}
+
+-- ── Score decay ───────────────────────────────────────────────────────────────
+local SCORE_DECAY_HIGH_RISK  = 0.2
+local SCORE_DECAY_SUSPICIOUS = 0.5
+local SCORE_DECAY_INTERVAL   = 1.0
+local HARD_FLAGS             = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
+
+-- ── Check-flags template (allocated once per new player) ──────────────────────
+local function newCheckFlags()
+	return {
+		valveID64Checked      = false,
+		valveSteam2Checked    = false,
+		valveItemBadgeChecked = false,
+		valveGroupChecked     = false,
+		vacBanChecked         = false,
+		commBanChecked        = false,
+		steamHistoryChecked   = false,
+		profileLookupQueued   = false,
+	}
+end
+
+-- ── Auto-priority helpers ─────────────────────────────────────────────────────
+local function isAutoPriorityEnabled()
+	return G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true
+end
+
+local function applyAutoPriority(state, ent)
+	if not state or not ent then return end
+	if not isAutoPriorityEnabled() then return end
+
+	if (state.flags & HARD_FLAGS) ~= 0 then
+		pcall(playerlist.SetPriority, ent, 10)
+		state.autoPrioritySusApplied = false
+		return
+	end
+
+	local isSus = (state.flags & Constants.Flags.SUSPICIOUS) ~= 0
+	if isSus then
+		if not state.autoPrioritySusApplied then
+			local ok, prio = pcall(playerlist.GetPriority, ent)
+			if ok and type(prio) == "number" and prio < 1 then
+				pcall(playerlist.SetPriority, ent, 1)
+				state.autoPrioritySusApplied = true
+			end
+		end
+	elseif state.autoPrioritySusApplied then
+		local ok, prio = pcall(playerlist.GetPriority, ent)
+		if ok and type(prio) == "number" and prio == 1 then
+			pcall(playerlist.SetPriority, ent, 0)
+		end
+		state.autoPrioritySusApplied = false
+	end
+end
+
+-- ── View arrays (rebuilt when membership changes) ─────────────────────────────
 local arrAll          = {}
 local arrNoLocal      = {}
 local arrTeam         = {}
@@ -53,68 +107,46 @@ local cachedLocal     = nil
 local cachedLocalID   = nil
 local cachedLocalTeam = nil
 
-local function markDirty()
-	arrDirty = true
-end
-
--- Helper to mark a specific player as dirty (for DirtySystem)
-local function markPlayerDirty(id, flags)
-	if DirtySystem and DirtySystem.MarkDirty then
-		DirtySystem.MarkDirty(id, flags or DirtySystem.FLAGS.SCORE)
-	end
-end
-
-local function refreshLocal()
-	local raw = entities.GetLocalPlayer()
-	if not raw or not raw:IsValid() then
-		cachedLocal     = nil
-		cachedLocalID   = nil
-		cachedLocalTeam = nil
-		return
-	end
-	cachedLocalTeam = raw:GetTeamNumber()
-	if cachedLocal and cachedLocal:GetRawEntity() == raw then
-		return
-	end
-	cachedLocal   = WrappedPlayer.FromEntity(raw)
-	cachedLocalID = cachedLocal and tostring(Common.GetSteamID64(raw)) or nil
-end
-
 local function rebuildArrays()
-	if not arrDirty then
-		return
+	if not arrDirty then return end
+
+	local raw = entities.GetLocalPlayer()
+	if raw and raw:IsValid() then
+		cachedLocalTeam = raw:GetTeamNumber()
+		local lid = tostring(Common.GetSteamID64(raw))
+		if lid ~= cachedLocalID then
+			cachedLocalID = lid
+			cachedLocal   = activeSet[lid] and activeSet[lid].wrap or nil
+		end
+	else
+		cachedLocal, cachedLocalID, cachedLocalTeam = nil, nil, nil
 	end
-	refreshLocal()
 
 	local allN, noLocalN, teamN, enemyN = 0, 0, 0, 0
 	for id, state in pairs(activeSet) do
-		local pdata = state.pdata
-		-- Safely get entity only if pdata is fresh for this tick
-		local ent = pdata and PlayerData.GetEntity(pdata)
-		-- Filter to only valid, non-dormant players for the view arrays
-		if ent and ent:IsValid() and not ent:IsDormant() then
+		local wrap = state.wrap
+		if wrap and not state.pdata.isDormant then
 			allN = allN + 1
-			arrAll[allN] = WrappedPlayer.FromEntity(ent)
+			arrAll[allN] = wrap
 
 			if id ~= cachedLocalID then
 				noLocalN = noLocalN + 1
-				arrNoLocal[noLocalN] = WrappedPlayer.FromEntity(ent)
+				arrNoLocal[noLocalN] = wrap
 			end
 
 			if cachedLocalTeam then
-				local t = ent:GetTeamNumber()
+				local t = state.pdata._teamNum
 				if t == cachedLocalTeam then
 					teamN = teamN + 1
-					arrTeam[teamN] = WrappedPlayer.FromEntity(ent)
+					arrTeam[teamN] = wrap
 				else
 					enemyN = enemyN + 1
-					arrEnemy[enemyN] = WrappedPlayer.FromEntity(ent)
+					arrEnemy[enemyN] = wrap
 				end
 			end
 		end
 	end
 
-	-- Trim stale tail entries
 	for i = allN + 1, #arrAll do arrAll[i] = nil end
 	for i = noLocalN + 1, #arrNoLocal do arrNoLocal[i] = nil end
 	for i = teamN + 1, #arrTeam do arrTeam[i] = nil end
@@ -123,400 +155,260 @@ local function rebuildArrays()
 	arrDirty = false
 end
 
--- ── Score decay constants (replaces Heartbeat periodic decay) ───────────────
--- Rates match original: 2pts per 10s heartbeat for HIGH_RISK, 5pts per 10s for SUSPICIOUS
-local SCORE_DECAY_HIGH_RISK  = 0.2 -- points/sec
-local SCORE_DECAY_SUSPICIOUS = 0.5 -- points/sec
+-- ── Core sync ─────────────────────────────────────────────────────────────────
 
-local HARD_FLAGS             = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
-local SCORE_DECAY_INTERVAL   = 1.0 -- Decay every 1s
-
-local function isAutoPriorityEnabled()
-	return G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true
-end
-
-local function applyAutoPriority(state, ent)
-	if not state or not ent or not ent:IsValid() then
-		return
-	end
-	if not isAutoPriorityEnabled() then
-		return
-	end
-
-	if (state.flags & HARD_FLAGS) ~= 0 then
-		pcall(playerlist.SetPriority, ent, 10)
-		state.autoPrioritySusApplied = false
-		return
-	end
-
-	local isSus = (state.flags & Constants.Flags.SUSPICIOUS) ~= 0
-	if isSus then
-		if state.autoPrioritySusApplied ~= true then
-			local okGet, prio = pcall(playerlist.GetPriority, ent)
-			local currentPriority = okGet and type(prio) == "number" and prio or 0
-			if currentPriority < 1 then
-				pcall(playerlist.SetPriority, ent, 1)
-				state.autoPrioritySusApplied = true
-			end
-		end
-	else
-		if state.autoPrioritySusApplied == true then
-			local okGet, prio = pcall(playerlist.GetPriority, ent)
-			local currentPriority = okGet and type(prio) == "number" and prio or 0
-			if currentPriority == 1 then
-				pcall(playerlist.SetPriority, ent, 0)
-			end
-			state.autoPrioritySusApplied = false
-		end
-	end
-end
-
--- ── Detector API ──────────────────────────────────────────────────────────────
-
-local function newCheckFlags()
-	return {
-		valveID64Checked = false,
-		valveSteam2Checked = false,
-		valveItemBadgeChecked = false,
-		valveGroupChecked = false,
-		vacBanChecked = false,
-		commBanChecked = false,
-		steamHistoryChecked = false,
-		profileLookupQueued = false,
-	}
-end
-
-local lastSyncTick = -1
-local seenTickByID = {}
-
-local function syncActivePlayersTick()
+function PlayerCache.SyncTick()
 	local curTick = globals.TickCount()
-	if curTick == lastSyncTick then
-		return
-	end
+	if curTick == lastSyncTick then return end
 	lastSyncTick = curTick
 
-	refreshLocal()
+	local liveEnts = entities.FindByClass("CTFPlayer") or {}
 
-	local liveEntities = entities.FindByClass("CTFPlayer") or {}
-	TickEntityCache.RefreshTick(curTick, liveEntities)
-	for i = 1, #liveEntities do
-		local ent = liveEntities[i]
-		if ent and ent:IsValid() then
-			local steamID = Common.GetSteamID64(ent)
-			if steamID then
-				local id = tostring(steamID)
-				seenTickByID[id] = curTick
+	-- Clear reusable tables in-place (no reallocation)
+	for k in pairs(tickMap) do tickMap[k] = nil end
+	for k in pairs(seenIDs) do seenIDs[k] = nil end
 
-				local state = activeSet[id]
-				if not state then
-					local dbEntry   = G.Database and G.Database.GetCheater(id) or nil
-					local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
-					local initScore = dbEntry and dbEntry.Score or 0
+	local now        = globals.RealTime()
+	local anyNew     = false
+	local anyRemoved = false
 
-					-- Create lazy PlayerData - stores INDEX, never entity reference
-					local pdata     = PlayerData.ForEntity(ent)
-					if pdata then
-						activeSet[id] = {
-							id                     = id,
-							entityIndex            = ent:GetIndex(), -- Store INDEX only
-							pdata                  = pdata, -- Lazy data container
-							wrap                   = WrappedPlayer.FromEntity(ent),
-							flags                  = initFlags,
-							score                  = initScore,
-							externalChecked        = false,
-							checkFlags             = newCheckFlags(),
-							isFriend               = Common.IsFriend and Common.IsFriend(ent, true) or false,
-							lastUpdate             = curTick,
-							lastScoreDecay         = globals.RealTime(),
-							autoPrioritySusApplied = false,
-						}
-						markPlayerDirty(id,
-							DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
-						applyAutoPriority(activeSet[id], ent)
+	-- Single pass: build tickMap + process state simultaneously
+	for i = 1, #liveEnts do
+		local ent = liveEnts[i]
+		if not ent then goto nextEnt end
+
+		tickMap[ent:GetIndex()] = ent
+
+		local steamID = Common.GetSteamID64(ent)
+		if not steamID then goto nextEnt end
+		local id = tostring(steamID)
+		seenIDs[id] = true
+
+		local state = activeSet[id]
+		if not state then
+			-- New player — allocate proxy once
+			local info       = client.GetPlayerInfo(ent:GetIndex())
+			local steam3     = info and info.SteamID or ""
+			local name       = info and info.Name or id
+			local dbEntry    = G.Database and G.Database.GetCheater(id) or nil
+			local initFlags  = dbEntry and dbEntry.Flags or Constants.Flags.NONE
+			local initScore  = dbEntry and dbEntry.Score or 0
+
+			local proxy      = WrappedPlayer.New(ent:GetIndex(), id, steam3, name)
+
+			-- Minimal pdata shim — plain table, no metatable
+			-- Holds current-tick property snapshot + _index for PlayerData.GetEntity compat
+			local pdata      = {
+				_index     = ent:GetIndex(),
+				isAlive    = ent:IsAlive(),
+				isDormant  = ent:IsDormant(),
+				onGround   = false,
+				flags      = 0,
+				velocity   = nil,
+				viewOffset = nil,
+				simTime    = nil,
+				_teamNum   = ent:GetTeamNumber(),
+			}
+			local mfFlags    = ent:GetPropInt("m_fFlags") or 0
+			pdata.flags      = mfFlags
+			pdata.onGround   = (mfFlags & 1) ~= 0
+			pdata.velocity   = ent:EstimateAbsVelocity()
+			pdata.viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
+			pdata.simTime    = ent:GetPropFloat("m_flSimulationTime")
+
+			state            = {
+				id                     = id,
+				entityIndex            = ent:GetIndex(),
+				pdata                  = pdata,
+				wrap                   = proxy,
+				flags                  = initFlags,
+				score                  = initScore,
+				externalChecked        = false,
+				checkFlags             = newCheckFlags(),
+				isFriend               = Common.IsFriend and Common.IsFriend(ent, true) or false,
+				lastUpdate             = curTick,
+				lastScoreDecay         = now,
+				autoPrioritySusApplied = false,
+				wasDormant             = ent:IsDormant(),
+			}
+			activeSet[id]    = state
+			anyNew           = true
+			DirtySystem.MarkDirty(id,
+				DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
+			applyAutoPriority(state, ent)
+		else
+			-- Existing player — refresh pdata fields in-place (zero allocation)
+			local pdata       = state.pdata
+			pdata._index      = ent:GetIndex()
+			pdata.isAlive     = ent:IsAlive()
+			pdata.isDormant   = ent:IsDormant()
+			pdata._teamNum    = ent:GetTeamNumber()
+
+			local mfFlags     = ent:GetPropInt("m_fFlags") or 0
+			pdata.flags       = mfFlags
+			pdata.onGround    = (mfFlags & 1) ~= 0
+			pdata.velocity    = ent:EstimateAbsVelocity()
+			pdata.viewOffset  = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
+			pdata.simTime     = ent:GetPropFloat("m_flSimulationTime")
+
+			-- Update proxy slot index (handles reconnect/team switch)
+			state.wrap.index  = ent:GetIndex()
+			state.entityIndex = ent:GetIndex()
+			state.lastUpdate  = curTick
+
+			-- Lazy score decay
+			if state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
+				local elapsed = now - (state.lastScoreDecay or now)
+				if elapsed >= SCORE_DECAY_INTERVAL then
+					local rate = 0
+					if (state.flags & Constants.Flags.HIGH_RISK) ~= 0 then
+						rate = SCORE_DECAY_HIGH_RISK
+					elseif (state.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
+						rate = SCORE_DECAY_SUSPICIOUS
 					end
-				else
-					-- Update PlayerData and WrappedPlayer for this tick
-					state.pdata      = PlayerData.ForEntity(ent) or state.pdata
-					state.wrap       = WrappedPlayer.FromEntity(ent) or state.wrap
-					state.lastUpdate = curTick
+					if rate > 0 then
+						state.score = math.max(0, state.score - rate * elapsed)
+						if state.score < Constants.Threshold.SUSPICIOUS then
+							state.flags = (state.flags & ~Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
+						elseif state.score < Constants.Threshold.HIGH_RISK then
+							state.flags = (state.flags | Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
+						else
+							state.flags = state.flags | Constants.Flags.SUSPICIOUS | Constants.Flags.HIGH_RISK
+						end
+					end
+					state.lastScoreDecay = now
 				end
 			end
 		end
+
+		::nextEnt::
 	end
 
-	local removedAny = false
-	for id, state in pairs(activeSet) do
-		if seenTickByID[id] ~= curTick then
-			state.current = nil
+	-- Push completed map to WrappedPlayer upvalue and legacy cache
+	WrappedPlayer._SetTickEntities(tickMap)
+	TickEntityCache.RefreshTick(curTick, liveEnts)
+
+	-- Prune disconnected players
+	for id in pairs(activeSet) do
+		if not seenIDs[id] then
 			Events.Publish("OnPlayerRemoved", id, "missing_from_findbyclass")
 			activeSet[id] = nil
-			removedAny = true
+			anyRemoved = true
 		end
 	end
 
-	if removedAny then
-		markDirty()
+	if anyNew or anyRemoved then
+		arrDirty = true
 	end
 end
 
----Get or create active state for a player (CreateMove / detector path)
----Uses lazy PlayerData - entity INDEX stored, never entity reference
+-- ── Fallback Get() by entity (Main.lua hot loop uses GetActiveTable directly) ─
+
 ---@param ply Entity
 ---@return table|nil
 function PlayerCache.Get(ply)
-	if not ply or not ply:IsValid() then
-		return nil
-	end
-
+	if not ply or not ply:IsValid() then return nil end
 	local steamID = Common.GetSteamID64(ply)
-	if not steamID then
-		return nil
-	end
-
-	local id = tostring(steamID)
-	local curTick = globals.TickCount()
-
-	if not activeSet[id] then
-		local dbEntry   = G.Database and G.Database.GetCheater(id) or nil
-		local initFlags = dbEntry and dbEntry.Flags or Constants.Flags.NONE
-		local initScore = dbEntry and dbEntry.Score or 0
-
-		-- Create lazy PlayerData - stores INDEX only, never entity reference
-		local pdata     = PlayerData.ForEntity(ply)
-		if not pdata then
-			return nil
-		end
-
-		activeSet[id] = {
-			id                     = id,
-			entityIndex            = ply:GetIndex(), -- Store INDEX only
-			pdata                  = pdata, -- Lazy data container (auto-caches per tick)
-			wrap                   = WrappedPlayer.FromEntity(ply),
-			flags                  = initFlags,
-			score                  = initScore,
-			externalChecked        = false,
-			checkFlags             = newCheckFlags(),
-			isFriend               = Common.IsFriend and Common.IsFriend(ply, true) or false,
-			lastUpdate             = curTick,
-			lastScoreDecay         = globals.RealTime(),
-			autoPrioritySusApplied = false,
-		}
-		markPlayerDirty(id, DirtySystem.FLAGS.CONNECTED | DirtySystem.FLAGS.SCORE | DirtySystem.FLAGS.FLAGS)
-
-		applyAutoPriority(activeSet[id], ply)
-	else
-		-- Refresh PlayerData and WrappedPlayer for current tick
-		local state      = activeSet[id]
-		state.pdata      = PlayerData.ForEntity(ply) or state.pdata
-		state.wrap       = WrappedPlayer.FromEntity(ply) or state.wrap
-		state.lastUpdate = curTick
-	end
-
-	-- Lazy score decay: apply elapsed-time decay periodically
-	local state = activeSet[id]
-	if not state.checkFlags then
-		state.checkFlags = newCheckFlags()
-	end
-	local now = globals.RealTime()
-	local lastDecay = state.lastScoreDecay or now
-	local elapsedSinceDecay = now - lastDecay
-
-	if elapsedSinceDecay >= SCORE_DECAY_INTERVAL and state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
-		local rate = 0
-		if (state.flags & Constants.Flags.HIGH_RISK) ~= 0 then
-			rate = SCORE_DECAY_HIGH_RISK
-		elseif (state.flags & Constants.Flags.SUSPICIOUS) ~= 0 then
-			rate = SCORE_DECAY_SUSPICIOUS
-		end
-		if rate > 0 then
-			state.score = math.max(0, state.score - rate * elapsedSinceDecay)
-			if state.score < Constants.Threshold.SUSPICIOUS then
-				state.flags = (state.flags & ~Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
-			elseif state.score < Constants.Threshold.HIGH_RISK then
-				state.flags = (state.flags | Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
-			else
-				state.flags = state.flags | Constants.Flags.SUSPICIOUS | Constants.Flags.HIGH_RISK
-			end
-		end
-		state.lastScoreDecay = now
-		applyAutoPriority(state, ply)
-	end
-
-	return state
+	if not steamID then return nil end
+	return activeSet[tostring(steamID)]
 end
 
----Get state by steamID64 string (HistoryManager / warp_dt path)
 ---@param id string
 ---@return table|nil
 function PlayerCache.GetByID(id)
 	return activeSet[id]
 end
 
----Remove a player from the active set (called on disconnect / heartbeat)
 ---@param id string
 function PlayerCache.Remove(id, reason)
 	local key = tostring(id)
-	local state = activeSet[key]
-	if state then
-		state.current = nil
-	end
-	-- Mark as disconnected before removal
-	markPlayerDirty(key, DirtySystem.FLAGS.DISCONNECTED)
+	DirtySystem.MarkDirty(key, DirtySystem.FLAGS.DISCONNECTED)
 	Events.Publish("OnPlayerRemoved", key, reason or "explicit_remove")
 	activeSet[key] = nil
-	markDirty()
+	arrDirty = true
 end
 
----Return the raw active state table (for central iteration)
 function PlayerCache.GetActiveTable()
 	return activeSet
 end
 
--- ── Heartbeat / score decay ───────────────────────────────────────────────────
--- Score decay is now lazy (applied in Get() using elapsed RealTime).
--- Invalid player eviction is handled lazily: rebuildArrays() skips invalid
--- entities; Get() returns nil for invalid entities; Remove() handles disconnects.
-
 function PlayerCache.ResetCheckedState()
 	for _, state in pairs(activeSet) do
 		state.externalChecked = false
-		state.itemChecked = false
-		state.profileChecked = false
-		state.checkFlags = newCheckFlags()
+		state.itemChecked     = false
+		state.profileChecked  = false
+		state.checkFlags      = newCheckFlags()
 	end
 end
 
 function PlayerCache.Cleanup()
-	for k in pairs(activeSet) do
-		activeSet[k] = nil
-	end
-	markDirty()
+	for k in pairs(activeSet) do activeSet[k] = nil end
+	arrDirty = true
 end
 
-function PlayerCache.SyncTick()
-	syncActivePlayersTick()
-end
-
--- ── View API (replaces FastPlayers) ──────────────────────────────────────────
+-- ── View API ──────────────────────────────────────────────────────────────────
 
 ---@param excludeLocal boolean?
----@return table  WrappedPlayer[]
+---@return table
 function PlayerCache.GetAll(excludeLocal)
 	rebuildArrays()
 	return excludeLocal and arrNoLocal or arrAll
 end
 
----@return table|nil  WrappedPlayer
+---@return table|nil
 function PlayerCache.GetLocal()
-	refreshLocal()
-	return cachedLocal
+	local raw = entities.GetLocalPlayer()
+	if not raw or not raw:IsValid() then return nil end
+	local id = tostring(Common.GetSteamID64(raw))
+	return activeSet[id] and activeSet[id].wrap or nil
 end
 
----@return table  WrappedPlayer[]
+---@return table
 function PlayerCache.GetTeammates()
 	rebuildArrays()
 	return arrTeam
 end
 
----@return table  WrappedPlayer[]
+---@return table
 function PlayerCache.GetEnemies()
 	rebuildArrays()
 	return arrEnemy
 end
 
----@param id string  steamID64 string
----@return table|nil  PlayerData
-function PlayerCache.GetBySteamID(id)
-	local state = activeSet[tostring(id)]
-	return state and state.pdata or nil
-end
-
----Get entity index for a player (safe - no entity reference)
----@param id string steamID64 string
----@return number|nil entity index
-function PlayerCache.GetEntityIndex(id)
-	local state = activeSet[tostring(id)]
-	return state and state.entityIndex or nil
-end
-
----@param id string  steamID64 string
+---@param id string
 ---@return boolean
 function PlayerCache.IsFriend(id)
 	local state = activeSet[tostring(id)]
 	return state ~= nil and state.isFriend == true
 end
 
+---@param id string
+---@return number|nil
+function PlayerCache.GetEntityIndex(id)
+	local state = activeSet[tostring(id)]
+	return state and state.entityIndex or nil
+end
+
 -- ── Priority subscriber ───────────────────────────────────────────────────────
 
 local RUNTIME_HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
-	assert(playerState, "PlayerCache priority subscriber: playerState missing")
-	assert(playerState.id, "PlayerCache priority subscriber: id missing")
-	-- Use PlayerData to safely get entity (only if on current tick)
-	local ent = playerState.pdata and PlayerData.GetEntity(playerState.pdata)
-	if not ent or not ent:IsValid() then
-		return
-	end
-
+	if not playerState or not playerState.id then return end
+	local ent = playerState.wrap and playerState.wrap:GetRawEntity()
+	if not ent or not ent:IsValid() then return end
 	if (playerState.flags & RUNTIME_HARD_FLAGS) ~= 0 then
 		pcall(playerlist.SetPriority, ent, 10)
 		playerState.autoPrioritySusApplied = false
 		return
 	end
-
 	applyAutoPriority(playerState, ent)
 end)
 
--- ── Periodic validation (every 1s) ───────────────────────────────────────────
--- Authoritative player list sync: get live players from FindByClass, remove
--- any orphaned entries in activeSet. Catches player rotation leaks that events miss.
+-- ── ValidateStates: kept as no-op stub (SyncTick handles eviction) ────────────
+function PlayerCache.ValidateStates() end
 
-local lastValidationTick = 0
-local VALIDATION_INTERVAL_TICKS = Constants.SecondsToTicks(1.0)
-
-function PlayerCache.ValidateStates()
-	local now = globals.TickCount()
-	if now - lastValidationTick < VALIDATION_INTERVAL_TICKS then
-		return
-	end
-	lastValidationTick = now
-
-	-- Get authoritative list of live players
-	local liveEntities = entities.FindByClass("CTFPlayer") or {}
-	local liveIDs = {}
-
-	for _, ent in pairs(liveEntities) do
-		if ent and ent:IsValid() then
-			local steamID = Common.GetSteamID64(ent)
-			if steamID then
-				liveIDs[tostring(steamID)] = true
-			end
-		end
-	end
-
-	-- Remove any activeSet entries not in the live list
-	local toRemove = {}
-	for id, state in pairs(activeSet) do
-		if not liveIDs[id] then
-			toRemove[#toRemove + 1] = id
-		end
-	end
-
-	for _, id in ipairs(toRemove) do
-		activeSet[id] = nil
-	end
-
-	if #toRemove > 0 then
-		markDirty()
-	end
-end
-
--- ── Lifecycle listeners (replaces FastPlayers' EventManager registrations) ────
-
-local function onLifecycleEvent(_event)
-	markDirty()
-end
+-- ── Lifecycle dirty-marking (keeps view arrays fresh) ────────────────────────
+local function onLifecycleEvent(_event) arrDirty = true end
 
 Events.Register("FireGameEvent", "PC_PlayerConnect", onLifecycleEvent, "player_connect_client")
 Events.Register("FireGameEvent", "PC_PlayerDisconnect", onLifecycleEvent, "player_disconnect")

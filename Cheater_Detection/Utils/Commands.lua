@@ -5,8 +5,8 @@ local ValveData = require("Cheater_Detection.data.valve_data")
 local ValveEmployees = require("Cheater_Detection.Database.ValveEmployees")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
-local MAC = require("Cheater_Detection.Database.MAC")
 local Config = require("Cheater_Detection.Utils.Config")
+local Common = require("Cheater_Detection.Utils.Common")
 
 local Commands = {}
 local registered = {}
@@ -60,6 +60,51 @@ local function setupSteamHistory()
 			return
 		end
 
+		-- Validate key format (32 hex characters)
+		-- Remove any whitespace that might have been copy-pasted
+		key = key:gsub("%s", "")
+		-- Check: exactly 32 hex characters (0-9, a-f, A-F)
+		if #key ~= 32 or not key:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$") then
+			printc(255, 100, 100, 255, "[SteamHistory] Invalid API key format!")
+			printc(255, 150, 100, 255, "[SteamHistory] Key must be 32 hexadecimal characters (0-9, a-f)")
+			printc(200, 200, 200, 255, "[SteamHistory] Expected length: 32, got: " .. #key)
+			return
+		end
+		-- Normalize to lowercase for storage
+		key = key:lower()
+
+		-- Validate key by making a test API call
+		local testUrl = "https://steamhistory.net/api/sourcebans?key=" ..
+			key .. "&shouldkey=0&steamids=76561197960287930"
+		local valid = false
+		local errMsg = nil
+
+		-- Use pcall to handle any HTTP errors gracefully
+		local ok, body = pcall(http.Get, testUrl)
+		if not ok or type(body) ~= "string" or body == "" then
+			errMsg = "API request failed (no response)"
+		else
+			-- Check for HTML error pages
+			if body:match("^%s*<") or body:lower():find("<html", 1, true) then
+				errMsg = "Invalid API key (authentication failed)"
+			else
+				-- Try to parse JSON
+				local jsonOk, decoded = pcall(Common.Json.decode, body)
+				if jsonOk and type(decoded) == "table" and decoded.response ~= nil then
+					valid = true
+				else
+					errMsg = "Invalid API response (key may be invalid)"
+				end
+			end
+		end
+
+		if not valid then
+			printc(255, 100, 100, 255, "[SteamHistory] API key validation failed!")
+			printc(255, 150, 100, 255, "[SteamHistory] " .. tostring(errMsg or "Unknown error"))
+			printc(200, 200, 200, 255, "[SteamHistory] Check your key at: https://steamhistory.net")
+			return
+		end
+
 		shell.ApiKey = key
 		shell.Enable = true -- Enable it automatically when key is set
 		-- SteamHistory.IsEnabled() uses Scanner.SteamHistory as the runtime gate.
@@ -75,7 +120,7 @@ local function setupSteamHistory()
 			Config.CreateCFG()
 		end
 
-		printc(0, 255, 140, 255, "[SteamHistory] API key stored and module enabled!")
+		printc(0, 255, 140, 255, "[SteamHistory] API key validated and stored!")
 	end)
 
 	Commands.Register("steamhistory_status", function(_args)
@@ -95,157 +140,6 @@ local function setupSteamHistory()
 end
 
 setupSteamHistory()
-
-local function setupMAC()
-	local function setMacApiKey(key)
-		G.Menu = G.Menu or {}
-		G.Menu.Scanner = G.Menu.Scanner or {}
-		G.Menu.Misc = G.Menu.Misc or {}
-		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
-
-		if type(key) == "string" then
-			key = key:match("^%s*(.-)%s*$")
-		end
-		if not key or key == "" then
-			printc(255, 100, 100, 255, "[MAC] Usage: mac_key <api_key>")
-			return
-		end
-
-		G.Menu.Scanner.MAC = true
-		local ok, err = MAC.SetApiKey(key)
-		if not ok then
-			printc(255, 100, 100, 255, "[MAC] Invalid API key: " .. tostring(err))
-			return
-		end
-
-		if Config and Config.CreateCFG then
-			Config.CreateCFG()
-		end
-
-		printc(0, 255, 140, 255, "[MAC] API key stored and scanner enabled")
-	end
-
-	Commands.Register("mac", function(args)
-		local key = args and args[1] or nil
-		G.Menu = G.Menu or {}
-		G.Menu.Scanner = G.Menu.Scanner or {}
-		G.Menu.Misc = G.Menu.Misc or {}
-		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
-
-		if type(key) == "string" then
-			key = key:match("^%s*(.-)%s*$")
-		end
-
-		if key == "off" or key == "disable" then
-			G.Menu.Scanner.MAC = false
-			if Config and Config.CreateCFG then
-				Config.CreateCFG()
-			end
-			printc(200, 200, 200, 255, "[MAC] Scanner disabled")
-			return
-		end
-
-		if key == "clear" or key == "none" or key == "nokey" then
-			G.Menu.Scanner.MAC = true
-			if MAC and MAC.ClearApiKey then
-				MAC.ClearApiKey()
-			end
-			if Config and Config.CreateCFG then
-				Config.CreateCFG()
-			end
-			printc(0, 255, 140, 255, "[MAC] API key cleared; scanner enabled in no-key mode")
-			return
-		end
-
-		if not key or key == "" then
-			G.Menu.Scanner.MAC = true
-			if MAC and MAC.ClearApiKey then
-				MAC.ClearApiKey()
-			end
-			if Config and Config.CreateCFG then
-				Config.CreateCFG()
-			end
-			printc(0, 255, 140, 255, "[MAC] Scanner enabled (no API key mode)")
-			printc(200, 200, 200, 255, "[MAC] Public cheater lists come from Auto-Sync Databases")
-			printc(100, 220, 255, 255, "[MAC] Optional: mac <api_key> to set key, mac clear to remove key")
-			return
-		end
-
-		G.Menu.Scanner.MAC = true
-
-		local ok, err = MAC.SetApiKey(key)
-		if not ok then
-			printc(255, 100, 100, 255, "[MAC] Invalid API key: " .. tostring(err))
-			return
-		end
-
-		if Config and Config.CreateCFG then
-			Config.CreateCFG()
-		end
-
-		printc(0, 255, 140, 255, "[MAC] API key stored and scanner enabled")
-	end)
-
-	Commands.Register("mac_key", function(args)
-		setMacApiKey(args and args[1] or nil)
-	end)
-
-	Commands.Register("mb", function(args)
-		setMacApiKey(args and args[1] or nil)
-	end)
-
-	Commands.Register("mac_url", function(args)
-		local url = args and args[1] or nil
-		if not url or url == "" then
-			local currentURL = MAC and MAC.GetBaseURL and MAC.GetBaseURL() or "unknown"
-			printc(100, 220, 255, 255, "[MAC] Usage: mac_url <base_url>")
-			printc(255, 200, 120, 255, "[MAC] Endpoint should expose mac/user/v1 (client-backend API)")
-			printc(200, 200, 200, 255, "[MAC] Current URL: " .. tostring(currentURL))
-			return
-		end
-
-		G.Menu = G.Menu or {}
-		G.Menu.Scanner = G.Menu.Scanner or {}
-		G.Menu.Scanner.MAC = true
-		G.Menu.Misc = G.Menu.Misc or {}
-		G.Menu.Misc.MAC = G.Menu.Misc.MAC or {}
-
-		local ok, err = MAC.SetBaseURL(url)
-		if not ok then
-			printc(255, 100, 100, 255, "[MAC] Invalid URL: " .. tostring(err))
-			return
-		end
-
-		if Config and Config.CreateCFG then
-			Config.CreateCFG()
-		end
-
-		printc(0, 255, 140, 255, "[MAC] URL stored and scanner enabled: " .. tostring(MAC.GetBaseURL()))
-	end)
-
-	Commands.Register("mac_status", function(_args)
-		local scannerEnabled = G.Menu and G.Menu.Scanner and G.Menu.Scanner.MAC == true
-		local baseURL = MAC and MAC.GetBaseURL and MAC.GetBaseURL() or "unknown"
-		local apiKey = MAC and MAC.GetApiKey and MAC.GetApiKey() or nil
-		local status = MAC and MAC.GetStatusText and MAC.GetStatusText() or "MAC unavailable"
-
-		printc(100, 220, 255, 255, "[MAC] Status:")
-		printc(200, 200, 200, 255, string.format("  scannerEnabled : %s", tostring(scannerEnabled)))
-		printc(200, 200, 200, 255, string.format("  baseURL        : %s", tostring(baseURL)))
-		printc(200, 200, 200, 255,
-			string.format("  hasApiKey      : %s", tostring(type(apiKey) == "string" and apiKey ~= "")))
-		printc(200, 200, 200, 255, string.format("  moduleStatus   : %s", tostring(status)))
-	end)
-
-	Commands.Register("mac_rescan", function(_args)
-		if MAC and MAC.QueueRescan then
-			MAC.QueueRescan()
-			printc(0, 200, 255, 255, "[MAC] Rescan queued")
-		end
-	end)
-end
-
-setupMAC()
 
 local function setupDiagnostics()
 	Commands.Register("valve_group_dump", function(_args)
