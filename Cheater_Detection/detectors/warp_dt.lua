@@ -189,7 +189,7 @@ function WarpDT.ProcessPlayer(pState)
 		local now = globals.RealTime()
 		if (now - data.lastEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
 			data.lastEvidenceTime = now
-			Evidence.AddEvidence(id, "double_tap", weight)
+			Evidence.AddEvidence(id, "warp_dt", weight)
 			if isDebug then
 				print(string.format("[DoubleTap] %s burst after dmg (delay=%d ticks, %d ticks) → evidence +%.1f",
 					id, elapsedTicks, burstAmount, weight))
@@ -231,7 +231,7 @@ local function onPlayerHurt(event)
 		local now = globals.RealTime()
 		if (now - data.lastEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
 			data.lastEvidenceTime = now
-			Evidence.AddEvidence(attackerID, "double_tap", weight)
+			Evidence.AddEvidence(attackerID, "warp_dt", weight)
 			if Common.IsLogCategoryEnabled("Warp/DT") then
 				local damage = event:GetInt("damageamount") or event:GetInt("damage") or 0
 				print(string.format("[DoubleTap] %s dmg after burst (delay=%d ticks, dmg=%d) → evidence +%.1f",

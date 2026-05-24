@@ -178,7 +178,7 @@ local function IsDatabaseCheaterRecord(entry)
 	end
 
 	local flags = tonumber(entry.Flags or 0) or 0
-	local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.VAC_BANNED |
+	local cheaterMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED |
 		Constants.Flags.COMM_BANNED
 	if (flags & cheaterMask) == 0 then
 		return false

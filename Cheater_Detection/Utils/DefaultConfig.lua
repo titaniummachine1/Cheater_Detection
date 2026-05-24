@@ -17,7 +17,8 @@ local Default_Config = {
 	},
 
 	Advanced = {
-		Evidence_Tolerance = 15,            -- Evidence score threshold to mark as cheater (lowered for testing)
+		SuspicionThreshold = 30,            -- Evidence percent needed to mark suspicious
+		Evidence_Tolerance = 85,            -- Evidence percent needed to mark cheater
 		AutoPriority = true,
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
@@ -61,7 +62,6 @@ local Default_Config = {
 				Console = true,
 			},
 		},
-		SuspicionThreshold = 30, -- Only notify above this %
 	},
 
 	Misc = {

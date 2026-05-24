@@ -120,7 +120,10 @@ local function OnStateChange(playerState, reason)
 	local isHard = isCheater or isValve or isVacBanned or isCommBanned
 
 	if not isHard then
-		local minScore = type(cfg.SuspicionThreshold) == "number" and cfg.SuspicionThreshold or 30
+		local adv = G.Menu and G.Menu.Advanced or nil
+		local minScore = type(adv and adv.SuspicionThreshold) == "number" and adv.SuspicionThreshold
+			or type(cfg.SuspicionThreshold) == "number" and cfg.SuspicionThreshold
+			or 30
 		if score < minScore then
 			return
 		end

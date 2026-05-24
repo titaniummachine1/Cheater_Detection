@@ -142,8 +142,11 @@ local function DrawMenu()
 		TimMenu.NextLine()
 	elseif G.Menu.currentTab == "Advanced" then
 		TimMenu.BeginSector("Evidence System")
+		Advanced.SuspicionThreshold =
+			TimMenu.Slider("Suspicious Threshold %", Advanced.SuspicionThreshold or Notifications.SuspicionThreshold or 30, 0, 100, 1)
+		TimMenu.NextLine()
 		Advanced.Evidence_Tolerance =
-			TimMenu.Slider("Evidence Threshold %", Advanced.Evidence_Tolerance or 50, 0, 100, 1)
+			TimMenu.Slider("Cheater Threshold %", Advanced.Evidence_Tolerance or 85, 0, 100, 1)
 		TimMenu.NextLine()
 		Advanced.AutoPriority = TimMenu.Checkbox("Auto Priority", Advanced.AutoPriority == true)
 		TimMenu.NextLine()
@@ -218,10 +221,6 @@ local function DrawMenu()
 			N.Channels = N.Channels
 				or { LocalChat = true, PublicChat = false, Party = false, Toast = true, Console = true }
 			EditNotificationChannels("Detection channels", N.Channels)
-			TimMenu.Text("Suspicion Filtering:")
-			TimMenu.NextLine()
-			N.SuspicionThreshold = TimMenu.Slider("Alert Threshold %", N.SuspicionThreshold or 30, 5, 95, 5)
-			TimMenu.NextLine()
 			N.SuspicionCooldown = TimMenu.Slider("Spam Cooldown (s)", N.SuspicionCooldown or 10, 5, 120, 5)
 			TimMenu.NextLine()
 			TimMenu.EndSector()

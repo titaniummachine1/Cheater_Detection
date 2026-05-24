@@ -8,8 +8,10 @@ client.Command("clear", true)
 local G = require("Cheater_Detection.Utils.Globals")
 local Config = require("Cheater_Detection.Utils.Config")
 local Events = require("Cheater_Detection.Core.Events")
+Events.Reset()
 local Constants = require("Cheater_Detection.Core.constants")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local Evidence = require("Cheater_Detection.Core.Evidence_system")
 local Scheduler = require("Cheater_Detection.Core.scheduler")
 local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 local SteamLookup = require("Cheater_Detection.services.steam_lookup")
@@ -164,7 +166,6 @@ end
 
 -- [[ Initialization ]]
 local function Init()
-	Events.Reset()
 	JoinNotifications.Init()
 	NotificationService.Init()
 	BridgePrompt.Init()
@@ -395,6 +396,7 @@ local function OnDraw()
 			TickProfiler.SetEnabled(true)
 		end
 	end
+	Evidence.ApplyDecay()
 	Scheduler.Tick()
 	Visuals.DrawTags()
 	BridgePrompt.Draw()
