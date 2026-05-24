@@ -194,10 +194,7 @@ local function analyseYawHistoryFromManager(id)
 	local history       = HistoryManager.GetPlayerHistory(id)
 	if not history then return nil, nil, nil, nil, nil, false, 0 end
 
-	-- ipairs: history[1] = current tick, history[2] = 1 tick ago, etc.
-	for i, playerData in ipairs(history) do
-		if i > YAW_HISTORY_SIZE then break end
-
+	HistoryManager.ForEachRecordNewestFirst(history, YAW_HISTORY_SIZE, function(_, playerData)
 		local ang     = playerData[HistoryManager.Fields.Angles]
 		local simTime = playerData[HistoryManager.Fields.SimulationTime]
 
@@ -231,7 +228,7 @@ local function analyseYawHistoryFromManager(id)
 				lastRecord = { yaw = yaw, simTime = simTime }
 			end
 		end
-	end
+	end)
 
 	if collected == 0 then return nil, nil, nil, nil, nil, false, 0 end
 

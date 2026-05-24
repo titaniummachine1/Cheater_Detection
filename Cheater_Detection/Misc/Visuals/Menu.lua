@@ -143,7 +143,8 @@ local function DrawMenu()
 	elseif G.Menu.currentTab == "Advanced" then
 		TimMenu.BeginSector("Evidence System")
 		Advanced.SuspicionThreshold =
-			TimMenu.Slider("Suspicious Threshold %", Advanced.SuspicionThreshold or Notifications.SuspicionThreshold or 30, 0, 100, 1)
+			TimMenu.Slider("Suspicious Threshold %",
+				Advanced.SuspicionThreshold or Notifications.SuspicionThreshold or 30, 0, 100, 1)
 		TimMenu.NextLine()
 		Advanced.Evidence_Tolerance =
 			TimMenu.Slider("Cheater Threshold %", Advanced.Evidence_Tolerance or 85, 0, 100, 1)

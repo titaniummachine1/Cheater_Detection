@@ -122,10 +122,12 @@ function WarpDT.ProcessPlayer(pState)
 	if not history then return end
 
 	local simTicks = {}
-	for _, record in ipairs(history) do
+	HistoryManager.ForEachRecordNewestFirst(history, nil, function(_, record)
 		local simTime = record[HistoryManager.Fields.SimulationTime]
-		if simTime then simTicks[#simTicks + 1] = timeToTicks(simTime) end
-	end
+		if simTime then
+			simTicks[#simTicks + 1] = timeToTicks(simTime)
+		end
+	end)
 	if #simTicks < 10 then return end
 
 	local deltaTicks = {}

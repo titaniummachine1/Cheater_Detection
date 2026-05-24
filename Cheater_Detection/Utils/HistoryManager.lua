@@ -140,6 +140,33 @@ function HistoryManager.GetPlayerHistory(steamID)
 	return playerHistories[tostring(steamID)]
 end
 
+-- Circular buffer index: offset 0 = newest (_head), 1 = one tick ago, etc.
+local function recordIndexForOffset(history, offset)
+	if not history or offset < 0 or offset >= history._count then
+		return nil
+	end
+	local idx = history._head - offset
+	while idx < 1 do
+		idx = idx + maxRetentionTicks
+	end
+	return idx
+end
+
+-- Walk records newest-first. callback(offset, record) — stop if it returns false.
+function HistoryManager.ForEachRecordNewestFirst(history, maxRecords, callback)
+	if not history or not callback or history._count == 0 then
+		return
+	end
+	local limit = math.min(history._count, maxRecords or history._count)
+	for offset = 0, limit - 1 do
+		local idx = recordIndexForOffset(history, offset)
+		local record = idx and history[idx]
+		if record and callback(offset, record) == false then
+			return
+		end
+	end
+end
+
 -- NEW API: Get specific record from player history by offset
 -- offset=0: current tick, offset=1: 1 tick ago, etc.
 function HistoryManager.GetPlayerRecordAt(steamID, offset)
@@ -151,10 +178,8 @@ function HistoryManager.GetPlayerRecordAt(steamID, offset)
 		return nil
 	end
 
-	-- Convert offset to array index
-	-- history[1] = current, history[2] = 1 tick ago
-	local idx = offset + 1
-	if idx > history._count then
+	local idx = recordIndexForOffset(history, offset)
+	if not idx then
 		return nil
 	end
 

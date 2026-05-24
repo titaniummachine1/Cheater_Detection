@@ -113,6 +113,19 @@ local function getCategory(detectionName)
 	return categoryByDetection[detectionName] or "Movement"
 end
 
+local function getCategoryDecayRate(category)
+	assert(category, "getCategoryDecayRate: category missing")
+	local rates = Evidence.Config.DecayRates
+	if category == "Aim" then
+		return (rates.Aim and rates.Aim.default) or 0
+	elseif category == "Exploit" then
+		return (rates.Exploit and rates.Exploit.default) or 0
+	elseif category == "Movement" then
+		return (rates.Movement and rates.Movement.default) or 0
+	end
+	return 0
+end
+
 local function getOrCreateEvidence(steamID)
 	if not evidenceStore[steamID] then
 		evidenceStore[steamID] = {
@@ -131,6 +144,21 @@ local function recalcTotalScore(evidence)
 	evidence.TotalScore = total
 end
 
+local function applyLazyDecayToReason(reason)
+	if not reason or reason.ManualDecay == true then
+		return
+	end
+	local now = globals.RealTime()
+	local elapsed = now - (reason.LastDecayTime or now)
+	if elapsed > 0 then
+		local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
+		if rate > 0 and reason.Weight > 0 then
+			reason.Weight = math.max(Evidence.Config.MinWeightFloor, reason.Weight - rate * elapsed)
+		end
+	end
+	reason.LastDecayTime = now
+end
+
 local function applyReasonOptions(reason, opts)
 	if not reason or not opts then
 		return
@@ -141,19 +169,6 @@ local function applyReasonOptions(reason, opts)
 	if opts.decayRate then
 		reason.DecayRate = opts.decayRate
 	end
-end
-
-local function getCategoryDecayRate(category)
-	category = category or "Movement"
-	local rates = Evidence.Config.DecayRates
-	if category == "Aim" then
-		return (rates.Aim and rates.Aim.default) or 0
-	elseif category == "Exploit" then
-		return (rates.Exploit and rates.Exploit.default) or 0
-	elseif category == "Movement" then
-		return (rates.Movement and rates.Movement.default) or 0
-	end
-	return 0
 end
 
 local function getMethodScoreCap(detectionName)
@@ -309,7 +324,8 @@ local function tryApplyAutoPriority(steamID, evidence)
 
 	if evidence.TotalScore < threshold then
 		Logger.Debug("Evidence",
-			string.format("Score %.1f below threshold %.1f, returning", evidence.TotalScore, threshold))
+			string.format("Score %.1f below threshold %.1f, clearing suspicion", evidence.TotalScore, threshold))
+		syncPlayerStateFromEvidence(steamID, evidence)
 		return
 	end
 
@@ -441,7 +457,6 @@ local function tryApplyAutoPriority(steamID, evidence)
 				end
 
 				-- Mark score as dirty so visuals update
-				local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 				DirtySystem.MarkDirty(steamID, "score")
 				DirtySystem.MarkDirty(steamID, "flags")
 				Logger.Info(
@@ -460,7 +475,6 @@ local function tryApplyAutoPriority(steamID, evidence)
 				Logger.Debug("Evidence", string.format("Setting wrap.score via flags field to %d", displayScore))
 
 				-- Mark score as dirty so visuals update
-				local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 				DirtySystem.MarkDirty(steamID, "score")
 				DirtySystem.MarkDirty(steamID, "flags")
 				-- Store detection reason for display - use actual method name
@@ -524,15 +538,37 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 		return
 	end
 
+	if detectionName == "fake_lag" then
+		local adv = G.Menu and G.Menu.Advanced
+		if not adv or adv.Choke ~= true then
+			return
+		end
+	elseif not isDetectionEnabled(detectionName) then
+		return
+	end
+
 	steamID = tostring(steamID)
 
-	-- Skip local player unless debug mode is enabled
-	if not G.Menu.Advanced.debug then
-		local localPlayer = PlayerCache.GetLocal()
-		if localPlayer then
-			local localSteamID = localPlayer:GetSteamID64()
-			if localSteamID and tostring(localSteamID) == steamID then
-				return -- Skip local player
+	-- Skip local player unless debug or active choke self-test (Choke detection on).
+	if detectionName == "fake_lag" then
+		local adv = G.Menu and G.Menu.Advanced
+		if adv and adv.Choke == true then
+			-- allow evidence while testing fakelag on yourself
+		elseif not Common.IsDebugEnabled() then
+			local localPlayer = entities.GetLocalPlayer()
+			if localPlayer and localPlayer:IsValid() then
+				local localSteamID = Common.GetSteamID64(localPlayer)
+				if localSteamID and steamID == tostring(localSteamID) then
+					return
+				end
+			end
+		end
+	elseif not Common.IsDebugEnabled() then
+		local localPlayer = entities.GetLocalPlayer()
+		if localPlayer and localPlayer:IsValid() then
+			local localSteamID = Common.GetSteamID64(localPlayer)
+			if localSteamID and steamID == tostring(localSteamID) then
+				return
 			end
 		end
 	end
@@ -557,17 +593,7 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 
 	-- Apply accumulated lazy decay before adding new weight
 	local reason = evidence.Reasons[detectionName]
-	if reason.ManualDecay ~= true then
-		local now = globals.RealTime()
-		local elapsed = now - (reason.LastDecayTime or now)
-		if elapsed > 0 then
-			local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
-			if rate > 0 then
-				reason.Weight = math.max(0, reason.Weight - rate * elapsed)
-			end
-		end
-		reason.LastDecayTime = now
-	end
+	applyLazyDecayToReason(reason)
 
 	-- Add weight
 	reason.Weight = math.max(0, reason.Weight + weight)
@@ -598,19 +624,23 @@ local function applyDecayToEvidence(steamID, evidence, now)
 	end
 
 	local changed = false
-	for _, reason in pairs(evidence.Reasons) do
+	for methodName, reason in pairs(evidence.Reasons) do
 		if reason.ManualDecay ~= true then
+			local oldWeight = reason.Weight
+			local now = globals.RealTime()
 			local elapsed = now - (reason.LastDecayTime or now)
 			if elapsed > 0 then
 				local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
+				if not isDetectionEnabled(methodName) then
+					rate = rate * 5.0
+				end
 				if rate > 0 and reason.Weight > 0 then
-					local oldWeight = reason.Weight
-					reason.Weight = math.max(0, reason.Weight - rate * elapsed)
-					if reason.Weight ~= oldWeight then
-						changed = true
-					end
+					reason.Weight = math.max(Evidence.Config.MinWeightFloor, reason.Weight - rate * elapsed)
 				end
 				reason.LastDecayTime = now
+			end
+			if reason.Weight ~= oldWeight then
+				changed = true
 			end
 		end
 	end
@@ -766,6 +796,29 @@ function Evidence.GetMethodWeight(steamID, detectionName)
 		return 0
 	end
 	return methodData.Weight or 0
+end
+
+--- Pause time-based decay while a detection is still actively firing (e.g. ongoing fakelag).
+---@param steamID string Player's SteamID64
+---@param detectionName string Detection method name
+function Evidence.HoldDecayForMethod(steamID, detectionName)
+	if not steamID or not detectionName then
+		return
+	end
+	if not isDetectionEnabled(detectionName) then
+		return
+	end
+
+	steamID = tostring(steamID)
+	local evidence = evidenceStore[steamID]
+	if not evidence or not evidence.Reasons then
+		return
+	end
+	local reason = evidence.Reasons[detectionName]
+	if not reason or reason.ManualDecay == true then
+		return
+	end
+	reason.LastDecayTime = globals.RealTime()
 end
 
 --- Get detailed evidence breakdown for a player

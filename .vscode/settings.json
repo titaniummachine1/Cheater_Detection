@@ -35,5 +35,6 @@
         "autoShowOutputPanel": "always"
       }
     ]
-  }
+  },
+  "stylua.targetReleaseVersion": "latest"
 }
