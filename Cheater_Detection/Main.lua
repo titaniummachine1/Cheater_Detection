@@ -1,4 +1,4 @@
-﻿--[[ Main.lua
+--[[ Main.lua
      New Core Entry Point for Cheater Detection Service.
 ]]
 client.Command("clear", true)
@@ -23,7 +23,7 @@ require("Cheater_Detection.Misc.Auto_Vote")
 require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
-local Fetcher             = require("Cheater_Detection.Database.Fetcher")
+local Fetcher = require("Cheater_Detection.Database.Fetcher")
 
 -- Combat event hub (must load before detectors so OnHitscanHit/OnFireBullets are available)
 require("Cheater_Detection.Core.CombatEvents")
@@ -252,7 +252,6 @@ local function OnCreateMove(cmd)
 	local enableChoke         = adv and adv.Choke == true
 	local enableCosmetics     = adv and adv.Cosmetics == true
 
-	local tagsEnabled         = mainMenu == nil or mainMenu.Cheater_Tags ~= false
 	local anyDetectorsEnabled = enableValveCheck
 		or enableSilent
 		or enableAntiAim
@@ -261,7 +260,7 @@ local function OnCreateMove(cmd)
 		or enableWarpDT
 		or enableChoke
 		or enableCosmetics
-	if not anyDetectorsEnabled and not tagsEnabled then
+	if not anyDetectorsEnabled then
 		TickProfiler.EndSection("CreateMove_Total")
 		return
 	end
@@ -395,9 +394,7 @@ local function OnDraw()
 	local profilerEnabled = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler == true
 	if sessionState.lastProfilerEnabled ~= profilerEnabled then
 		sessionState.lastProfilerEnabled = profilerEnabled
-		if profilerEnabled then
-			TickProfiler.SetEnabled(true)
-		end
+		TickProfiler.SetEnabled(profilerEnabled)
 	end
 	Evidence.ApplyDecay()
 	Scheduler.Tick()

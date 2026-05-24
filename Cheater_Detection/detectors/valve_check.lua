@@ -39,7 +39,6 @@ local lastProfileCheck = {}
 -- Track if Layer 1 logging has occurred for a player: id -> boolean
 local layer1Logged = {}
 local deferredQueue = {}
-local deferredSweepRequested = true
 local pendingBadgeProfileVerification = {}
 
 -- Track which players have been valve-checked this session (optimization)
@@ -54,10 +53,7 @@ local function queueDeferredCheck(id)
 	end
 end
 
-local function queueDeferredSweep()
-	-- Legacy - deferred checks now use DirtySystem
-	deferredSweepRequested = true
-end
+local function queueDeferredSweep() end
 
 -- Layer 2 deferred sweep: runs periodically to check players marked with CHECKS flag.
 -- Uses DirtySystem - only checks players explicitly marked as needing verification.

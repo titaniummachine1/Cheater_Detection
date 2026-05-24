@@ -970,10 +970,6 @@ function SilentAim.ProcessPlayer(playerState)
 		}
 	end
 	local pdata = playerData[id]
-	if pdata.lastSmallSnapDecay == nil then
-		pdata.lastSmallSnapDecay = 0
-	end
-
 	local curTick = globals.TickCount()
 
 
@@ -990,21 +986,17 @@ end
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerData[id]   = nil
 	shotAccuracy[id] = nil
-end)
-
-Events.Subscribe("OnPlayerRemoved", function(id)
-	playerData[id]   = nil
-	shotAccuracy[id] = nil
-end)
-
--- Flush stale fire-cache entries every disconnect to avoid index aliasing.
-Events.Subscribe("OnPlayerDisconnect", function(_id)
-	local curTick = globals.TickCount()
+	local curTick    = globals.TickCount()
 	for idx, entry in pairs(fireShotCache) do
 		if (curTick - entry.tick) > FIRE_CACHE_STALE_TICKS then
 			fireShotCache[idx] = nil
 		end
 	end
+end)
+
+Events.Subscribe("OnPlayerRemoved", function(id)
+	playerData[id]   = nil
+	shotAccuracy[id] = nil
 end)
 
 return SilentAim

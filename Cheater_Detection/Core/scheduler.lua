@@ -8,10 +8,40 @@ local HttpQueue = require("Cheater_Detection.services.http_queue")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")
 local ValveCheck = require("Cheater_Detection.detectors.valve_check")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local G = require("Cheater_Detection.Utils.Globals")
 
 local Scheduler = {}
 
 local lastTick = -1
+local lastIdleCacheSync = 0
+local IDLE_CACHE_SYNC_INTERVAL = 0.5
+
+local function detectorsNeedLiveCache()
+    local menu = G.Menu
+    local main = menu and menu.Main or nil
+    local adv = menu and menu.Advanced or nil
+    return (main and main.ValveCheck == true)
+        or (adv and adv.SilentAimbot == true)
+        or (adv and adv.AntiAim == true)
+        or (adv and adv.DuckSpeed == true)
+        or (adv and adv.Bhop == true)
+        or (adv and adv.Warp == true)
+        or (adv and adv.Choke == true)
+        or (adv and adv.Cosmetics == true)
+end
+
+local function syncPlayerCacheForMode()
+    if detectorsNeedLiveCache() then
+        PlayerCache.SyncTick()
+        return
+    end
+
+    local now = globals.RealTime()
+    if (now - lastIdleCacheSync) >= IDLE_CACHE_SYNC_INTERVAL then
+        lastIdleCacheSync = now
+        PlayerCache.SyncTick()
+    end
+end
 
 function Scheduler.Tick()
     local currentTick = globals.TickCount()
@@ -20,7 +50,7 @@ function Scheduler.Tick()
     end
     lastTick = currentTick
 
-    PlayerCache.SyncTick()
+    syncPlayerCacheForMode()
 
     -- Periodic player state validation (cleanup orphaned players)
     PlayerCache.ValidateStates()

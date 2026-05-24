@@ -177,7 +177,8 @@ local NOISE_BRACKET_MAX_DEG = 2.0
 local function analyseYawHistoryFromManager(id)
 	if not HistoryManager.IsInitialized() then return nil, nil, nil, nil, nil, false, 0 end
 
-	local tickInterval  = globals.TickInterval()
+	local tickInterval = globals.TickInterval()
+	if not tickInterval or tickInterval <= 0 then return nil, nil, nil, nil, nil, false, 0 end
 	local collected     = 0
 	local sumYawDelta   = 0.0
 	local sumChokeTicks = 0
@@ -282,6 +283,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then return end
+	if playerState.id:sub(1, 4) == "BOT_" then return end
 
 	local isDebug = Common.IsLogCategoryEnabled("AntiAim")
 	local pdata   = playerState.pdata
@@ -314,16 +316,14 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	local now = globals.RealTime()
 	applyPitchDecay(pitchState, now)
 	if isDebug then
-		local pitchStr = "nil"
-		local yawStr = "nil"
-		if pitch ~= nil then
-			pitchStr = string.format("%.3f", pitch)
+		local lastLog = pitchState.lastTickLogTime or 0
+		if (now - lastLog) >= 1.0 then
+			pitchState.lastTickLogTime = now
+			local pitchStr             = pitch ~= nil and string.format("%.3f", pitch) or "nil"
+			local yawStr               = yaw ~= nil and string.format("%.3f", yaw) or "nil"
+			print(string.format("[AntiAim][TICK] id=%s pitch=%s yaw=%s src=%s sim=%.3f",
+				tostring(playerState.id), pitchStr, yawStr, tostring(angleSource), simTime))
 		end
-		if yaw ~= nil then
-			yawStr = string.format("%.3f", yaw)
-		end
-		print(string.format("[AntiAim][TICK] id=%s pitch=%s yaw=%s src=%s sim=%.3f",
-			tostring(playerState.id), pitchStr, yawStr, tostring(angleSource), simTime))
 	end
 
 	-- ── 1. Invalid pitch detection ────────────────────────────────────────

@@ -183,7 +183,6 @@ function WarpDT.ProcessPlayer(pState)
 	end
 
 	-- Record burst tick for reverse correlation (damage after burst)
-	local curTick = globals.TickCount()
 	local data = getState(id)
 	data.lastBurstTick = curTick
 

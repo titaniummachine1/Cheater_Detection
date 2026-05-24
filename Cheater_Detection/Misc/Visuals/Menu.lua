@@ -175,11 +175,13 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Exploit Detection")
-		--Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection", Advanced.Choke == true)
 		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection (Experimental)", Advanced.Choke == true)
+		local ft = globals.AbsoluteFrameTime()
+		if ft and ft > 0 and (1.0 / ft) < 40 then
+			TimMenu.Text("(OFF: Low FPS!)")
+		end
 		TimMenu.NextLine()
 		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection (Experimental)", Advanced.Warp == true)
-		--TimMenu.NextLine()
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
 		Advanced.Cosmetics = TimMenu.Checkbox("Cosmetic Exploit Detection", Advanced.Cosmetics == true)

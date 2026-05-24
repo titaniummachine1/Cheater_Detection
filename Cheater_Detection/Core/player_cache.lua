@@ -252,18 +252,23 @@ function PlayerCache.SyncTick()
 			applyAutoPriority(state, ent)
 		else
 			-- Existing player — refresh pdata fields in-place (zero allocation)
-			local pdata       = state.pdata
-			pdata._index      = ent:GetIndex()
-			pdata.isAlive     = ent:IsAlive()
-			pdata.isDormant   = ent:IsDormant()
-			pdata._teamNum    = ent:GetTeamNumber()
+			local pdata      = state.pdata
+			pdata._index     = ent:GetIndex()
+			pdata.isAlive    = ent:IsAlive()
+			pdata.isDormant  = ent:IsDormant()
+			pdata._teamNum   = ent:GetTeamNumber()
 
-			local mfFlags     = ent:GetPropInt("m_fFlags") or 0
-			pdata.flags       = mfFlags
-			pdata.onGround    = (mfFlags & 1) ~= 0
-			pdata.velocity    = ent:EstimateAbsVelocity()
-			pdata.viewOffset  = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
-			pdata.simTime     = ent:GetPropFloat("m_flSimulationTime")
+			local mfFlags    = ent:GetPropInt("m_fFlags") or 0
+			pdata.flags      = mfFlags
+			pdata.onGround   = (mfFlags & 1) ~= 0
+			-- Only re-read Vector3 props when simTime advances (player isn't choking).
+			-- This avoids per-tick Vector3 allocations for choked/idle players.
+			local newSimTime = ent:GetPropFloat("m_flSimulationTime")
+			if newSimTime ~= pdata.simTime then
+				pdata.velocity   = ent:EstimateAbsVelocity()
+				pdata.viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
+				pdata.simTime    = newSimTime
+			end
 
 			-- Update proxy slot index (handles reconnect/team switch)
 			state.wrap.index  = ent:GetIndex()
@@ -281,6 +286,8 @@ function PlayerCache.SyncTick()
 						rate = SCORE_DECAY_SUSPICIOUS
 					end
 					if rate > 0 then
+						local prevScore = state.score
+						local prevFlags = state.flags
 						state.score = math.max(0, state.score - rate * elapsed)
 						local susThreshold = getSuspicionThreshold()
 						if state.score < susThreshold then
@@ -289,6 +296,12 @@ function PlayerCache.SyncTick()
 							state.flags = (state.flags | Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
 						else
 							state.flags = state.flags | Constants.Flags.SUSPICIOUS | Constants.Flags.HIGH_RISK
+						end
+						if state.score ~= prevScore then
+							DirtySystem.MarkDirty(id, "score")
+						end
+						if state.flags ~= prevFlags then
+							DirtySystem.MarkDirty(id, "flags")
 						end
 					end
 					state.lastScoreDecay = now

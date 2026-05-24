@@ -88,11 +88,6 @@ function Visuals.DrawTags()
 
 			local tagList = buildTagList(flags, score)
 			if #tagList > 0 then
-				-- DEBUG: Log when tags are being drawn for a player
-				if G.Menu.Advanced.debug and ent == pLocal then
-					-- print(string.format("[Visuals] Drawing %d tags for local player", #tagList))
-				end
-
 				local headPos = wrap:GetEyePos()
 				if headPos then
 					headPos = headPos + Vec3(0, 0, 15)

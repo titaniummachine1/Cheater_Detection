@@ -15,9 +15,9 @@ function bundleLua(entryPath) {
   return bundle(entryPath, {
     metadata: false,
     expressionHandler: (module, expression) => {
-      const start = expression.loc.start;
+      const loc = expression.loc && expression.loc.start;
       console.warn(
-        `WARNING: Non-literal require found in '${module.name}' at ${start.line}:${start.column}`
+        `WARNING: Non-literal require found in '${module.name}' at ${loc ? `${loc.line}:${loc.column}` : "unknown"}`
       );
     },
   });
@@ -77,6 +77,7 @@ function main() {
     process.exitCode = 0;
   } catch (err) {
     console.error(`[BundleAndDeploy] NOT DEPLOYED: ${err instanceof Error ? err.message : String(err)}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
     process.exitCode = 1;
   }
 }

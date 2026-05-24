@@ -50,13 +50,27 @@ local BURST_STALL_LOOKBACK        = 6                                      -- re
 local BURST_STALL_MIN_COUNT       = 2                                      -- require choke-then-release, not steady drift
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
 local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
+local MIN_FPS_FOR_DETECTION       = 40                                     -- below ~40 fps, frame gaps can exceed the 8-tick choke threshold (ticks/frame = tickrate/fps)
 
 local evidenceCooldowns           = {}                                     -- [id] = last globals.RealTime() evidence was added
 local consecutiveChokeCount       = {}                                     -- count consecutive large deltas for impulse detection
 local lastChokeDelta              = {}
 local debugSummaries              = {}
+local smoothedFrameTime           = 1 / 60
 
 -- ── helpers ────────────────────────────────────────────────────────────────
+local function isLocalFpsSufficient()
+	local ft = globals.AbsoluteFrameTime()
+	if ft and ft > 0 then
+		smoothedFrameTime = smoothedFrameTime * 0.9 + ft * 0.1
+	end
+	return (1.0 / smoothedFrameTime) >= MIN_FPS_FOR_DETECTION
+end
+
+function FakeLag.IsLowFps()
+	return (1.0 / smoothedFrameTime) < MIN_FPS_FOR_DETECTION
+end
+
 local function timeToTicks(time)
 	return math.floor(time / globals.TickInterval() + 0.5)
 end
@@ -276,19 +290,14 @@ end
 function FakeLag.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not isChokeDetectionEnabled() then return end
-	if not Common.IsConnectionStableForDetection() then return end
-
-	local pdata   = playerState.pdata
-	local isAlive = pdata.isAlive
-	if isAlive == nil or not isAlive then return end
 
 	local id = playerState.id
 	if id:sub(1, 4) == "BOT_" then return end
-	local localPlayer = entities.GetLocalPlayer()
-	local localId = localPlayer and localPlayer:IsValid() and tostring(Common.GetSteamID64(localPlayer)) or nil
-	if localId and id == localId and not Common.IsDebugEnabled() and not isChokeDetectionEnabled() then
-		return
-	end
+
+	if not isLocalFpsSufficient() then return end
+	if not Common.IsConnectionStableForDetection() then return end
+
+	if not playerState.pdata.isAlive then return end
 
 	local history = HistoryManager.GetPlayerHistory(id)
 	if not history then return end

@@ -966,29 +966,39 @@ local function onGameEvent(event)
 end
 
 local function onCreateMove()
+	local now = globals.RealTime()
+	if state.inactiveCreateMoveUntil and now < state.inactiveCreateMoveUntil then
+		return
+	end
+
 	local inServer = syncServerBoundaryState()
 	if not inServer then
+		state.inactiveCreateMoveUntil = now + 0.5
 		return
 	end
 
 	if not refreshEnabled() then
 		logInactiveReason(false)
+		state.inactiveCreateMoveUntil = now + 0.5
 		return
 	end
 
 	if state.temporarilyDisabled then
 		logInactiveReason(false)
+		state.inactiveCreateMoveUntil = now + 0.5
 		return
 	end
+
+	state.inactiveCreateMoveUntil = nil
 
 	if not state.initialQueued then
 		queueCurrentPlayers()
 		state.initialQueued = true
 	end
 
-	if globals.RealTime() - state.lastActiveSweepTime >= ACTIVE_SWEEP_INTERVAL then
+	if now - state.lastActiveSweepTime >= ACTIVE_SWEEP_INTERVAL then
 		queueCurrentPlayers()
-		state.lastActiveSweepTime = globals.RealTime()
+		state.lastActiveSweepTime = now
 	end
 
 	if state.scanning then
@@ -996,11 +1006,11 @@ local function onCreateMove()
 	end
 
 	-- Check if we are in cooldown
-	if globals.RealTime() < state.nextRetryTime then
+	if now < state.nextRetryTime then
 		return
 	end
 
-	if next(state.pending) and globals.RealTime() - state.lastBatchTime >= MIN_INTERVAL then
+	if next(state.pending) and now - state.lastBatchTime >= MIN_INTERVAL then
 		requestBatch()
 	end
 	maybeAnnounceScanComplete()
