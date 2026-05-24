@@ -230,7 +230,8 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 		return
 	end
 
-	local hardMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED | Constants.Flags.VALVE
+	local hardMask = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED |
+		Constants.Flags.VALVE
 	if (playerState.flags & hardMask) ~= 0 then
 		return
 	end
@@ -242,7 +243,7 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 	local oldScore = playerState.score or 0
 	local primaryMethod, onlyFakeLag = getPrimaryMethod(evidence)
 	local shouldMarkSuspicious = evidence.TotalScore >= threshold
-	local shouldMarkCheater = evidence.TotalScore >= cheaterThreshold and not onlyFakeLag
+	local shouldMarkCheater = evidence.TotalScore >= cheaterThreshold
 
 	-- Track active evidence to prevent double-decay in player_cache
 	if evidence.TotalScore > 0 then
@@ -508,6 +509,14 @@ end
 --- No-op kept for API compatibility – decay is now lazy (applied on AddEvidence/GetScore).
 local function applyDecayToEvidence(steamID, evidence, now)
 	if not evidence or not evidence.Reasons then
+		return false
+	end
+
+	-- Skip decay entirely for confirmed cheaters: the CHEATER flag cannot be
+	-- downgraded by score decay (syncPlayerStateFromEvidence guards against it),
+	-- so computing decay is wasted work once the flag is set.
+	local state = PlayerCache.GetByID(steamID)
+	if state and (state.flags & Constants.Flags.CHEATER) ~= 0 then
 		return false
 	end
 

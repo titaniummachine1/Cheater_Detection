@@ -28,7 +28,7 @@ local FakeLag                     = {}
 local MIN_FAKELAG_CHOKE_TICKS     = 4
 local FAKELAG_EVIDENCE_COOLDOWN_S = 1.0  -- was 2.0 — twice as many evidence refreshes
 local RECENT_CHOKE_SAMPLE_COUNT   = 16
-local STRONG_CHOKE_MIN_HIGH_TICKS = 8   -- was 10 — count 8+ tick gaps as choke
+local STRONG_CHOKE_MIN_HIGH_TICKS = 8    -- was 10 — count 8+ tick gaps as choke
 local STRONG_CHOKE_HIGH_RATIO     = 0.28 -- was 0.55 — ~half the window must be large gaps
 local RHYTHM_MIN_EVENTS           = 6    -- was 8 — faster rhythmic match
 local RHYTHM_CHECK_COUNT          = 16   -- only judge recent deltas (not the whole ring buffer)
@@ -41,18 +41,18 @@ local SUSTAINED_MIN_AVG_TICKS     = 8    -- average choke in that window (22-tic
 -- Rijin-derived: avg choke-tick threshold
 -- avg simtime gap >= 2 ticks across the window = fakelag signal
 local AVG_CHOKE_THRESHOLD         = 4.2
-local AVG_CHOKE_MIN_SAMPLES       = 4   -- require more samples for average calculation
-local AVG_CHOKE_EVIDENCE_W        = 3.0 -- was 1.5 — 2x evidence per trigger
-local BURST_CHOKE_MIN_TICKS       = 8   -- ignore normal single-tick jitter
-local BURST_CONFIRM_EVENTS        = 4   -- consecutive large deltas after a stall
-local BURST_STALL_MAX_TICKS       = 0   -- simtime frozen (0), not normal 1–2 tick stepping
-local BURST_STALL_LOOKBACK        = 6   -- recent samples that must include stalls
-local BURST_STALL_MIN_COUNT       = 2   -- require choke-then-release, not steady drift
+local AVG_CHOKE_MIN_SAMPLES       = 4                                      -- require more samples for average calculation
+local AVG_CHOKE_EVIDENCE_W        = 6.0                                    -- was 3.0 — doubled weight per trigger
+local BURST_CHOKE_MIN_TICKS       = 8                                      -- ignore normal single-tick jitter
+local BURST_CONFIRM_EVENTS        = 4                                      -- consecutive large deltas after a stall
+local BURST_STALL_MAX_TICKS       = 0                                      -- simtime frozen (0), not normal 1–2 tick stepping
+local BURST_STALL_LOOKBACK        = 6                                      -- recent samples that must include stalls
+local BURST_STALL_MIN_COUNT       = 2                                      -- require choke-then-release, not steady drift
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
 local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
 
-local evidenceCooldowns           = {}  -- [id] = last globals.RealTime() evidence was added
-local consecutiveChokeCount       = {}  -- count consecutive large deltas for impulse detection
+local evidenceCooldowns           = {}                                     -- [id] = last globals.RealTime() evidence was added
+local consecutiveChokeCount       = {}                                     -- count consecutive large deltas for impulse detection
 local lastChokeDelta              = {}
 local debugSummaries              = {}
 
@@ -320,8 +320,8 @@ function FakeLag.ProcessPlayer(playerState)
 		end
 	end
 
-	local now           = globals.RealTime()
-	local isDebug       = Common.IsLogCategoryEnabled("Choke")
+	local now     = globals.RealTime()
+	local isDebug = Common.IsLogCategoryEnabled("Choke")
 
 	if isDebug then
 		recordDebugSample(id, #deltaTicks, deltaTicks[1] or 0, now)

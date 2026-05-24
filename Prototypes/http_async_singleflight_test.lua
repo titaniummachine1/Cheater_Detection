@@ -1,10 +1,11 @@
 --[[
-HTTP async single-flight test.
+HTTP async single-flight test with exponential backoff.
 
 Purpose:
 - dispatch exactly one async request at a time
 - test one URL repeatedly with no parallelism
 - report empty/error-read/timeout outcomes
+- test exponential backoff on failures
 ]]
 
 local CONFIG = {
@@ -14,6 +15,10 @@ local CONFIG = {
     INTER_REQUEST_DELAY = 1.0,
     REQUEST_TIMEOUT = 12.0,
     CHECK_SYNC_BASELINE = true,
+    ENABLE_EXPONENTIAL_BACKOFF = true,
+    BACKOFF_BASE_DELAY = 1.0, -- seconds
+    BACKOFF_MAX_DELAY = 30.0, -- seconds
+    BACKOFF_MULTIPLIER = 2.0,
 }
 
 local State = {
@@ -34,6 +39,10 @@ local State = {
 
     baselineOk = 0,
     baselineError = 0,
+
+    -- Exponential backoff state
+    consecutiveFailures = 0,
+    backoffDelay = 0,
 }
 
 local function Log(message)
@@ -47,9 +56,17 @@ local function IsErrorReadPayload(data)
     return data:find("ERROR_READ:", 1, true) ~= nil
 end
 
+local function CalculateBackoffDelay(consecutiveFailures)
+    if not CONFIG.ENABLE_EXPONENTIAL_BACKOFF then
+        return CONFIG.INTER_REQUEST_DELAY
+    end
+    local delay = CONFIG.BACKOFF_BASE_DELAY * (CONFIG.BACKOFF_MULTIPLIER ^ consecutiveFailures)
+    return math.min(delay, CONFIG.BACKOFF_MAX_DELAY)
+end
+
 local function Finish(reason)
     Log(string.format(
-        "finish reason=%s sent=%d completed=%d ok=%d empty=%d error_read=%d timeout=%d dispatch_error=%d baseline_ok=%d baseline_error=%d",
+        "finish reason=%s sent=%d completed=%d ok=%d empty=%d error_read=%d timeout=%d dispatch_error=%d baseline_ok=%d baseline_error=%d consecutive_failures=%d max_backoff=%.1fs",
         tostring(reason),
         State.sent,
         State.completed,
@@ -59,7 +76,9 @@ local function Finish(reason)
         State.timeout,
         State.dispatchError,
         State.baselineOk,
-        State.baselineError
+        State.baselineError,
+        State.consecutiveFailures,
+        CalculateBackoffDelay(State.consecutiveFailures)
     ))
     State.isRunning = false
     State.inFlight = false
@@ -78,6 +97,7 @@ local function OnAsyncResponse(data)
     State.inFlight = false
     State.completed = State.completed + 1
 
+    local success = false
     if type(data) ~= "string" or data == "" then
         State.empty = State.empty + 1
         Log(string.format("result round=%d status=empty len=0", State.currentRound))
@@ -86,7 +106,20 @@ local function OnAsyncResponse(data)
         Log(string.format("result round=%d status=error_read len=%d body=%s", State.currentRound, #data, data))
     else
         State.ok = State.ok + 1
+        success = true
         Log(string.format("result round=%d status=ok len=%d", State.currentRound, #data))
+    end
+
+    -- Track consecutive failures for exponential backoff
+    if success then
+        State.consecutiveFailures = 0
+    else
+        State.consecutiveFailures = State.consecutiveFailures + 1
+        local backoffDelay = CalculateBackoffDelay(State.consecutiveFailures)
+        if backoffDelay > CONFIG.INTER_REQUEST_DELAY then
+            Log(string.format("backoff round=%d consecutive_failures=%d delay=%.1fs", State.currentRound,
+                State.consecutiveFailures, backoffDelay))
+        end
     end
 
     if State.sent >= CONFIG.REPEATS and not State.inFlight then
@@ -94,7 +127,8 @@ local function OnAsyncResponse(data)
         return
     end
 
-    State.nextActionAt = globals.RealTime() + CONFIG.INTER_REQUEST_DELAY
+    local delay = CalculateBackoffDelay(State.consecutiveFailures)
+    State.nextActionAt = globals.RealTime() + delay
 end
 
 local function RunSyncBaseline()
@@ -161,12 +195,20 @@ local function TickTimeout(now)
     State.completed = State.completed + 1
     Log(string.format("result round=%d status=timeout after=%.2fs", State.currentRound, now - State.startedAt))
 
+    -- Track consecutive failures for exponential backoff
+    State.consecutiveFailures = State.consecutiveFailures + 1
+    local backoffDelay = CalculateBackoffDelay(State.consecutiveFailures)
+    if backoffDelay > CONFIG.INTER_REQUEST_DELAY then
+        Log(string.format("backoff round=%d consecutive_failures=%d delay=%.1fs", State.currentRound,
+            State.consecutiveFailures, backoffDelay))
+    end
+
     if State.sent >= CONFIG.REPEATS and not State.inFlight then
         Finish("complete")
         return
     end
 
-    State.nextActionAt = now + CONFIG.INTER_REQUEST_DELAY
+    State.nextActionAt = now + backoffDelay
 end
 
 local function OnDraw()

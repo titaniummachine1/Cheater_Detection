@@ -21,7 +21,6 @@ local PlayerData                        = require("Cheater_Detection.Utils.Playe
 local HistoryManager                    = require("Cheater_Detection.Utils.HistoryManager")
 local PlayerCache                       = require("Cheater_Detection.Core.player_cache")
 local mathAbs                           = math.abs
-local HitscanInfo                       = require("Cheater_Detection.Utils.HitscanInfo")
 
 local SilentAim                         = {}
 
@@ -807,78 +806,34 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 end
 
-local function onDamageEvent(event)
-	local eventName = event:GetName()
-	if eventName ~= "player_hurt" then
-		return
-	end
-
+-- Consumes the pre-resolved hitscan hit event from Core/CombatEvents.lua.
+-- Entity lookup, SteamID resolution and weapon classification are already done.
+Events.Subscribe("OnHitscanHit", function(hit)
 	local menu = G.Menu
 	local adv = menu and menu.Advanced or nil
-	if not adv or adv.SilentAimbot ~= true then
-		return
-	end
+	if not adv or adv.SilentAimbot ~= true then return end
 
 	HistoryManager.NewTick()
 
-	local attackerUID = event:GetInt("attacker")
-	local victimUID = event:GetInt("userid")
-	if not attackerUID or not victimUID or attackerUID == victimUID then
-		if Common.IsLogCategoryEnabled("SilentAim") then
-			local now = globals.RealTime()
-			if canPrintFiltered(now) then
-				print(string.format("[SilentAim] player_hurt ignored (attacker=%s victim=%s)", tostring(attackerUID),
-					tostring(victimUID)))
-			end
-		end
-		return
-	end
+	local attackerEnt   = hit.attackerEnt
+	local victimEnt     = hit.victimEnt
+	local curTick       = hit.tickCount
+	local attackerID    = hit.attackerID
+	local victimID      = hit.victimID
+	local attackerUID   = hit.attackerUID
 
-	local attackerPly = entities.GetByUserID(attackerUID)
-	if not attackerPly or not attackerPly:IsValid() then
-		return
-	end
-
-	-- 1. Check weaponid from event (authoritative for hitscan vs projectile)
-	local curTick = globals.TickCount()
-	local attackerClass = attackerPly:GetPropInt("m_iClass")
-	local weaponID = event:GetInt("weaponid")
-	local weaponName = event.GetString and event:GetString("weapon") or nil
-
+	local attackerClass = attackerEnt:GetPropInt("m_iClass")
 	if attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
 		local lastTick = lastNonSniperTickByUserID[attackerUID] or -999999
-		if (curTick - lastTick) < NON_SNIPER_COOLDOWN_TICKS then
-			return
-		end
+		if (curTick - lastTick) < NON_SNIPER_COOLDOWN_TICKS then return end
 		lastNonSniperTickByUserID[attackerUID] = curTick
 	end
 
-	local isHitscan, weaponClass, weaponSpread, projType = HitscanInfo.Classify(attackerPly, weaponName, weaponID)
-	if not isHitscan then
-		return
-	end
-
-	local victimPly = entities.GetByUserID(victimUID)
-	if not victimPly or not victimPly:IsValid() then
-		return
-	end
-
-	if not Common.IsValidPlayer(attackerPly, nil, nil, nil) then
-		return
-	end
-	if not Common.IsValidPlayer(victimPly, nil, nil, nil) then
-		return
-	end
-
-	local attackerID = tostring(Common.GetSteamID64(attackerPly))
-	local victimID = tostring(Common.GetSteamID64(victimPly))
-	if not attackerID or not victimID then
-		return
-	end
+	if not Common.IsValidPlayer(attackerEnt, nil, nil, nil) then return end
+	if not Common.IsValidPlayer(victimEnt, nil, nil, nil) then return end
 
 	HistoryManager.MarkDamageDealt(attackerID)
 
-	-- Count this as a confirmed hit for accuracy tracking.
 	local acc = shotAccuracy[attackerID]
 	if acc then
 		acc.hit = acc.hit + 1
@@ -888,10 +843,7 @@ local function onDamageEvent(event)
 
 	local pdata = playerData[attackerID]
 	if not pdata then
-		pdata = {
-			shotPending = nil,
-			lastSmallSnapDecay = 0,
-		}
+		pdata = { shotPending = nil, lastSmallSnapDecay = 0 }
 		playerData[attackerID] = pdata
 	end
 	if pdata.lastSmallSnapDecay == nil then
@@ -900,53 +852,52 @@ local function onDamageEvent(event)
 
 	if pdata.shotPending and pdata.shotPending.shotTick < curTick then
 		local state = PlayerCache.GetByID(attackerID)
-		if state and state.wrap and attackerPly and attackerPly:IsValid() then
-			analyzePendingShot(state, attackerPly, pdata, pdata.shotPending, curTick)
+		if state and state.wrap and attackerEnt:IsValid() then
+			analyzePendingShot(state, attackerEnt, pdata, pdata.shotPending, curTick)
 		end
 		pdata.shotPending = nil
 	end
 	if not pdata.shotPending or pdata.shotPending.shotTick < curTick then
-		local weapon = attackerPly:GetPropEntity("m_hActiveWeapon")
+		local weapon = attackerEnt:GetPropEntity("m_hActiveWeapon")
 		local activeWeaponName = "unknown"
 		if weapon and weapon:IsValid() then
 			activeWeaponName = weapon:GetClass()
 		end
 
 		pdata.shotPending = {
-			shotTick = curTick,
-			victimID = victimID,
-			weaponID = weaponID,
-			weaponClass = weaponClass,
-			projType = projType,
-			weaponSpread = weaponSpread,
-			weaponName = activeWeaponName,
-			crit = (event:GetInt("crit") or 0) ~= 0,
-			minicrit = (event:GetInt("minicrit") or 0) ~= 0,
-			damage = event:GetInt("damageamount"),
-			victimHealthAfter = event:GetInt("health"),
-			shooterEyePos = nil,
-			victimEyePos = nil,
-			victimHeadPos = nil,
-			victimBodyPos = nil,
-			victimOrigin = nil,
+			shotTick          = curTick,
+			victimID          = victimID,
+			weaponID          = hit.weaponID,
+			weaponClass       = hit.weaponClass,
+			projType          = hit.projType,
+			weaponSpread      = hit.weaponSpread,
+			weaponName        = activeWeaponName,
+			crit              = hit.crit,
+			minicrit          = hit.minicrit,
+			damage            = hit.damage,
+			victimHealthAfter = hit.victimHealthAfter,
+			shooterEyePos     = nil,
+			victimEyePos      = nil,
+			victimHeadPos     = nil,
+			victimBodyPos     = nil,
+			victimOrigin      = nil,
 		}
 
-		-- Prefer exact eye position captured at fire time via CTEFireBullets.
-		-- Fall back to current entity state (1 tick late) if cache is absent or stale.
-		local fireEntry = fireShotCache[attackerPly:GetIndex()]
+		local attackerIdx = attackerEnt:GetIndex()
+		local fireEntry   = fireShotCache[attackerIdx]
 		if fireEntry and (curTick - fireEntry.tick) <= FIRE_CACHE_STALE_TICKS then
 			pdata.shotPending.shooterEyePos = fireEntry.eyePos
-			fireShotCache[attackerPly:GetIndex()] = nil
+			fireShotCache[attackerIdx] = nil
 		else
-			local origin = attackerPly:GetAbsOrigin()
-			local viewOffset = attackerPly:GetPropVector("localdata", "m_vecViewOffset[0]")
+			local origin     = attackerEnt:GetAbsOrigin()
+			local viewOffset = attackerEnt:GetPropVector("localdata", "m_vecViewOffset[0]")
 			if origin and viewOffset then
 				pdata.shotPending.shooterEyePos = origin + viewOffset
 			end
 		end
 
-		local vOrigin = victimPly:GetAbsOrigin()
-		local vViewOffset = victimPly:GetPropVector("localdata", "m_vecViewOffset[0]")
+		local vOrigin     = victimEnt:GetAbsOrigin()
+		local vViewOffset = victimEnt:GetPropVector("localdata", "m_vecViewOffset[0]")
 		if vOrigin then
 			pdata.shotPending.victimOrigin = vOrigin
 			if vViewOffset then
@@ -954,75 +905,43 @@ local function onDamageEvent(event)
 			end
 		end
 
-		local vHead = getHitboxCenter(victimPly, 1)
-		if vHead then
-			pdata.shotPending.victimHeadPos = vHead
-		end
-		local vBody = getHitboxCenter(victimPly, 4)
-		if vBody then
-			pdata.shotPending.victimBodyPos = vBody
-		end
+		local vHead = getHitboxCenter(victimEnt, 1)
+		if vHead then pdata.shotPending.victimHeadPos = vHead end
+		local vBody = getHitboxCenter(victimEnt, 4)
+		if vBody then pdata.shotPending.victimBodyPos = vBody end
 
 		if Common.IsLogCategoryEnabled("SilentAim") then
 			local now = globals.RealTime()
 			if canPrintRecorded(now) then
 				print(string.format(
 					"[SilentAim] shot recorded %s -> %s weapon=%s class=%s",
-					attackerID,
-					victimID,
-					tostring(weaponName),
-					tostring(weaponClass)
+					attackerID, victimID,
+					tostring(hit.weaponName), tostring(hit.weaponClass)
 				))
 			end
 		end
 	end
-end
+end)
 
-Events.Register("FireGameEvent", "CD_SilentAim_Event", onDamageEvent, "*")
-
--- CTEFireBullets fires on ProcessTempEntities at the exact tick the shot leaves the barrel.
--- We capture the shooter's true eye position here so onDamageEvent can use it instead of
--- the post-hoc estimate read from entity state during player_hurt (which is ~1 tick late).
-local function onProcessTempEntities(entEvtTable)
-	local curTick = globals.TickCount()
-	local localPlayer = entities.GetLocalPlayer()
-	if not localPlayer then return end
-
-	for ent, _ in pairs(entEvtTable) do
-		if ent:GetNetworkName() == "CTEFireBullets" then
-			local shooterIdx = ent:GetPropInt("m_iPlayer") + 1
-			if shooterIdx > 1 and shooterIdx ~= localPlayer:GetIndex() then
-				local shooter = entities.GetByIndex(shooterIdx)
-				if shooter and shooter:IsValid() and shooter:IsAlive() and not shooter:IsDormant() then
-					local origin = shooter:GetAbsOrigin()
-					local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]")
-					if origin and viewOffset then
-						local existing = fireShotCache[shooterIdx]
-						if existing then
-							existing.eyePos = origin + viewOffset
-							existing.tick   = curTick
-						else
-							fireShotCache[shooterIdx] = { eyePos = origin + viewOffset, tick = curTick }
-						end
-					end
-					-- Count hitscan shot fired: look up steamID for this entity index.
-					local shooterID = tostring(Common.GetSteamID64(shooter))
-					if shooterID and shooterID:match("^7656119%d+$") then
-						local acc = shotAccuracy[shooterID]
-						if acc then
-							acc.fired = acc.fired + 1
-						else
-							shotAccuracy[shooterID] = { fired = 1, hit = 0 }
-						end
-					end
-				end
-			end
-		end
+-- Consumes the pre-resolved fire-bullet event from Core/CombatEvents.lua.
+-- Populates fireShotCache with the exact shooter eye pos captured at fire time,
+-- and increments the per-player shots-fired accuracy counter.
+Events.Subscribe("OnFireBullets", function(fire)
+	local existing = fireShotCache[fire.shooterIdx]
+	if existing then
+		existing.eyePos = fire.eyePos
+		existing.tick   = fire.tickCount
+	elseif fire.eyePos then
+		fireShotCache[fire.shooterIdx] = { eyePos = fire.eyePos, tick = fire.tickCount }
 	end
-end
 
-callbacks.Unregister("ProcessTempEntities", "CD_SilentAim_FireBullets")
-callbacks.Register("ProcessTempEntities", "CD_SilentAim_FireBullets", onProcessTempEntities)
+	local acc = shotAccuracy[fire.shooterID]
+	if acc then
+		acc.fired = acc.fired + 1
+	else
+		shotAccuracy[fire.shooterID] = { fired = 1, hit = 0 }
+	end
+end)
 
 function SilentAim.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then

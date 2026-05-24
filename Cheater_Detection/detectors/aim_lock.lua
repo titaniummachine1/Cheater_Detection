@@ -5,7 +5,6 @@ local G = require("Cheater_Detection.Utils.Globals")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
-local HitscanInfo = require("Cheater_Detection.Utils.HitscanInfo")
 local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
 local AimLock = {}
@@ -94,65 +93,27 @@ local function ensurePlayerData(id)
 	return pdata
 end
 
-local function onDamageEvent(event)
+Events.Subscribe("OnHitscanHit", function(hit)
 	local menu = G.Menu
 	local adv = menu and menu.Advanced or nil
-	if not adv or adv.SilentAimbot ~= true then
-		return
-	end
+	if not adv or adv.SilentAimbot ~= true then return end
 
-	local attackerUID = event:GetInt("attacker")
-	local victimUID = event:GetInt("userid")
-	if not attackerUID or not victimUID or attackerUID == victimUID then
-		return
-	end
+	if not Common.IsValidPlayer(hit.attackerEnt, nil, nil, nil) then return end
+	if not Common.IsValidPlayer(hit.victimEnt, nil, nil, nil) then return end
 
-	local attackerPly = entities.GetByUserID(attackerUID)
-	if not attackerPly or not attackerPly:IsValid() then
-		return
-	end
-
-	local curTick = globals.TickCount()
-	local attackerClass = attackerPly:GetPropInt("m_iClass")
+	local attackerUID   = hit.attackerUID
+	local curTick       = hit.tickCount
+	local attackerClass = hit.attackerEnt:GetPropInt("m_iClass")
 	if attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
 		local lastTick = lastNonSniperTickByUserID[attackerUID] or -999999
-		if (curTick - lastTick) < NON_SNIPER_COOLDOWN_TICKS then
-			return
-		end
+		if (curTick - lastTick) < NON_SNIPER_COOLDOWN_TICKS then return end
 		lastNonSniperTickByUserID[attackerUID] = curTick
 	end
 
-	local weaponID = event:GetInt("weaponid")
-	local weaponName = event.GetString and event:GetString("weapon") or nil
-	local isHitscan = HitscanInfo.Classify(attackerPly, weaponName, weaponID)
-	if not isHitscan then
-		return
-	end
-
-	local victimPly = entities.GetByUserID(victimUID)
-	if not victimPly or not victimPly:IsValid() then
-		return
-	end
-
-	if not Common.IsValidPlayer(attackerPly, nil, nil, nil) then
-		return
-	end
-	if not Common.IsValidPlayer(victimPly, nil, nil, nil) then
-		return
-	end
-
-	local attackerID = tostring(Common.GetSteamID64(attackerPly))
-	local victimID = tostring(Common.GetSteamID64(victimPly))
-	if not attackerID or not victimID then
-		return
-	end
-
-	local pdata = ensurePlayerData(attackerID)
-	pdata.lastVictimID = victimID
+	local pdata          = ensurePlayerData(hit.attackerID)
+	pdata.lastVictimID   = hit.victimID
 	pdata.lastVictimTick = curTick
-end
-
-Events.Register("FireGameEvent", "CD_AimLock_Event", onDamageEvent, "player_hurt")
+end)
 
 function AimLock.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
@@ -174,7 +135,7 @@ function AimLock.ProcessPlayer(playerState)
 
 	local id = playerState.id
 	local playerdata = playerState.pdata
-	
+
 	-- Get entity safely (only valid for current tick)
 	local ply = PlayerData.GetEntity(playerdata)
 	if not ply or not ply:IsValid() then
@@ -204,7 +165,7 @@ function AimLock.ProcessPlayer(playerState)
 	if not victimEyePos then
 		return
 	end
-	
+
 	-- Get victim entity safely via PlayerData
 	local victimPdata = victimState and victimState.pdata
 	local victimEnt = victimPdata and PlayerData.GetEntity(victimPdata)

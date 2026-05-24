@@ -1,4 +1,4 @@
---[[ Main.lua
+﻿--[[ Main.lua
      New Core Entry Point for Cheater Detection Service.
 ]]
 client.Command("clear", true)
@@ -24,6 +24,9 @@ require("Cheater_Detection.Misc.Visuals.Menu")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
 local Fetcher             = require("Cheater_Detection.Database.Fetcher")
+
+-- Combat event hub (must load before detectors so OnHitscanHit/OnFireBullets are available)
+require("Cheater_Detection.Core.CombatEvents")
 
 -- Detectors
 local ValveCheck          = require("Cheater_Detection.detectors.valve_check")
@@ -449,7 +452,7 @@ end
 local function OnUnload()
 	print("[CD] Unloading system...")
 	engine.PlaySound("hl1/fvox/deactivated.wav")
-	-- Save config synchronously — fast io.open write, acceptable stutter on unload.
+	-- Save config synchronously â€” fast io.open write, acceptable stutter on unload.
 	if G.Menu then
 		Config.CreateCFG(G.Menu)
 	end
