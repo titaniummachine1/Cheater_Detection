@@ -223,6 +223,8 @@ local function getPrimaryMethod(evidence)
 end
 
 local function syncPlayerStateFromEvidence(steamID, evidence)
+	assert(steamID, "syncPlayerStateFromEvidence: steamID missing")
+	assert(evidence, "syncPlayerStateFromEvidence: evidence missing")
 	local playerState = PlayerCache.GetByID(steamID)
 	if not playerState then
 		return
@@ -242,28 +244,78 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 	local shouldMarkSuspicious = evidence.TotalScore >= threshold
 	local shouldMarkCheater = evidence.TotalScore >= cheaterThreshold and not onlyFakeLag
 
-	if shouldMarkCheater then
-		playerState.flags = (oldFlags | Constants.Flags.CHEATER) & ~Constants.Flags.SUSPICIOUS
-		playerState.score = 100
-	elseif shouldMarkSuspicious then
-		playerState.flags = oldFlags | Constants.Flags.SUSPICIOUS
-		playerState.score = math.max(Constants.Threshold.SUSPICIOUS, displayScore)
+	-- Track active evidence to prevent double-decay in player_cache
+	if evidence.TotalScore > 0 then
+		playerState.hasActiveEvidence = true
 	else
-		playerState.flags = oldFlags & ~Constants.Flags.SUSPICIOUS & ~Constants.Flags.HIGH_RISK
-		playerState.score = displayScore
+		playerState.hasActiveEvidence = nil
+	end
+
+	local newFlags = oldFlags
+	local newScore = displayScore
+
+	if shouldMarkCheater then
+		newFlags = (oldFlags | Constants.Flags.CHEATER) & ~Constants.Flags.SUSPICIOUS
+		newScore = 100
+	elseif shouldMarkSuspicious then
+		newFlags = oldFlags | Constants.Flags.SUSPICIOUS
+		newScore = math.max(1, displayScore) -- minimum 1% suspicion display for feedback
+	else
+		newFlags = oldFlags & ~Constants.Flags.SUSPICIOUS & ~Constants.Flags.HIGH_RISK
+		newScore = displayScore
 		evidence.AutoPriorityApplied = false
 	end
+
+	playerState.flags = newFlags
+	playerState.score = newScore
 	playerState.detectionReason = shouldMarkSuspicious and primaryMethod or nil
 
 	if playerState.score ~= oldScore then
 		DirtySystem.MarkDirty(steamID, "score")
 	end
+
 	if playerState.flags ~= oldFlags then
 		DirtySystem.MarkDirty(steamID, "flags")
 		Events.Publish("OnPlayerStateChange", playerState, primaryMethod)
+
+		-- Log transition to Suspicious or Cheater
+		local playerName = playerState.wrap and playerState.wrap:GetName() or steamID
+		if (newFlags & Constants.Flags.CHEATER) ~= 0 and (oldFlags & Constants.Flags.CHEATER) == 0 then
+			Logger.Info(
+				"Evidence",
+				string.format(
+					"CHEATER flag set for %s (Score: %.1f >= %.1f) - %s evidence",
+					playerName,
+					evidence.TotalScore,
+					cheaterThreshold,
+					primaryMethod
+				)
+			)
+		elseif (newFlags & Constants.Flags.SUSPICIOUS) ~= 0 and (oldFlags & Constants.Flags.SUSPICIOUS) == 0 then
+			Logger.Info(
+				"Evidence",
+				string.format(
+					"SUSPICIOUS flag set for %s (Score: %.1f >= %.1f) - %s evidence",
+					playerName,
+					evidence.TotalScore,
+					threshold,
+					primaryMethod
+				)
+			)
+		end
 	end
+
 	if playerState.score ~= oldScore or playerState.flags ~= oldFlags then
 		DirtySystem.MarkDirty(steamID, "session")
+
+		-- Automatically upsert database entry to keep persistent state synchronized
+		local playerName = playerState.wrap and playerState.wrap:GetName() or steamID
+		Database.UpsertCheater(steamID, {
+			name = playerName ~= "Unknown" and playerName or steamID,
+			reason = primaryMethod,
+			flags = playerState.flags,
+			score = playerState.score,
+		})
 	end
 end
 
@@ -305,13 +357,10 @@ end
 ---@param steamID string
 ---@param evidence table
 local function tryApplyAutoPriority(steamID, evidence)
-	if not evidence then
-		return
-	end
+	assert(steamID, "tryApplyAutoPriority: steamID missing")
+	assert(evidence, "tryApplyAutoPriority: evidence missing")
 
 	local threshold = Evidence.GetThreshold(evidence)
-	local cheaterThreshold = Evidence.GetCheaterThreshold(evidence)
-
 	Logger.Debug(
 		"Evidence",
 		string.format(
@@ -322,28 +371,12 @@ local function tryApplyAutoPriority(steamID, evidence)
 		)
 	)
 
-	if evidence.TotalScore < threshold then
-		Logger.Debug("Evidence",
-			string.format("Score %.1f below threshold %.1f, clearing suspicion", evidence.TotalScore, threshold))
-		syncPlayerStateFromEvidence(steamID, evidence)
-		return
-	end
+	-- Always sync player state first
+	syncPlayerStateFromEvidence(steamID, evidence)
 
-	local shouldApplyPriority = not evidence.AutoPriorityApplied
-	if not shouldApplyPriority then
-		Logger.Debug("Evidence", "AutoPriority already applied, refreshing suspicious state only")
-	end
-
-	local playerName = "Unknown"
 	local playerState = PlayerCache.GetByID(steamID)
-	if playerState and playerState.wrap then
-		local wrap = playerState.wrap
-		if wrap.GetName and type(wrap.GetName) == "function" then
-			local name = wrap:GetName()
-			if name and name ~= "" then
-				playerName = name
-			end
-		end
+	if not playerState then
+		return
 	end
 
 	-- Set low suspicious priority if AutoPriority is enabled.
@@ -354,163 +387,18 @@ local function tryApplyAutoPriority(steamID, evidence)
 		autoPriorityEnabled = G.Menu.Main.AutoPriority == true
 	end
 
-	Logger.Debug(
-		"Evidence",
-		string.format(
-			"AutoPriority enabled: %s",
-			tostring(autoPriorityEnabled)
-		)
-	)
+	if autoPriorityEnabled then
+		local isCheater = (playerState.flags & Constants.Flags.CHEATER) ~= 0
+		local isSus = (playerState.flags & Constants.Flags.SUSPICIOUS) ~= 0
 
-	if true then
-		if autoPriorityEnabled and shouldApplyPriority then
+		if isCheater then
+			Evidence.SetPriorityForSteamID(steamID, 10)
+		elseif isSus and not evidence.AutoPriorityApplied then
 			Evidence.SetPriorityForSteamID(steamID, 1)
 			evidence.AutoPriorityApplied = true
+			local playerName = playerState.wrap and playerState.wrap:GetName() or steamID
+			print(string.format("[CD] heads up: (%s) might be cheating", playerName))
 		end
-
-		local playerState = PlayerCache.GetByID(steamID)
-		if not playerState then
-			Logger.Debug("Evidence", "PlayerCache state not found for " .. steamID)
-			return
-		end
-
-		local displayScore = math.min(99, math.max(Constants.Threshold.SUSPICIOUS, getEvidencePercent(evidence)))
-		local primaryMethod = "Exploit"
-		local onlyFakeLag = true
-		for method, reason in pairs(evidence.Reasons or {}) do
-			if reason.Weight > 0 then
-				if method ~= "fake_lag" then
-					onlyFakeLag = false
-				end
-				if method == "fake_lag" and primaryMethod == "Exploit" then
-					primaryMethod = "Fake Lag"
-				elseif method == "warp_dt" then
-					primaryMethod = "Double Tap / Warp"
-				elseif method == "anti_aim" then
-					primaryMethod = "Anti-Aim"
-				end
-			end
-		end
-
-		local oldFlags = playerState.flags or 0
-		local oldScore = playerState.score or 0
-		local shouldMarkCheater = evidence.TotalScore >= cheaterThreshold and not onlyFakeLag
-		if shouldMarkCheater then
-			playerState.flags = (oldFlags | Constants.Flags.CHEATER) & ~Constants.Flags.SUSPICIOUS
-			playerState.score = 100
-			if autoPriorityEnabled then
-				Evidence.SetPriorityForSteamID(steamID, 10)
-			end
-		else
-			playerState.flags = oldFlags | Constants.Flags.SUSPICIOUS
-			playerState.score = math.max(oldScore, displayScore)
-		end
-		playerState.detectionReason = primaryMethod
-
-		if playerState.score ~= oldScore then
-			DirtySystem.MarkDirty(steamID, "score")
-		end
-		if playerState.flags ~= oldFlags then
-			DirtySystem.MarkDirty(steamID, "flags")
-			Events.Publish("OnPlayerStateChange", playerState, primaryMethod)
-		end
-		if playerState.score ~= oldScore or playerState.flags ~= oldFlags then
-			DirtySystem.MarkDirty(steamID, "session")
-		end
-
-		Database.UpsertCheater(steamID, {
-			name = playerName ~= "Unknown" and playerName or steamID,
-			reason = primaryMethod,
-			flags = playerState.flags,
-			score = playerState.score,
-		})
-
-		Logger.Info(
-			"Evidence",
-			string.format(
-				"%s flag set for %s (Score: %.1f >= %.1f) - %s evidence",
-				shouldMarkCheater and "CHEATER" or "SUSPICIOUS",
-				playerName,
-				evidence.TotalScore,
-				shouldMarkCheater and cheaterThreshold or threshold,
-				primaryMethod
-			)
-		)
-		if false then
-
-		-- Set SUSPICIOUS flag for exploit evidence (DT, AA, fakelag) - not full CHEATER
-		local wrap = PlayerCache.GetByID(steamID)
-		if wrap then
-			-- Convert evidence score (0-200) to playerState score (0-99) for display
-			local displayScore = math.min(99, math.floor(evidence.TotalScore / 2))
-
-			Logger.Debug("Evidence",
-				string.format("Setting wrap.score to %d (evidence score %.1f)", displayScore, evidence.TotalScore))
-
-			-- Try direct flag setting on wrap
-			if wrap.SetFlag and type(wrap.SetFlag) == "function" then
-				wrap:SetFlag(Constants.Flags.SUSPICIOUS, true)
-				if wrap.SetScore then
-					wrap:SetScore(displayScore)
-				else
-					wrap.score = displayScore
-				end
-
-				-- Mark score as dirty so visuals update
-				DirtySystem.MarkDirty(steamID, "score")
-				DirtySystem.MarkDirty(steamID, "flags")
-				Logger.Info(
-					"Evidence",
-					string.format(
-						"SUSPICIOUS flag set for %s (Score: %.1f >= %.1f) – Exploit evidence",
-						playerName,
-						evidence.TotalScore,
-						threshold
-					)
-				)
-				-- Try setting through flags field
-			elseif wrap.flags ~= nil then
-				wrap.flags = wrap.flags | Constants.Flags.SUSPICIOUS
-				wrap.score = displayScore
-				Logger.Debug("Evidence", string.format("Setting wrap.score via flags field to %d", displayScore))
-
-				-- Mark score as dirty so visuals update
-				DirtySystem.MarkDirty(steamID, "score")
-				DirtySystem.MarkDirty(steamID, "flags")
-				-- Store detection reason for display - use actual method name
-				local primaryMethod = "Exploit"
-				for method, reason in pairs(evidence.Reasons or {}) do
-					if reason.Weight > 0 then
-						if method == "fake_lag" then
-							primaryMethod = "Fake Lag"
-							break
-						elseif method == "warp_dt" then
-							primaryMethod = "Double Tap / Warp"
-						elseif method == "anti_aim" then
-							primaryMethod = "Anti-Aim"
-						end
-					end
-				end
-				wrap.detectionReason = primaryMethod
-				Logger.Info(
-					"Evidence",
-					string.format(
-						"SUSPICIOUS flag set for %s (Score: %.1f >= %.1f) – %s evidence (via flags field)",
-						playerName,
-						evidence.TotalScore,
-						threshold,
-						primaryMethod
-					)
-				)
-			else
-				Logger.Debug("Evidence", "Cannot set SUSPICIOUS flag - no SetFlag method or flags field on wrap")
-			end
-		else
-			Logger.Debug("Evidence", "PlayerCache wrap not found for " .. steamID)
-		end
-		end
-	else
-		Logger.Debug("Evidence", "AutoPriority is disabled, not setting flag")
 	end
 
 	-- Debug breakdown of contributing detections

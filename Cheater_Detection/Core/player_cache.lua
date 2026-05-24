@@ -68,6 +68,19 @@ local function isAutoPriorityEnabled()
 	return G.Menu and G.Menu.Advanced and G.Menu.Advanced.AutoPriority == true
 end
 
+local function getSuspicionThreshold()
+	local adv = G.Menu and G.Menu.Advanced
+	local pct = adv and adv.SuspicionThreshold
+	if pct == nil then
+		local notifications = G.Menu and G.Menu.Notifications
+		pct = notifications and notifications.SuspicionThreshold
+	end
+	if type(pct) ~= "number" then
+		return Constants.Threshold.SUSPICIOUS
+	end
+	return math.max(0, math.min(100, pct))
+end
+
 local function applyAutoPriority(state, ent)
 	if not state or not ent then return end
 	if not isAutoPriorityEnabled() then return end
@@ -258,7 +271,7 @@ function PlayerCache.SyncTick()
 			state.lastUpdate  = curTick
 
 			-- Lazy score decay
-			if state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 then
+			if state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 and not state.hasActiveEvidence then
 				local elapsed = now - (state.lastScoreDecay or now)
 				if elapsed >= SCORE_DECAY_INTERVAL then
 					local rate = 0
@@ -269,7 +282,8 @@ function PlayerCache.SyncTick()
 					end
 					if rate > 0 then
 						state.score = math.max(0, state.score - rate * elapsed)
-						if state.score < Constants.Threshold.SUSPICIOUS then
+						local susThreshold = getSuspicionThreshold()
+						if state.score < susThreshold then
 							state.flags = (state.flags & ~Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
 						elseif state.score < Constants.Threshold.HIGH_RISK then
 							state.flags = (state.flags | Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
