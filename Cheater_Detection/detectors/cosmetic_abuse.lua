@@ -19,19 +19,11 @@ local WHOLE_HEAD_CONFLICTS = {
 	hat_lower = true,
 }
 
--- Load items_game.txt data once at startup
+-- Load items_game.txt once at startup for full equip_region coverage
 VDFParser.LoadItemsGame()
 
--- defIndex -> equip_region string (or false if no region)
+-- defIndex -> equip_region string (or false if no region); avoids repeated lookups
 local regionCache = {}
-
--- Check if we can get equip region data (VDF or itemschema)
-local function hasVDFData()
-	-- VDFParser is preferred but not required - itemschema is fallback
-	-- Just check if VDFParser attempted to load (loaded flag is set)
-	-- The actual item regions will be fetched via getItemRegion which handles both sources
-	return true -- Always allow scanning, getItemRegion handles the fallback
-end
 
 -- per-player scan results: id -> { regions = {region->count}, slotCounts = {slot->count} }
 -- nil = not yet scanned, false = scanned clean, table = conflict data
@@ -61,85 +53,60 @@ local function getItemRegion(defIndex)
 	if regionCache[defIndex] ~= nil then
 		return regionCache[defIndex] or nil
 	end
-	-- Use VDF parser to get equip_region from items_game.txt
 	local region = VDFParser.GetEquipRegion(defIndex)
-	if region then
-		regionCache[defIndex] = region
-		return region
-	end
-	regionCache[defIndex] = false
-	return nil
+	regionCache[defIndex] = region or false
+	return region
 end
 
-local function findPlayerByID(targetID)
-	local players = entities.FindByClass("CTFPlayer")
-	for _, ent in pairs(players) do
-		if ent:IsValid() then
-			local sid = Common.GetSteamID64(ent)
-			if tostring(sid) == targetID then return ent end
-		end
-	end
-	return nil
-end
+-- Cosmetic loadout slots to check directly on each player entity
+local COSMETIC_SLOTS = {
+	LOADOUT_POSITION_HEAD,
+	LOADOUT_POSITION_MISC,
+	LOADOUT_POSITION_MISC2,
+	LOADOUT_POSITION_ACTION,
+}
 
-local function scanPlayerWearables(targetID)
-	local player = findPlayerByID(targetID)
+local function scanPlayerWearables(player, targetID, isDebug)
 	if not player then return false end
 
 	local playerIdx = player:GetIndex()
-	local data = { regions = {}, slotNames = {} }
+	local data = { regions = {}, totalWearables = 0 }
+	if isDebug then data.slotNames = {} end
 	local seenEntIndex = {}
-	local itemNum = 0
 
-	local playerClass = player:GetPropInt("m_iClass")
-
-	local function processWearable(wearable)
-		if not wearable or not wearable:IsValid() then return end
-		local entIdx = wearable:GetIndex()
+	local function processWearable(item)
+		if not item or not item:IsValid() then return end
+		local entIdx = item:GetIndex()
 		if seenEntIndex[entIdx] then return end
 		seenEntIndex[entIdx] = true
 
-		-- Skip items that don't match player's class (prevents false positives from class-switching)
-		local itemClass = readPropInt(wearable, "m_iClass")
-		if itemClass and itemClass > 0 and itemClass ~= playerClass then
-			return -- Item is for a different class, skip it
+		local defIndex = readPropInt(item, "m_iItemDefinitionIndex")
+		if not defIndex or defIndex <= 0 then return end
+
+		local region = getItemRegion(defIndex)
+		if region then
+			data.regions[region] = (data.regions[region] or 0) + 1
 		end
+		if isDebug then
+			local n = data.totalWearables + 1
+			data.slotNames[n] = string.format("%s [%d]%s",
+				getItemName(defIndex) or "?", defIndex,
+				region and (" region=" .. region) or "")
+		end
+		data.totalWearables = data.totalWearables + 1
+	end
 
-		itemNum = itemNum + 1
-
-		local defIndex = readPropInt(wearable, "m_iItemDefinitionIndex")
-		if defIndex and defIndex > 0 then
-			local region = getItemRegion(defIndex)
-			if region then
-				data.regions[region] = (data.regions[region] or 0) + 1
+	-- Primary: scan ALL live CTFWearable entities owned by this player.
+	-- This catches exploit hats networked outside the standard loadout slots.
+	for _, wearable in pairs(entities.FindByClass("CTFWearable")) do
+		if wearable:IsValid() then
+			local ok1, owner = pcall(wearable.GetPropEntity, wearable, "m_hOwnerEntity")
+			local ok2, parent = pcall(wearable.GetPropEntity, wearable, "m_hMoveParent")
+			local ownerIdx = ok1 and owner and owner:IsValid() and owner:GetIndex()
+			local parentIdx = ok2 and parent and parent:IsValid() and parent:GetIndex()
+			if ownerIdx == playerIdx or parentIdx == playerIdx then
+				processWearable(wearable)
 			end
-			local iname = getItemName(defIndex)
-			data.slotNames[itemNum] = string.format("%s [%d]%s",
-				iname or "?", defIndex, region and (" region=" .. region) or "")
-		else
-			data.slotNames[itemNum] = string.format("? [defIndex=%s entIdx=%d]",
-				tostring(defIndex), entIdx)
-		end
-	end
-
-	local function isOwnedByPlayer(wearable)
-		local ok, owner = pcall(wearable.GetPropEntity, wearable, "m_hOwnerEntity")
-		if ok and owner and owner:IsValid() and owner:GetIndex() == playerIdx then
-			return true
-		end
-		local ok2, parent = pcall(wearable.GetPropEntity, wearable, "m_hMoveParent")
-		if ok2 and parent and parent:IsValid() and parent:GetIndex() == playerIdx then
-			return true
-		end
-		return false
-	end
-
-	-- Primary: scan ALL live CTFWearable entities filtered by owner.
-	-- This catches extra entities that the slot system never returns.
-	local allWearables = entities.FindByClass("CTFWearable")
-	for _, wearable in pairs(allWearables) do
-		if wearable:IsValid() and isOwnedByPlayer(wearable) then
-			processWearable(wearable)
 		end
 	end
 
@@ -151,12 +118,10 @@ local function scanPlayerWearables(targetID)
 		end
 	end
 
-	data.totalWearables = itemNum
-
-	-- Don't mark as scanned if we found 0 wearables - items likely not loaded yet
-	if itemNum == 0 then
-		if Common.IsLogCategoryEnabled("Cosmetics") then
-			print(string.format("[CosmeticAbuse] id=%s - 0 wearables found, skipping scan (items not loaded)", targetID))
+	if data.totalWearables == 0 then
+		-- Only log zero wearables for real players in debug, not bots
+		if isDebug and not string.find(targetID, "BOT_") then
+			print(string.format("[CosmeticAbuse] id=%s - 0 wearables found", targetID))
 		end
 		return false
 	end
@@ -164,10 +129,12 @@ local function scanPlayerWearables(targetID)
 	playerScanData[targetID] = data
 	scannedPlayers[targetID] = true
 
-	if Common.IsLogCategoryEnabled("Cosmetics") then
-		local parts = { string.format("[CosmeticAbuse] id=%s wearables=%d", targetID, itemNum) }
-		for i, label in pairs(data.slotNames) do
-			parts[#parts + 1] = string.format("  item%d: %s", i, label)
+	if isDebug then
+		local parts = { string.format("[CosmeticAbuse] id=%s wearables=%d", targetID, data.totalWearables) }
+		if data.slotNames then
+			for i, label in pairs(data.slotNames) do
+				parts[#parts + 1] = string.format("  item%d: %s", i, label)
+			end
 		end
 		print(table.concat(parts, "\n"))
 	end
@@ -217,132 +184,61 @@ function CosmeticAbuse.NeedsScan(id)
 	return scannedPlayers[id] == nil
 end
 
-function CosmeticAbuse.ProcessPlayer(playerState, _cmd)
-	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
-	local playerName = (playerState and playerState.wrap and playerState.wrap.GetName)
-		and playerState.wrap:GetName()
-		or (playerState and playerState.id) or "?"
-
+function CosmeticAbuse.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then return end
-	if not Common.IsPlayerConnected() then return end
-
-	if not isEnabled() then
-		if isDebug then print(string.format("[CosmeticAbuse] SKIP %s: disabled in menu", playerName)) end
-		return
-	end
-
-	if not hasVDFData() then
-		if isDebug then print(string.format("[CosmeticAbuse] SKIP %s: VDF data not loaded", playerName)) end
-		return
-	end
-
 	local id = tostring(playerState.id)
 
+	-- Skip bots
+	if string.find(id, "BOT_") == 1 then return end
+
+	if scannedPlayers[id] then return end
+	if not isEnabled() then return end
+	if not Common.IsPlayerConnected() then return end
 	if not Common.IsDebugEnabled() and playerState.isFriend then return end
+	if playerState.pdata.isDormant then return end
 
-	local localPlayer = entities.GetLocalPlayer()
-	local isLocalPlayer = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
-
-	if scannedPlayers[id] then
-		-- Already scanned, skip silently
-		return
-	end
-
-	-- Skip if player is dormant - items aren't loaded yet
-	if playerState.pdata.isDormant then
-		if isDebug then
-			print(string.format("[CosmeticAbuse] SKIP %s: player dormant", playerName))
-		end
-		return
-	end
-
-	-- Skip disguised spies (disguised class items can cause false positives)
 	local ent = playerState.wrap and playerState.wrap:GetRawEntity()
-	if ent then
-		local disguiseClass = ent:GetPropInt("m_iDisguiseTargetClass")
-		if disguiseClass and disguiseClass > 0 then
-			if isDebug then
-				print(string.format("[CosmeticAbuse] SKIP %s: disguised as class %d", playerName, disguiseClass))
-			end
-			return
-		end
-	end
+	if not ent then return end
 
-	-- Simple tick-based scheduling: check if it's time to scan this player
+	local disguiseClass = ent:GetPropInt("m_iDisguiseTargetClass")
+	if disguiseClass and disguiseClass > 0 then return end
+
 	local curTick = globals.TickCount()
 	local retryState = scanRetryState[id]
 	if not retryState then
 		retryState = { targetTick = curTick, attempts = 0 }
 		scanRetryState[id] = retryState
 	end
+	if curTick < retryState.targetTick then return end
 
-	-- Not time yet? Skip silently (no spam)
-	if curTick < retryState.targetTick then
-		return
-	end
-
-	-- Time to scan
-	if isDebug then
-		print(string.format("[CosmeticAbuse] SCANNING %s (attempt %d)...", playerName, retryState.attempts + 1))
-	end
-
-	local scanned = scanPlayerWearables(id)
+	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
+	local scanned = scanPlayerWearables(ent, id, isDebug)
 	if not scanned then
-		-- 0 wearables found - schedule retry
 		retryState.attempts = retryState.attempts + 1
 		retryState.targetTick = curTick + SCAN_RETRY_TICKS
-
-		-- After 5 attempts, mark as clean (likely F2P with no hats)
 		if retryState.attempts >= MAX_SCAN_ATTEMPTS then
 			if isDebug then
-				print(string.format("[CosmeticAbuse] GIVING UP %s: 0 wearables after %d attempts (F2P?)", playerName,
-					MAX_SCAN_ATTEMPTS))
+				print(string.format("[CosmeticAbuse] GIVING UP %s after %d attempts (F2P?)", id, MAX_SCAN_ATTEMPTS))
 			end
-			scannedPlayers[id] = true -- Mark as scanned (clean)
-			scanRetryState[id] = nil -- Clean up
+			scannedPlayers[id] = true
+			scanRetryState[id] = nil
 		end
 		return
 	end
 
-	if isDebug then
-		print(string.format("[CosmeticAbuse] SUCCESS %s: found %d wearables", playerName, scanned.totalWearables))
-	end
-
-	-- Debug: Print detected items and regions
-	if isDebug then
-		print(string.format("[CosmeticAbuse] Items for %s:", playerName))
-		for slotName, info in pairs(scanned.slotNames) do
-			print(string.format("  [%d] %s", slotName, info))
-		end
-		print(string.format("  Regions detected: %s", table.concat(
-			(function()
-				local t = {}
-				for region, count in pairs(scanned.regions) do
-					t[#t + 1] = region .. "=" .. count
-				end
-				return t
-			end)(), ", ")))
-	end
-
-	-- Clean up retry state - scan succeeded
 	scanRetryState[id] = nil
-
 	local illegal, reason = checkConflicts(id)
 	if illegal then
-		-- Skip flagging local player unless global debug mode is on
-		-- (prevents self-flagging during normal gameplay)
-		if isLocalPlayer and not Common.IsDebugEnabled() then
+		local localPlayer = entities.GetLocalPlayer()
+		local isLocal = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
+		-- In debug mode, allow local player detection
+		if not isLocal or Common.IsDebugEnabled() then
+			local flagged = DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER,
+				"Equip region abuse: " .. (reason or "unknown conflict"))
 			if isDebug then
-				print(string.format("[CosmeticAbuse] SKIP [LOCAL]: %s (enable Debug Mode to self-flag)", reason))
+				print(string.format("[CosmeticAbuse] %sFLAGGED: %s (flagsChanged=%s)",
+					isLocal and "[LOCAL] " or "", reason or "unknown", tostring(flagged)))
 			end
-			return
-		end
-		-- Hard detection: duplicate equip_region or >3 wearables is 100% impossible
-		local flagged = DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER,
-			"Equip region abuse: " .. (reason or "unknown conflict"))
-		if isDebug then
-			print(string.format("[CosmeticAbuse] %sFLAGGED: %s (flagsChanged=%s)",
-				isLocalPlayer and "[LOCAL] " or "", reason or "unknown", tostring(flagged)))
 		end
 	end
 end

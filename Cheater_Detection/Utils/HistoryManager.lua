@@ -12,11 +12,11 @@
        - GetPlayerDataInBucket(bucket, steamID) -> adapter
 ]]
 
-local PlayerCache = require("Cheater_Detection.Core.player_cache")
+local PlayerCache         = require("Cheater_Detection.Core.player_cache")
 
-local HistoryManager = {}
+local HistoryManager      = {}
 
-HistoryManager.Fields = {
+HistoryManager.Fields     = {
 	Angles = "angles",
 	EyePosition = "eye_pos",
 	HeadHitbox = "hitbox_head",
@@ -27,9 +27,21 @@ HistoryManager.Fields = {
 	ViewOffset = "view_offset",
 }
 
-local activeFields = {}
-local maxRetentionTicks = 0
-local initialized = false
+local activeFields        = {}
+local maxRetentionTicks   = 0
+local initialized         = false
+
+local tickLocalPlayer     = nil
+local tickLocalPlayerTick = -1
+
+local function getTickLocalPlayer()
+	local curTick = globals.TickCount()
+	if curTick ~= tickLocalPlayerTick then
+		tickLocalPlayerTick = curTick
+		tickLocalPlayer     = entities.GetLocalPlayer()
+	end
+	return tickLocalPlayer
+end
 
 -- NEW: Player-centric storage
 -- playerHistories[steamID] = { [1]=current, [2]=prev, ..., _head=N, _count=N, _tick=N }
@@ -53,7 +65,7 @@ end
 
 local FIELD_BUILDERS = {
 	[HistoryManager.Fields.Angles] = function(player)
-		local localPlayer = entities.GetLocalPlayer()
+		local localPlayer = getTickLocalPlayer()
 		if localPlayer and localPlayer.IsValid and localPlayer:IsValid() then
 			if localPlayer.GetIndex and player.GetIndex and localPlayer:GetIndex() == player:GetIndex() then
 				local pitchNL, yawNL = tryGetTFNonLocalEyeAngles(player)
@@ -232,8 +244,7 @@ function HistoryManager.NewTick()
 		if history._count < maxRetentionTicks then
 			history._count = history._count + 1
 		end
-		-- Clear the slot we're about to overwrite
-		history[history._head] = nil
+		-- Keep the slot table alive so Push can reuse it (avoids per-tick allocation)
 	end
 end
 
@@ -267,8 +278,12 @@ function HistoryManager.Push(player)
 		HistoryManager.NewTick()
 	end
 
-	-- Build record for current head position
-	local record = {}
+	-- Reuse existing slot table to avoid per-tick allocation
+	local headSlot = history._head
+	local record   = history[headSlot]
+	if type(record) ~= "table" then
+		record = {}
+	end
 
 	for field in pairs(activeFields) do
 		local builder = FIELD_BUILDERS[field]
@@ -276,7 +291,15 @@ function HistoryManager.Push(player)
 			if field == HistoryManager.Fields.Angles then
 				local pitch, yaw = builder(player)
 				if pitch ~= nil and yaw ~= nil then
-					record[field] = { pitch = pitch, yaw = yaw }
+					local a = record[field]
+					if type(a) ~= "table" then
+						a = {}
+						record[field] = a
+					end
+					a.pitch = pitch
+					a.yaw   = yaw
+				else
+					record[field] = nil
 				end
 			else
 				record[field] = builder(player)

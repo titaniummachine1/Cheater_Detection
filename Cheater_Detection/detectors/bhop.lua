@@ -3,27 +3,38 @@
      Uses lazy PlayerData - NO direct entity API calls.
 ]]
 
-local Constants = require("Cheater_Detection.Core.constants")
-local Common = require("Cheater_Detection.Utils.Common")
-local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local Events = require("Cheater_Detection.Core.Events")
-local PlayerData = require("Cheater_Detection.Utils.PlayerData")
+local Constants           = require("Cheater_Detection.Core.constants")
+local Common              = require("Cheater_Detection.Utils.Common")
+local DetectorUtils       = require("Cheater_Detection.Utils.DetectorUtils")
+local Events              = require("Cheater_Detection.Core.Events")
+local PlayerData          = require("Cheater_Detection.Utils.PlayerData")
 
-local Bhop = {}
+local Bhop                = {}
 
 -- Per-player state
-local playerData = {}
+local playerData          = {}
 
 -- Constant override: some scripts use 2 ticks to bypass simple anticheats
-local MAX_GROUND_TICKS = 2
+local MAX_GROUND_TICKS    = 2
 local CHAIN_BREAK_SECONDS = 1.5
+
+local _tickLP             = nil
+local _tickLPTick         = -1
+
+local function getTickLP()
+	local ct = globals.TickCount()
+	if ct ~= _tickLPTick then
+		_tickLPTick = ct
+		_tickLP     = entities.GetLocalPlayer()
+	end
+	return _tickLP
+end
 
 function Bhop.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
 		return
 	end
 
-	-- Basic check: must be connected to server (but not 100% stability required)
 	if not Common.IsPlayerConnected() then
 		return
 	end
@@ -32,14 +43,11 @@ function Bhop.ProcessPlayer(playerState)
 	local pdata = playerState.pdata
 	local data = playerData[id]
 
-	-- Use lazy cached properties from PlayerData (fetched once per tick)
 	local isDormant = pdata.isDormant
 	local isAlive = pdata.isAlive
 	local onGround = pdata.onGround
 	local flags = pdata.flags
 
-	-- If PlayerData is stale (old tick), properties return nil
-	-- This is safe - we just skip this tick and wait for fresh data
 	if isDormant == nil or isAlive == nil or onGround == nil then
 		return
 	end
@@ -64,9 +72,7 @@ function Bhop.ProcessPlayer(playerState)
 		return
 	end
 
-	-- Skip local player unless debug mode is enabled for testing.
-	-- Note: We check steamID instead of entity reference (safe)
-	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then
+	if id == tostring(Common.GetSteamID64(getTickLP())) and not Common.IsDebugEnabled() then
 		return
 	end
 

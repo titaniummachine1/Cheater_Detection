@@ -94,6 +94,16 @@ local function cleanBurstTable(curTick)
 	end
 end
 
+local _simTicks = {}
+local _deltaTicks = {}
+
+local function _collectSimTick(_, record)
+	local simTime = record[HistoryManager.Fields.SimulationTime]
+	if simTime then
+		_simTicks[#_simTicks + 1] = timeToTicks(simTime)
+	end
+end
+
 local function getState(id)
 	if not playerState[id] then
 		playerState[id] = { lastDamageTick = 0, lastBurstTick = 0, lastBurstEvidenceTime = 0, lastHitCountEvidenceTime = 0, recentHits = {} }
@@ -144,26 +154,24 @@ function WarpDT.ProcessPlayer(pState)
 	local history = HistoryManager.GetPlayerHistory(id)
 	if not history then return end
 
-	local simTicks = {}
-	HistoryManager.ForEachRecordNewestFirst(history, nil, function(_, record)
-		local simTime = record[HistoryManager.Fields.SimulationTime]
-		if simTime then
-			simTicks[#simTicks + 1] = timeToTicks(simTime)
-		end
-	end)
-	if #simTicks < 10 then return end
+	local simN = 0
+	for i = 1, #_simTicks do _simTicks[i] = nil end
+	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTick)
+	simN = #_simTicks
+	if simN < 10 then return end
 
-	local deltaTicks = {}
-	for i = 1, #simTicks - 1 do
-		deltaTicks[#deltaTicks + 1] = simTicks[i] - simTicks[i + 1]
+	local deltaN = 0
+	for i = 1, #_deltaTicks do _deltaTicks[i] = nil end
+	for i = 1, simN - 1 do
+		deltaN = deltaN + 1
+		_deltaTicks[deltaN] = _simTicks[i] - _simTicks[i + 1]
 	end
 
 	local burstMin    = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	local burstMax    = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
-	-- Only check the MOST RECENT delta for burst (newest-first history)
 	local burstAmount = 0
-	if #deltaTicks >= 1 then
-		local d = deltaTicks[1] -- most recent delta only
+	if deltaN >= 1 then
+		local d = _deltaTicks[1]
 		if d >= burstMin and d < burstMax then
 			burstAmount = d
 		end

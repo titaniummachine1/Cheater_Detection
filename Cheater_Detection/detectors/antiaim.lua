@@ -290,6 +290,18 @@ local function ourConnectionUnstable()
 end
 
 -- ── main entry ─────────────────────────────────────────────────────────────
+local _tickLocalPlayer     = nil
+local _tickLocalPlayerTick = -1
+
+local function getTickLocalPlayer()
+	local ct = globals.TickCount()
+	if ct ~= _tickLocalPlayerTick then
+		_tickLocalPlayerTick = ct
+		_tickLocalPlayer     = entities.GetLocalPlayer()
+	end
+	return _tickLocalPlayer
+end
+
 function AntiAim.ProcessPlayer(playerState, cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
@@ -306,7 +318,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if not isAlive or isDorm then return end
 	if not simTime or simTime <= 0 then return end
 
-	local localPlayer = entities.GetLocalPlayer()
+	local localPlayer = getTickLocalPlayer()
 	local isLocalPlayer = playerState.id == tostring(Common.GetSteamID64(localPlayer))
 	-- Skip friends and local player unless global debug mode is enabled
 	if not Common.IsDebugEnabled() then

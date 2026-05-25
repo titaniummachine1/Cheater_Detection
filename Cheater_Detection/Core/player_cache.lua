@@ -314,7 +314,7 @@ function PlayerCache.SyncTick()
 
 	-- Push completed map to WrappedPlayer upvalue and legacy cache
 	WrappedPlayer._SetTickEntities(tickMap)
-	TickEntityCache.RefreshTick(curTick, liveEnts)
+	TickEntityCache.RefreshFromTickMap(curTick, tickMap)
 
 	-- Prune disconnected players
 	for id in pairs(activeSet) do

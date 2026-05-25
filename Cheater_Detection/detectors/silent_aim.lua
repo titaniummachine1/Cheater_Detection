@@ -68,6 +68,10 @@ local playerData                        = {}
 local NON_SNIPER_COOLDOWN_TICKS         = 6
 local lastNonSniperTickByUserID         = {}
 
+local _histPitches                      = {}
+local _histYaws                         = {}
+local _histTicks                        = {}
+
 -- Fire-event cache: keyed by shooter entity index.
 -- Populated by CTEFireBullets (exact shot tick), consumed by onDamageEvent.
 -- { eyePos = Vector3, tick = n }
@@ -373,7 +377,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	if mathAbs(shotAngles.pitch) > 180 or mathAbs(shotAngles.yaw) > 1000000 then
 		return
 	end
-	shotAngles = { pitch = shotAngles.pitch, yaw = wrapAngle(shotAngles.yaw) }
+	local shotPitch = shotAngles.pitch
+	local shotYaw   = wrapAngle(shotAngles.yaw)
 
 	if debugInterested then
 		print(string.format(
@@ -403,7 +408,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	if eyePos then
 		if headPos then
 			local p, y = getAngleToPos(eyePos, headPos)
-			local headErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
+			local headErr = angularDist(shotPitch, shotYaw, p, y)
 			bestAimError = headErr
 			if headErr < SANITY_MAX_DEGREES then
 				aimedAtTarget = true
@@ -411,7 +416,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		end
 		if not aimedAtTarget and bodyPos then
 			local p, y = getAngleToPos(eyePos, bodyPos)
-			local bodyErr = angularDist(shotAngles.pitch, shotAngles.yaw, p, y)
+			local bodyErr = angularDist(shotPitch, shotYaw, p, y)
 			if bestAimError == nil or bodyErr < bestAimError then
 				bestAimError = bodyErr
 			end
@@ -431,37 +436,33 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	-- 1. Gather pre-shot history for prediction (up to 5 clean ticks)
-	-- In new history array: history[1] = current, history[shotIndex] = shot tick
-	-- We want records OLDER than the shot (higher indices)
-	local historyAngles = {}
-	local historyTicks = {}
-	local startIdx = shotIndex + 1    -- Start from record after shot (older)
+	local startIdx = shotIndex + 1
+	local histN = 0
+	for i = 1, #_histPitches do _histPitches[i] = nil end
+	for i = 1, #_histYaws do _histYaws[i] = nil end
+	for i = 1, #_histTicks do _histTicks[i] = nil end
 
-	for idx = startIdx, startIdx + 10 do -- Look ahead up to 10 records
-		if #historyAngles >= 5 then break end
+	for idx = startIdx, startIdx + 10 do
+		if histN >= 5 then break end
 		local record = history[idx]
 		if not record then break end
 
 		local data = record[HistoryManager.Fields.Angles]
 		if data and type(data.pitch) == "number" and type(data.yaw) == "number" then
 			if mathAbs(data.pitch) <= 180 and mathAbs(data.yaw) <= 1000000 then
-				data = { pitch = data.pitch, yaw = wrapAngle(data.yaw) }
-			else
-				data = nil
+				if not record.damageDealt then
+					histN               = histN + 1
+					_histPitches[histN] = data.pitch
+					_histYaws[histN]    = wrapAngle(data.yaw)
+					_histTicks[histN]   = record._tick
+				end
 			end
-		else
-			data = nil
-		end
-		-- Skip records with damageDealt to keep prediction clean.
-		if data and not record.damageDealt then
-			table.insert(historyAngles, data)
-			table.insert(historyTicks, record._tick)
 		end
 	end
 
-	if #historyAngles < 2 then
+	if histN < 2 then
 		if Common.IsLogCategoryEnabled("SilentAim") then
-			print(string.format("[SilentAim] %s extrapolation failed (only %d clean history ticks)", id, #historyAngles))
+			print(string.format("[SilentAim] %s extrapolation failed (only %d clean history ticks)", id, histN))
 		end
 		return
 	end
@@ -469,13 +470,11 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	-- 2. Predict angular velocity (average over history)
 	local totalVPitch, totalVYaw = 0, 0
 	local samples = 0
-	for i = 1, #historyAngles - 1 do
-		local a1 = historyAngles[i]
-		local a2 = historyAngles[i + 1]
-		local dt = historyTicks[i] - historyTicks[i + 1]
+	for i = 1, histN - 1 do
+		local dt = _histTicks[i] - _histTicks[i + 1]
 		if dt > 0 then
-			totalVPitch = totalVPitch + wrapAngle(a1.pitch - a2.pitch) / dt
-			totalVYaw = totalVYaw + wrapAngle(a1.yaw - a2.yaw) / dt
+			totalVPitch = totalVPitch + wrapAngle(_histPitches[i] - _histPitches[i + 1]) / dt
+			totalVYaw = totalVYaw + wrapAngle(_histYaws[i] - _histYaws[i + 1]) / dt
 			samples = samples + 1
 		end
 	end
@@ -488,13 +487,12 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	local avgVYaw = totalVYaw / samples
 
 	-- 3. Predict shot tick angles from the most recent clean history tick
-	local mostRecentClean = historyAngles[1]
-	local dtToShot = pending.shotTick - historyTicks[1]
-	local predShotPitch = mostRecentClean.pitch + (avgVPitch * dtToShot)
-	local predShotYaw = mostRecentClean.yaw + (avgVYaw * dtToShot)
+	local dtToShot = pending.shotTick - _histTicks[1]
+	local predShotPitch = _histPitches[1] + (avgVPitch * dtToShot)
+	local predShotYaw = _histYaws[1] + (avgVYaw * dtToShot)
 
 	-- 4. Calculate deviation on shot tick
-	local shotDev = angularDist(shotAngles.pitch, shotAngles.yaw, predShotPitch, predShotYaw)
+	local shotDev = angularDist(shotPitch, shotYaw, predShotPitch, predShotYaw)
 
 	-- Minimum snap threshold to avoid noise
 	if shotDev < MIN_SNAP_DEGREES then
@@ -511,17 +509,18 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	-- 5. Alignment check: compare the player's viewangles 1-3 ticks AFTER the damage
 	-- to what we predicted their viewangles would be (continued motion model).
-	local bestAlignDev = nil
-	local bestAlignTick = nil
-	local bestDirFactor = 0.0
+	local bestAlignDev      = nil
+	local bestAlignTick     = nil
+	local bestDirFactor     = 0.0
 	local bestDirMeaningful = false
-	local alignDev1 = nil
-	local dirFactor1 = nil
-	local dirMeaningful1 = nil
+	local alignDev1         = nil
+	local dirFactor1        = nil
+	local dirMeaningful1    = nil
 
-	local prevActualAngles = shotAngles
-	local prevPredPitch = predShotPitch
-	local prevPredYaw = predShotYaw
+	local prevActualPitch   = shotPitch
+	local prevActualYaw     = shotYaw
+	local prevPredPitch     = predShotPitch
+	local prevPredYaw       = predShotYaw
 
 	for k = 1, 3 do
 		local postTick = pending.shotTick + k
@@ -535,22 +534,23 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			if not postRecord.damageDealt then
 				local postShotAngles = postRecord[HistoryManager.Fields.Angles]
 				if postShotAngles and type(postShotAngles.pitch) == "number" and type(postShotAngles.yaw) == "number" then
-					postShotAngles = { pitch = postShotAngles.pitch, yaw = wrapAngle(postShotAngles.yaw) }
+					local postPitch     = postShotAngles.pitch
+					local postYaw       = wrapAngle(postShotAngles.yaw)
 
-					local dtToPost = postTick - historyTicks[1]
-					local predPostPitch = mostRecentClean.pitch + (avgVPitch * dtToPost)
-					local predPostYaw = mostRecentClean.yaw + (avgVYaw * dtToPost)
+					local dtToPost      = postTick - _histTicks[1]
+					local predPostPitch = _histPitches[1] + (avgVPitch * dtToPost)
+					local predPostYaw   = _histYaws[1] + (avgVYaw * dtToPost)
 
-					local alignDev = angularDist(postShotAngles.pitch, postShotAngles.yaw, predPostPitch, predPostYaw)
+					local alignDev      = angularDist(postPitch, postYaw, predPostPitch, predPostYaw)
 
-					local actualDPitch = wrapAngle(postShotAngles.pitch - prevActualAngles.pitch)
-					local actualDYaw = wrapAngle(postShotAngles.yaw - prevActualAngles.yaw)
-					local predDPitch = wrapAngle(predPostPitch - prevPredPitch)
-					local predDYaw = wrapAngle(predPostYaw - prevPredYaw)
+					local actualDPitch  = wrapAngle(postPitch - prevActualPitch)
+					local actualDYaw    = wrapAngle(postYaw - prevActualYaw)
+					local predDPitch    = wrapAngle(predPostPitch - prevPredPitch)
+					local predDYaw      = wrapAngle(predPostYaw - prevPredYaw)
 
-					local actualLen = math.sqrt(actualDPitch * actualDPitch + actualDYaw * actualDYaw)
-					local predLen = math.sqrt(predDPitch * predDPitch + predDYaw * predDYaw)
-					local dirFactor = 0.0
+					local actualLen     = math.sqrt(actualDPitch * actualDPitch + actualDYaw * actualDYaw)
+					local predLen       = math.sqrt(predDPitch * predDPitch + predDYaw * predDYaw)
+					local dirFactor     = 0.0
 					local dirMeaningful = (actualLen >= DIR_MIN_DELTA_DEGREES) and (predLen >= DIR_MIN_DELTA_DEGREES)
 					if dirMeaningful then
 						local dot = actualDPitch * predDPitch + actualDYaw * predDYaw
@@ -576,9 +576,10 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 						bestDirMeaningful = dirMeaningful
 					end
 
-					prevActualAngles = postShotAngles
-					prevPredPitch = predPostPitch
-					prevPredYaw = predPostYaw
+					prevActualPitch = postPitch
+					prevActualYaw   = postYaw
+					prevPredPitch   = predPostPitch
+					prevPredYaw     = predPostYaw
 				end
 			end
 		end
@@ -668,12 +669,12 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 		if eyePos and sniperHeadPos then
 			local hp, hy = getAngleToPos(eyePos, sniperHeadPos)
-			headError = angularDist(shotAngles.pitch, shotAngles.yaw, hp, hy)
+			headError = angularDist(shotPitch, shotYaw, hp, hy)
 			bestAimError = headError
 		end
 		if bestAimError == nil and eyePos and sniperBodyPos then
 			local bp, by = getAngleToPos(eyePos, sniperBodyPos)
-			bestAimError = angularDist(shotAngles.pitch, shotAngles.yaw, bp, by)
+			bestAimError = angularDist(shotPitch, shotYaw, bp, by)
 		end
 
 		if bestAimError ~= nil then
@@ -685,8 +686,9 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 		local rawGain = 0.0
 		if pending.crit == true then
+			local shotAnglesTable = { pitch = shotPitch, yaw = shotYaw }
 			rawGain, lilacMaxDelta, lilacTotalDelta, lilacFlags = lilacAimbotHeuristics(id, shotOffset, pending.shotTick,
-				shotAngles, eyePos, sniperHeadPos, sniperBodyPos)
+				shotAnglesTable, eyePos, sniperHeadPos, sniperBodyPos)
 		end
 		if alignDev1 ~= nil and dirMeaningful1 and dirFactor1 ~= nil then
 			if shotDev >= LILAC_RETURN_MIN_SNAP_DEGREES
@@ -720,8 +722,9 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 		local rawGain = 0.0
 		if (attackerClass == TF_CLASS_SPY) and (pending.crit == true) then
+			local shotAnglesTable = { pitch = shotPitch, yaw = shotYaw }
 			rawGain, lilacMaxDelta, lilacTotalDelta, lilacFlags = lilacAimbotHeuristics(id, shotOffset, pending.shotTick,
-				shotAngles, eyePos, headPos, bodyPos)
+				shotAnglesTable, eyePos, headPos, bodyPos)
 		end
 		if alignDev1 ~= nil and dirMeaningful1 and dirFactor1 ~= nil then
 			if shotDev >= LILAC_RETURN_MIN_SNAP_DEGREES
@@ -771,8 +774,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 			"          | Pred: P%.1f Y%.1f | Actual: P%.1f Y%.1f",
 			predShotPitch,
 			wrapAngle(predShotYaw),
-			shotAngles.pitch,
-			wrapAngle(shotAngles.yaw)
+			shotPitch,
+			wrapAngle(shotYaw)
 		))
 	end
 

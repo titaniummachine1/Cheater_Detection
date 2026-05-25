@@ -52,6 +52,9 @@ local NotificationService = require("Cheater_Detection.services.notification_ser
 local Visuals             = require("Cheater_Detection.actions.visuals")
 local BridgePrompt        = require("Cheater_Detection.services.bridge_prompt")
 
+local lastDetectorTick    = -1
+local activePlayers       = {}
+
 local sessionState        = {
 	groupSearched = false,
 	valveDisconnectTriggered = false,
@@ -301,10 +304,22 @@ local function OnCreateMove(cmd)
 	PlayerCache.SyncTick()
 	Profiler.End("PlayerCache_Sync")
 
+	-- Skip all detector work on frames where the game tick hasn't advanced
+	-- (CreateMove fires per frame, game ticks at 66 Hz)
+	local curTick = globals.TickCount()
+	if curTick == lastDetectorTick then
+		Profiler.End("CreateMove_Total")
+		return
+	end
+	lastDetectorTick = curTick
+
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer))
 	local stateTable = PlayerCache.GetActiveTable()
+
+	-- Pre-filter active players into a flat list (reuse module-level table)
 	Profiler.Begin("PlayerScan_Loop")
+	for k = 1, #activePlayers do activePlayers[k] = nil end
 	for id, existingState in pairs(stateTable) do
 		local pdata = existingState.pdata
 		if not pdata then goto continue end
@@ -319,22 +334,19 @@ local function OnCreateMove(cmd)
 
 		if not pdata.isAlive then goto continue end
 
-		local pState = existingState
-		pState.wasDormant = false
+		existingState.wasDormant = false
 
-		-- In normal mode: exclude local player's friends and party members.
-		-- In debug mode: process everyone including self and friends.
 		if not isDebug then
 			if id == localID then
 				if not sessionState.cleanedFriendIDs[id] then
 					sessionState.cleanedFriendIDs[id] = true
 					Database.RemoveCheater(id)
-					if pState.wrap then pState.wrap:SetPriority(0) end
+					if existingState.wrap then existingState.wrap:SetPriority(0) end
 				end
 				goto continue
 			end
-			if pState.isFriend then
-				local friendID = pState.id
+			if existingState.isFriend then
+				local friendID = existingState.id
 				if friendID and friendID:match("^7656119%d+$") and not sessionState.cleanedFriendIDs[friendID] then
 					sessionState.cleanedFriendIDs[friendID] = true
 					Database.RemoveCheater(friendID)
@@ -343,53 +355,91 @@ local function OnCreateMove(cmd)
 			end
 		end
 
-		if historyEnabled then
-			Profiler.Begin("History_Push")
-			HistoryManager.Push(pState.wrap)
-			Profiler.End("History_Push")
-		end
-
-		Profiler.Begin("Detectors")
-		if enableValveCheck then
-			ValveCheck.ProcessPlayer(pState)
-		end
-		if enableSilent then
-			SilentAim.ProcessPlayer(pState)
-			if enableAimLock then
-				AimLock.ProcessPlayer(pState)
-			end
-		end
-		if enableAntiAim then
-			AntiAim.ProcessPlayer(pState, cmd)
-		end
-		if enableDuckSpeed then
-			DuckSpeed.ProcessPlayer(pState)
-		end
-		if enableBhop then
-			Bhop.ProcessPlayer(pState)
-		end
-		if enableWarpDT then
-			WarpDT.ProcessPlayer(pState)
-		end
-		if enableChoke then
-			FakeLag.ProcessPlayer(pState)
-		end
-		if enableCosmetics and CosmeticAbuse.NeedsScan(id) then
-			CosmeticAbuse.ProcessPlayer(pState, cmd)
-		end
-		Profiler.End("Detectors")
-
-		if enableValveCheck then
-			enforceValveAutoDisconnect(pState)
-		end
-		if sessionState.valveDisconnectTriggered then
-			Profiler.End("PlayerScan_Loop")
-			Profiler.End("CreateMove_Total")
-			return
-		end
-
+		activePlayers[#activePlayers + 1] = existingState
 		::continue::
 	end
+
+	-- One profiler section per detector type across all players (minimal overhead)
+	if historyEnabled then
+		Profiler.Begin("History_Push")
+		for _, pState in ipairs(activePlayers) do
+			HistoryManager.Push(pState.wrap)
+		end
+		Profiler.End("History_Push")
+	end
+
+	if enableValveCheck then
+		Profiler.Begin("ValveCheck")
+		for _, pState in ipairs(activePlayers) do
+			ValveCheck.ProcessPlayer(pState)
+			enforceValveAutoDisconnect(pState)
+			if sessionState.valveDisconnectTriggered then
+				Profiler.End("ValveCheck")
+				Profiler.End("PlayerScan_Loop")
+				Profiler.End("CreateMove_Total")
+				return
+			end
+		end
+		Profiler.End("ValveCheck")
+	end
+
+	if enableSilent then
+		Profiler.Begin("SilentAim")
+		for _, pState in ipairs(activePlayers) do
+			SilentAim.ProcessPlayer(pState)
+			if enableAimLock then AimLock.ProcessPlayer(pState) end
+		end
+		Profiler.End("SilentAim")
+	end
+
+	if enableAntiAim then
+		Profiler.Begin("AntiAim")
+		for _, pState in ipairs(activePlayers) do
+			AntiAim.ProcessPlayer(pState, cmd)
+		end
+		Profiler.End("AntiAim")
+	end
+
+	if enableDuckSpeed then
+		Profiler.Begin("DuckSpeed")
+		for _, pState in ipairs(activePlayers) do
+			DuckSpeed.ProcessPlayer(pState)
+		end
+		Profiler.End("DuckSpeed")
+	end
+
+	if enableBhop then
+		Profiler.Begin("Bhop")
+		for _, pState in ipairs(activePlayers) do
+			Bhop.ProcessPlayer(pState)
+		end
+		Profiler.End("Bhop")
+	end
+
+	if enableWarpDT then
+		Profiler.Begin("WarpDT")
+		for _, pState in ipairs(activePlayers) do
+			WarpDT.ProcessPlayer(pState)
+		end
+		Profiler.End("WarpDT")
+	end
+
+	if enableChoke then
+		Profiler.Begin("FakeLag")
+		for _, pState in ipairs(activePlayers) do
+			FakeLag.ProcessPlayer(pState)
+		end
+		Profiler.End("FakeLag")
+	end
+
+	if enableCosmetics then
+		Profiler.Begin("CosmeticAbuse")
+		for _, pState in ipairs(activePlayers) do
+			CosmeticAbuse.ProcessPlayer(pState)
+		end
+		Profiler.End("CosmeticAbuse")
+	end
+
 	Profiler.End("PlayerScan_Loop")
 	Profiler.End("CreateMove_Total")
 end

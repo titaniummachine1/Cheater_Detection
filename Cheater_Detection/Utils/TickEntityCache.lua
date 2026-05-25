@@ -35,6 +35,20 @@ function TickEntityCache.RefreshTick(curTick, playerEntities)
 	end
 end
 
+function TickEntityCache.RefreshFromTickMap(curTick, tickMap)
+	if type(curTick) ~= "number" then
+		return
+	end
+	if curTick == lastTick then
+		return
+	end
+	lastTick = curTick
+	clearMap(playerIndexPresent)
+	for idx in pairs(tickMap) do
+		playerIndexPresent[idx] = true
+	end
+end
+
 function TickEntityCache.GetPlayerByIndex(index)
 	if type(index) ~= "number" then
 		return nil

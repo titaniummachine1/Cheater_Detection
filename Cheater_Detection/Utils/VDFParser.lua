@@ -8,26 +8,17 @@ local equipRegionCache = {}
 local loaded = false
 
 local function findItemsGamePath()
-	local _, fullPath = filesystem.CreateDirectory([[tf\scripts\items]])
-	if type(fullPath) ~= "string" then
-		print("[VDFParser] filesystem API unavailable, fullPath=" .. tostring(fullPath))
-		return nil
+	-- engine.GetGameDir() returns e.g. "C:\Steam\steamapps\common\Team Fortress 2\tf"
+	local gameDir = engine.GetGameDir()
+	if type(gameDir) ~= "string" or gameDir == "" then
+		error("[VDFParser] FATAL: engine.GetGameDir() returned nothing — can't locate items_game.txt")
 	end
 	local sep = package.config:sub(1, 1)
-	local path = fullPath .. sep .. "items_game.txt"
+	local path = gameDir .. sep .. "scripts" .. sep .. "items" .. sep .. "items_game.txt"
 	print("[VDFParser] Looking for items_game.txt at: " .. path)
 	local f = io.open(path, "r")
 	if not f then
-		print("[VDFParser] items_game.txt not found at: " .. path)
-		-- Try alternate path directly in scripts folder
-		local altPath = fullPath .. sep .. ".." .. sep .. "items" .. sep .. "items_game.txt"
-		print("[VDFParser] Trying alternate path: " .. altPath)
-		local f2 = io.open(altPath, "r")
-		if f2 then
-			f2:close()
-			return altPath
-		end
-		return nil
+		error("[VDFParser] FATAL: items_game.txt not found at: " .. path)
 	end
 	f:close()
 	return path
@@ -109,16 +100,15 @@ function VDFParser.LoadItemsGame()
 
 	local path = findItemsGamePath()
 	if not path then
-		print("[VDFParser] ERROR: Could not find items_game.txt")
-		return
+		error("[VDFParser] FATAL: Could not find items_game.txt — cosmetic detection is broken!")
 	end
 
 	print("[VDFParser] Scanning items_game.txt for equip_region data...")
 	local count = scanEquipRegions(path)
-	print(string.format("[VDFParser] Done: %d equip_region entries loaded", count))
 	if count == 0 then
-		print("[VDFParser] WARNING: No equip_region data found - cosmetic detection will not work")
+		error("[VDFParser] FATAL: Parsed items_game.txt but found 0 equip_region entries — parser is broken, fix it!")
 	end
+	print(string.format("[VDFParser] OK: %d equip_region entries loaded", count))
 end
 
 function VDFParser.GetEquipRegion(defIndex)
