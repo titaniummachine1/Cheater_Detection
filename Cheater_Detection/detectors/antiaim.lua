@@ -166,7 +166,12 @@ end
 local yawEvidenceCooldownById = {}
 
 -- Quiet-frame threshold for noise-bracket guard (degrees)
-local NOISE_BRACKET_MAX_DEG = 2.0
+local NOISE_BRACKET_MAX_DEG   = 2.0
+
+-- Module-level reusable buffers — cleared in-place each call, never reallocated.
+-- Eliminates two table + one closure allocation per player per tick.
+local _frameYaws              = {}
+local _frameDeltas            = {}
 
 -- Returns avg_yaw_delta, avg_choke_ticks, max_yaw_delta, flip_count, cooldownTime,
 --         snapBracketed (bool), repeatCount (int — A→B→A desync pattern per RijiN)
@@ -179,6 +184,10 @@ local function analyseYawHistoryFromManager(id)
 
 	local tickInterval = globals.TickInterval()
 	if not tickInterval or tickInterval <= 0 then return nil, nil, nil, nil, nil, false, 0 end
+
+	local history = HistoryManager.GetPlayerHistory(id)
+	if not history then return nil, nil, nil, nil, nil, false, 0 end
+
 	local collected     = 0
 	local sumYawDelta   = 0.0
 	local sumChokeTicks = 0
@@ -186,50 +195,52 @@ local function analyseYawHistoryFromManager(id)
 	local flipCount     = 0
 	local repeatCount   = 0
 	local lastDeltaSign = 0
-
-	local frameDeltas   = {}
-	local frameYaws     = {} -- raw yaw per record, index 1 = newest
 	local recordCount   = 0
-	local lastRecord    = nil
+	local lastYaw       = nil
+	local lastSimTime   = nil
 
-	local history       = HistoryManager.GetPlayerHistory(id)
-	if not history then return nil, nil, nil, nil, nil, false, 0 end
+	for i = 1, #_frameYaws do _frameYaws[i] = nil end
+	for i = 1, #_frameDeltas do _frameDeltas[i] = nil end
 
-	HistoryManager.ForEachRecordNewestFirst(history, YAW_HISTORY_SIZE, function(_, playerData)
-		local ang     = playerData[HistoryManager.Fields.Angles]
-		local simTime = playerData[HistoryManager.Fields.SimulationTime]
+	local limit = math.min(history._count, YAW_HISTORY_SIZE)
+	for offset = 0, limit - 1 do
+		local playerData = HistoryManager.GetRecordAt(history, offset)
+		if playerData then
+			local ang     = playerData[HistoryManager.Fields.Angles]
+			local simTime = playerData[HistoryManager.Fields.SimulationTime]
+			if ang and simTime then
+				local yaw = ang.yaw or ang[2]
+				if yaw then
+					recordCount = recordCount + 1
+					_frameYaws[recordCount] = yaw
 
-		if ang and simTime then
-			local yaw = ang.yaw or ang[2]
-			if yaw then
-				recordCount = recordCount + 1
-				frameYaws[recordCount] = yaw
+					if lastYaw ~= nil then
+						local d          = yawDelta(yaw, lastYaw)
+						local absDelta   = math.abs(d)
+						local timeDiff   = math.abs(simTime - lastSimTime)
+						local chokeTicks = math.floor(timeDiff / tickInterval + 0.5)
 
-				if lastRecord then
-					local d          = yawDelta(yaw, lastRecord.yaw)
-					local absDelta   = math.abs(d)
-					local timeDiff   = math.abs(simTime - lastRecord.simTime)
-					local chokeTicks = math.floor(timeDiff / tickInterval + 0.5)
+						if absDelta > maxYawDelta then maxYawDelta = absDelta end
+						sumYawDelta   = sumYawDelta + absDelta
+						sumChokeTicks = sumChokeTicks + chokeTicks
 
-					if absDelta > maxYawDelta then maxYawDelta = absDelta end
-					sumYawDelta   = sumYawDelta + absDelta
-					sumChokeTicks = sumChokeTicks + chokeTicks
-
-					if absDelta >= YAW_FLIP_THRESHOLD then
-						local sign = d > 0 and 1 or -1
-						if lastDeltaSign ~= 0 and sign ~= lastDeltaSign then
-							flipCount = flipCount + 1
+						if absDelta >= YAW_FLIP_THRESHOLD then
+							local sign = d > 0 and 1 or -1
+							if lastDeltaSign ~= 0 and sign ~= lastDeltaSign then
+								flipCount = flipCount + 1
+							end
+							lastDeltaSign = sign
 						end
-						lastDeltaSign = sign
-					end
 
-					collected = collected + 1
-					frameDeltas[collected] = absDelta
+						collected = collected + 1
+						_frameDeltas[collected] = absDelta
+					end
+					lastYaw     = yaw
+					lastSimTime = simTime
 				end
-				lastRecord = { yaw = yaw, simTime = simTime }
 			end
 		end
-	end)
+	end
 
 	if collected == 0 then return nil, nil, nil, nil, nil, false, 0 end
 
@@ -242,9 +253,9 @@ local function analyseYawHistoryFromManager(id)
 	-- No choke requirement — real desync AA fires every single tick.
 	if recordCount >= 3 then
 		for k = 1, recordCount - 2 do
-			local cur         = frameYaws[k]
-			local mid         = frameYaws[k + 1]
-			local prev        = frameYaws[k + 2]
+			local cur         = _frameYaws[k]
+			local mid         = _frameYaws[k + 1]
+			local prev        = _frameYaws[k + 2]
 			local curPrevDiff = math.abs(yawDelta(cur, prev))
 			local midCurDiff  = math.abs(yawDelta(mid, cur))
 			if curPrevDiff <= YAW_REPEAT_EPSILON and midCurDiff >= YAW_REPEAT_MIN_DEG then
@@ -258,10 +269,10 @@ local function analyseYawHistoryFromManager(id)
 	if maxYawDelta >= YAW_MAX_DELTA_THRESHOLD and collected >= 3 then
 		local snapIdx = 1
 		for k = 2, collected do
-			if frameDeltas[k] > frameDeltas[snapIdx] then snapIdx = k end
+			if _frameDeltas[k] > _frameDeltas[snapIdx] then snapIdx = k end
 		end
-		local prevDelta = snapIdx > 1 and frameDeltas[snapIdx - 1] or nil
-		local nextDelta = snapIdx < collected and frameDeltas[snapIdx + 1] or nil
+		local prevDelta = snapIdx > 1 and _frameDeltas[snapIdx - 1] or nil
+		local nextDelta = snapIdx < collected and _frameDeltas[snapIdx + 1] or nil
 		snapBracketed = (prevDelta == nil or prevDelta < NOISE_BRACKET_MAX_DEG)
 			and (nextDelta == nil or nextDelta < NOISE_BRACKET_MAX_DEG)
 	end

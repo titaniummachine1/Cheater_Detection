@@ -24,6 +24,7 @@ local Evidence                              = require("Cheater_Detection.Core.Ev
 local Events                                = require("Cheater_Detection.Core.Events")
 local HistoryManager                        = require("Cheater_Detection.Utils.HistoryManager")
 local Common                                = require("Cheater_Detection.Utils.Common")
+local Fetcher                               = require("Cheater_Detection.Database.Fetcher")
 
 local WarpDT                                = {}
 
@@ -126,6 +127,7 @@ end
 
 function WarpDT.ProcessPlayer(pState)
 	if not pState or not pState.pdata or not pState.id then return end
+	if Fetcher.State.isRunning then return end
 	if not isEnabled() then return end
 	if not Common.IsConnectionStableForDetection() then return end
 

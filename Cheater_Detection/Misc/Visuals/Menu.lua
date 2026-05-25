@@ -1,7 +1,6 @@
 local Menu = {}
 
 local G = require("Cheater_Detection.Utils.Globals")
-local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 
@@ -66,9 +65,6 @@ local function EnsureMenuState()
 end
 
 local function DrawMenu()
-	if G.Menu.Advanced.profiler then
-		TickProfiler.BeginSection("Draw_Menu")
-	end
 	EnsureMenuState()
 
 	if G.Menu.Advanced.debug and not gui.IsMenuOpen() then
@@ -78,9 +74,6 @@ local function DrawMenu()
 	end
 
 	if not TimMenu.Begin("Cheater Detection", gui.IsMenuOpen()) then
-		if G.Menu.Advanced.profiler then
-			TickProfiler.EndSection("Draw_Menu")
-		end
 		return
 	end
 
@@ -156,7 +149,7 @@ local function DrawMenu()
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
 		TimMenu.NextLine()
-		Advanced.profiler = TimMenu.Checkbox("Tick Profiler (Laggy)", Advanced.profiler == true)
+		Advanced.profiler = TimMenu.Checkbox("Performance Profiler", Advanced.profiler == true)
 		TimMenu.NextLine()
 		-- Debug category selector to reduce console spam
 		Advanced.DebugCategory = TimMenu.Combo(
@@ -405,9 +398,6 @@ local function DrawMenu()
 	end
 
 	TimMenu.End()
-	if G.Menu.Advanced.profiler then
-		TickProfiler.EndSection("Draw_Menu")
-	end
 end
 
 --[[ Callbacks ]]

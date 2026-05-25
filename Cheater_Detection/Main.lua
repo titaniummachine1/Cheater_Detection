@@ -29,20 +29,23 @@ local Fetcher = require("Cheater_Detection.Database.Fetcher")
 require("Cheater_Detection.Core.CombatEvents")
 
 -- Detectors
-local ValveCheck          = require("Cheater_Detection.detectors.valve_check")
-local SilentAim           = require("Cheater_Detection.detectors.silent_aim")
-local AimLock             = require("Cheater_Detection.detectors.aim_lock")
-local AntiAim             = require("Cheater_Detection.detectors.antiaim")
-local DuckSpeed           = require("Cheater_Detection.detectors.duck_speed")
-local Bhop                = require("Cheater_Detection.detectors.bhop")
-local WarpDT              = require("Cheater_Detection.detectors.warp_dt")
-local FakeLag             = require("Cheater_Detection.detectors.fake_lag")
-local CosmeticAbuse       = require("Cheater_Detection.detectors.cosmetic_abuse")
+local ValveCheck            = require("Cheater_Detection.detectors.valve_check")
+local SilentAim             = require("Cheater_Detection.detectors.silent_aim")
+local AimLock               = require("Cheater_Detection.detectors.aim_lock")
+local AntiAim               = require("Cheater_Detection.detectors.antiaim")
+local DuckSpeed             = require("Cheater_Detection.detectors.duck_speed")
+local Bhop                  = require("Cheater_Detection.detectors.bhop")
+local WarpDT                = require("Cheater_Detection.detectors.warp_dt")
+local FakeLag               = require("Cheater_Detection.detectors.fake_lag")
+local CosmeticAbuse         = require("Cheater_Detection.detectors.cosmetic_abuse")
 
-local HistoryManager      = require("Cheater_Detection.Utils.HistoryManager")
-local DetectionConfig     = require("Cheater_Detection.Utils.DetectionConfig")
-local JoinNotifications   = require("Cheater_Detection.Misc.JoinNotifications")
-local TickProfiler        = require("Cheater_Detection.Utils.TickProfiler")
+local HistoryManager        = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig       = require("Cheater_Detection.Utils.DetectionConfig")
+local JoinNotifications     = require("Cheater_Detection.Misc.JoinNotifications")
+local _profilerOk, Profiler = pcall(require, "Profiler")
+if not _profilerOk then
+	Profiler = { Begin = function() end, End = function() end, SetVisible = function() end, SetContext = function() end, Draw = function() end }
+end
 
 -- Actions
 local NotificationService = require("Cheater_Detection.services.notification_service")
@@ -201,10 +204,11 @@ end
 
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
-	TickProfiler.BeginSection("CreateMove_Total")
+	Profiler.SetContext("tick")
+	Profiler.Begin("CreateMove_Total")
 	local isGameUI = engine.IsGameUIVisible()
 	if isGameUI then
-		TickProfiler.EndSection("CreateMove_Total")
+		Profiler.End("CreateMove_Total")
 		return
 	end
 
@@ -220,19 +224,19 @@ local function OnCreateMove(cmd)
 			sessionState.groupSearched = false
 			sessionState.valveDisconnectTriggered = false
 		end
-		TickProfiler.EndSection("CreateMove_Total")
+		Profiler.End("CreateMove_Total")
 		return
 	end
 	sessionState.inServer = true
 
 	local localPlayer = entities.GetLocalPlayer()
 	if not localPlayer or not localPlayer:IsValid() then
-		TickProfiler.EndSection("CreateMove_Total")
+		Profiler.End("CreateMove_Total")
 		return
 	end
 
 	if sessionState.valveDisconnectTriggered then
-		TickProfiler.EndSection("CreateMove_Total")
+		Profiler.End("CreateMove_Total")
 		return
 	end
 
@@ -261,7 +265,7 @@ local function OnCreateMove(cmd)
 		or enableChoke
 		or enableCosmetics
 	if not anyDetectorsEnabled then
-		TickProfiler.EndSection("CreateMove_Total")
+		Profiler.End("CreateMove_Total")
 		return
 	end
 
@@ -281,9 +285,9 @@ local function OnCreateMove(cmd)
 
 	local historyEnabled = enableSilent or enableWarpDT or enableChoke or enableAntiAim
 	if historyEnabled then
-		TickProfiler.BeginSection("History_NewTick")
+		Profiler.Begin("History_NewTick")
 		HistoryManager.NewTick()
-		TickProfiler.EndSection("History_NewTick")
+		Profiler.End("History_NewTick")
 	end
 
 	if not sessionState.groupSearched then
@@ -293,14 +297,14 @@ local function OnCreateMove(cmd)
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 
 	-- Sync authoritative live-player list and tick entity cache once per tick
-	TickProfiler.BeginSection("PlayerCache_Sync")
+	Profiler.Begin("PlayerCache_Sync")
 	PlayerCache.SyncTick()
-	TickProfiler.EndSection("PlayerCache_Sync")
+	Profiler.End("PlayerCache_Sync")
 
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer))
 	local stateTable = PlayerCache.GetActiveTable()
-	TickProfiler.BeginSection("PlayerScan_Loop")
+	Profiler.Begin("PlayerScan_Loop")
 	for id, existingState in pairs(stateTable) do
 		local pdata = existingState.pdata
 		if not pdata then goto continue end
@@ -340,12 +344,12 @@ local function OnCreateMove(cmd)
 		end
 
 		if historyEnabled then
-			TickProfiler.BeginSection("History_Push")
+			Profiler.Begin("History_Push")
 			HistoryManager.Push(pState.wrap)
-			TickProfiler.EndSection("History_Push")
+			Profiler.End("History_Push")
 		end
 
-		TickProfiler.BeginSection("Detectors")
+		Profiler.Begin("Detectors")
 		if enableValveCheck then
 			ValveCheck.ProcessPlayer(pState)
 		end
@@ -373,29 +377,36 @@ local function OnCreateMove(cmd)
 		if enableCosmetics and CosmeticAbuse.NeedsScan(id) then
 			CosmeticAbuse.ProcessPlayer(pState, cmd)
 		end
-		TickProfiler.EndSection("Detectors")
+		Profiler.End("Detectors")
 
 		if enableValveCheck then
 			enforceValveAutoDisconnect(pState)
 		end
 		if sessionState.valveDisconnectTriggered then
-			TickProfiler.EndSection("PlayerScan_Loop")
-			TickProfiler.EndSection("CreateMove_Total")
+			Profiler.End("PlayerScan_Loop")
+			Profiler.End("CreateMove_Total")
 			return
 		end
 
 		::continue::
 	end
-	TickProfiler.EndSection("PlayerScan_Loop")
-	TickProfiler.EndSection("CreateMove_Total")
+	Profiler.End("PlayerScan_Loop")
+	Profiler.End("CreateMove_Total")
 end
 
 local function OnDraw()
-	local profilerEnabled = G and G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler == true
+	local profilerEnabled = G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler == true
+
 	if sessionState.lastProfilerEnabled ~= profilerEnabled then
 		sessionState.lastProfilerEnabled = profilerEnabled
-		TickProfiler.SetEnabled(profilerEnabled)
+		Profiler.SetVisible(profilerEnabled)
 	end
+
+	if profilerEnabled then
+		Profiler.SetContext("frame")
+		Profiler.Draw()
+	end
+
 	Evidence.ApplyDecay()
 	Scheduler.Tick()
 	Visuals.DrawTags()

@@ -35,8 +35,26 @@ function copyLuaTarget(sourcePath, targetFilePath, label) {
   console.log(`[BundleAndDeploy] DEPLOYED ${label}: ${fileInfo(targetFilePath)}`);
 }
 
+function stripBomFromDir(dir) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      stripBomFromDir(fullPath);
+    } else if (entry.isFile() && entry.name.endsWith(".lua")) {
+      const content = fs.readFileSync(fullPath, "utf8");
+      if (content.charCodeAt(0) === 0xfeff) {
+        fs.writeFileSync(fullPath, content.slice(1), "utf8");
+        console.log(`[BundleAndDeploy] Stripped BOM: ${fullPath}`);
+      }
+    }
+  }
+}
+
 function main() {
   try {
+    stripBomFromDir("./Cheater_Detection");
+
     // Bundle main Cheater_Detection
     const bundledLua = bundleLua("./Cheater_Detection/Main.lua");
     writeLuaTarget(targetPath, bundledLua, "main");

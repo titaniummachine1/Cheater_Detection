@@ -9,7 +9,6 @@
 ]]
 
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
-local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 local HistoryManager = {}
 
@@ -212,8 +211,6 @@ function HistoryManager.Push(player)
 		return
 	end
 
-	TickProfiler.BeginSection("History_Write")
-
 	local currentBucket = ringBuffer[ringHead]
 	if not currentBucket or currentBucket._tick ~= globals.TickCount() then
 		HistoryManager.NewTick()
@@ -256,8 +253,6 @@ function HistoryManager.Push(player)
 	end
 
 	state.current = existingPlayerData
-
-	TickProfiler.EndSection("History_Write")
 end
 
 function HistoryManager.MarkDamageDealt(steamID)

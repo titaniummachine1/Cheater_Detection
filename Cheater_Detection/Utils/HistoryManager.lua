@@ -13,7 +13,6 @@
 ]]
 
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
-local TickProfiler = require("Cheater_Detection.Utils.TickProfiler")
 
 local HistoryManager = {}
 
@@ -204,6 +203,14 @@ function HistoryManager.IsInitialized()
 	return initialized
 end
 
+-- Direct record access by offset on an already-retrieved history object.
+-- Avoids the steamID table lookup that GetPlayerRecordAt performs.
+-- offset 0 = newest, 1 = one tick ago, etc.
+function HistoryManager.GetRecordAt(history, offset)
+	local idx = recordIndexForOffset(history, offset)
+	return idx and history[idx]
+end
+
 local lastTickCount = -1
 
 function HistoryManager.NewTick()
@@ -248,8 +255,6 @@ function HistoryManager.Push(player)
 		return
 	end
 
-	TickProfiler.BeginSection("History_Write")
-
 	-- Ensure we have a history for this player
 	local history = playerHistories[tostring(steamID)]
 	if not history then
@@ -285,8 +290,6 @@ function HistoryManager.Push(player)
 	history[history._head] = record
 
 	state.current = record
-
-	TickProfiler.EndSection("History_Write")
 end
 
 function HistoryManager.MarkDamageDealt(steamID)

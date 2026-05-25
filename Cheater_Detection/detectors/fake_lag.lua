@@ -20,6 +20,7 @@ local Common                      = require("Cheater_Detection.Utils.Common")
 local Evidence                    = require("Cheater_Detection.Core.Evidence_system")
 local Events                      = require("Cheater_Detection.Core.Events")
 local HistoryManager              = require("Cheater_Detection.Utils.HistoryManager")
+local Fetcher                     = require("Cheater_Detection.Database.Fetcher")
 
 local FakeLag                     = {}
 
@@ -289,6 +290,7 @@ end
 
 function FakeLag.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then return end
+	if Fetcher.State.isRunning then return end
 	if not isChokeDetectionEnabled() then return end
 
 	local id = playerState.id

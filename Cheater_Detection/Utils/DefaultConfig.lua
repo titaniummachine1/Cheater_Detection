@@ -22,7 +22,7 @@ local Default_Config = {
 		AutoPriority = true,
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
 		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
-		profiler = false,                   -- Tick profiler (measure performance, can cause lag)
+		profiler = false,                   -- Performance Profiler (uses global Profiler library)
 		-- Detection toggles (only for implemented detections)
 		Choke = false,                      -- Fake Lag detection
 		Warp = false,                       -- Warp/DT detection
