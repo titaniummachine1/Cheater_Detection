@@ -19,9 +19,6 @@ local WHOLE_HEAD_CONFLICTS = {
 	hat_lower = true,
 }
 
--- Load items_game.txt once at startup for full equip_region coverage
-VDFParser.LoadItemsGame()
-
 -- defIndex -> equip_region string (or false if no region); avoids repeated lookups
 local regionCache = {}
 
@@ -172,6 +169,10 @@ local function isEnabled()
 	local advanced = menu and menu.Advanced
 	if not advanced then return false end
 	return advanced.Cosmetics == true
+end
+
+function CosmeticAbuse.Init()
+	VDFParser.LoadItemsGame()
 end
 
 function CosmeticAbuse.InvalidatePlayer(id)

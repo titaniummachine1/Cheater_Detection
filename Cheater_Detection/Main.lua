@@ -194,6 +194,7 @@ local function Init()
 	end
 
 	DetectionConfig.RegisterWithHistoryManager()
+	CosmeticAbuse.Init()
 
 	-- Automate Database Fetch (Local then Online) - Respects AutoSync setting
 	if G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false then

@@ -317,15 +317,28 @@ function FakeLag.ProcessPlayer(playerState)
 
 	if #simTimes < 5 then return end
 
-	-- Build delta-tick array (positive deltas only; allow up to ~2s choke spikes)
-	local maxDeltaSec = 2.5
-	local deltaTicks  = {}
-	local sumTicks    = 0
+	-- Build delta-tick array (positive deltas only)
+	-- Cap: 33 ticks (~600ms) max for real fake lag detection; above that is packet loss/alt-tab
+	local MAX_FAKELAG_TICKS = 33
+	local maxDeltaSec       = 2.5
+	local deltaTicks        = {}
+	local sumTicks          = 0
 
 	for i = 1, #simTimes - 1 do
 		local delta = simTimes[i] - simTimes[i + 1] -- simTimes[i] is newer
 		if delta > 0 and delta <= maxDeltaSec then
 			local t = timeToTicks(delta)
+			-- Spike filter: reject isolated massive gaps (>33 ticks) as packet loss
+			if t > MAX_FAKELAG_TICKS then
+				-- Only allow if neighbors are also large (sustained choke, not a spike)
+				local prevLarge = (i > 1) and (timeToTicks(simTimes[i - 1] - simTimes[i]) > MAX_FAKELAG_TICKS)
+				local nextLarge = (i < #simTimes - 1) and
+					(timeToTicks(simTimes[i + 1] - simTimes[i + 2]) > MAX_FAKELAG_TICKS)
+				if not (prevLarge or nextLarge) then
+					-- Single spike: treat as packet loss, clamp to reasonable choke
+					t = MIN_FAKELAG_CHOKE_TICKS
+				end
+			end
 			deltaTicks[#deltaTicks + 1] = t
 			sumTicks = sumTicks + t
 		end

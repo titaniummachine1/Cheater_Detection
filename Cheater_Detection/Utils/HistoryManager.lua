@@ -13,6 +13,7 @@
 ]]
 
 local PlayerCache         = require("Cheater_Detection.Core.player_cache")
+local G                   = require("Cheater_Detection.Utils.Globals")
 
 local HistoryManager      = {}
 
@@ -33,6 +34,22 @@ local initialized         = false
 
 local tickLocalPlayer     = nil
 local tickLocalPlayerTick = -1
+
+-- Cache for detector enablement to avoid menu lookups every tick
+local lastCheckTick       = -1
+local historyEnabled      = false
+
+local function isHistoryEnabled()
+	local curTick = globals.TickCount()
+	if curTick ~= lastCheckTick then
+		lastCheckTick = curTick
+		local menu = G.Menu
+		local adv = menu and menu.Advanced
+		-- History needed for SilentAim, WarpDT, FakeLag, AntiAim
+		historyEnabled = (adv and (adv.SilentAimbot or adv["Warp"] or adv.Choke or adv.AntiAim)) == true
+	end
+	return historyEnabled
+end
 
 local function getTickLocalPlayer()
 	local curTick = globals.TickCount()
@@ -229,6 +246,9 @@ function HistoryManager.NewTick()
 	if not initialized then
 		return
 	end
+	if not isHistoryEnabled() then
+		return
+	end
 	local curTick = globals.TickCount()
 	if curTick == lastTickCount then
 		return
@@ -252,25 +272,29 @@ function HistoryManager.Push(player)
 	if not initialized or not next(activeFields) then
 		return
 	end
+	if not isHistoryEnabled() then
+		return
+	end
 	if not player or type(player.GetSteamID64) ~= "function" then
 		return
 	end
 
-	local steamID = player:GetSteamID64()
-	if not steamID then
+	local steamIDRaw = player:GetSteamID64()
+	if not steamIDRaw then
 		return
 	end
 
-	local state = PlayerCache.GetByID(tostring(steamID))
+	local steamID = tostring(steamIDRaw)
+	local state = PlayerCache.GetByID(steamID)
 	if not state then
 		return
 	end
 
 	-- Ensure we have a history for this player
-	local history = playerHistories[tostring(steamID)]
+	local history = playerHistories[steamID]
 	if not history then
 		history = { _head = 0, _count = 0 }
-		playerHistories[tostring(steamID)] = history
+		playerHistories[steamID] = history
 	end
 
 	local curTick = globals.TickCount()

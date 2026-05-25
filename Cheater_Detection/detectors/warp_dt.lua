@@ -51,10 +51,26 @@ local DT_EVIDENCE_COOLDOWN_S                = 1.0  -- min seconds between eviden
 -- Hit history constants
 local MAX_SHOT_HISTORY                      = 8 -- keep last N confirmed hits per player
 
+-- Cached tick calculations (recalculated when tick interval changes)
+local cachedTickInterval                    = nil
+local cachedBurstMinTicks                   = nil
+local cachedBurstMaxTicks                   = nil
+
+local function getBurstThresholds()
+	local tickInt = globals.TickInterval()
+	if tickInt ~= cachedTickInterval then
+		cachedTickInterval = tickInt
+		-- Scaled to actual server tickrate: ticks = time / tickInterval
+		cachedBurstMinTicks = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / tickInt + 0.5)
+		cachedBurstMaxTicks = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / tickInt + 0.5)
+	end
+	return cachedBurstMinTicks, cachedBurstMaxTicks
+end
+
 -- ── state ──────────────────────────────────────────────────────────────────
 
 -- [id] = { lastDamageTick, lastBurstTick, lastBurstEvidenceTime, lastHitCountEvidenceTime, recentHits }
-local playerState                           = {}
+local playerState = {}
 
 
 -- Server-hitch suppression: track which ticks had simultaneous bursts
@@ -167,8 +183,7 @@ function WarpDT.ProcessPlayer(pState)
 		_deltaTicks[deltaN] = _simTicks[i] - _simTicks[i + 1]
 	end
 
-	local burstMin    = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
-	local burstMax    = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+	local burstMin, burstMax = getBurstThresholds()
 	local burstAmount = 0
 	if deltaN >= 1 then
 		local d = _deltaTicks[1]
