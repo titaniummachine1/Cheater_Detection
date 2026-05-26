@@ -252,29 +252,25 @@ function PlayerCache.SyncTick()
 			DirtySystem.MarkDirty(id, "checks")
 			applyAutoPriority(state, ent)
 		else
-			-- Existing player — refresh pdata fields in-place (zero allocation)
+			-- Existing player — minimal refresh, most properties are lazy-cached via wrap
 			local pdata      = state.pdata
 			pdata._index     = ent:GetIndex()
-			pdata.isAlive    = ent:IsAlive()
-			pdata.isDormant  = ent:IsDormant()
-			pdata._teamNum   = ent:GetTeamNumber()
 
-			local mfFlags    = ent:GetPropInt("m_fFlags") or 0
-			pdata.flags      = mfFlags
-			pdata.onGround   = (mfFlags & 1) ~= 0
-			-- Only re-read Vector3 props when simTime advances (player isn't choking).
-			-- This avoids per-tick Vector3 allocations for choked/idle players.
+			-- Only read simTime to detect if player moved (for lazy Vector3 prop updates)
 			local newSimTime = ent:GetPropFloat("m_flSimulationTime")
 			if newSimTime ~= pdata.simTime then
-				pdata.velocity   = ent:EstimateAbsVelocity()
-				pdata.viewOffset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
-				pdata.simTime    = newSimTime
+				-- Player moved: update cached timestamp (actual props fetched lazily via wrap)
+				pdata.simTime = newSimTime
 			end
 
 			-- Update proxy slot index (handles reconnect/team switch)
 			state.wrap.index  = ent:GetIndex()
 			state.entityIndex = ent:GetIndex()
 			state.lastUpdate  = curTick
+
+			-- Refresh lazy state flags for detectors that check before wrap access
+			pdata.isAlive     = ent:IsAlive()
+			pdata.isDormant   = ent:IsDormant()
 
 			-- Lazy score decay
 			if state.score > 0 and (state.flags & Constants.Flags.CHEATER) == 0 and not state.hasActiveEvidence then

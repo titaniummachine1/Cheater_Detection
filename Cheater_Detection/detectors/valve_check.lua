@@ -101,21 +101,7 @@ local function isKnownStaticValvePlayer(playerState)
 		return false
 	end
 
-	if isKnownValveID64(playerState.id) then
-		return true
-	end
-
-	if playerState.wrap and playerState.wrap.GetRawEntity then
-		local rawEntity = playerState.wrap:GetRawEntity()
-		if rawEntity then
-			local steam2 = Common.GetSteamID(rawEntity)
-			if isKnownValveIDSteam2(steam2) then
-				return true
-			end
-		end
-	end
-
-	return false
+	return isKnownValveID64(playerState.id)
 end
 
 -- ──────────────────────────────────────────────────────────────────────────────
@@ -592,24 +578,6 @@ runDeferredSweep = function()
 				DirtySystem.ClearDirty(id, "checks")
 				goto continue
 			end
-		end
-
-		-- ── Layer 1b: Legacy Steam2 fallback ─────────────────────────────────────
-		if not checkFlags.valveSteam2Checked then
-			local ply = state.wrap:GetRawEntity()
-			if ply then
-				local s2 = Common.GetSteamID(ply)
-				if isKnownValveIDSteam2(s2) then
-					checkFlags.valveSteam2Checked = true
-					checkFlags.valveGroupChecked = true
-					checkFlags.vacBanChecked = true
-					checkFlags.commBanChecked = true
-					applyValveFlag(state, "Known Valve SteamID (Legacy)")
-					DirtySystem.ClearDirty(id, "checks")
-					goto continue
-				end
-			end
-			checkFlags.valveSteam2Checked = true
 		end
 
 		-- ── Layer 2: Item / Badge check (deferred, limited per frame) ─────────────

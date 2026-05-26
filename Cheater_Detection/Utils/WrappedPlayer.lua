@@ -15,8 +15,12 @@ local PlayerCache        = require("Cheater_Detection.Core.player_cache")
 ---@field _steamID3 string
 ---@field _name string
 ---@field _chargeDataCache table
+---@field _cache table
+---@field _cacheTick number
 local WrappedPlayer      = {}
 local WrappedPlayerMT    = { __index = WrappedPlayer }
+
+local _currentCacheTick  = -1
 
 local Vec3               = Vector3
 local BONE_MASK_HITBOX   = 0x7ff00
@@ -45,7 +49,29 @@ function WrappedPlayer.New(entIndex, steamID64, steamID3, name)
 	self._steamID3        = steamID3
 	self._name            = name
 	self._chargeDataCache = { ChargeBegin = 0, ChargedDamage = 0 }
+	self._cache           = {} -- Lazy property cache: [key] = value
+	self._cacheTick       = -1 -- Tick when cache was last cleared
 	return self
+end
+
+---Internal: ensure cache is fresh for current tick, then return/get cache value
+---@param key string Cache key
+---@param fetchFn function Function to call if cache miss
+---@return any
+function WrappedPlayer:_getCached(key, fetchFn)
+	local curTick = globals.TickCount()
+	if curTick ~= self._cacheTick then
+		-- New tick: clear cache
+		self._cache = {}
+		self._cacheTick = curTick
+	end
+	local cached = self._cache[key]
+	if cached ~= nil or self._cache[key] ~= nil then
+		return cached
+	end
+	local value = fetchFn()
+	self._cache[key] = value
+	return value
 end
 
 --- Returns the entity for this proxy if it is present this tick.
@@ -84,26 +110,34 @@ function WrappedPlayer:IsValid()
 end
 
 function WrappedPlayer:IsAlive()
-	local ent = self:GetRawEntity()
-	return ent ~= nil and ent:IsAlive()
+	return self:_getCached("isAlive", function()
+		local ent = self:GetRawEntity()
+		return ent ~= nil and ent:IsAlive()
+	end)
 end
 
 function WrappedPlayer:IsDormant()
-	local ent = self:GetRawEntity()
-	return ent == nil or ent:IsDormant()
+	return self:_getCached("isDormant", function()
+		local ent = self:GetRawEntity()
+		return ent == nil or ent:IsDormant()
+	end)
 end
 
 function WrappedPlayer:IsOnGround()
-	local ent = self:GetRawEntity()
-	if not ent then return false end
-	local f = ent:GetPropInt("m_fFlags")
-	return f ~= nil and (f & FL_ONGROUND) ~= 0
+	return self:_getCached("isOnGround", function()
+		local ent = self:GetRawEntity()
+		if not ent then return false end
+		local f = ent:GetPropInt("m_fFlags")
+		return f ~= nil and (f & FL_ONGROUND) ~= 0
+	end)
 end
 
 function WrappedPlayer:IsFriend(includeParty)
-	local ent = self:GetRawEntity()
-	if not ent then return false end
-	return Common.IsFriend(ent, includeParty)
+	return self:_getCached("isFriend_" .. tostring(includeParty), function()
+		local ent = self:GetRawEntity()
+		if not ent then return false end
+		return Common.IsFriend(ent, includeParty)
+	end)
 end
 
 function WrappedPlayer:IsValidPlayer(checkFriend, checkDormant, skipEntity)
@@ -120,50 +154,64 @@ function WrappedPlayer:IsEnemyOf(other)
 end
 
 function WrappedPlayer:GetTeamNumber()
-	local ent = self:GetRawEntity()
-	return ent and ent:GetTeamNumber() or nil
+	return self:_getCached("teamNumber", function()
+		local ent = self:GetRawEntity()
+		return ent and ent:GetTeamNumber() or nil
+	end)
 end
 
 function WrappedPlayer:GetAbsOrigin()
-	local ent = self:GetRawEntity()
-	return ent and ent:GetAbsOrigin() or nil
+	return self:_getCached("absOrigin", function()
+		local ent = self:GetRawEntity()
+		return ent and ent:GetAbsOrigin() or nil
+	end)
 end
 
 function WrappedPlayer:GetVelocity()
-	local ent = self:GetRawEntity()
-	return ent and ent:EstimateAbsVelocity() or nil
+	return self:_getCached("velocity", function()
+		local ent = self:GetRawEntity()
+		return ent and ent:EstimateAbsVelocity() or nil
+	end)
 end
 
 function WrappedPlayer:GetViewOffset()
-	local ent = self:GetRawEntity()
-	return ent and ent:GetPropVector("localdata", "m_vecViewOffset[0]") or nil
+	return self:_getCached("viewOffset", function()
+		local ent = self:GetRawEntity()
+		return ent and ent:GetPropVector("localdata", "m_vecViewOffset[0]") or nil
+	end)
 end
 
 function WrappedPlayer:GetEyePos()
-	local ent = self:GetRawEntity()
-	if not ent then return nil end
-	local origin = ent:GetAbsOrigin()
-	local offset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
-	if origin and offset then return origin + offset end
-	return nil
+	return self:_getCached("eyePos", function()
+		local ent = self:GetRawEntity()
+		if not ent then return nil end
+		local origin = ent:GetAbsOrigin()
+		local offset = ent:GetPropVector("localdata", "m_vecViewOffset[0]")
+		if origin and offset then return origin + offset end
+		return nil
+	end)
 end
 
 function WrappedPlayer:GetEyeAngles()
-	local ent = self:GetRawEntity()
-	if not ent then return nil end
-	if ent:GetIndex() == localPlayerIndex() then
-		return engine.GetViewAngles()
-	end
-	local ang = ent:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
-	if ang then return EulerAngles(ang.x, ang.y, ang.z) end
-	ang = ent:GetPropVector("m_angEyeAngles[0]")
-	if ang then return EulerAngles(ang.x, ang.y, ang.z) end
-	return nil
+	return self:_getCached("eyeAngles", function()
+		local ent = self:GetRawEntity()
+		if not ent then return nil end
+		if ent:GetIndex() == localPlayerIndex() then
+			return engine.GetViewAngles()
+		end
+		local ang = ent:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+		if ang then return EulerAngles(ang.x, ang.y, ang.z) end
+		ang = ent:GetPropVector("m_angEyeAngles[0]")
+		if ang then return EulerAngles(ang.x, ang.y, ang.z) end
+		return nil
+	end)
 end
 
 function WrappedPlayer:GetSimulationTime()
-	local ent = self:GetRawEntity()
-	return ent and ent:GetPropFloat("m_flSimulationTime") or nil
+	return self:_getCached("simTime", function()
+		local ent = self:GetRawEntity()
+		return ent and ent:GetPropFloat("m_flSimulationTime") or nil
+	end)
 end
 
 function WrappedPlayer:GetHitboxPos(hitboxIndex)

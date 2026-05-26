@@ -1,9 +1,9 @@
 --[[ data/valve_data.lua
      Static data for Valve employee detection.
-     
+
      Detection data sourced from valve_employee_detector.lua v2.2
      and ValveEmployees.lua database.
-     
+
      Uses SteamID64 as primary key (more reliable than Steam2).
      Steam2 manual list kept for legacy compatibility only.
 ]]
@@ -19,17 +19,14 @@ ValveData.QualityID = 8
 -- Badge definition index for "Valve Employee" badge
 ValveData.BadgeDefIndex = 11
 
--- Manual Steam2 list (legacy fallback, only for IsValveID Steam2 check)
-ValveData.ManualIDsSteam2 = {
-	["STEAM_0:0:8"]    = true, -- Robin Walker
-	["STEAM_0:1:4"]    = true, -- Gabe Newell
-	["STEAM_0:0:1563"] = true, -- Erik Johnson
-}
-
 -- Comprehensive SteamID64 list from ValveEmployees.lua + known employees
 -- Source: steamdb.info/badge/11
+-- Note: Converted legacy Steam2 IDs: STEAM_0:0:8=76561197960265744, STEAM_0:1:4=76561197960265737, STEAM_0:0:1563=76561197960268854
 ValveData.KnownSteamID64s = {
 	["76561197960265729"] = true,
+	["76561197960265737"] = true, -- Gabe Newell (legacy STEAM_0:1:4)
+	["76561197960265744"] = true, -- Robin Walker (legacy STEAM_0:0:8)
+	["76561197960268854"] = true, -- Erik Johnson (legacy STEAM_0:0:1563)
 	["76561197960265730"] = true,
 	["76561197960265731"] = true,
 	["76561197960265733"] = true,
