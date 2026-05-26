@@ -10,7 +10,7 @@ local DetectionConfig = {}
 
 DetectionConfig.Detectors = {
 	WarpDT = {
-		retentionTicks = 33,
+		retentionTicks = 24,
 		fields = { HistoryManager.Fields.SimulationTime },
 	},
 	SilentAim = {
@@ -21,12 +21,12 @@ DetectionConfig.Detectors = {
 		},
 	},
 	FakeLag = {
-		retentionTicks = 33,
+		retentionTicks = 22,
 		fields = { HistoryManager.Fields.SimulationTime },
 	},
 }
 
-DetectionConfig.DefaultRetentionTicks = 33
+DetectionConfig.DefaultRetentionTicks = 24
 
 function DetectionConfig.GetRetentionTicks()
 	local maxTicks = DetectionConfig.DefaultRetentionTicks

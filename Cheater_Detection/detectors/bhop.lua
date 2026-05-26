@@ -8,6 +8,7 @@ local Common              = require("Cheater_Detection.Utils.Common")
 local DetectorUtils       = require("Cheater_Detection.Utils.DetectorUtils")
 local Events              = require("Cheater_Detection.Core.Events")
 local PlayerData          = require("Cheater_Detection.Utils.PlayerData")
+local PlayerCache         = require("Cheater_Detection.Core.player_cache")
 
 local Bhop                = {}
 
@@ -18,17 +19,6 @@ local playerData          = {}
 local MAX_GROUND_TICKS    = 2
 local CHAIN_BREAK_SECONDS = 1.5
 
-local _tickLP             = nil
-local _tickLPTick         = -1
-
-local function getTickLP()
-	local ct = globals.TickCount()
-	if ct ~= _tickLPTick then
-		_tickLPTick = ct
-		_tickLP     = entities.GetLocalPlayer()
-	end
-	return _tickLP
-end
 
 function Bhop.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
@@ -72,7 +62,7 @@ function Bhop.ProcessPlayer(playerState)
 		return
 	end
 
-	if id == tostring(Common.GetSteamID64(getTickLP())) and not Common.IsDebugEnabled() then
+	if id == PlayerCache.GetLocalID() and not Common.IsDebugEnabled() then
 		return
 	end
 

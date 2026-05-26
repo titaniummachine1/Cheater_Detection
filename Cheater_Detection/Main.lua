@@ -302,7 +302,10 @@ local function OnCreateMove(cmd)
 
 	-- Sync authoritative live-player list and tick entity cache once per tick
 	Profiler.Begin("PlayerCache_Sync")
+	-- DEBUG: skip SyncTick entirely to measure baseline FPS
+	-- if false then
 	PlayerCache.SyncTick()
+	-- end
 	Profiler.End("PlayerCache_Sync")
 
 	-- Skip all detector work on frames where the game tick hasn't advanced
@@ -369,19 +372,17 @@ local function OnCreateMove(cmd)
 		Profiler.End("History_Push")
 	end
 
+	-- ValveCheck now runs on DirtySystem (connected flag) like cosmetics
+	-- Auto-disconnect enforcement still runs every tick for confirmed Valve employees
 	if enableValveCheck then
-		Profiler.Begin("ValveCheck")
 		for _, pState in ipairs(activePlayers) do
-			ValveCheck.ProcessPlayer(pState)
 			enforceValveAutoDisconnect(pState)
 			if sessionState.valveDisconnectTriggered then
-				Profiler.End("ValveCheck")
 				Profiler.End("PlayerScan_Loop")
 				Profiler.End("CreateMove_Total")
 				return
 			end
 		end
-		Profiler.End("ValveCheck")
 	end
 
 	if enableSilent then
@@ -446,7 +447,7 @@ local function OnCreateMove(cmd)
 end
 
 local function OnDraw()
-	local profilerEnabled = G.Menu and G.Menu.Advanced and G.Menu.Advanced.profiler == true
+	local profilerEnabled = G.Menu and G.Menu.Advanced and G.Menu.Advanced["profiler"] == true
 
 	if sessionState.lastProfilerEnabled ~= profilerEnabled then
 		sessionState.lastProfilerEnabled = profilerEnabled

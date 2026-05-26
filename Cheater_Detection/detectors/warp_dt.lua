@@ -63,6 +63,12 @@ local function getBurstThresholds()
 		-- Scaled to actual server tickrate: ticks = time / tickInterval
 		cachedBurstMinTicks = math.floor(BURST_MIN_TICKS_66HZ / 66.0 / tickInt + 0.5)
 		cachedBurstMaxTicks = math.floor(BURST_MAX_TICKS_66HZ / 66.0 / tickInt + 0.5)
+		if cachedBurstMinTicks <= 0 or cachedBurstMaxTicks <= cachedBurstMinTicks then
+			print("[WarpDT ERROR] Invalid burst thresholds (min=" ..
+				tostring(cachedBurstMinTicks) .. ", max=" .. tostring(cachedBurstMaxTicks) .. "), using defaults")
+			cachedBurstMinTicks = math.floor(BURST_MIN_TICKS_66HZ)
+			cachedBurstMaxTicks = math.floor(BURST_MAX_TICKS_66HZ)
+		end
 	end
 	return cachedBurstMinTicks, cachedBurstMaxTicks
 end
@@ -122,7 +128,13 @@ end
 
 local function getState(id)
 	if not playerState[id] then
-		playerState[id] = { lastDamageTick = 0, lastBurstTick = 0, lastBurstEvidenceTime = 0, lastHitCountEvidenceTime = 0, recentHits = {} }
+		playerState[id] = {
+			lastDamageTick           = 0,
+			lastBurstTick            = 0,
+			lastBurstEvidenceTime    = 0,
+			lastHitCountEvidenceTime = 0,
+			recentHits               = { _data = {}, _head = 1, _count = 0 },
+		}
 	end
 	return playerState[id]
 end
@@ -134,19 +146,12 @@ end
 
 
 local function recordConfirmedHit(attackerID, tick)
-	local data = getState(attackerID)
-	local hits = data.recentHits
-	hits[#hits + 1] = tick
-	while #hits > MAX_SHOT_HISTORY do
-		table.remove(hits, 1)
+	local ring = getState(attackerID).recentHits
+	ring._data[ring._head] = tick
+	ring._head = (ring._head % MAX_SHOT_HISTORY) + 1
+	if ring._count < MAX_SHOT_HISTORY then
+		ring._count = ring._count + 1
 	end
-end
-
-local function getLastConfirmedHitDelta(attackerID, tick)
-	local data = getState(attackerID)
-	local hits = data.recentHits
-	if #hits == 0 then return nil end
-	return tick - hits[#hits]
 end
 
 -- ── burst detection (called per-player each tick) ──────────────────────────
@@ -254,9 +259,11 @@ Events.Subscribe("OnHitscanHit", function(hit)
 
 	if data.lastBurstTick > 0 and (curTick - data.lastBurstTick) <= DT_CONFIRM_WINDOW_TICKS then
 		local hitsInWindow = 0
-		local hits = data.recentHits
-		for i = #hits, 1, -1 do
-			if hits[i] >= data.lastBurstTick then
+		local ring = data.recentHits
+		for i = 0, ring._count - 1 do
+			local idx = ((ring._head - 2 - i) % MAX_SHOT_HISTORY) + 1
+			local hitTick = ring._data[idx]
+			if hitTick and hitTick >= data.lastBurstTick then
 				hitsInWindow = hitsInWindow + 1
 			else
 				break

@@ -24,6 +24,7 @@ local Events                  = require("Cheater_Detection.Core.Events")
 local G                       = require("Cheater_Detection.Utils.Globals")
 local PlayerData              = require("Cheater_Detection.Utils.PlayerData")
 local HistoryManager          = require("Cheater_Detection.Utils.HistoryManager")
+local PlayerCache             = require("Cheater_Detection.Core.player_cache")
 
 local AntiAim                 = {}
 
@@ -290,18 +291,6 @@ local function ourConnectionUnstable()
 end
 
 -- ── main entry ─────────────────────────────────────────────────────────────
-local _tickLocalPlayer     = nil
-local _tickLocalPlayerTick = -1
-
-local function getTickLocalPlayer()
-	local ct = globals.TickCount()
-	if ct ~= _tickLocalPlayerTick then
-		_tickLocalPlayerTick = ct
-		_tickLocalPlayer     = entities.GetLocalPlayer()
-	end
-	return _tickLocalPlayer
-end
-
 function AntiAim.ProcessPlayer(playerState, cmd)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
@@ -318,8 +307,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if not isAlive or isDorm then return end
 	if not simTime or simTime <= 0 then return end
 
-	local localPlayer = getTickLocalPlayer()
-	local isLocalPlayer = playerState.id == tostring(Common.GetSteamID64(localPlayer))
+	local isLocalPlayer = playerState.id == PlayerCache.GetLocalID()
 	-- Skip friends and local player unless global debug mode is enabled
 	if not Common.IsDebugEnabled() then
 		if playerState.isFriend or isLocalPlayer then return end
@@ -342,8 +330,10 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		local lastLog = pitchState.lastTickLogTime or 0
 		if (now - lastLog) >= 1.0 then
 			pitchState.lastTickLogTime = now
-			local pitchStr             = pitch ~= nil and string.format("%.3f", pitch) or "nil"
-			local yawStr               = yaw ~= nil and string.format("%.3f", yaw) or "nil"
+			local pitchStr = "nil"
+			if pitch ~= nil then pitchStr = string.format("%.3f", pitch) end
+			local yawStr = "nil"
+			if yaw ~= nil then yawStr = string.format("%.3f", yaw) end
 			print(string.format("[AntiAim][TICK] id=%s pitch=%s yaw=%s src=%s sim=%.3f",
 				tostring(playerState.id), pitchStr, yawStr, tostring(angleSource), simTime))
 		end

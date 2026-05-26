@@ -66,7 +66,7 @@ local LILAC_GAIN_RETURN                 = 1.0
 
 local playerData                        = {}
 local NON_SNIPER_COOLDOWN_TICKS         = 6
-local lastNonSniperTickByUserID         = {}
+local lastNonSniperTickByID             = {}
 
 local _histPitches                      = {}
 local _histYaws                         = {}
@@ -202,11 +202,11 @@ local function bestAimDistToTarget(eyePos, headPos, bodyPos, pitch, yaw)
 	return best
 end
 
-local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePos, headPos, bodyPos)
+local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotPitch, shotYaw, eyePos, headPos, bodyPos)
 	if not id or type(shotOffset) ~= "number" or type(shotTick) ~= "number" then
 		return 0.0, 0.0, 0.0, 0
 	end
-	if not shotAngles or type(shotAngles.pitch) ~= "number" or type(shotAngles.yaw) ~= "number" then
+	if type(shotPitch) ~= "number" or type(shotYaw) ~= "number" then
 		return 0.0, 0.0, 0.0, 0
 	end
 	if not eyePos or (not headPos and not bodyPos) then
@@ -224,13 +224,13 @@ local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotAngles, eyePo
 	local maxDelta = 0.0
 	local totalDelta = 0.0
 
-	local aimDist = bestAimDistToTarget(eyePos, headPos, bodyPos, shotAngles.pitch, shotAngles.yaw)
+	local aimDist = bestAimDistToTarget(eyePos, headPos, bodyPos, shotPitch, shotYaw)
 	if aimDist == nil then
 		return 0.0, 0.0, 0.0, 0
 	end
 
-	local langPitch = shotAngles.pitch
-	local langYaw = shotAngles.yaw
+	local langPitch = shotPitch
+	local langYaw = shotYaw
 	local lastAimDist = aimDist
 
 	-- Look at older records (higher indices) for LILAC window
@@ -686,9 +686,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 		local rawGain = 0.0
 		if pending.crit == true then
-			local shotAnglesTable = { pitch = shotPitch, yaw = shotYaw }
 			rawGain, lilacMaxDelta, lilacTotalDelta, lilacFlags = lilacAimbotHeuristics(id, shotOffset, pending.shotTick,
-				shotAnglesTable, eyePos, sniperHeadPos, sniperBodyPos)
+				shotPitch, shotYaw, eyePos, sniperHeadPos, sniperBodyPos)
 		end
 		if alignDev1 ~= nil and dirMeaningful1 and dirFactor1 ~= nil then
 			if shotDev >= LILAC_RETURN_MIN_SNAP_DEGREES
@@ -722,9 +721,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 		local rawGain = 0.0
 		if (attackerClass == TF_CLASS_SPY) and (pending.crit == true) then
-			local shotAnglesTable = { pitch = shotPitch, yaw = shotYaw }
 			rawGain, lilacMaxDelta, lilacTotalDelta, lilacFlags = lilacAimbotHeuristics(id, shotOffset, pending.shotTick,
-				shotAnglesTable, eyePos, headPos, bodyPos)
+				shotPitch, shotYaw, eyePos, headPos, bodyPos)
 		end
 		if alignDev1 ~= nil and dirMeaningful1 and dirFactor1 ~= nil then
 			if shotDev >= LILAC_RETURN_MIN_SNAP_DEGREES
@@ -827,9 +825,9 @@ Events.Subscribe("OnHitscanHit", function(hit)
 
 	local attackerClass = attackerEnt:GetPropInt("m_iClass")
 	if attackerClass ~= TF_CLASS_SNIPER and attackerClass ~= TF_CLASS_SPY then
-		local lastTick = lastNonSniperTickByUserID[attackerUID] or -999999
+		local lastTick = lastNonSniperTickByID[attackerID] or -999999
 		if (curTick - lastTick) < NON_SNIPER_COOLDOWN_TICKS then return end
-		lastNonSniperTickByUserID[attackerUID] = curTick
+		lastNonSniperTickByID[attackerID] = curTick
 	end
 
 	if not Common.IsValidPlayer(attackerEnt, nil, nil, nil) then return end
@@ -987,9 +985,10 @@ function SilentAim.ProcessPlayer(playerState)
 end
 
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	playerData[id]   = nil
-	shotAccuracy[id] = nil
-	local curTick    = globals.TickCount()
+	playerData[id]            = nil
+	shotAccuracy[id]          = nil
+	lastNonSniperTickByID[id] = nil
+	local curTick             = globals.TickCount()
 	for idx, entry in pairs(fireShotCache) do
 		if (curTick - entry.tick) > FIRE_CACHE_STALE_TICKS then
 			fireShotCache[idx] = nil
@@ -998,8 +997,9 @@ Events.Subscribe("OnPlayerDisconnect", function(id)
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
-	playerData[id]   = nil
-	shotAccuracy[id] = nil
+	playerData[id]            = nil
+	shotAccuracy[id]          = nil
+	lastNonSniperTickByID[id] = nil
 end)
 
 return SilentAim

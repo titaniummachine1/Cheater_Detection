@@ -25,7 +25,7 @@ local function detectorsNeedLiveCache()
         or (adv and adv.AntiAim == true)
         or (adv and adv.DuckSpeed == true)
         or (adv and adv.Bhop == true)
-        or (adv and adv.Warp == true)
+        or (adv and adv["Warp"] == true)
         or (adv and adv.Choke == true)
         or (adv and adv.Cosmetics == true)
 end

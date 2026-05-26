@@ -9,6 +9,7 @@ local Common                       = require("Cheater_Detection.Utils.Common")
 local DetectorUtils                = require("Cheater_Detection.Utils.DetectorUtils")
 local Events                       = require("Cheater_Detection.Core.Events")
 local PlayerData                   = require("Cheater_Detection.Utils.PlayerData")
+local PlayerCache                  = require("Cheater_Detection.Core.player_cache")
 
 local DuckSpeed                    = {}
 
@@ -18,17 +19,6 @@ local FULLY_CROUCHED_VIEW_OFFSET_Z = 45
 -- State storage for tick accumulation
 local tickCounters                 = {}
 
-local _tickLP                      = nil
-local _tickLPTick                  = -1
-
-local function getTickLP()
-	local ct = globals.TickCount()
-	if ct ~= _tickLPTick then
-		_tickLPTick = ct
-		_tickLP     = entities.GetLocalPlayer()
-	end
-	return _tickLP
-end
 
 function DuckSpeed.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
@@ -51,7 +41,7 @@ function DuckSpeed.ProcessPlayer(playerState)
 		return
 	end
 
-	if id == tostring(Common.GetSteamID64(getTickLP())) and not Common.IsDebugEnabled() then
+	if id == PlayerCache.GetLocalID() and not Common.IsDebugEnabled() then
 		return
 	end
 

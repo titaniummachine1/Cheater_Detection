@@ -13,7 +13,6 @@
 ]]
 
 local PlayerCache         = require("Cheater_Detection.Core.player_cache")
-local G                   = require("Cheater_Detection.Utils.Globals")
 
 local HistoryManager      = {}
 
@@ -29,27 +28,13 @@ HistoryManager.Fields     = {
 }
 
 local activeFields        = {}
+local _hasActiveFields    = false
 local maxRetentionTicks   = 0
 local initialized         = false
 
 local tickLocalPlayer     = nil
 local tickLocalPlayerTick = -1
 
--- Cache for detector enablement to avoid menu lookups every tick
-local lastCheckTick       = -1
-local historyEnabled      = false
-
-local function isHistoryEnabled()
-	local curTick = globals.TickCount()
-	if curTick ~= lastCheckTick then
-		lastCheckTick = curTick
-		local menu = G.Menu
-		local adv = menu and menu.Advanced
-		-- History needed for SilentAim, WarpDT, FakeLag, AntiAim
-		historyEnabled = (adv and (adv.SilentAimbot or adv["Warp"] or adv.Choke or adv.AntiAim)) == true
-	end
-	return historyEnabled
-end
 
 local function getTickLocalPlayer()
 	local curTick = globals.TickCount()
@@ -144,12 +129,16 @@ function HistoryManager.Initialize(retentionTicks, fields)
 
 	maxRetentionTicks = retentionTicks or 33
 	activeFields = fields or {}
+	_hasActiveFields = next(activeFields) ~= nil
+	if not _hasActiveFields then
+		print(
+		"[HistoryManager WARNING] No active fields configured — was DetectionConfig.RegisterWithHistoryManager() called?")
+	end
 
-	-- Clear existing histories if capacity changed
 	for steamID, history in pairs(playerHistories) do
-		-- Reinitialize with new capacity
 		history._head = 1
 		history._count = 0
+		history._lastTick = -1
 		for i = 1, maxRetentionTicks do
 			history[i] = nil
 		end
@@ -246,35 +235,19 @@ function HistoryManager.NewTick()
 	if not initialized then
 		return
 	end
-	if not isHistoryEnabled() then
-		return
-	end
 	local curTick = globals.TickCount()
 	if curTick == lastTickCount then
 		return
 	end
 	lastTickCount = curTick
 	currentTickNum = curTick
-
-	-- Advance each player's circular buffer
-	for steamID, history in pairs(playerHistories) do
-		-- Move head forward (circular)
-		history._head = (history._head % maxRetentionTicks) + 1
-		-- Increase count until max
-		if history._count < maxRetentionTicks then
-			history._count = history._count + 1
-		end
-		-- Keep the slot table alive so Push can reuse it (avoids per-tick allocation)
-	end
 end
 
 function HistoryManager.Push(player)
-	if not initialized or not next(activeFields) then
+	if not initialized then
 		return
 	end
-	if not isHistoryEnabled() then
-		return
-	end
+	if not _hasActiveFields then return end
 	if not player or type(player.GetSteamID64) ~= "function" then
 		return
 	end
@@ -285,6 +258,10 @@ function HistoryManager.Push(player)
 	end
 
 	local steamID = tostring(steamIDRaw)
+	if type(steamID) ~= "string" or steamID == "" then
+		print("[HistoryManager ERROR] steamID conversion failed for player")
+		return
+	end
 	local state = PlayerCache.GetByID(steamID)
 	if not state then
 		return
@@ -293,13 +270,19 @@ function HistoryManager.Push(player)
 	-- Ensure we have a history for this player
 	local history = playerHistories[steamID]
 	if not history then
-		history = { _head = 0, _count = 0 }
+		history = { _head = 0, _count = 0, _lastTick = -1 }
 		playerHistories[steamID] = history
 	end
 
 	local curTick = globals.TickCount()
-	if curTick ~= lastTickCount then
-		HistoryManager.NewTick()
+
+	-- Lazily advance this player's circular-buffer head once per tick
+	if history._lastTick ~= curTick then
+		history._head = (history._head % maxRetentionTicks) + 1
+		if history._count < maxRetentionTicks then
+			history._count = history._count + 1
+		end
+		history._lastTick = curTick
 	end
 
 	-- Reuse existing slot table to avoid per-tick allocation
@@ -370,13 +353,18 @@ function HistoryManager.PushAngles(steamID, pitch, yaw)
 
 	local history = playerHistories[tostring(steamID)]
 	if not history then
-		history = { _head = 0, _count = 0 }
+		history = { _head = 0, _count = 0, _lastTick = -1 }
 		playerHistories[tostring(steamID)] = history
 	end
 
 	local curTick = globals.TickCount()
-	if curTick ~= lastTickCount then
-		HistoryManager.NewTick()
+
+	if history._lastTick ~= curTick then
+		history._head = (history._head % maxRetentionTicks) + 1
+		if history._count < maxRetentionTicks then
+			history._count = history._count + 1
+		end
+		history._lastTick = curTick
 	end
 
 	local record = history[history._head] or {}

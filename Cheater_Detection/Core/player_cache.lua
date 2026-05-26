@@ -249,6 +249,7 @@ function PlayerCache.SyncTick()
 			DirtySystem.MarkDirty(id, "connected")
 			DirtySystem.MarkDirty(id, "score")
 			DirtySystem.MarkDirty(id, "flags")
+			DirtySystem.MarkDirty(id, "checks")
 			applyAutoPriority(state, ent)
 		else
 			-- Existing player — refresh pdata fields in-place (zero allocation)
@@ -391,6 +392,11 @@ function PlayerCache.GetLocal()
 	return activeSet[id] and activeSet[id].wrap or nil
 end
 
+---@return string|nil
+function PlayerCache.GetLocalID()
+	return cachedLocalID
+end
+
 ---@return table
 function PlayerCache.GetTeammates()
 	rebuildArrays()
@@ -438,12 +444,34 @@ function PlayerCache.ValidateStates() end
 -- ── Lifecycle dirty-marking (keeps view arrays fresh) ────────────────────────
 local function onLifecycleEvent(_event) arrDirty = true end
 
+local function onPlayerSpawnOrClassChange(event)
+	arrDirty = true
+	local uid = event:GetInt("userid")
+	if not uid then return end
+	local ent = entities.GetByUserID(uid)
+	if not ent or not ent:IsValid() then return end
+	local steamID = Common.GetSteamID64(ent)
+	if not steamID then return end
+	local state = activeSet[tostring(steamID)]
+	if state then
+		state.wearablesScanned = nil
+	end
+end
+
+local function onNewMapOrRoundStart()
+	arrDirty = true
+	for _, state in pairs(activeSet) do
+		state.wearablesScanned = nil
+	end
+end
+
 Events.Register("FireGameEvent", "PC_PlayerConnect", onLifecycleEvent, "player_connect_client")
 Events.Register("FireGameEvent", "PC_PlayerDisconnect", onLifecycleEvent, "player_disconnect")
 Events.Register("FireGameEvent", "PC_PlayerTeam", onLifecycleEvent, "player_team")
-Events.Register("FireGameEvent", "PC_PlayerSpawn", onLifecycleEvent, "player_spawn")
+Events.Register("FireGameEvent", "PC_PlayerSpawn", onPlayerSpawnOrClassChange, "player_spawn")
+Events.Register("FireGameEvent", "PC_PlayerChangeClass", onPlayerSpawnOrClassChange, "player_changeclass")
 Events.Register("FireGameEvent", "PC_PlayerDeath", onLifecycleEvent, "player_death")
-Events.Register("FireGameEvent", "PC_NewMap", onLifecycleEvent, "game_newmap")
-Events.Register("FireGameEvent", "PC_RoundStart", onLifecycleEvent, "teamplay_round_start")
+Events.Register("FireGameEvent", "PC_NewMap", onNewMapOrRoundStart, "game_newmap")
+Events.Register("FireGameEvent", "PC_RoundStart", onNewMapOrRoundStart, "teamplay_round_start")
 
 return PlayerCache

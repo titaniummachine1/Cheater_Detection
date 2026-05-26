@@ -52,14 +52,26 @@ local BURST_STALL_MIN_COUNT       = 2                                      -- re
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
 local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
 local MIN_FPS_FOR_DETECTION       = 40                                     -- below ~40 fps, frame gaps can exceed the 8-tick choke threshold (ticks/frame = tickrate/fps)
+local MAX_FAKELAG_TICKS           = 33
+local MAX_DELTA_SEC               = 2.5
 
-local evidenceCooldowns           = {}                                     -- [id] = last globals.RealTime() evidence was added
-local consecutiveChokeCount       = {}                                     -- count consecutive large deltas for impulse detection
+local evidenceCooldowns           = {} -- [id] = last globals.RealTime() evidence was added
+local consecutiveChokeCount       = {} -- count consecutive large deltas for impulse detection
 local lastChokeDelta              = {}
 local debugSummaries              = {}
 local smoothedFrameTime           = 1 / 60
 
+local _simTimes                   = {}
+local _deltaTicks                 = {}
+
 -- ── helpers ────────────────────────────────────────────────────────────────
+local function _collectSimTime(_, record)
+	local simTime = record[HistoryManager.Fields.SimulationTime]
+	if simTime then
+		_simTimes[#_simTimes + 1] = simTime
+	end
+end
+
 local function isLocalFpsSufficient()
 	local ft = globals.AbsoluteFrameTime()
 	if ft and ft > 0 then
@@ -139,7 +151,8 @@ local function countRhythmMatches(deltaTicks, anchorDelta, sampleCount, toleranc
 	local matching = 0
 	for i = 1, limit do
 		local delta = deltaTicks[i]
-		if delta >= MIN_FAKELAG_CHOKE_TICKS and math.abs(delta - anchorDelta) <= tolerance then
+		local diff = math.abs(delta - anchorDelta)
+		if delta >= MIN_FAKELAG_CHOKE_TICKS and diff <= tolerance then
 			matching = matching + 1
 		end
 	end
@@ -288,6 +301,34 @@ local function isActiveChokePattern(deltaTicks, sumTicks)
 	return false
 end
 
+local function countRecentStalls(deltaTicks)
+	local stalls = 0
+	local lookback = math.min(BURST_STALL_LOOKBACK, #deltaTicks)
+	for i = 2, lookback do
+		if deltaTicks[i] <= BURST_STALL_MAX_TICKS then
+			stalls = stalls + 1
+		end
+	end
+	return stalls
+end
+
+local function tryAddChokeEvidence(id, now, isDebug, weight, logLabel, logDetail)
+	local lastTime = evidenceCooldowns[id] or 0
+	if (now - lastTime) < FAKELAG_EVIDENCE_COOLDOWN_S then
+		return 0
+	end
+	local addedWeight = addCappedFakeLagEvidence(id, weight)
+	if addedWeight > 0 then
+		evidenceCooldowns[id] = now
+		if isDebug then
+			print(string.format("[FakeLag] %s %s: %s (evidence +%.1f)", id, logLabel, logDetail, addedWeight))
+		end
+	elseif isDebug and weight > 0 then
+		print(string.format("[FakeLag] %s evidence blocked for %s (wanted +%.1f)", id, logLabel, weight))
+	end
+	return addedWeight
+end
+
 function FakeLag.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then return end
 	if Fetcher.State.isRunning then return end
@@ -306,27 +347,21 @@ function FakeLag.ProcessPlayer(playerState)
 
 	if history._count < 5 then return end
 
-	-- Collect simulation times newest-first (circular buffer order)
-	local simTimes = {}
-	HistoryManager.ForEachRecordNewestFirst(history, nil, function(_, record)
-		local simTime = record[HistoryManager.Fields.SimulationTime]
-		if simTime then
-			simTimes[#simTimes + 1] = simTime
-		end
-	end)
+	-- Collect simulation times (reuse module-level table)
+	for k = 1, #_simTimes do _simTimes[k] = nil end
+	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTime)
 
-	if #simTimes < 5 then return end
+	if #_simTimes < 5 then return end
 
-	-- Build delta-tick array (positive deltas only)
-	-- Cap: 33 ticks (~600ms) max for real fake lag detection; above that is packet loss/alt-tab
-	local MAX_FAKELAG_TICKS = 33
-	local maxDeltaSec       = 2.5
-	local deltaTicks        = {}
-	local sumTicks          = 0
+	-- Build delta-tick array (positive deltas only; reuse module-level table)
+	for k = 1, #_deltaTicks do _deltaTicks[k] = nil end
+	local deltaTicks = _deltaTicks
+	local simTimes   = _simTimes
+	local sumTicks   = 0
 
 	for i = 1, #simTimes - 1 do
 		local delta = simTimes[i] - simTimes[i + 1] -- simTimes[i] is newer
-		if delta > 0 and delta <= maxDeltaSec then
+		if delta > 0 and delta <= MAX_DELTA_SEC then
 			local t = timeToTicks(delta)
 			-- Spike filter: reject isolated massive gaps (>33 ticks) as packet loss
 			if t > MAX_FAKELAG_TICKS then
@@ -356,41 +391,14 @@ function FakeLag.ProcessPlayer(playerState)
 		Evidence.HoldDecayForMethod(id, "fake_lag")
 	end
 
-	local function countRecentStalls()
-		local stalls = 0
-		local lookback = math.min(BURST_STALL_LOOKBACK, #deltaTicks)
-		for i = 2, lookback do
-			if deltaTicks[i] <= BURST_STALL_MAX_TICKS then
-				stalls = stalls + 1
-			end
-		end
-		return stalls
-	end
-
-	local function tryAddChokeEvidence(weight, logLabel, logDetail)
-		local lastTime = evidenceCooldowns[id] or 0
-		if (now - lastTime) < FAKELAG_EVIDENCE_COOLDOWN_S then
-			return 0
-		end
-		local addedWeight = addCappedFakeLagEvidence(id, weight)
-		if addedWeight > 0 then
-			evidenceCooldowns[id] = now
-			if isDebug then
-				print(string.format("[FakeLag] %s %s: %s (evidence +%.1f)", id, logLabel, logDetail, addedWeight))
-			end
-		elseif isDebug and weight > 0 then
-			print(string.format("[FakeLag] %s evidence blocked for %s (wanted +%.1f)", id, logLabel, weight))
-		end
-		return addedWeight
-	end
-
 	-- ── 1. Choke-then-release bursts (not steady simtime drift) ───────────────
 	if #deltaTicks >= 1 then
 		local firstDelta = deltaTicks[1]
-		if firstDelta >= BURST_CHOKE_MIN_TICKS and countRecentStalls() >= BURST_STALL_MIN_COUNT then
+		if firstDelta >= BURST_CHOKE_MIN_TICKS and countRecentStalls(deltaTicks) >= BURST_STALL_MIN_COUNT then
 			local previousDelta = lastChokeDelta[id]
 			local tolerance = firstDelta >= 16 and 12 or 2
-			if previousDelta and math.abs(firstDelta - previousDelta) > tolerance then
+			local prevDiff = previousDelta and math.abs(firstDelta - previousDelta)
+			if prevDiff and prevDiff > tolerance then
 				consecutiveChokeCount[id] = 1
 			else
 				consecutiveChokeCount[id] = (consecutiveChokeCount[id] or 0) + 1
@@ -401,6 +409,7 @@ function FakeLag.ProcessPlayer(playerState)
 				consecutiveChokeCount[id] = 0
 				lastChokeDelta[id] = nil
 				tryAddChokeEvidence(
+					id, now, isDebug,
 					buildEvidenceWeight(firstDelta),
 					"choke/release burst",
 					string.format("%d ticks", firstDelta)
@@ -419,6 +428,7 @@ function FakeLag.ProcessPlayer(playerState)
 	end
 	if chokeTicks then
 		tryAddChokeEvidence(
+			id, now, isDebug,
 			buildEvidenceWeight(chokeTicks),
 			chokeLabel,
 			string.format("%.1f ticks", chokeTicks)
@@ -427,6 +437,7 @@ function FakeLag.ProcessPlayer(playerState)
 		local sustainedAvg = getSustainedChokeAverage(deltaTicks)
 		if sustainedAvg then
 			tryAddChokeEvidence(
+				id, now, isDebug,
 				buildEvidenceWeight(sustainedAvg),
 				"sustained choke",
 				string.format("avg %.1f ticks", sustainedAvg)
@@ -443,9 +454,10 @@ function FakeLag.ProcessPlayer(playerState)
 				)
 				if checked >= RHYTHM_MIN_EVENTS and (matching / checked) >= RHYTHM_MATCH_RATIO then
 					tryAddChokeEvidence(
+						id, now, isDebug,
 						buildEvidenceWeight(anchorDelta),
 						"rhythmic choke",
-						string.format("%d ticks (%d/%d within ±%d)", anchorDelta, matching, checked, tolerance)
+						string.format("%d ticks (%d/%d within \xc2\xb1%d)", anchorDelta, matching, checked, tolerance)
 					)
 				end
 			end

@@ -2,6 +2,7 @@ local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local VDFParser = require("Cheater_Detection.Utils.VDFParser")
 
 local CosmeticAbuse = {}
@@ -22,15 +23,8 @@ local WHOLE_HEAD_CONFLICTS = {
 -- defIndex -> equip_region string (or false if no region); avoids repeated lookups
 local regionCache = {}
 
--- per-player scan results: id -> { regions = {region->count}, slotCounts = {slot->count} }
--- nil = not yet scanned, false = scanned clean, table = conflict data
+-- per-player scan results: id -> { regions = {region->count}, totalWearables = n }
 local playerScanData = {}
--- ids that have been fully scanned this session; cleared on class change/spawn
-local scannedPlayers = {}
--- Simple tick-based retry: id -> { targetTick, attempts }
-local scanRetryState = {}
-local SCAN_RETRY_TICKS = 66 -- ~1 second at 66 tick
-local MAX_SCAN_ATTEMPTS = 5 -- After 5 attempts with 0 wearables, mark as clean (likely F2P with no hats)
 
 local function readPropInt(ent, propName)
 	local ok, value = pcall(ent.GetPropInt, ent, propName)
@@ -117,14 +111,13 @@ local function scanPlayerWearables(player, targetID, isDebug)
 
 	if data.totalWearables == 0 then
 		-- Only log zero wearables for real players in debug, not bots
-		if isDebug and not string.find(targetID, "BOT_") then
+		if isDebug and targetID:sub(1, 4) ~= "BOT_" then
 			print(string.format("[CosmeticAbuse] id=%s - 0 wearables found", targetID))
 		end
 		return false
 	end
 
 	playerScanData[targetID] = data
-	scannedPlayers[targetID] = true
 
 	if isDebug then
 		local parts = { string.format("[CosmeticAbuse] id=%s wearables=%d", targetID, data.totalWearables) }
@@ -176,13 +169,16 @@ function CosmeticAbuse.Init()
 end
 
 function CosmeticAbuse.InvalidatePlayer(id)
-	scannedPlayers[id] = nil
 	playerScanData[id] = nil
-	scanRetryState[id] = nil
+	local state = PlayerCache.GetByID(id)
+	if state then
+		state.wearablesScanned = nil
+	end
 end
 
 function CosmeticAbuse.NeedsScan(id)
-	return scannedPlayers[id] == nil
+	local state = PlayerCache.GetByID(id)
+	return state == nil or not state.wearablesScanned
 end
 
 function CosmeticAbuse.ProcessPlayer(playerState)
@@ -190,9 +186,9 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 	local id = tostring(playerState.id)
 
 	-- Skip bots
-	if string.find(id, "BOT_") == 1 then return end
+	if id:sub(1, 4) == "BOT_" then return end
 
-	if scannedPlayers[id] then return end
+	if playerState.wearablesScanned then return end
 	if not isEnabled() then return end
 	if not Common.IsPlayerConnected() then return end
 	if not Common.IsDebugEnabled() and playerState.isFriend then return end
@@ -204,30 +200,15 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 	local disguiseClass = ent:GetPropInt("m_iDisguiseTargetClass")
 	if disguiseClass and disguiseClass > 0 then return end
 
-	local curTick = globals.TickCount()
-	local retryState = scanRetryState[id]
-	if not retryState then
-		retryState = { targetTick = curTick, attempts = 0 }
-		scanRetryState[id] = retryState
-	end
-	if curTick < retryState.targetTick then return end
-
 	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
 	local scanned = scanPlayerWearables(ent, id, isDebug)
 	if not scanned then
-		retryState.attempts = retryState.attempts + 1
-		retryState.targetTick = curTick + SCAN_RETRY_TICKS
-		if retryState.attempts >= MAX_SCAN_ATTEMPTS then
-			if isDebug then
-				print(string.format("[CosmeticAbuse] GIVING UP %s after %d attempts (F2P?)", id, MAX_SCAN_ATTEMPTS))
-			end
-			scannedPlayers[id] = true
-			scanRetryState[id] = nil
-		end
+		-- No wearables found - mark as scanned (F2P or no hats equipped)
+		playerState.wearablesScanned = true
 		return
 	end
 
-	scanRetryState[id] = nil
+	playerState.wearablesScanned = true
 	local illegal, reason = checkConflicts(id)
 	if illegal then
 		local localPlayer = entities.GetLocalPlayer()
@@ -243,19 +224,5 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 		end
 	end
 end
-
-callbacks.Register("FireGameEvent", function(event)
-	if not event then return end
-	local name = event:GetName()
-	if name ~= "player_changeclass" and name ~= "player_spawn" then return end
-	local userID = event:GetInt("userid")
-	if not userID then return end
-	local ent = entities.GetByUserID(userID)
-	if not ent or not ent:IsValid() then return end
-	local steamID64 = Common.GetSteamID64(ent)
-	if steamID64 then
-		CosmeticAbuse.InvalidatePlayer(tostring(steamID64))
-	end
-end)
 
 return CosmeticAbuse

@@ -55,55 +55,8 @@ end
 
 local function queueDeferredSweep() end
 
--- Layer 2 deferred sweep: runs periodically to check players marked with CHECKS flag.
--- Uses DirtySystem - only checks players explicitly marked as needing verification.
-local function runDeferredSweep()
-	local isDebug = (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true)
-
-	-- Get only players marked with dirty CHECKS flag (via DirtySystem)
-	local dirtyPlayers = DirtySystem.GetDirtyPlayers("checks")
-
-	-- Limit checks per frame to avoid lag spikes
-	local maxChecksPerFrame = 3
-	local checksThisFrame = 0
-
-	for _, id in ipairs(dirtyPlayers) do
-		if checksThisFrame >= maxChecksPerFrame then
-			break -- Process rest next frame
-		end
-
-		local state = PlayerCache.GetByID(id)
-		if not state then
-			-- Player no longer active, clear their dirty flag
-			DirtySystem.ClearDirty(id, "checks")
-			goto continue
-		end
-
-		-- Only check if not already confirmed as Valve
-		if (state.flags & Constants.Flags.VALVE) ~= 0 then
-			-- Already confirmed Valve, clear dirty flag
-			DirtySystem.ClearDirty(id, "checks")
-			goto continue
-		end
-
-		-- Run the deferred checks (badge, items)
-		checksThisFrame = checksThisFrame + 1
-		local found = ValveData.CheckPlayerItems(id)
-
-		if found then
-			if isDebug and not layer1Logged[id] then
-				Logger.Debug("ValveCheck", string.format("[Layer 2/3] Found via badge/item check: %s", id))
-			end
-			-- Mark as Valve in database (async)
-			SteamLookup.MarkAsValve(id, "Badge/Item")
-		end
-
-		-- Clear dirty flag - we've processed this player
-		DirtySystem.ClearDirty(id, "checks")
-
-		::continue::
-	end
-end
+-- Forward declarations (defined after helper functions)
+local runDeferredSweep
 
 -- Subscribe to player check events
 Events.Subscribe("OnPlayerNeedsCheck", function(playerState)
@@ -585,26 +538,184 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 end
 
--- Reset per-player timers on disconnect so rejoining players are re-checked
+-- Valve check sweep: runs periodically via Scheduler.Tick to check players marked with CHECKS flag.
+-- Uses DirtySystem - only checks players explicitly marked as needing verification.
+-- Includes Layer 1 (SteamID static lists) and Layer 2 (badge/items) checks.
+runDeferredSweep = function()
+	local isDebug = (G.Menu and G.Menu.Advanced and G.Menu.Advanced.debug == true)
+	local now = globals.CurTime()
+
+	-- Get only players marked with dirty CHECKS flag (via DirtySystem)
+	local dirtyPlayers = DirtySystem.GetDirtyPlayers("checks")
+
+	-- Limit checks per frame to avoid lag spikes
+	local maxChecksPerFrame = 3
+	local checksThisFrame = 0
+
+	for _, id in ipairs(dirtyPlayers) do
+		if checksThisFrame >= maxChecksPerFrame then
+			break -- Process rest next frame
+		end
+
+		local state = PlayerCache.GetByID(id)
+		if not state then
+			-- Player no longer active, clear their dirty flag
+			DirtySystem.ClearDirty(id, "checks")
+			goto continue
+		end
+
+		-- Skip if already confirmed as Valve or Cheater (flag won't change mid-session)
+		if (state.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
+			DirtySystem.ClearDirty(id, "checks")
+			goto continue
+		end
+
+		-- Skip local player unless debug mode
+		if not Common.IsDebugEnabled() then
+			local localID = PlayerCache.GetLocalID()
+			if localID and id == localID then
+				DirtySystem.ClearDirty(id, "checks")
+				goto continue
+			end
+		end
+
+		local checkFlags = state.checkFlags
+
+		-- ── Layer 1a: SteamID64 instant check ─────────────────────────────────────
+		if not checkFlags.valveID64Checked then
+			checkFlags.valveID64Checked = true
+			if isKnownValveID64(id) then
+				checkFlags.valveGroupChecked = true
+				checkFlags.vacBanChecked = true
+				checkFlags.commBanChecked = true
+				applyValveFlag(state, "Known Valve SteamID")
+				DirtySystem.ClearDirty(id, "checks")
+				goto continue
+			end
+		end
+
+		-- ── Layer 1b: Legacy Steam2 fallback ─────────────────────────────────────
+		if not checkFlags.valveSteam2Checked then
+			local ply = state.wrap:GetRawEntity()
+			if ply then
+				local s2 = Common.GetSteamID(ply)
+				if isKnownValveIDSteam2(s2) then
+					checkFlags.valveSteam2Checked = true
+					checkFlags.valveGroupChecked = true
+					checkFlags.vacBanChecked = true
+					checkFlags.commBanChecked = true
+					applyValveFlag(state, "Known Valve SteamID (Legacy)")
+					DirtySystem.ClearDirty(id, "checks")
+					goto continue
+				end
+			end
+			checkFlags.valveSteam2Checked = true
+		end
+
+		-- ── Layer 2: Item / Badge check (deferred, limited per frame) ─────────────
+		if not checkFlags.valveItemBadgeChecked then
+			checksThisFrame = checksThisFrame + 1
+			checkFlags.valveItemBadgeChecked = true
+			state.itemChecked = true
+
+			local ply = state.wrap:GetRawEntity()
+			if ply then
+				local found, reason = checkPlayerItems(ply)
+				if found then
+					-- Async profile verification for badge-based detection
+					if not pendingBadgeProfileVerification[id] then
+						pendingBadgeProfileVerification[id] = true
+						queueDeferredCheck(id) -- Re-queue for profile verification
+					end
+				end
+			end
+		end
+
+		-- ── Layer 3: Async profile check (VAC / Comm ban / Valve Group) ──────────
+		-- Only run once per session after layers 1-2 are done
+		if not checkFlags.profileLookupQueued and not state.profileChecked then
+			local lastProfile = lastProfileCheck[id]
+			if not lastProfile or (now - lastProfile > PROFILE_RECHECK_INTERVAL) then
+				lastProfileCheck[id] = now
+				checkFlags.profileLookupQueued = true
+				if isDebug and VERBOSE_DEBUG_LOGS then
+					Logger.Debug("ValveCheck", id .. " – queuing async profile check")
+				end
+
+				SteamLookup.CheckProfileAsync(id, function(results)
+					if not results then
+						checkFlags.profileLookupQueued = false
+						if isDebug then
+							Logger.Debug("ValveCheck", id .. " – async profile check returned nil (HTTP failed)")
+						end
+						-- Reset timer so it retries sooner (10s) instead of waiting 2 min
+						lastProfileCheck[id] = now - (PROFILE_RECHECK_INTERVAL - 10)
+						return
+					end
+
+					if results.isValve then
+						applyValveFlag(state, "Valve Steam Group Member")
+					end
+					checkFlags.valveGroupChecked = true
+					if results.vacBanned then
+						applyVacFlag(state)
+					end
+					checkFlags.vacBanChecked = true
+					if results.tradeBanned then
+						applyCommBanFlag(state)
+					end
+					checkFlags.commBanChecked = true
+
+					-- Mark checked so we NEVER run Layer 3 again for this player this session
+					state.profileChecked = true
+					state.externalChecked = true
+					state.flags = state.flags | Constants.Flags.CHECKED
+				end)
+			end
+		end
+
+		-- If all checks done, clear dirty flag
+		if checkFlags.valveItemBadgeChecked and checkFlags.valveGroupChecked then
+			DirtySystem.ClearDirty(id, "checks")
+		end
+
+		::continue::
+	end
+end
+
+-- Reset per-player state on disconnect so rejoining players are re-checked
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	lastProfileCheck[id] = nil
 	deferredQueue[id] = nil
 	pendingBadgeProfileVerification[id] = nil
+	valveCheckedThisSession[id] = nil
+	layer1Logged[id] = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
 	lastProfileCheck[id] = nil
 	deferredQueue[id] = nil
 	pendingBadgeProfileVerification[id] = nil
+	valveCheckedThisSession[id] = nil
+	layer1Logged[id] = nil
 end)
+
+-- Clear ALL session state on new map or round start (new session)
+local function onNewSession()
+	for k in pairs(lastProfileCheck) do lastProfileCheck[k] = nil end
+	for k in pairs(deferredQueue) do deferredQueue[k] = nil end
+	for k in pairs(pendingBadgeProfileVerification) do pendingBadgeProfileVerification[k] = nil end
+	for k in pairs(valveCheckedThisSession) do valveCheckedThisSession[k] = nil end
+	for k in pairs(layer1Logged) do layer1Logged[k] = nil end
+	queueDeferredSweep()
+end
+
+Events.Register("FireGameEvent", "ValveCheck_NewMapClear", onNewSession, "game_newmap")
+Events.Register("FireGameEvent", "ValveCheck_RoundStartClear", onNewSession, "teamplay_round_start")
 
 Events.Subscribe("OnPlayerJoinTeam", function(id, _ent)
 	queueDeferredCheck(id)
 end)
-
-local function onRoundOrMap(_event)
-	queueDeferredSweep()
-end
 
 local function onLocalSpawnOrDeath(event)
 	local localPlayer = entities.GetLocalPlayer()
@@ -618,8 +729,7 @@ local function onLocalSpawnOrDeath(event)
 	end
 end
 
-Events.Register("FireGameEvent", "ValveCheck_NewMapSweep", onRoundOrMap, "game_newmap")
-Events.Register("FireGameEvent", "ValveCheck_RoundStartSweep", onRoundOrMap, "teamplay_round_start")
+-- Note: NewMap/RoundStart now handled by onNewSession above (clears session + queues sweep)
 Events.Register("FireGameEvent", "ValveCheck_LocalSpawnSweep", onLocalSpawnOrDeath, "player_spawn")
 Events.Register("FireGameEvent", "ValveCheck_LocalDeathSweep", onLocalSpawnOrDeath, "player_death")
 
