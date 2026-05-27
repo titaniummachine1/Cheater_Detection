@@ -58,12 +58,7 @@ function DetectorUtils.ApplyPlayerFlag(playerState, scoreIncrement, hardFlag, re
 		end
 	end
 
-	-- Get player name from wrapper if available
-	local playerName = playerState.id
-	if playerState.wrap and playerState.wrap.GetName then
-		local name = playerState.wrap:GetName()
-		if name then playerName = name end
-	end
+	local playerName = playerState.wrap:GetName() or playerState.id
 
 	Database.UpsertCheater(playerState.id, {
 		name = playerName,

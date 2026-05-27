@@ -280,13 +280,13 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 		Events.Publish("OnPlayerStateChange", playerState, primaryMethod)
 
 		-- Log transition to Suspicious or Cheater
-		local playerName = playerState.wrap and playerState.wrap:GetName() or steamID
+		local name = playerState.wrap:GetName() or steamID
 		if (newFlags & Constants.Flags.CHEATER) ~= 0 and (oldFlags & Constants.Flags.CHEATER) == 0 then
 			Logger.Info(
 				"Evidence",
 				string.format(
 					"CHEATER flag set for %s (Score: %.1f >= %.1f) - %s evidence",
-					playerName,
+					name,
 					evidence.TotalScore,
 					cheaterThreshold,
 					primaryMethod
@@ -297,7 +297,7 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 				"Evidence",
 				string.format(
 					"SUSPICIOUS flag set for %s (Score: %.1f >= %.1f) - %s evidence",
-					playerName,
+					name,
 					evidence.TotalScore,
 					threshold,
 					primaryMethod
@@ -310,9 +310,9 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 		DirtySystem.MarkDirty(steamID, "session")
 
 		-- Automatically upsert database entry to keep persistent state synchronized
-		local playerName = playerState.wrap and playerState.wrap:GetName() or steamID
+		local name = playerState.wrap:GetName() or steamID
 		Database.UpsertCheater(steamID, {
-			name = playerName ~= "Unknown" and playerName or steamID,
+			name = name ~= "Unknown" and name or steamID,
 			reason = primaryMethod,
 			flags = playerState.flags,
 			score = playerState.score,
@@ -397,8 +397,7 @@ local function tryApplyAutoPriority(steamID, evidence)
 		elseif isSus and not evidence.AutoPriorityApplied then
 			Evidence.SetPriorityForSteamID(steamID, 1)
 			evidence.AutoPriorityApplied = true
-			local playerName = playerState.wrap and playerState.wrap:GetName() or steamID
-			print(string.format("[CD] heads up: (%s) might be cheating", playerName))
+			print(string.format("[CD] heads up: (%s) might be cheating", playerState.wrap:GetName() or steamID))
 		end
 	end
 

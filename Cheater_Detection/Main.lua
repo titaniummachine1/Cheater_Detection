@@ -104,10 +104,7 @@ local function persistSessionPlayerState(id, state, fallbackName)
 	end
 
 	local existing = Database.GetCheater(id)
-	local name = fallbackName
-	if state.wrap and state.wrap.GetName then
-		name = state.wrap:GetName()
-	end
+	local name = state.wrap:GetName() or fallbackName
 	if (not name or name == "") and existing and existing.Name then
 		name = existing.Name
 	end
@@ -133,7 +130,7 @@ local function enforceValveAutoDisconnect(playerState)
 
 	sessionState.valveDisconnectTriggered = true
 	JoinNotifications.SendValveAlert({
-		name = playerState.wrap and playerState.wrap:GetName() or playerState.id,
+		name = playerState.wrap:GetName() or playerState.id,
 		tail = "is in the server - Leaving game",
 		allowParty = false,
 	})

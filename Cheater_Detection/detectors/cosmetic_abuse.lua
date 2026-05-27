@@ -194,7 +194,7 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 	if not Common.IsDebugEnabled() and playerState.isFriend then return end
 	if playerState.pdata.isDormant then return end
 
-	local ent = playerState.wrap and playerState.wrap:GetRawEntity()
+	local ent = playerState.wrap:GetRawEntity()
 	if not ent then return end
 
 	local disguiseClass = ent:GetPropInt("m_iDisguiseTargetClass")

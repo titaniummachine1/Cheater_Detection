@@ -578,7 +578,7 @@ local function setSteamHistoryChecks(steamID, entry)
 		and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0
 	then
 		Database.UpsertCheater(steamID, {
-			name = playerState.wrap and playerState.wrap:GetName() or resolveName(steamID, nil, entry),
+			name = playerState.wrap:GetName() or resolveName(steamID, nil, entry),
 			reason = isVacBanned and "SteamHistory VAC Ban" or "SteamHistory Community/Trade Ban",
 			source = "SteamHistory",
 			flags = playerState.flags,

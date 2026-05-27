@@ -361,8 +361,8 @@ OnPlayerStateChange = function(playerState, reason)
 	end
 
 	local sentState = getSentAlertState(steamID64)
-	local flags = tonumber(playerState.flags or 0) or 0
-	local playerName = (playerState.wrap and playerState.wrap.GetName and playerState.wrap:GetName()) or steamID64
+	local flags = playerState.flags
+	local playerName = playerState.wrap:GetName() or steamID64
 
 	if config.CheckValve and (flags & Constants.Flags.VALVE) ~= 0 and not sentState.valve then
 		local alertSent = DispatchValveAlert(config, {

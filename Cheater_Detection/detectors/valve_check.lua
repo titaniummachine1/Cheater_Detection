@@ -433,7 +433,7 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	if useSteamHistory then
 		if not checkFlags.steamHistoryChecked and SteamHistory.QueuePlayerCheck then
-			SteamHistory.QueuePlayerCheck(id, playerState.wrap and playerState.wrap:GetName() or id)
+			SteamHistory.QueuePlayerCheck(id, playerState.wrap:GetName() or id)
 		end
 
 		if not checkFlags.valveGroupChecked then

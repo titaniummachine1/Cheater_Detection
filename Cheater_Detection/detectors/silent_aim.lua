@@ -853,7 +853,7 @@ Events.Subscribe("OnHitscanHit", function(hit)
 
 	if pdata.shotPending and pdata.shotPending.shotTick < curTick then
 		local state = PlayerCache.GetByID(attackerID)
-		if state and state.wrap and attackerEnt:IsValid() then
+		if state and attackerEnt:IsValid() then
 			analyzePendingShot(state, attackerEnt, pdata, pdata.shotPending, curTick)
 		end
 		pdata.shotPending = nil

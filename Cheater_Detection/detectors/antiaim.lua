@@ -61,7 +61,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then return end
 
 	-- Get entity
-	local entity = playerState.wrap and playerState.wrap:GetRawEntity()
+	local entity = playerState.wrap:GetRawEntity()
 	if not entity then return end
 
 	-- Get state
