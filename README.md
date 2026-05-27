@@ -1,9 +1,14 @@
 ![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Ftitaniummachine1%2FCheater_Detection&label=Visitors&countColor=%23263759&style=plastic)
+![Stars](https://img.shields.io/github/stars/titaniummachine1/Cheater_Detection?style=plastic&logo=github&color=yellow)
+![Forks](https://img.shields.io/github/forks/titaniummachine1/Cheater_Detection?style=plastic&logo=github)
+![Commits](https://img.shields.io/github/commit-activity/m/titaniummachine1/Cheater_Detection?style=plastic&logo=git)
+![Last Commit](https://img.shields.io/github/last-commit/titaniummachine1/Cheater_Detection?style=plastic&logo=github)
+![Downloads](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total?style=plastic&logo=github)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # Cheater_Detection
-<img width="534" height="460" alt="image" src="https://github.com/user-attachments/assets/a58ce056-6186-4ed8-bdd1-8397728e6889" />
 
+<img width="534" height="460" alt="image" src="https://github.com/user-attachments/assets/a58ce056-6186-4ed8-bdd1-8397728e6889" />
 
 Automatic bot and cheater detection with cheater prioritization, visuals based on RijiN, and an optional local HTTP bridge for smoother online lookups.
 
@@ -30,17 +35,17 @@ Click the badges below to download required dependencies:
 
 <img width="643" height="744" alt="image" src="https://github.com/user-attachments/assets/41e758f9-a837-4d6e-ab0a-61e9a8f87f46" />
 
-
-> [!WARNING]
-> ### ⚠️ Current Active Detections Status
-> **Currently, active in-game telemetry detections (such as anti-aim, silent aimbot, bhop, duck speed, etc.) are temporarily disabled or not functioning due to game changes and ongoing logic updates.**
-> 
-> **However, the Database Engine is fully functional, extremely reliable, and completely stable.** 
-> * All static databases (including TF2BD Official/Trusted, sleepy lists, joekiller, qfoxb, masterbase broadcasts, etc.) are fully imported.
-> * Cheaters are **instantly prioritized, auto-voted, and flagged** using the local database records.
-> * Visual features (ESP flags, RijiN-style cheater indicator), player lists, auto-priority, and other modular features work perfectly.
-> 
-> *Active detections will be restored soon once telemetry hooks are adjusted!*
+> [!IMPORTANT]
+> ### ✅ Current Active Detections Status
+> **Everything except aimbot detections is now live and running.**
+>
+> - **Database Engine**: Fully functional, stable, and highly optimized.
+> - **All static databases** (TF2BD Official/Trusted, Sleepy, Joekiller, Qfoxb, Masterbase broadcasts, etc.) are fully imported and active.
+> - **Cheater prioritization**, auto-voting, and flagging using local records work instantly.
+> - **Visual features** (ESP flags, RijiN-style cheater indicators), player lists, and modular features are fully operational.
+> - Most behavioral/telemetry detections (anti-aim, bhop, duck speed, etc.) are active.
+>
+> **Aimbot detections** are currently the only module not yet live (under active development/restoration).
 
 ---
 
@@ -48,17 +53,16 @@ Click the badges below to download required dependencies:
 
 We have completely re-engineered the backend storage and in-memory execution pipeline to offer massive performance gains **entirely for free**:
 
-* **Hybrid Lexical Database Compression**: Storing ~31,000+ cheater database records using pre-compiled integer IDs—saving **80-90%** of disk storage and Lua heap space (**reducing script RAM by 5-10 MB**).
+* **Hybrid Lexical Database Compression**: Storing \~31,000+ cheater database records using pre-compiled integer IDs—saving **80-90%** of disk storage and Lua heap space (**reducing script RAM by 5-10 MB**).
 * **Lazy Decompression**: Entries stay compressed in memory and are decompressed **only once** on-demand when a player joins the server.
 * **Zero-Allocation Gameplay Path**: The high-frequency callback loops (such as `CreateMove` and `Draw`) perform direct lookups against active player cache states, allocating **zero tables** during frame rendering. This completely eliminates game micro-stutters and garbage collection spikes.
-* **Instant Disk Saves**: Database flushing is optimized to complete in **~200 ms** (down from several seconds of gameplay freeze).
+* **Instant Disk Saves**: Database flushing is optimized to complete in **\~200 ms** (down from several seconds of gameplay freeze).
 
 ---
 
 ## Download
-[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Detection/releases/latest/download/Cheater_Detection.lua)
 
-![image](https://github.com/titaniummachine1/Cheater_Detection/assets/78664175/bc8ea7b4-1313-46c2-a3a3-87b71ce0116b)
+[![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Detection/releases/latest/download/Cheater_Detection.lua)
 
 ---
 
@@ -92,5 +96,6 @@ When the bridge is not running:
 ---
 
 ## Contact
+
 * [Contact me on Telegram](https://t.me/TerminatorMachine)
 * [Official Telegram Channel](https://t.me/TerminatorMachine)
