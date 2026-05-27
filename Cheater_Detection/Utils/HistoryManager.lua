@@ -1,22 +1,16 @@
 --[[ HistoryManager.lua
      Player-centric circular buffer for tick history.
-
-     NEW Architecture:
        - Each player has their own circular buffer: playerHistories[steamID]
        - Buffer is an ipairs-traversable array: [1]=current tick, [2]=1 tick ago, etc.
        - Circular overwrite: new data overwrites oldest when buffer full
        - No per-tick bucket clearing needed
-
-     Old API Compatibility:
-       - GetBucketAt(offset) -> adapter to new structure
-       - GetPlayerDataInBucket(bucket, steamID) -> adapter
 ]]
 
-local PlayerCache         = require("Cheater_Detection.Core.player_cache")
+local PlayerCache       = require("Cheater_Detection.Core.player_cache")
 
-local HistoryManager      = {}
+local HistoryManager    = {}
 
-HistoryManager.Fields     = {
+HistoryManager.Fields   = {
 	Angles = "angles",
 	EyePosition = "eye_pos",
 	HeadHitbox = "hitbox_head",
@@ -27,38 +21,15 @@ HistoryManager.Fields     = {
 	ViewOffset = "view_offset",
 }
 
-local activeFields        = {}
-local _hasActiveFields    = false
-local maxRetentionTicks   = 0
-local initialized         = false
+local activeFields      = {}
+local _hasActiveFields  = false
+local maxRetentionTicks = 0
+local initialized       = false
 
-local tickLocalPlayer     = nil
-local tickLocalPlayerTick = -1
-
-
-local function getTickLocalPlayer()
-	local curTick = globals.TickCount()
-	if curTick ~= tickLocalPlayerTick then
-		tickLocalPlayerTick = curTick
-		tickLocalPlayer     = entities.GetLocalPlayer()
-	end
-	return tickLocalPlayer
-end
-
--- NEW: Player-centric storage
 -- playerHistories[steamID] = { [1]=current, [2]=prev, ..., _head=N, _count=N, _tick=N }
-local playerHistories = {}
+local playerHistories   = {}
 
--- For old API compatibility: we maintain a "virtual" tick-based view
--- This maps tick offsets to the player history indices
-local currentTickNum = -1
-
-local function tryGetTFNonLocalEyeAngles(player)
-	return player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[0]"),
-		player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[1]")
-end
-
-local FIELD_BUILDERS = {
+local FIELD_BUILDERS    = {
 	[HistoryManager.Fields.Angles] = function(player)
 		local ang = player:GetEyeAngles()
 		return ang.pitch, ang.yaw
@@ -111,9 +82,7 @@ function HistoryManager.Initialize(retentionTicks, fields)
 	initialized = true
 end
 
--- NEW API: Get player's full history array (ipairs-friendly)
--- Returns: { [1]=current, [2]=prev, ..., _head, _count, _tick }
--- Use ipairs to traverse: for i, record in ipairs(history) do ... end
+-- Get player's full history array. Use ipairs to traverse.
 function HistoryManager.GetPlayerHistory(steamID)
 	if not initialized or not steamID then
 		return nil
@@ -148,8 +117,7 @@ function HistoryManager.ForEachRecordNewestFirst(history, maxRecords, callback)
 	end
 end
 
--- NEW API: Get specific record from player history by offset
--- offset=0: current tick, offset=1: 1 tick ago, etc.
+-- Get specific record by offset (0=current, 1=1 tick ago, etc.)
 function HistoryManager.GetPlayerRecordAt(steamID, offset)
 	if not initialized or not steamID then
 		return nil
@@ -185,9 +153,7 @@ function HistoryManager.IsInitialized()
 	return initialized
 end
 
--- Direct record access by offset on an already-retrieved history object.
--- Avoids the steamID table lookup that GetPlayerRecordAt performs.
--- offset 0 = newest, 1 = one tick ago, etc.
+-- Direct record access by offset on already-retrieved history object.
 function HistoryManager.GetRecordAt(history, offset)
 	local idx = recordIndexForOffset(history, offset)
 	return idx and history[idx]
@@ -204,7 +170,6 @@ function HistoryManager.NewTick()
 		return
 	end
 	lastTickCount = curTick
-	currentTickNum = curTick
 end
 
 function HistoryManager.Push(player)
@@ -306,7 +271,7 @@ function HistoryManager.GetActiveFields()
 	return copy
 end
 
--- NEW API: Debug function to set a field in a player's history
+-- Debug function to set a field in a player's history
 function HistoryManager.DebugSetPlayerFieldAt(bufferOffset, steamID, fieldName, value)
 	if not initialized or bufferOffset == nil or bufferOffset < 0 then
 		return false

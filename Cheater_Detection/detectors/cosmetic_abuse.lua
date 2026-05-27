@@ -194,14 +194,11 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 	if not Common.IsDebugEnabled() and playerState.isFriend then return end
 	if playerState.pdata.isDormant then return end
 
-	local ent = playerState.wrap:GetRawEntity()
-	if not ent then return end
-
-	local disguiseClass = ent:GetPropInt("m_iDisguiseTargetClass")
+	local disguiseClass = playerState.wrap:GetPropInt("m_iDisguiseTargetClass")
 	if disguiseClass and disguiseClass > 0 then return end
 
 	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
-	local scanned = scanPlayerWearables(ent, id, isDebug)
+	local scanned = scanPlayerWearables(playerState.wrap:GetEntity(), id, isDebug)
 	if not scanned then
 		-- No wearables found - mark as scanned (F2P or no hats equipped)
 		playerState.wearablesScanned = true

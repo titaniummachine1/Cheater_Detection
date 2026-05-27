@@ -351,9 +351,8 @@ function ValveCheck.ProcessPlayer(playerState)
 	end
 
 	-- ── Layer 1b: Legacy Steam2 fallback ──────────────────────────────────────
-	local ply = playerState.wrap:GetRawEntity()
-	if ply and not checkFlags.valveSteam2Checked then
-		local s2 = Common.GetSteamID(ply)
+	if not checkFlags.valveSteam2Checked then
+		local s2 = Common.GetSteamID(playerState.wrap:GetEntity())
 		if isKnownValveIDSteam2(s2) then
 			checkFlags.valveSteam2Checked = true
 			checkFlags.valveGroupChecked = true
@@ -578,9 +577,9 @@ runDeferredSweep = function()
 			checkFlags.valveItemBadgeChecked = true
 			state.itemChecked = true
 
-			local ply = state.wrap:GetRawEntity()
-			if ply then
-				local found, reason = checkPlayerItems(ply)
+			local ent = state.wrap:GetEntity()
+			if ent and ent:IsValid() then
+				local found, reason = checkPlayerItems(ent)
 				if found then
 					-- Async profile verification for badge-based detection
 					if not pendingBadgeProfileVerification[id] then

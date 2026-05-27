@@ -387,9 +387,8 @@ local function getGroupForPlayer(player)
 		return nil
 	end
 
-	local entity = player:GetRawEntity()
 	local steamID = player:GetSteamID64()
-	local isFriend = isFriendEntity(entity)
+	local isFriend = isFriendEntity(player:GetEntity())
 
 	-- HIGHEST PRIORITY: Retaliation - players who CALLED a vote against us
 	if config.intent.retaliation ~= false and steamID and isRetaliationTarget(steamID) then
@@ -516,12 +515,11 @@ local function issueVote(target)
 	end
 
 	-- Team check already done in collectCandidates
-	local targetEntity = target.player:GetRawEntity()
-	if not targetEntity or not targetEntity:IsValid() then
+	if not target.player:IsValid() then
 		return false
 	end
 
-	local idx = targetEntity:GetIndex()
+	local idx = target.player.index
 	if not idx then
 		return false
 	end

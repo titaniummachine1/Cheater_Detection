@@ -959,10 +959,7 @@ function SilentAim.ProcessPlayer(playerState)
 	end
 
 	local id = playerState.id
-	local ply = playerState.wrap:GetRawEntity()
-	if not ply or not ply:IsValid() then
-		return
-	end
+	if not playerState.wrap:IsValid() then return end
 
 	if not playerData[id] then
 		playerData[id] = {

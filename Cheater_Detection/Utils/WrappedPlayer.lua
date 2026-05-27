@@ -18,13 +18,22 @@ local PlayerCache        = require("Cheater_Detection.Core.player_cache")
 ---@field _cache table
 ---@field _cacheTick number
 local WrappedPlayer      = {}
+
+-- The volatile tick map: [entityIndex] = raw_entity
+-- Replaced wholesale by PlayerCache.SyncTick every tick.
+-- Must be declared before WrappedPlayerMT so the closure captures it as an upvalue.
+local activeTickEntities = {}
+
 local WrappedPlayerMT    = {
 	__index = function(self, key)
-		-- Check explicit methods first
+		-- Check raw table fields first (index, _steamID64, etc.)
+		local raw = rawget(self, key)
+		if raw ~= nil then return raw end
+		-- Check explicit methods
 		local method = WrappedPlayer[key]
 		if method then return method end
 		-- Fall back to raw entity method (for rare/uncommon properties)
-		local ent = activeTickEntities[self.index]
+		local ent = activeTickEntities[rawget(self, "index")]
 		if ent and ent[key] then
 			return function(_, ...)
 				return ent[key](ent, ...)
@@ -39,10 +48,6 @@ local _currentCacheTick  = -1
 local Vec3               = Vector3
 local BONE_MASK_HITBOX   = 0x7ff00
 local localPlayerIndex   = client.GetLocalPlayerIndex
-
--- The volatile tick map: [entityIndex] = raw_entity
--- Replaced wholesale by PlayerCache.SyncTick every tick.
-local activeTickEntities = {}
 
 --- Called by PlayerCache.SyncTick at the start of every tick.
 --- Replaces the upvalue pointer — zero allocation, zero iteration.
@@ -94,6 +99,10 @@ function WrappedPlayer:GetRawEntity()
 	return activeTickEntities[self.index]
 end
 
+function WrappedPlayer:GetEntity()
+	return activeTickEntities[self.index]
+end
+
 --- Returns the display name. Cached on join; only queries engine when name is missing.
 ---@return string|nil
 function WrappedPlayer:GetName()
@@ -126,59 +135,60 @@ end
 function WrappedPlayer:IsAlive()
 	return self:_getCached("isAlive", function()
 		-- m_lifeState: 0=alive, 1=dying, 2=dead, 3=respawnable
-		return entities.GetPlayer(self.index):GetPropInt("m_lifeState") == 0
+		return activeTickEntities[self.index]:GetPropInt("m_lifeState") == 0
 	end)
 end
 
 function WrappedPlayer:IsDormant()
 	return self:_getCached("isDormant", function()
-		return entities.GetPlayer(self.index):IsDormant()
+		local ent = activeTickEntities[self.index]
+		return ent and ent:IsDormant() or true
 	end)
 end
 
 function WrappedPlayer:IsOnGround()
 	return self:_getCached("isOnGround", function()
-		return (entities.GetPlayer(self.index):GetPropInt("m_fFlags") & FL_ONGROUND) ~= 0
+		return (activeTickEntities[self.index]:GetPropInt("m_fFlags") & FL_ONGROUND) ~= 0
 	end)
 end
 
 function WrappedPlayer:IsFriend(includeParty)
 	return self:_getCached("isFriend_" .. tostring(includeParty), function()
-		return Common.IsFriend(entities.GetPlayer(self.index), includeParty)
+		return Common.IsFriend(activeTickEntities[self.index], includeParty)
 	end)
 end
 
 function WrappedPlayer:IsValidPlayer(checkFriend, checkDormant, skipEntity)
-	return Common.IsValidPlayer(entities.GetPlayer(self.index), checkFriend, checkDormant, skipEntity)
+	return Common.IsValidPlayer(activeTickEntities[self.index], checkFriend, checkDormant, skipEntity)
 end
 
 function WrappedPlayer:IsEnemyOf(other)
 	if not other or type(other.GetTeamNumber) ~= "function" then return false end
-	local myTeam = entities.GetPlayer(self.index):GetTeamNumber()
+	local myTeam = activeTickEntities[self.index]:GetTeamNumber()
 	return myTeam ~= 0 and myTeam ~= other:GetTeamNumber()
 end
 
 function WrappedPlayer:GetTeamNumber()
 	return self:_getCached("teamNumber", function()
-		return entities.GetPlayer(self.index):GetTeamNumber()
+		return activeTickEntities[self.index]:GetTeamNumber()
 	end)
 end
 
 function WrappedPlayer:GetAbsOrigin()
 	return self:_getCached("absOrigin", function()
-		return entities.GetPlayer(self.index):GetAbsOrigin()
+		return activeTickEntities[self.index]:GetAbsOrigin()
 	end)
 end
 
 function WrappedPlayer:GetVelocity()
 	return self:_getCached("velocity", function()
-		return entities.GetPlayer(self.index):EstimateAbsVelocity()
+		return activeTickEntities[self.index]:EstimateAbsVelocity()
 	end)
 end
 
 function WrappedPlayer:GetViewOffset()
 	return self:_getCached("viewOffset", function()
-		return entities.GetPlayer(self.index):GetPropVector("localdata", "m_vecViewOffset[0]")
+		return activeTickEntities[self.index]:GetPropVector("localdata", "m_vecViewOffset[0]")
 	end)
 end
 
@@ -193,19 +203,21 @@ function WrappedPlayer:GetEyeAngles()
 		if self.index == localPlayerIndex() then
 			return engine.GetViewAngles()
 		end
-		local a = entities.GetPlayer(self.index):GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+		local ent = activeTickEntities[self.index]
+		if not ent then return nil end
+		local a = ent:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
 		return EulerAngles(a.x, a.y, a.z)
 	end)
 end
 
 function WrappedPlayer:GetSimulationTime()
 	return self:_getCached("simTime", function()
-		return entities.GetPlayer(self.index):GetPropFloat("m_flSimulationTime")
+		return activeTickEntities[self.index]:GetPropFloat("m_flSimulationTime")
 	end)
 end
 
 function WrappedPlayer:GetHitboxPos(hitboxIndex)
-	local hitbox = entities.GetPlayer(self.index):GetHitboxes()[hitboxIndex]
+	local hitbox = activeTickEntities[self.index]:GetHitboxes()[hitboxIndex]
 	if not hitbox then return nil end
 	return (hitbox[1] + hitbox[2]) * 0.5
 end
@@ -217,7 +229,7 @@ function WrappedPlayer:GetLookPos()
 end
 
 function WrappedPlayer:GetActiveWeapon()
-	return entities.GetPlayer(self.index):GetPropEntity("m_hActiveWeapon")
+	return activeTickEntities[self.index]:GetPropEntity("m_hActiveWeapon")
 end
 
 function WrappedPlayer:GetActiveWeaponID()
@@ -235,11 +247,11 @@ function WrappedPlayer:GetWeaponChargeData()
 end
 
 function WrappedPlayer:GetObserverMode()
-	return entities.GetPlayer(self.index):GetPropInt("m_iObserverMode")
+	return activeTickEntities[self.index]:GetPropInt("m_iObserverMode")
 end
 
 function WrappedPlayer:GetObserverTarget()
-	local target = entities.GetPlayer(self.index):GetPropEntity("m_hObserverTarget")
+	local target = activeTickEntities[self.index]:GetPropEntity("m_hObserverTarget")
 	if not target then return nil end
 	local sid64 = Common.GetSteamID64(target)
 	if not sid64 then return nil end
@@ -248,7 +260,7 @@ function WrappedPlayer:GetObserverTarget()
 end
 
 function WrappedPlayer:GetNextAttack()
-	return entities.GetPlayer(self.index):GetPropFloat("m_flNextAttack")
+	return activeTickEntities[self.index]:GetPropFloat("m_flNextAttack")
 end
 
 -- GetPropInt, GetPropFloat, GetPropVector, GetPropBool, GetPropEntity
@@ -256,7 +268,7 @@ end
 
 function WrappedPlayer:SetPriority(level)
 	if not level then return false end
-	playerlist.SetPriority(entities.GetPlayer(self.index), level)
+	playerlist.SetPriority(activeTickEntities[self.index], level)
 	return true
 end
 

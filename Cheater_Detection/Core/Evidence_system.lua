@@ -752,16 +752,9 @@ function Evidence.SetPriorityForSteamID(steamID, priority)
 		return false
 	end
 
-	local wrap = playerState.wrap
-	local entity = wrap and wrap.GetRawEntity and wrap:GetRawEntity() or nil
-
-	if not entity then
-		return false
-	end
-
-	local success = playerlist.SetPriority(entity, priority)
+	local success = playerlist.SetPriority(entities.GetPlayer(playerState.wrap.index), priority)
 	if success then
-		local name = wrap.GetName and wrap:GetName() or steamID
+		local name = playerState.wrap:GetName() or steamID
 		Logger.Info("Evidence", string.format("Set priority %d for %s", priority, name))
 		return true
 	end

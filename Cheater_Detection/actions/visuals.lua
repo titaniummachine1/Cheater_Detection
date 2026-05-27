@@ -80,9 +80,7 @@ function Visuals.DrawTags()
 	for _, pState in pairs(stateTable) do
 		local wrap = pState.wrap
 		if not wrap then goto continue end
-		local ent = wrap:GetRawEntity()
-
-		if ent and ent:IsValid() and not ent:IsDormant() and ent:IsAlive() then
+		if wrap:IsValid() and not wrap:IsDormant() and wrap:IsAlive() then
 			local flags = pState.flags
 			local score = pState.score
 
@@ -92,11 +90,7 @@ function Visuals.DrawTags()
 				if headPos then
 					headPos = headPos + Vec3(0, 0, 15)
 				else
-					local absOrigin = ent:GetAbsOrigin()
-					if not absOrigin then
-						goto continue
-					end
-					headPos = absOrigin + Vec3(0, 0, 72)
+					headPos = wrap:GetAbsOrigin() + Vec3(0, 0, 72)
 				end
 				local x, y = WorldToScreenXY(headPos)
 

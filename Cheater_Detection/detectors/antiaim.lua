@@ -60,10 +60,6 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	-- Already flagged
 	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then return end
 
-	-- Get entity
-	local entity = playerState.wrap:GetRawEntity()
-	if not entity then return end
-
 	-- Get state
 	local state = pitchScores[playerState.id]
 	if not state then
@@ -74,8 +70,8 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 	-- Apply decay
 	ApplyDecay(state)
 
-	-- Get pitch
-	local pitch = GetPitch(entity)
+	-- Get pitch from entity
+	local pitch = GetPitch(playerState.wrap:GetEntity())
 	if not pitch then return end
 
 	-- Check for invalid pitch (90 or -90 exactly = AA)
