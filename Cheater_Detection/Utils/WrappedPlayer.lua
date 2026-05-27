@@ -217,11 +217,13 @@ end
 function WrappedPlayer:GetHitboxPos(hitboxIndex)
 	local ent = self:GetRawEntity()
 	if not ent or not ent:IsAlive() or ent:IsDormant() then return nil end
-	local bones = ent:SetupBones(BONE_MASK_HITBOX, globals.CurTime())
-	if not bones then return nil end
-	local matrix = bones[hitboxIndex]
-	if not matrix then return nil end
-	return Vec3(matrix[1][4], matrix[2][4], matrix[3][4])
+	-- GetHitboxes returns world-space hitbox bounds: { [idx] = {mins, maxs} }
+	local hitboxes = ent:GetHitboxes()
+	if not hitboxes then return nil end
+	local box = hitboxes[hitboxIndex]
+	if not box or not box[1] or not box[2] then return nil end
+	-- Return center of hitbox bounds
+	return (box[1] + box[2]) * 0.5
 end
 
 function WrappedPlayer:GetLookPos()

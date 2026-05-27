@@ -54,71 +54,35 @@ local playerHistories = {}
 local currentTickNum = -1
 
 local function tryGetTFNonLocalEyeAngles(player)
-	if not player or not player.GetPropFloat then
-		return nil
-	end
-	local pitch = player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[0]")
-	local yaw = player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[1]")
-	if type(pitch) ~= "number" or type(yaw) ~= "number" then
-		return nil
-	end
-	return pitch, yaw
+	return player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[0]"),
+		player:GetPropFloat("tfnonlocaldata", "m_angEyeAngles[1]")
 end
 
 local FIELD_BUILDERS = {
 	[HistoryManager.Fields.Angles] = function(player)
-		local localPlayer = getTickLocalPlayer()
-		if localPlayer and localPlayer.IsValid and localPlayer:IsValid() then
-			if localPlayer.GetIndex and player.GetIndex and localPlayer:GetIndex() == player:GetIndex() then
-				local pitchNL, yawNL = tryGetTFNonLocalEyeAngles(player)
-				if pitchNL ~= nil and yawNL ~= nil then
-					return pitchNL, yawNL
-				end
-			end
-		end
-		local ang = player.GetEyeAngles and player:GetEyeAngles()
-		if not ang then
-			return nil
-		end
-		local pitch = ang.pitch
-		local yaw = ang.yaw
-		if pitch == nil or yaw == nil then
-			return nil
-		end
-		return pitch, yaw
+		local ang = player:GetEyeAngles()
+		return ang.pitch, ang.yaw
 	end,
 	[HistoryManager.Fields.EyePosition] = function(player)
-		return player.GetEyePos and player:GetEyePos()
+		return player:GetEyePos()
 	end,
 	[HistoryManager.Fields.HeadHitbox] = function(player)
-		return player.GetHitboxPos and player:GetHitboxPos(1)
+		return player:GetHitboxPos(1)
 	end,
 	[HistoryManager.Fields.BodyHitbox] = function(player)
-		return player.GetHitboxPos and player:GetHitboxPos(4)
+		return player:GetHitboxPos(4)
 	end,
 	[HistoryManager.Fields.SimulationTime] = function(player)
-		if player.GetSimulationTime then
-			return player:GetSimulationTime()
-		end
-		if player.GetPropFloat then
-			return player:GetPropFloat("m_flSimulationTime")
-		end
-		return nil
+		return player:GetSimulationTime()
 	end,
 	[HistoryManager.Fields.OnGround] = function(player)
-		return player.IsOnGround and player:IsOnGround()
+		return player:IsOnGround()
 	end,
 	[HistoryManager.Fields.Velocity] = function(player)
-		if player.GetVelocity then
-			return player:GetVelocity()
-		end
-		if player.EstimateAbsVelocity then
-			return player:EstimateAbsVelocity()
-		end
-		return nil
+		return player:GetVelocity()
 	end,
 	[HistoryManager.Fields.ViewOffset] = function(player)
-		return player.GetViewOffset and player:GetViewOffset()
+		return player:GetViewOffset()
 	end,
 }
 
@@ -132,7 +96,7 @@ function HistoryManager.Initialize(retentionTicks, fields)
 	_hasActiveFields = next(activeFields) ~= nil
 	if not _hasActiveFields then
 		print(
-		"[HistoryManager WARNING] No active fields configured — was DetectionConfig.RegisterWithHistoryManager() called?")
+			"[HistoryManager WARNING] No active fields configured — was DetectionConfig.RegisterWithHistoryManager() called?")
 	end
 
 	for steamID, history in pairs(playerHistories) do
@@ -244,29 +208,8 @@ function HistoryManager.NewTick()
 end
 
 function HistoryManager.Push(player)
-	if not initialized then
-		return
-	end
 	if not _hasActiveFields then return end
-	if not player or type(player.GetSteamID64) ~= "function" then
-		return
-	end
-
-	local steamIDRaw = player:GetSteamID64()
-	if not steamIDRaw then
-		return
-	end
-
-	local steamID = tostring(steamIDRaw)
-	if type(steamID) ~= "string" or steamID == "" then
-		print("[HistoryManager ERROR] steamID conversion failed for player")
-		return
-	end
-	local state = PlayerCache.GetByID(steamID)
-	if not state then
-		return
-	end
-
+	local steamID = tostring(player:GetSteamID64())
 	-- Ensure we have a history for this player
 	local history = playerHistories[steamID]
 	if not history then
@@ -295,31 +238,12 @@ function HistoryManager.Push(player)
 	for field in pairs(activeFields) do
 		local builder = FIELD_BUILDERS[field]
 		if builder then
-			if field == HistoryManager.Fields.Angles then
-				local pitch, yaw = builder(player)
-				if pitch ~= nil and yaw ~= nil then
-					local a = record[field]
-					if type(a) ~= "table" then
-						a = {}
-						record[field] = a
-					end
-					a.pitch = pitch
-					a.yaw   = yaw
-				else
-					record[field] = nil
-				end
-			else
-				record[field] = builder(player)
-			end
+			record[field] = builder(player)
 		end
 	end
 
 	record._tick = curTick
-
-	-- Write at current head position
 	history[history._head] = record
-
-	state.current = record
 end
 
 function HistoryManager.MarkDamageDealt(steamID)
@@ -340,9 +264,6 @@ function HistoryManager.MarkDamageDealt(steamID)
 end
 
 function HistoryManager.ClearPlayer(steamID)
-	if not initialized or not steamID then
-		return
-	end
 	playerHistories[tostring(steamID)] = nil
 end
 

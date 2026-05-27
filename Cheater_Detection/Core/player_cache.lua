@@ -86,7 +86,7 @@ local function applyAutoPriority(state, ent)
 	if not isAutoPriorityEnabled() then return end
 
 	if (state.flags & HARD_FLAGS) ~= 0 then
-		pcall(playerlist.SetPriority, ent, 10)
+		playerlist.SetPriority(ent, 10)
 		state.autoPrioritySusApplied = false
 		return
 	end
@@ -94,16 +94,14 @@ local function applyAutoPriority(state, ent)
 	local isSus = (state.flags & Constants.Flags.SUSPICIOUS) ~= 0
 	if isSus then
 		if not state.autoPrioritySusApplied then
-			local ok, prio = pcall(playerlist.GetPriority, ent)
-			if ok and type(prio) == "number" and prio < 1 then
-				pcall(playerlist.SetPriority, ent, 1)
+			if playerlist.GetPriority(ent) < 1 then
+				playerlist.SetPriority(ent, 1)
 				state.autoPrioritySusApplied = true
 			end
 		end
 	elseif state.autoPrioritySusApplied then
-		local ok, prio = pcall(playerlist.GetPriority, ent)
-		if ok and type(prio) == "number" and prio == 1 then
-			pcall(playerlist.SetPriority, ent, 0)
+		if playerlist.GetPriority(ent) == 1 then
+			playerlist.SetPriority(ent, 0)
 		end
 		state.autoPrioritySusApplied = false
 	end
@@ -181,9 +179,10 @@ function PlayerCache.SyncTick()
 	for k in pairs(tickMap) do tickMap[k] = nil end
 	for k in pairs(seenIDs) do seenIDs[k] = nil end
 
-	local now        = globals.RealTime()
-	local anyNew     = false
-	local anyRemoved = false
+	local now          = globals.RealTime()
+	local anyNew       = false
+	local anyRemoved   = false
+	local susThreshold = getSuspicionThreshold()
 
 	-- Single pass: build tickMap + process state simultaneously
 	for i = 1, #liveEnts do
@@ -286,7 +285,6 @@ function PlayerCache.SyncTick()
 						local prevScore = state.score
 						local prevFlags = state.flags
 						state.score = math.max(0, state.score - rate * elapsed)
-						local susThreshold = getSuspicionThreshold()
 						if state.score < susThreshold then
 							state.flags = (state.flags & ~Constants.Flags.SUSPICIOUS) & ~Constants.Flags.HIGH_RISK
 						elseif state.score < Constants.Threshold.HIGH_RISK then
@@ -427,7 +425,7 @@ Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
 	local ent = playerState.wrap and playerState.wrap:GetRawEntity()
 	if not ent or not ent:IsValid() then return end
 	if (playerState.flags & RUNTIME_HARD_FLAGS) ~= 0 then
-		pcall(playerlist.SetPriority, ent, 10)
+		playerlist.SetPriority(ent, 10)
 		playerState.autoPrioritySusApplied = false
 		return
 	end

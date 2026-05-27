@@ -27,8 +27,8 @@ local regionCache = {}
 local playerScanData = {}
 
 local function readPropInt(ent, propName)
-	local ok, value = pcall(ent.GetPropInt, ent, propName)
-	if not ok or type(value) ~= "number" then return nil end
+	local value = ent:GetPropInt(propName)
+	if type(value) ~= "number" then return nil end
 	return value
 end
 
@@ -36,8 +36,8 @@ local function getItemName(defIndex)
 	if not itemschema then return nil end
 	local itemDef = itemschema.GetItemDefinitionByID(defIndex)
 	if not itemDef then return nil end
-	local ok, name = pcall(itemDef.GetName, itemDef)
-	return (ok and type(name) == "string" and name ~= "") and name or nil
+	local name = itemDef:GetName()
+	return (type(name) == "string" and name ~= "") and name or nil
 end
 
 local function getItemRegion(defIndex)
@@ -91,10 +91,10 @@ local function scanPlayerWearables(player, targetID, isDebug)
 	-- This catches exploit hats networked outside the standard loadout slots.
 	for _, wearable in pairs(entities.FindByClass("CTFWearable")) do
 		if wearable:IsValid() then
-			local ok1, owner = pcall(wearable.GetPropEntity, wearable, "m_hOwnerEntity")
-			local ok2, parent = pcall(wearable.GetPropEntity, wearable, "m_hMoveParent")
-			local ownerIdx = ok1 and owner and owner:IsValid() and owner:GetIndex()
-			local parentIdx = ok2 and parent and parent:IsValid() and parent:GetIndex()
+			local owner = wearable:GetPropEntity("m_hOwnerEntity")
+			local parent = wearable:GetPropEntity("m_hMoveParent")
+			local ownerIdx = owner and owner:IsValid() and owner:GetIndex()
+			local parentIdx = parent and parent:IsValid() and parent:GetIndex()
 			if ownerIdx == playerIdx or parentIdx == playerIdx then
 				processWearable(wearable)
 			end
@@ -103,8 +103,8 @@ local function scanPlayerWearables(player, targetID, isDebug)
 
 	-- Secondary: loadout slots 7-12, catches anything the entity scan missed.
 	for slot = 7, 12 do
-		local ok, item = pcall(player.GetEntityForLoadoutSlot, player, slot)
-		if ok and item then
+		local item = player:GetEntityForLoadoutSlot(slot)
+		if item then
 			processWearable(item)
 		end
 	end

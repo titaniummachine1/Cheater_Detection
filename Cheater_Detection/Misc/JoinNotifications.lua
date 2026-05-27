@@ -119,7 +119,7 @@ local function SendAlert(outputConfig, messageConfig)
 
 	if outputConfig.Toast then
 		if lnxNotifs then
-			pcall(lnxNotifs.Add, messagePlain)
+			lnxNotifs.Add(messagePlain)
 		end
 	end
 end

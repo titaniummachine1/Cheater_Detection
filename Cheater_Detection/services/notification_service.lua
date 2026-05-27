@@ -87,8 +87,8 @@ local function OnStateChange(playerState, reason)
 	-- Safely get player name with nil checks
 	local name = id
 	if playerState.wrap and playerState.wrap.GetName then
-		local ok, n = pcall(playerState.wrap.GetName, playerState.wrap)
-		if ok and n then
+		local n = playerState.wrap:GetName()
+		if n then
 			name = n
 		end
 	end

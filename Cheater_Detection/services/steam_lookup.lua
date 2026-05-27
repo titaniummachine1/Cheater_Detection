@@ -55,19 +55,9 @@ local function parseGroupXML(xml)
 end
 
 local function GetLocalPlayerEntity()
-	local ok, localPlayer = pcall(entities.GetLocalPlayer)
-	if not ok or not localPlayer then
-		return nil
-	end
-
-	local isValidFn = localPlayer.IsValid
-	if type(isValidFn) == "function" then
-		local validOk, isValid = pcall(isValidFn, localPlayer)
-		if not validOk or isValid ~= true then
-			return nil
-		end
-	end
-
+	local localPlayer = entities.GetLocalPlayer()
+	if not localPlayer then return nil end
+	if localPlayer.IsValid and not localPlayer:IsValid() then return nil end
 	return localPlayer
 end
 
@@ -91,10 +81,7 @@ local function CanUseSafeWindowBurst()
 		return false
 	end
 
-	local aliveOk, alive = pcall(isAliveFn, localPlayer)
-	if not aliveOk then
-		return false
-	end
+	local alive = isAliveFn(localPlayer)
 
 	return alive ~= true
 end

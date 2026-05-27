@@ -38,77 +38,30 @@ local function Now()
 end
 
 local function GetLocalPlayerEntity()
-    local ok, localPlayer = pcall(entities.GetLocalPlayer)
-    if not ok or not localPlayer then
-        return nil
-    end
-
-    local isValidFn = localPlayer.IsValid
-    if type(isValidFn) == "function" then
-        local validOk, isValid = pcall(isValidFn, localPlayer)
-        if not validOk or isValid ~= true then
-            return nil
-        end
-    end
-
+    local localPlayer = entities.GetLocalPlayer()
+    if not localPlayer then return nil end
+    if localPlayer.IsValid and not localPlayer:IsValid() then return nil end
     return localPlayer
 end
 
 local function IsLocalPlayerAliveNow()
     local localPlayer = GetLocalPlayerEntity()
-    if not localPlayer then
-        return false
-    end
-
-    local isAliveFn = localPlayer.IsAlive
-    if type(isAliveFn) ~= "function" then
-        return false
-    end
-
-    local aliveOk, alive = pcall(isAliveFn, localPlayer)
-    if not aliveOk then
-        return false
-    end
-
-    return alive == true
+    if not localPlayer then return false end
+    return localPlayer:IsAlive() == true
 end
 
 local function SafeEngineBoolean(methodName)
-    local engineTable = engine
-    if type(engineTable) ~= "table" then
-        return false
-    end
-
-    local method = engineTable[methodName]
-    if type(method) ~= "function" then
-        return false
-    end
-
-    local ok, value = pcall(method)
-    if not ok then
-        return false
-    end
-
+    if type(engine) ~= "table" then return false end
+    local method = engine[methodName]
+    if type(method) ~= "function" then return false end
+    local value = method()
     return value == true
 end
 
 local function GetServerIP()
-    local engineTable = engine
-    if type(engineTable) ~= "table" then
-        return nil
-    end
-
-    local getServerIP = engineTable.GetServerIP
-    if type(getServerIP) ~= "function" then
-        return nil
-    end
-
-    local ok, serverIP = pcall(getServerIP)
-    if not ok then
-        return nil
-    end
-
-    return serverIP
+    if type(engine) ~= "table" then return nil end
+    if type(engine.GetServerIP) ~= "function" then return nil end
+    return engine.GetServerIP()
 end
 
 local function IsGitHubLikeURL(url)
@@ -363,18 +316,7 @@ local function CanRunBlockingHTTPNow(now)
         return true
     end
 
-    local isAliveFn = localPlayer.IsAlive
-    if type(isAliveFn) ~= "function" then
-        ResetBlockingWindowState()
-        return false
-    end
-
-    local aliveOk, alive = pcall(isAliveFn, localPlayer)
-    if not aliveOk then
-        ResetBlockingWindowState()
-        return false
-    end
-
+    local alive = localPlayer:IsAlive()
     if alive == true then
         blockingWindowState.wasAlive = true
         blockingWindowState.deadSince = 0

@@ -196,10 +196,8 @@ local function applyCommBanFlag(playerState)
 end
 
 local function readItemInt(ent, propName)
-	local ok, value = pcall(ent.GetPropInt, ent, propName)
-	if not ok or type(value) ~= "number" then
-		return nil
-	end
+	local value = ent:GetPropInt(propName)
+	if type(value) ~= "number" then return nil end
 	return value
 end
 
@@ -208,15 +206,9 @@ local function isVerifiedWearableItemEntity(ent)
 		return false
 	end
 
-	local okValid, isValid = pcall(ent.IsValid, ent)
-	if not okValid or not isValid then
-		return false
-	end
-
-	local okClass, className = pcall(ent.GetClass, ent)
-	if not okClass or type(className) ~= "string" then
-		return false
-	end
+	if not ent:IsValid() then return false end
+	local className = ent:GetClass()
+	if type(className) ~= "string" then return false end
 	if not className:find("Wearable", 1, true) then
 		return false
 	end
@@ -238,12 +230,12 @@ local function isVerifiedWearableItemEntity(ent)
 end
 
 -- ──────────────────────────────────────────────────────────────────────────────
--- Layer 2: Item + Badge check (pcall-safe)
+-- Layer 2: Item + Badge check
 -- ──────────────────────────────────────────────────────────────────────────────
 local function checkPlayerItems(ply)
 	for slot = 0, 18 do
-		local okEnt, ent = pcall(ply.GetEntityForLoadoutSlot, ply, slot)
-		if okEnt and isVerifiedWearableItemEntity(ent) then
+		local ent = ply:GetEntityForLoadoutSlot(slot)
+		if isVerifiedWearableItemEntity(ent) then
 			local quality = readItemInt(ent, "m_iEntityQuality")
 			local defIdx = readItemInt(ent, "m_iItemDefinitionIndex")
 

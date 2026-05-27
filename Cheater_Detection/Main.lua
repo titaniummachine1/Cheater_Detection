@@ -246,29 +246,21 @@ local function OnCreateMove(cmd)
 
 	Events.DispatchEngineEvent("CreateMove", cmd)
 
-	local menu                = G.Menu
-	local mainMenu            = menu and menu.Main or nil
-	local adv                 = menu and menu.Advanced or nil
+	local menu             = G.Menu
+	local adv              = menu.Advanced
 
-	local enableValveCheck    = mainMenu and mainMenu.ValveCheck == true
-	local enableSilent        = adv and adv.SilentAimbot == true
-	local enableAimLock       = enableSilent and (adv.AimLock ~= false)
-	local enableAntiAim       = adv and adv.AntiAim == true
-	local enableDuckSpeed     = adv and adv.DuckSpeed == true
-	local enableBhop          = adv and adv.Bhop == true
-	local enableWarpDT        = adv and adv["Warp"] == true
-	local enableChoke         = adv and adv.Choke == true
-	local enableCosmetics     = adv and adv.Cosmetics == true
+	local enableValveCheck = menu.Main.ValveCheck == true
+	local enableSilent     = adv.SilentAimbot == true
+	local enableAimLock    = enableSilent and adv.AimLock ~= false
+	local enableAntiAim    = adv.AntiAim == true
+	local enableDuckSpeed  = adv.DuckSpeed == true
+	local enableBhop       = adv.Bhop == true
+	local enableWarpDT     = adv["Warp"] == true
+	local enableChoke      = adv.Choke == true
+	local enableCosmetics  = adv.Cosmetics == true
 
-	local anyDetectorsEnabled = enableValveCheck
-		or enableSilent
-		or enableAntiAim
-		or enableDuckSpeed
-		or enableBhop
-		or enableWarpDT
-		or enableChoke
-		or enableCosmetics
-	if not anyDetectorsEnabled then
+	if not (enableValveCheck or enableSilent or enableAntiAim or enableDuckSpeed
+			or enableBhop or enableWarpDT or enableChoke or enableCosmetics) then
 		Profiler.End("CreateMove_Total")
 		return
 	end
@@ -318,7 +310,7 @@ local function OnCreateMove(cmd)
 	lastDetectorTick = curTick
 
 	local isDebug = isDebugEnabled()
-	local localID = tostring(Common.GetSteamID64(localPlayer))
+	local localID = tostring(Common.GetSteamID64(localPlayer) or "")
 	local stateTable = PlayerCache.GetActiveTable()
 
 	-- Pre-filter active players into a flat list (reuse module-level table)
@@ -345,13 +337,13 @@ local function OnCreateMove(cmd)
 				if not sessionState.cleanedFriendIDs[id] then
 					sessionState.cleanedFriendIDs[id] = true
 					Database.RemoveCheater(id)
-					if existingState.wrap then existingState.wrap:SetPriority(0) end
+					existingState.wrap:SetPriority(0)
 				end
 				goto continue
 			end
 			if existingState.isFriend then
 				local friendID = existingState.id
-				if friendID and friendID:match("^7656119%d+$") and not sessionState.cleanedFriendIDs[friendID] then
+				if friendID and not sessionState.cleanedFriendIDs[friendID] then
 					sessionState.cleanedFriendIDs[friendID] = true
 					Database.RemoveCheater(friendID)
 				end
