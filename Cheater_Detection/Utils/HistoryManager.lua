@@ -29,31 +29,81 @@ local initialized       = false
 -- playerHistories[steamID] = { [1]=current, [2]=prev, ..., _head=N, _count=N, _tick=N }
 local playerHistories   = {}
 
-local FIELD_BUILDERS    = {
-	[HistoryManager.Fields.Angles] = function(player)
+-- Field builders that mutate an existing slot table in-place to avoid allocation.
+-- Each receives (player, record) and writes directly into record[field].
+local FIELD_WRITERS     = {
+	[HistoryManager.Fields.Angles] = function(player, record, field)
 		local ang = player:GetEyeAngles()
-		return ang.pitch, ang.yaw
+		if not ang then
+			record[field] = nil; return
+		end
+		local t = record[field]
+		if type(t) ~= "table" then
+			t = {}; record[field] = t
+		end
+		t.pitch = ang.pitch
+		t.yaw   = ang.yaw
 	end,
-	[HistoryManager.Fields.EyePosition] = function(player)
-		return player:GetEyePos()
+	[HistoryManager.Fields.EyePosition] = function(player, record, field)
+		local v = player:GetEyePos()
+		if not v then
+			record[field] = nil; return
+		end
+		local t = record[field]
+		if type(t) ~= "table" then
+			t = {}; record[field] = t
+		end
+		t.x = v.x; t.y = v.y; t.z = v.z
 	end,
-	[HistoryManager.Fields.HeadHitbox] = function(player)
-		return player:GetHitboxPos(1)
+	[HistoryManager.Fields.HeadHitbox] = function(player, record, field)
+		local v = player:GetHitboxPos(1)
+		if not v then
+			record[field] = nil; return
+		end
+		local t = record[field]
+		if type(t) ~= "table" then
+			t = {}; record[field] = t
+		end
+		t.x = v.x; t.y = v.y; t.z = v.z
 	end,
-	[HistoryManager.Fields.BodyHitbox] = function(player)
-		return player:GetHitboxPos(4)
+	[HistoryManager.Fields.BodyHitbox] = function(player, record, field)
+		local v = player:GetHitboxPos(4)
+		if not v then
+			record[field] = nil; return
+		end
+		local t = record[field]
+		if type(t) ~= "table" then
+			t = {}; record[field] = t
+		end
+		t.x = v.x; t.y = v.y; t.z = v.z
 	end,
-	[HistoryManager.Fields.SimulationTime] = function(player)
-		return player:GetSimulationTime()
+	[HistoryManager.Fields.SimulationTime] = function(player, record, field)
+		record[field] = player:GetSimulationTime()
 	end,
-	[HistoryManager.Fields.OnGround] = function(player)
-		return player:IsOnGround()
+	[HistoryManager.Fields.OnGround] = function(player, record, field)
+		record[field] = player:IsOnGround()
 	end,
-	[HistoryManager.Fields.Velocity] = function(player)
-		return player:GetVelocity()
+	[HistoryManager.Fields.Velocity] = function(player, record, field)
+		local v = player:GetVelocity()
+		if not v then
+			record[field] = nil; return
+		end
+		local t = record[field]
+		if type(t) ~= "table" then
+			t = {}; record[field] = t
+		end
+		t.x = v.x; t.y = v.y; t.z = v.z
 	end,
-	[HistoryManager.Fields.ViewOffset] = function(player)
-		return player:GetViewOffset()
+	[HistoryManager.Fields.ViewOffset] = function(player, record, field)
+		local v = player:GetViewOffset()
+		if not v then
+			record[field] = nil; return
+		end
+		local t = record[field]
+		if type(t) ~= "table" then
+			t = {}; record[field] = t
+		end
+		t.x = v.x; t.y = v.y; t.z = v.z
 	end,
 }
 
@@ -201,9 +251,9 @@ function HistoryManager.Push(player)
 	end
 
 	for field in pairs(activeFields) do
-		local builder = FIELD_BUILDERS[field]
-		if builder then
-			record[field] = builder(player)
+		local writer = FIELD_WRITERS[field]
+		if writer then
+			writer(player, record, field)
 		end
 	end
 
@@ -253,9 +303,16 @@ function HistoryManager.PushAngles(steamID, pitch, yaw)
 		history._lastTick = curTick
 	end
 
-	local record = history[history._head] or {}
-	record[HistoryManager.Fields.Angles] = { pitch = pitch, yaw = yaw }
-	record._tick = curTick
+	local record = history[history._head]
+	if type(record) ~= "table" then record = {} end
+	local angField = HistoryManager.Fields.Angles
+	local t = record[angField]
+	if type(t) ~= "table" then
+		t = {}; record[angField] = t
+	end
+	t.pitch                = pitch
+	t.yaw                  = yaw
+	record._tick           = curTick
 	history[history._head] = record
 end
 
