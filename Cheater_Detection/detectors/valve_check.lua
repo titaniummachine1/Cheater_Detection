@@ -263,6 +263,8 @@ function ValveCheck.ProcessPlayer(playerState)
 
 	local id = tostring(playerState.id)
 
+	if id:sub(1, 4) == "BOT_" then return end
+
 	-- OPTIMIZATION: Only check players on join (dirty CONNECTED flag)
 	-- Valve status is permanent - cannot become Valve mid-session
 	local isNewPlayer = DirtySystem.IsDirty(id, "connected")
@@ -532,6 +534,11 @@ runDeferredSweep = function()
 	for _, id in ipairs(dirtyPlayers) do
 		if checksThisFrame >= maxChecksPerFrame then
 			break -- Process rest next frame
+		end
+
+		if id:sub(1, 4) == "BOT_" then
+			DirtySystem.ClearDirty(id, "checks")
+			goto continue
 		end
 
 		local state = PlayerCache.GetByID(id)

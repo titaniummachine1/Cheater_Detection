@@ -31,51 +31,44 @@ local playerHistories   = {}
 
 -- Field builders that mutate an existing slot table in-place to avoid allocation.
 -- Each receives (player, record) and writes directly into record[field].
-local FIELD_WRITERS     = {
+local function reuseVec(record, field, v)
+	if not v then
+		record[field] = nil
+		return
+	end
+	local t = record[field]
+	if type(t) ~= "table" then
+		t = {}
+		record[field] = t
+	end
+	t.x = v.x
+	t.y = v.y
+	t.z = v.z
+end
+
+local FIELD_WRITERS = {
 	[HistoryManager.Fields.Angles] = function(player, record, field)
 		local ang = player:GetEyeAngles()
 		if not ang then
-			record[field] = nil; return
+			record[field] = nil
+			return
 		end
 		local t = record[field]
 		if type(t) ~= "table" then
-			t = {}; record[field] = t
+			t = {}
+			record[field] = t
 		end
 		t.pitch = ang.pitch
 		t.yaw   = ang.yaw
 	end,
 	[HistoryManager.Fields.EyePosition] = function(player, record, field)
-		local v = player:GetEyePos()
-		if not v then
-			record[field] = nil; return
-		end
-		local t = record[field]
-		if type(t) ~= "table" then
-			t = {}; record[field] = t
-		end
-		t.x = v.x; t.y = v.y; t.z = v.z
+		reuseVec(record, field, player:GetEyePos())
 	end,
 	[HistoryManager.Fields.HeadHitbox] = function(player, record, field)
-		local v = player:GetHitboxPos(1)
-		if not v then
-			record[field] = nil; return
-		end
-		local t = record[field]
-		if type(t) ~= "table" then
-			t = {}; record[field] = t
-		end
-		t.x = v.x; t.y = v.y; t.z = v.z
+		reuseVec(record, field, player:GetHitboxPos(1))
 	end,
 	[HistoryManager.Fields.BodyHitbox] = function(player, record, field)
-		local v = player:GetHitboxPos(4)
-		if not v then
-			record[field] = nil; return
-		end
-		local t = record[field]
-		if type(t) ~= "table" then
-			t = {}; record[field] = t
-		end
-		t.x = v.x; t.y = v.y; t.z = v.z
+		reuseVec(record, field, player:GetHitboxPos(4))
 	end,
 	[HistoryManager.Fields.SimulationTime] = function(player, record, field)
 		record[field] = player:GetSimulationTime()
@@ -84,26 +77,10 @@ local FIELD_WRITERS     = {
 		record[field] = player:IsOnGround()
 	end,
 	[HistoryManager.Fields.Velocity] = function(player, record, field)
-		local v = player:GetVelocity()
-		if not v then
-			record[field] = nil; return
-		end
-		local t = record[field]
-		if type(t) ~= "table" then
-			t = {}; record[field] = t
-		end
-		t.x = v.x; t.y = v.y; t.z = v.z
+		reuseVec(record, field, player:GetVelocity())
 	end,
 	[HistoryManager.Fields.ViewOffset] = function(player, record, field)
-		local v = player:GetViewOffset()
-		if not v then
-			record[field] = nil; return
-		end
-		local t = record[field]
-		if type(t) ~= "table" then
-			t = {}; record[field] = t
-		end
-		t.x = v.x; t.y = v.y; t.z = v.z
+		reuseVec(record, field, player:GetViewOffset())
 	end,
 }
 
@@ -304,11 +281,14 @@ function HistoryManager.PushAngles(steamID, pitch, yaw)
 	end
 
 	local record = history[history._head]
-	if type(record) ~= "table" then record = {} end
+	if type(record) ~= "table" then
+		record = {}
+	end
 	local angField = HistoryManager.Fields.Angles
 	local t = record[angField]
 	if type(t) ~= "table" then
-		t = {}; record[angField] = t
+		t = {}
+		record[angField] = t
 	end
 	t.pitch                = pitch
 	t.yaw                  = yaw

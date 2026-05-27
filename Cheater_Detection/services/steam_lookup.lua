@@ -263,6 +263,10 @@ end
 
 --- Async profile check for specific group membership or bans
 function SteamLookup.CheckProfileAsync(steamID64, callback)
+	if not steamID64 or not steamID64:match("^%d+$") then
+		if type(callback) == "function" then callback(nil) end
+		return
+	end
 	local url = "https://steamcommunity.com/profiles/" .. steamID64 .. "/?xml=1"
 	local enqueued = HttpQueue.Enqueue(url, function(data)
 		if type(callback) ~= "function" then
