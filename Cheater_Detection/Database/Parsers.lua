@@ -8,6 +8,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 -- [[ Imported by: Fetcher.lua, Parsers.lua ]]
 
 local GlobalLookupTables = require("Cheater_Detection.Database.Static_Embeded_Databases.global_lookup_tables")
+local ReasonWeightResolver = require("Cheater_Detection.Utils.ReasonWeightResolver")
 
 local Parsers = {}
 
@@ -488,21 +489,17 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 			updName = true
 		end
 
-		-- Merge in better/missing reason context from incoming lists.
+		-- Weight-based reason selection: always keep the highest-weight reason.
+		-- Lower-weight sources (e.g. bot lists, generic griefing) cannot override
+		-- higher-weight detections (e.g. aimbot, VAC ban, trusted cheater marks).
 		if reason and reason ~= "Unknown Source" then
 			local existingReason = existingEntry.Reason
 			if existingReason == nil or existingReason == "Unknown Source" then
 				existingEntry.Reason = reason
 				updReason = true
-			elseif not containsPlain(existingReason, reason) then
-				local mergedReason = existingReason
-				if #existingReason < 220 then
-					mergedReason = existingReason .. " | " .. reason
-				end
-				if mergedReason ~= existingReason then
-					existingEntry.Reason = mergedReason
-					updReason = true
-				end
+			elseif ReasonWeightResolver.ShouldOverride(existingReason, reason) then
+				existingEntry.Reason = reason
+				updReason = true
 			end
 		end
 

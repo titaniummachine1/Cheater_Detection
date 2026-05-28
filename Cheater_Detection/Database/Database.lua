@@ -12,6 +12,7 @@ local Constants = require("Cheater_Detection.Core.constants")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
 local Events = require("Cheater_Detection.Core.Events")
+local ReasonWeightResolver = require("Cheater_Detection.Utils.ReasonWeightResolver")
 
 local EmbeddedDBs = {
 	["d3fc0n6_embedded"]           = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
@@ -652,6 +653,7 @@ end
 
 function Database.LoadEmbeddedDatabases()
 	local totalNew = 0
+	local totalOverridden = 0
 
 	for dbName, embeddedDB in pairs(EmbeddedDBs) do
 		if type(embeddedDB) == "table" then
@@ -661,23 +663,36 @@ function Database.LoadEmbeddedDatabases()
 			if usesGlobalFormat then
 				-- New format: Data arrays reference global lookup IDs
 				local added = 0
+				local overridden = 0
 				for steamID, entry in pairs(embeddedDB.Data) do
 					if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-						if not G.DataBase[steamID] then
+						local existing = G.DataBase[steamID]
+						if not existing then
 							G.DataBase[steamID] = entry
 							added = added + 1
+						else
+							-- Weight-based merge: resolve both reasons to strings and compare
+							local existingReason = Database.ResolveReason(existing)
+							local incomingReason = Database.ResolveReason(entry)
+							if ReasonWeightResolver.ShouldOverride(existingReason, incomingReason) then
+								G.DataBase[steamID] = entry
+								overridden = overridden + 1
+							end
 						end
 					end
 				end
 				totalNew = totalNew + added
+				totalOverridden = totalOverridden + overridden
 				Logger.Debug("Database",
-					string.format("[DB] Embedded '%s' (global format): +%d new entries", dbName, added))
+					string.format("[DB] Embedded '%s' (global format): +%d new, %d overridden", dbName, added, overridden))
 			else
 				-- Legacy format: individual lookup tables per file
 				local added = 0
+				local overridden = 0
 				for steamID, entry in pairs(embeddedDB) do
 					if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-						if not G.DataBase[steamID] then
+						local existing = G.DataBase[steamID]
+						if not existing then
 							G.DataBase[steamID] = {
 								Name = entry.Name or "Unknown",
 								Reason = entry.Reason or "Cheater",
@@ -686,20 +701,54 @@ function Database.LoadEmbeddedDatabases()
 								Flags = entry.Flags or 0,
 							}
 							added = added + 1
+						else
+							local existingReason = Database.ResolveReason(existing)
+							local incomingReason = entry.Reason or "Cheater"
+							if ReasonWeightResolver.ShouldOverride(existingReason, incomingReason) then
+								G.DataBase[steamID] = {
+									Name = entry.Name or existing.Name or "Unknown",
+									Reason = incomingReason,
+									Source = entry.Source or existing.Source or "Embedded",
+									Static = entry.Static or existing.Static or dbName,
+									Flags = entry.Flags or existing.Flags or 0,
+								}
+								overridden = overridden + 1
+							end
 						end
 					end
 				end
 				totalNew = totalNew + added
+				totalOverridden = totalOverridden + overridden
 				Logger.Debug("Database",
-					string.format("[DB] Embedded '%s' (legacy format): +%d new entries", dbName, added))
+					string.format("[DB] Embedded '%s' (legacy format): +%d new, %d overridden", dbName, added, overridden))
 			end
 		end
 	end
 
-	if totalNew > 0 then
+	if totalNew > 0 or totalOverridden > 0 then
 		Database.State.isDirty = true
-		Logger.Info("Database", string.format("[DB] Embedded DBs loaded: %d new entries", totalNew))
+		Logger.Info("Database",
+			string.format("[DB] Embedded DBs loaded: %d new, %d overridden (weight-based)", totalNew, totalOverridden))
 	end
+end
+
+--- Resolve a reason string from a database entry (handles both compressed and verbose formats)
+---@param entry table
+---@return string|nil
+function Database.ResolveReason(entry)
+	if not entry then
+		return nil
+	end
+	-- Compressed format: entry[3] is reason ID
+	if entry[1] ~= nil and type(entry[1]) == "number" then
+		local reasonID = entry[3]
+		if type(reasonID) == "number" then
+			return GlobalLookupTables.Reasons[reasonID]
+		end
+		return reasonID
+	end
+	-- Verbose format
+	return entry.Reason
 end
 
 function Database.Initialize(silent)
@@ -814,7 +863,17 @@ function Database.UpsertCheater(steamID, data)
 	if existing then
 		local scoreDelta = math.abs(score - (existing.Score or 0))
 		local timeDelta = currentTime - (existing.Timestamp or 0)
-		local reasonChanged = data.reason ~= existing.Reason
+
+		-- Weight-based reason selection: only update if incoming reason has higher weight
+		local effectiveReason = data.reason
+		local existingReason = existing.Reason
+		if effectiveReason and existingReason then
+			if not ReasonWeightResolver.ShouldOverride(existingReason, effectiveReason) then
+				effectiveReason = existingReason
+			end
+		end
+		local reasonChanged = effectiveReason ~= existingReason
+
 		local existingKarma = type(existing.Karma) == "number" and existing.Karma or 0
 		local existingRetaliation = existing.Retaliation == true
 		local effectiveKarma = incomingKarma
@@ -831,6 +890,9 @@ function Database.UpsertCheater(steamID, data)
 		if scoreDelta < 1 and timeDelta < 3600 and not reasonChanged and persistentFlags == existing.Flags and not karmaChanged and not retaliationChanged then
 			return false
 		end
+
+		-- Use the weight-selected reason for storage
+		data.reason = effectiveReason
 	end
 
 	local finalKarma = incomingKarma

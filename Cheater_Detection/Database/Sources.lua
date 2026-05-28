@@ -15,7 +15,8 @@ Sources.List = {
 		url = "https://megaanticheat.com/broadcasts",
 		cause = "Masterbase Broadcast Conviction",
 		parser = "broadcasts",
-		sourceID = "masterbase_broadcasts"
+		sourceID = "masterbase_broadcasts",
+		weight = 78
 	},
 	-- wgetJane's Biglist (primary source - large, actively updated bot list)
 	{
@@ -23,7 +24,8 @@ Sources.List = {
 		url = "https://gist.githubusercontent.com/wgetJane/0bc01bd46d7695362253c5a2fa49f2e9/raw/playerlist.biglist.json",
 		cause = "Bot (TF2BD Community Biglist)",
 		parser = "tf2db",
-		sourceID = "cc_biglist"
+		sourceID = "cc_biglist",
+		weight = 20
 	},
 	-- Curated by Trusted-role members of the official TF2BD Discord (high verification bar)
 	{
@@ -31,7 +33,8 @@ Sources.List = {
 		url = "https://trusted.roto.lol/v1/steamids",
 		cause = "Cheater (TF2BD Trusted)",
 		parser = "tf2db",
-		sourceID = "cc_trusted"
+		sourceID = "cc_trusted",
+		weight = 80
 	},
 	-- qfoxb live fetch — embedded snapshot exists but live fetch picks up new entries between re-embeds
 	{
@@ -39,7 +42,8 @@ Sources.List = {
 		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
 		cause = "Cheater (qfoxb)",
 		parser = "tf2db",
-		sourceID = "qfoxb"
+		sourceID = "qfoxb",
+		weight = 55
 	},
 	-- joekiller live fetch — US-East/Virginia focused, manually verified cheaters
 	{
@@ -47,7 +51,8 @@ Sources.List = {
 		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
 		cause = "Cheater (joekiller)",
 		parser = "tf2db",
-		sourceID = "joekiller"
+		sourceID = "joekiller",
+		weight = 55
 	},
 }
 
