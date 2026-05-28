@@ -44,7 +44,7 @@ TFCL_FILE   = OUTPUT_DIR / "tfcl_combined_lua.lua"
 SOURCE_WEIGHTS: Dict[str, int] = {
     "local_detector":       100,
     "manual_flag":          95,
-    "valve_official":       90,
+    "valve_official":       110,
     "vac_ban":              85,
     "cc_trusted":           80,
     "masterbase_broadcasts": 79,
@@ -132,9 +132,9 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
     ("Noise maker",              75),
     ("noise maker",              75),
     # Valve / VAC confirmed
-    ("VALVe",                   95),
-    ("Valve employee",          95),
-    ("valve employee",          95),
+    ("VALVe",                   110),
+    ("Valve employee",          110),
+    ("valve employee",          110),
     ("VAC",                     90),
     ("Game Ban",                88),
     # Trusted source cheater marks

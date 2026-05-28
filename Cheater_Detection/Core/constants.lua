@@ -53,7 +53,7 @@ Constants.SourceWeights = {
 	["manual_flag"] = 95,
 
 	-- Valve official
-	["valve_official"] = 90,
+	["valve_official"] = 110,
 
 	-- VAC / Game Ban confirmed
 	["vac_ban"] = 85,
@@ -150,8 +150,8 @@ Constants.ReasonCategoryWeights = {
 	{ pattern = "noise maker",             weight = 75 },
 
 	-- Valve / VAC confirmed
-	{ pattern = "VALVe",                   weight = 95 },
-	{ pattern = "Valve",                   weight = 95 },
+	{ pattern = "VALVe",                   weight = 110 },
+	{ pattern = "Valve",                   weight = 110 },
 	{ pattern = "VAC",                     weight = 90 },
 	{ pattern = "Game Ban",                weight = 88 },
 

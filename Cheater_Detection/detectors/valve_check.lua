@@ -111,15 +111,24 @@ local function applyValveFlag(playerState, reason)
 	local oldFlags = playerState.flags
 	playerState.flags = playerState.flags | Constants.Flags.VALVE
 
-	if playerState.flags ~= oldFlags then
-		local inStaticValveList = isKnownStaticValvePlayer(playerState)
-		local reasonForDatabase = reason
-		local staticTag = nil
-		if not inStaticValveList then
-			reasonForDatabase = reason .. " (Not in static Valve list)"
-			staticTag = "ValveDynamic"
-		end
+	local inStaticValveList = isKnownStaticValvePlayer(playerState)
+	local reasonForDatabase = reason
+	local staticTag = "valve_official"
+	if not inStaticValveList then
+		reasonForDatabase = reason .. " (Not in static Valve list)"
+		staticTag = "ValveDynamic"
+	end
 
+	Database.UpsertCheater(playerState.id, {
+		name = playerState.wrap:GetName(),
+		reason = reasonForDatabase,
+		flags = playerState.flags,
+		score = playerState.score,
+		Static = staticTag,
+		source = "Valve Employee Check",
+	})
+
+	if playerState.flags ~= oldFlags then
 		printc(
 			255,
 			215,
@@ -132,13 +141,6 @@ local function applyValveFlag(playerState, reason)
 				reason
 			)
 		)
-		Database.UpsertCheater(playerState.id, {
-			name = playerState.wrap:GetName(),
-			reason = reasonForDatabase,
-			flags = playerState.flags,
-			score = playerState.score,
-			Static = staticTag,
-		})
 		if not inStaticValveList then
 			Logger.Info(
 				"ValveCheck",
@@ -283,9 +285,8 @@ function ValveCheck.ProcessPlayer(playerState)
 		return
 	end
 
-	-- Skip if already definitively flagged as Valve or Cheater
-	if (playerState.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
-		-- Mark as checked so we don't re-check
+	-- Valve identity is safety-critical: never let an existing CHEATER mark suppress Valve verification.
+	if (playerState.flags & Constants.Flags.VALVE) ~= 0 then
 		valveCheckedThisSession[id] = true
 		DirtySystem.ClearDirty(id, "connected")
 		return
@@ -373,7 +374,8 @@ function ValveCheck.ProcessPlayer(playerState)
 	if not checkFlags.valveItemBadgeChecked then
 		checkFlags.valveItemBadgeChecked = true
 		playerState.itemChecked = true
-		if ply then
+		local ply = playerState.wrap:GetEntity()
+		if ply and ply:IsValid() then
 			if isDebug and VERBOSE_DEBUG_LOGS then
 				Logger.Debug("ValveCheck", id .. " – running item/badge check")
 			end
@@ -548,8 +550,8 @@ runDeferredSweep = function()
 			goto continue
 		end
 
-		-- Skip if already confirmed as Valve or Cheater (flag won't change mid-session)
-		if (state.flags & (Constants.Flags.VALVE | Constants.Flags.CHEATER)) ~= 0 then
+		-- Valve identity is safety-critical: only confirmed VALVE may skip Valve verification.
+		if (state.flags & Constants.Flags.VALVE) ~= 0 then
 			DirtySystem.ClearDirty(id, "checks")
 			goto continue
 		end

@@ -977,7 +977,7 @@ function SilentAim.ProcessPlayer(playerState)
 			return
 		end
 		pdata.shotPending = nil
-		analyzePendingShot(playerState, ply, pdata, pending, curTick)
+		analyzePendingShot(playerState, playerState.wrap, pdata, pending, curTick)
 	end
 end
 
