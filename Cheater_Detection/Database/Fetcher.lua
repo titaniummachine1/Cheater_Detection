@@ -1,5 +1,5 @@
 ---@diagnostic disable: undefined-global, undefined-field
---[[ Cheater Detection - Database Fetcher - Coroutine Async Version ]]
+--[[ Cheater Detection - Database Fetcher (HTTP spread per tick; parse/merge immediate) ]]
 local Common = require("Cheater_Detection.Utils.Common")
 local G = require("Cheater_Detection.Utils.Globals")
 local Json = Common.Json
@@ -16,13 +16,12 @@ local MAX_JSON_NIL_RETRIES = 0
 -- Seconds to wait between sequential online source fetches to avoid
 -- hammering the HTTP subsystem when safe-window blocking requests run.
 local INTER_SOURCE_DELAY = 3.0
-local ONLINE_ACTIVE_FETCH_LIMIT = 1
-local ONLINE_SAFE_WINDOW_FETCH_LIMIT = 20
+local ONLINE_FETCH_LIMIT = 1 -- one source HTTP enqueue per fetcher tick; HttpQueue enforces its own caps
 
 ---- State tracking
 Fetcher.State = {
 	isRunning = false,
-	mode = "IDLE", -- IDLE, LOCAL_SCAN, LOCAL_READ, LOCAL_PARSE, ONLINE_FETCH, ONLINE_WAIT_RESPONSE, ONLINE_PARSE, WAITING, FINISH
+	mode = "IDLE", -- IDLE, LOCAL_SCAN, LOCAL_READ, ONLINE_FETCH, ONLINE_WAIT_RESPONSE, WAITING, FINISH
 	startTime = 0,
 	results = {
 		total_added = 0,
@@ -129,13 +128,7 @@ local function onOnlineResponse(responseBody, errorMessage, source)
 end
 
 local function GetOnlineFetchParallelLimit()
-	if HttpQueue.IsBridgeAlive() then
-		return ONLINE_SAFE_WINDOW_FETCH_LIMIT
-	end
-	if ShouldRelaxFrameLimits() then
-		return ONLINE_SAFE_WINDOW_FETCH_LIMIT
-	end
-	return ONLINE_ACTIVE_FETCH_LIMIT
+	return ONLINE_FETCH_LIMIT
 end
 
 local function GetOnlineFetchDispatchDelay()
@@ -166,6 +159,133 @@ local function CompleteOnlineSource(state)
 		return
 	end
 	state.mode = "FINISH"
+end
+
+local function buildPlayersFromRawSteamIds(rawText)
+	local players = {}
+	if type(rawText) ~= "string" or rawText == "" then
+		return players
+	end
+	local pos = 1
+	local len = #rawText
+	while pos <= len do
+		local s, e = rawText:find("[%w%[%]%:_]+", pos)
+		if not s then
+			break
+		end
+		local word = rawText:sub(s, e)
+		pos = e + 1
+		local sid64 = Parsers.GetSteamID64(word)
+		if sid64 then
+			players[#players + 1] = { steamid = sid64, attributes = { "Raw List" } }
+		end
+	end
+	return players
+end
+
+-- Merge every entry from playersToProcess into G.DataBase in one shot (no per-tick chunking).
+local function mergePlayersFromActiveSource(state, parseMode)
+	local players = state.playersToProcess
+	if not players then
+		Logger.Error("Fetcher", "[FETCHER] playersToProcess missing in merge")
+		state.results.errors = state.results.errors + 1
+		state.mode = "FINISH"
+		return
+	end
+
+	local source = state.activeSource
+	if not source then
+		Logger.Error("Fetcher", "[FETCHER] activeSource missing in merge")
+		state.results.errors = state.results.errors + 1
+		state.mode = "FINISH"
+		return
+	end
+
+	local s = state.currentSourceStats
+	if not s then
+		Logger.Error("Fetcher", "[FETCHER] currentSourceStats missing in merge")
+		state.results.errors = state.results.errors + 1
+		state.mode = "FINISH"
+		return
+	end
+
+	local sourceCause = source.cause or "Unknown Source"
+	local staticID = source.sourceID or sourceCause or "Ext"
+	if type(staticID) == "string" and (staticID:find("http") or #staticID > 25) then
+		staticID = "Ext"
+	end
+
+	for i = 1, #players do
+		local player = players[i]
+		s.processed = s.processed + 1
+		if not player then
+			s.errors = s.errors + 1
+		else
+			local added, updated, err, updName, updReason, updStatic =
+				Parsers.ParseTF2BotDetector_MergeEntry(player, G.DataBase, staticID, sourceCause, source.name)
+
+			if err then
+				s.errors = s.errors + 1
+			elseif added or updated then
+				if added then
+					s.added = s.added + 1
+				end
+				if updated then
+					s.updated = s.updated + 1
+					if updName then
+						s.updName = (s.updName or 0) + 1
+					end
+					if updReason then
+						s.updReason = (s.updReason or 0) + 1
+					end
+					if updStatic then
+						s.updStatic = (s.updStatic or 0) + 1
+					end
+				end
+				Database.State.isDirty = true
+			else
+				s.existing = s.existing + 1
+			end
+		end
+	end
+
+	Parsers.AddSourceStats(
+		source.name,
+		s.processed,
+		s.added,
+		s.existing,
+		s.errors,
+		s.updated,
+		s.updName or 0,
+		s.updReason or 0,
+		s.updStatic or 0
+	)
+	state.results.total_added = state.results.total_added + s.added
+	state.results.total_updated = state.results.total_updated + s.updated
+	state.results.errors = state.results.errors + s.errors
+
+	Logger.Debug(
+		"Fetcher",
+		string.format(
+			"[FETCHER] Source done: %s processed=%d added=%d updated=%d existing=%d errors=%d",
+			tostring(source.name),
+			s.processed,
+			s.added,
+			s.updated,
+			s.existing,
+			s.errors
+		)
+	)
+
+	state.playersToProcess = nil
+	state.entryIdx = 1
+
+	if parseMode == "LOCAL_PARSE" then
+		state.fileIdx = state.fileIdx + 1
+		state.mode = "LOCAL_READ"
+	else
+		CompleteOnlineSource(state)
+	end
 end
 
 -- Logic for starting the process
@@ -339,24 +459,20 @@ function Fetcher.Tick()
 
 			-- FALLBACK: If JSON decode returned a number, it's likely a raw list of IDs
 			if not players and err and err:find("returned number") then
-				Logger.Debug("Fetcher", "[FETCHER] Local file appears to be raw IDs, parsing incrementally")
-				state.rawText = content
-				state.rawPos = 1
-				state.rawPendingSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
-				state.playersToProcess = {}
-				state.entryIdx = 1
+				Logger.Debug("Fetcher", "[FETCHER] Local file appears to be raw IDs, merging immediately")
+				state.playersToProcess = buildPlayersFromRawSteamIds(content)
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
-				state.nextMode = "LOCAL_PARSE"
-				state.mode = "RAW_INCREMENTAL"
+				state.activeSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
+				mergePlayersFromActiveSource(state, "LOCAL_PARSE")
 				return
 			end
 
 			if players then
 				state.playersToProcess = players
-				state.entryIdx = 1
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
 				state.activeSource = { name = fileName, cause = "Local Import (" .. fileName .. ")" }
-				state.mode = "LOCAL_PARSE"
+				mergePlayersFromActiveSource(state, "LOCAL_PARSE")
+				return
 			else
 				Logger.Warning("Fetcher", "[FETCHER] Parse error in " .. fileName .. ": " .. tostring(err))
 				state.fileIdx = state.fileIdx + 1
@@ -366,178 +482,6 @@ function Fetcher.Tick()
 			Logger.Warning("Fetcher", "[FETCHER] Failed to read or empty local file: " .. fileName)
 			state.fileIdx = state.fileIdx + 1
 			state.mode = "LOCAL_READ"
-		end
-
-		--------------------------------------------------------
-		-- STATE: RAW_INCREMENTAL
-		-- Parses a raw SteamID64 text blob N tokens per tick using
-		-- string.find + position counter (no closure / coroutine).
-		--------------------------------------------------------
-	elseif state.mode == "RAW_INCREMENTAL" then
-		local rawText = state.rawText
-		local source = state.rawPendingSource
-		assert(rawText, "RAW_INCREMENTAL: rawText missing")
-		assert(source, "RAW_INCREMENTAL: rawPendingSource missing")
-
-		local TOKENS_PER_TICK = ShouldRelaxFrameLimits() and 5000 or 500
-		local pos = state.rawPos
-		local count = 0
-		local len = #rawText
-		local label = source.name or source.cause or "Raw List"
-
-		while count < TOKENS_PER_TICK and pos <= len do
-			local s, e = rawText:find("[%w%[%]%:_]+", pos)
-			if not s then
-				pos = len + 1
-				break
-			end
-			local word = rawText:sub(s, e)
-			pos = e + 1
-			count = count + 1
-			local sid64 = Parsers.GetSteamID64(word)
-			if sid64 then
-				table.insert(state.playersToProcess, { steamid = sid64, attributes = { label } })
-			end
-		end
-
-		state.rawPos = pos
-
-		if pos > len then
-			-- Done — hand off to parse state
-			state.activeSource = source
-			state.entryIdx = 1
-			state.rawText = nil
-			state.rawPendingSource = nil
-			state.mode = state.nextMode or "LOCAL_PARSE"
-			state.nextMode = nil
-		end
-
-		--------------------------------------------------------
-		-- STATE: LOCAL_PARSE / ONLINE_PARSE (Merged Logic)
-		--------------------------------------------------------
-	elseif state.mode == "LOCAL_PARSE" or state.mode == "ONLINE_PARSE" then
-		local players = state.playersToProcess
-		if not players then
-			Logger.Error("Fetcher", "[FETCHER] playersToProcess missing in PARSE state")
-			state.results.errors = state.results.errors + 1
-			state.mode = "FINISH"
-			return
-		end
-		local startIdx = state.entryIdx
-		local count = 0
-		-- When the local player is dead there is no active gameplay, so we can
-		-- process the entire list without worrying about frame-time spikes.
-		local relaxedChunkSize = math.huge
-		local chunkSize = ShouldRelaxFrameLimits() and relaxedChunkSize or 20
-
-		local isDirtyBefore = Database.State.isDirty
-		local source = state.activeSource
-		if not source then
-			Logger.Error("Fetcher", "[FETCHER] activeSource missing in PARSE state")
-			state.results.errors = state.results.errors + 1
-			state.mode = "FINISH"
-			return
-		end
-
-		-- SANITIZATION: Never allow URLs as staticID
-		local sourceCause = source.cause or "Unknown Source"
-		local staticID = source.sourceID or sourceCause or "Ext"
-		if type(staticID) == "string" and (staticID:find("http") or #staticID > 25) then
-			staticID = "Ext"
-		end
-
-		local s = state.currentSourceStats
-		if not s then
-			Logger.Error("Fetcher", "[FETCHER] currentSourceStats missing in PARSE state")
-			state.results.errors = state.results.errors + 1
-			state.mode = "FINISH"
-			return
-		end
-
-		for i = startIdx, #players do
-			count = count + 1
-			-- Advance entryIdx to the next entry to process so that on the
-			-- following tick we resume from here, not re-process entry i.
-			state.entryIdx = i + 1
-
-			local player = players[i]
-			s.processed = s.processed + 1
-			if not player then
-				s.errors = s.errors + 1
-			else
-				local added, updated, err, updName, updReason, updStatic =
-					Parsers.ParseTF2BotDetector_MergeEntry(player, G.DataBase, staticID, sourceCause, source.name)
-
-				if err then
-					s.errors = s.errors + 1
-				elseif added or updated then
-					if added then
-						s.added = s.added + 1
-					end
-					if updated then
-						s.updated = s.updated + 1
-						if updName then
-							s.updName = (s.updName or 0) + 1
-						end
-						if updReason then
-							s.updReason = (s.updReason or 0) + 1
-						end
-						if updStatic then
-							s.updStatic = (s.updStatic or 0) + 1
-						end
-					end
-					Database.State.isDirty = true
-				else
-					s.existing = s.existing + 1
-				end
-			end
-
-			if count >= chunkSize then
-				break
-			end
-		end
-
-		if state.entryIdx > #players then
-			if not s or not source then
-				Logger.Error("Fetcher", "[FETCHER] stats/source missing at PARSE end")
-				state.mode = "FINISH"
-				return
-			end
-			Parsers.AddSourceStats(
-				source.name,
-				s.processed,
-				s.added,
-				s.existing,
-				s.errors,
-				s.updated,
-				s.updName or 0,
-				s.updReason or 0,
-				s.updStatic or 0
-			)
-			state.results.total_added = state.results.total_added + s.added
-			state.results.total_updated = state.results.total_updated + s.updated
-			state.results.errors = state.results.errors + s.errors
-
-			Logger.Debug(
-				"Fetcher",
-				string.format(
-					"[FETCHER] Source done: %s processed=%d added=%d updated=%d existing=%d errors=%d",
-					tostring(source.name),
-					s.processed,
-					s.added,
-					s.updated,
-					s.existing,
-					s.errors
-				)
-			)
-
-			if state.mode == "LOCAL_PARSE" then
-				state.fileIdx = state.fileIdx + 1
-				state.mode = "LOCAL_READ"
-			else
-				CompleteOnlineSource(state)
-			end
-			state.playersToProcess = nil
 		end
 
 		--------------------------------------------------------
@@ -558,8 +502,7 @@ function Fetcher.Tick()
 			return
 		end
 
-		-- Keep the live-game path serial, but allow safe windows to fill the
-		-- bridge queue with multiple source fetches at once.
+		-- One HTTP enqueue per tick; HttpQueue handles bridge submit/poll limits.
 		local now = globals.RealTime()
 		local dispatchDelay = GetOnlineFetchDispatchDelay()
 		if dispatchDelay > 0 and (now - state.lastOnlineFetchTime) < dispatchDelay then
@@ -669,15 +612,11 @@ function Fetcher.Tick()
 			elseif source.parser == "broadcasts" then
 				players, err = Parsers.GetPlayersFromBroadcasts(response, source.cause)
 			elseif source.parser == "raw" then
-				Logger.Debug("Fetcher", "[FETCHER] Online source is raw IDs, parsing incrementally")
-				state.rawText = response
-				state.rawPos = 1
-				state.rawPendingSource = source
-				state.playersToProcess = {}
-				state.entryIdx = 1
+				Logger.Debug("Fetcher", "[FETCHER] Online source is raw IDs, merging immediately")
+				state.playersToProcess = buildPlayersFromRawSteamIds(response)
+				state.activeSource = source
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
-				state.nextMode = "ONLINE_PARSE"
-				state.mode = "RAW_INCREMENTAL"
+				mergePlayersFromActiveSource(state, "ONLINE_PARSE")
 				return
 			else
 				err = "Unknown parser type: " .. tostring(source.parser)
@@ -686,10 +625,10 @@ function Fetcher.Tick()
 			if players then
 				state.onlineNilRetryCount[sourceName] = 0
 				state.playersToProcess = players
-				state.entryIdx = 1
 				state.activeSource = source
 				state.currentSourceStats = { processed = 0, added = 0, existing = 0, updated = 0, errors = 0 }
-				state.mode = "ONLINE_PARSE"
+				mergePlayersFromActiveSource(state, "ONLINE_PARSE")
+				return
 			else
 				local errText = tostring(err)
 				if errText:find("JSON decode returned nil", 1, true) then

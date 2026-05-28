@@ -21,9 +21,6 @@ local JoinNotifications = {}
 local hasValidatedOnLoad = false
 local sentAlerts = {}
 local OnPlayerStateChange
-local lastCatchupSweepTime = 0
-
-local CATCHUP_SWEEP_INTERVAL = 5.0
 
 local function resetSentAlerts()
 	sentAlerts = {}
@@ -505,24 +502,9 @@ local function OnCreateMove()
 		local config = G.Menu and G.Menu.Misc and G.Menu.Misc.JoinNotifications
 		-- Check if config is loaded (has boolean ValveAutoDisconnect)
 		if config and type(config.ValveAutoDisconnect) == "boolean" then
-			local validatedCount = ValidateAllPlayers()
-			if validatedCount > 0 then
-				hasValidatedOnLoad = true
-				lastCatchupSweepTime = globals.RealTime()
-			end
+			ValidateAllPlayers()
+			hasValidatedOnLoad = true
 		end
-		return
-	end
-
-	local config = GetJoinNotificationsConfig()
-	if not config then
-		return
-	end
-
-	local now = globals.RealTime()
-	if (now - lastCatchupSweepTime) >= CATCHUP_SWEEP_INTERVAL then
-		lastCatchupSweepTime = now
-		ValidateAllPlayers()
 	end
 end
 

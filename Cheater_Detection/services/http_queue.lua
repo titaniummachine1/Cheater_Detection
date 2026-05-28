@@ -1,7 +1,10 @@
 --[[ services/http_queue.lua
-     HTTP queue with optional local Python bridge.
-     Bridge: one /health at Lua require; if unhealthy, zero bridge HTTP until reload.
-     Blocking fallback (bridge off): console open, or on-server dead 3s+ (not spawn grace).
+     HTTP policy:
+       • Bridge up  → all remote URLs go through the bridge (localhost submit/poll only).
+       • Alive      → never blocking http.Get() to remote hosts (walking = no game-thread stalls).
+       • Bridge down + alive → queue waits (dead 3s+, menu, or console-only exceptions).
+       • Bridge down + dead/menu → blocking fallback may run.
+     Spawn grace: pause bridge submit/poll briefly after local spawn to avoid post-spawn hitches.
 ]]
 
 local Common = require("Cheater_Detection.Utils.Common")
@@ -32,9 +35,10 @@ local LOCAL_DEATH_SAFE_WINDOW_DELAY = 3.0
 local SPAWN_GRACE_SECONDS = 6.0
 local BRIDGE_POLL_INTERVAL = 0.5 -- 500ms when alive, faster when dead/menu
 local lastBridgePoll = 0
-local lastBridgeDispatch = 0
-local BRIDGE_DISPATCH_INTERVAL = 0.5
-local MAX_SUBMISSIONS_PER_TICK = 1
+local BRIDGE_POLL_INTERVAL_ACTIVE = 0.15
+local BRIDGE_SUBMISSIONS_PER_TICK_ALIVE = 1
+local BRIDGE_SUBMISSIONS_PER_TICK_BURST = 4
+local BRIDGE_MAX_CALLBACKS_PER_TICK = 2
 
 local function Now()
     return globals.RealTime()
@@ -76,6 +80,7 @@ local function IsInSpawnGrace()
     return Now() < spawnGraceState.graceUntil
 end
 
+-- True when remote work must not use blocking http.Get on the game thread.
 local function ShouldDeferGameplayHTTP()
     if IsInSpawnGrace() then
         return true
@@ -84,6 +89,11 @@ local function ShouldDeferGameplayHTTP()
         return true
     end
     return false
+end
+
+-- Bridge submit/poll paused during spawn grace (remote work already async in Python).
+local function ShouldDeferBridgeTick()
+    return IsInSpawnGrace()
 end
 
 local function SafeEngineBoolean(methodName)
@@ -215,13 +225,22 @@ local function BridgeHttpGet(url)
     return body, nil
 end
 
+local function hasActiveBridgeJobs()
+    for _ in pairs(activeBridgeJobs) do
+        return true
+    end
+    return false
+end
+
 local function PollBridgeResults(now)
-    if not IsBridgeUsable() then
+    if not IsBridgeUsable() or ShouldDeferBridgeTick() then
         return
     end
     local interval = BRIDGE_POLL_INTERVAL
-    if not IsLocalPlayerAliveNow() or SafeEngineBoolean("IsGameUIVisible") then
-        interval = 0.1 -- Faster polling when dead or in menu
+    if hasActiveBridgeJobs() then
+        interval = BRIDGE_POLL_INTERVAL_ACTIVE
+    elseif not IsLocalPlayerAliveNow() or SafeEngineBoolean("IsGameUIVisible") then
+        interval = BRIDGE_POLL_INTERVAL_ACTIVE
     end
 
     if now - lastBridgePoll < interval then
@@ -257,7 +276,11 @@ local function PollBridgeResults(now)
         return
     end
 
+    local callbacksThisTick = 0
     for _, res in ipairs(data.items) do
+        if callbacksThisTick >= BRIDGE_MAX_CALLBACKS_PER_TICK then
+            break
+        end
         local jobId = res.id
         local item = jobMap[jobId]
         if item then
@@ -268,30 +291,28 @@ local function PollBridgeResults(now)
                     InvokeCallback(item, nil, res.error or "Remote request failed")
                 end
                 activeBridgeJobs[jobId] = nil
+                callbacksThisTick = callbacksThisTick + 1
             elseif res.error == "unknown id" then
                 InvokeCallback(item, nil, "Bridge lost job context")
                 activeBridgeJobs[jobId] = nil
+                callbacksThisTick = callbacksThisTick + 1
             end
         end
     end
 end
 
 local function TryDispatchToBridge(now)
-    if not IsBridgeUsable() then
+    if not IsBridgeUsable() or ShouldDeferBridgeTick() then
         return false
     end
 
-    local interval = BRIDGE_DISPATCH_INTERVAL
+    local maxSubmissions = BRIDGE_SUBMISSIONS_PER_TICK_ALIVE
     if not IsLocalPlayerAliveNow() or SafeEngineBoolean("IsGameUIVisible") then
-        interval = 0.0 -- No dispatch throttle when dead or in menu
-    end
-
-    if now - lastBridgeDispatch < interval then
-        return false
+        maxSubmissions = BRIDGE_SUBMISSIONS_PER_TICK_BURST
     end
 
     local submissions = 0
-    while #queue > 0 and submissions < MAX_SUBMISSIONS_PER_TICK do
+    while #queue > 0 and submissions < maxSubmissions do
         local item = queue[1]
         if not item then
             table.remove(queue, 1)
@@ -307,7 +328,6 @@ local function TryDispatchToBridge(now)
             item = table.remove(queue, 1)
             submissions = submissions + 1
             lastSerialDispatchTime = now
-            lastBridgeDispatch = now
 
             local submitUrl
             if item.method and item.method ~= "GET" then
@@ -347,7 +367,7 @@ local function ResetBlockingWindowState()
     blockingWindowState.deadSince = 0
 end
 
--- Blocking fallback: on server, dead long enough, not during post-spawn grace.
+-- Blocking fallback for remote URLs only (never while alive and walking).
 local function CanRunBlockingHTTPNow(now)
     local currentTime = type(now) == "number" and now or Now()
 
@@ -355,14 +375,10 @@ local function CanRunBlockingHTTPNow(now)
         return false
     end
 
-    if SafeEngineBoolean("Con_IsVisible") then
-        ResetBlockingWindowState()
-        return true
-    end
-
     local serverIP = GetServerIP()
     if serverIP == nil or serverIP == "" then
-        return false
+        -- Main menu / not on server: allow blocking fetch (no gameplay to stutter).
+        return true
     end
 
     local localPlayer = GetLocalPlayerEntity()
@@ -371,6 +387,7 @@ local function CanRunBlockingHTTPNow(now)
     end
 
     if IsEntityAlive(localPlayer) then
+        -- Alive on server: remote blocking http.Get is never allowed.
         if blockingWindowState.wasAlive ~= true then
             ExtendSpawnGrace()
         end
@@ -388,6 +405,11 @@ local function CanRunBlockingHTTPNow(now)
     if blockingWindowState.deadSince <= 0 then
         blockingWindowState.deadSince = currentTime
         return false
+    end
+
+    if SafeEngineBoolean("Con_IsVisible") then
+        ResetBlockingWindowState()
+        return true
     end
 
     return (currentTime - blockingWindowState.deadSince) >= LOCAL_DEATH_SAFE_WINDOW_DELAY
@@ -593,13 +615,13 @@ function HttpQueue.Tick()
 
     local now = Now()
 
-    -- 1. Manage Bridge (discovery runs once at module load, not here)
-    if IsBridgeUsable() and not ShouldDeferGameplayHTTP() then
+    -- 1. Bridge handles the queue whenever it is up (independent of alive/dead defer).
+    if IsBridgeUsable() then
         PollBridgeResults(now)
         TryDispatchToBridge(now)
     end
 
-    -- 2. Manage Blocking Fallback (only if bridge is not handling everything)
+    -- 2. Blocking in-game http.Get only when the bridge is unavailable.
     if not IsBridgeUsable() then
         if activeItem and now >= activeDeadline and activeAttemptCount > 0 then
             local err = "HTTP request timed out after " .. tostring(REQUEST_TIMEOUT) .. "s"

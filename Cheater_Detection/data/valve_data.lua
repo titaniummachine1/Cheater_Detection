@@ -290,6 +290,13 @@ ValveData.KnownSteamID64s = {
 	["76561199690380138"] = true,
 }
 
+-- Legacy Steam2 keys (Layer 1b); most IDs are already in KnownSteamID64s above.
+ValveData.ManualIDsSteam2 = {
+	["STEAM_0:1:4"] = true,
+	["STEAM_0:0:8"] = true,
+	["STEAM_0:0:1563"] = true,
+}
+
 -- Merge Database/ValveEmployees.lua into the lookup table.
 -- This means any SteamID64 added to ValveEmployees.lua is picked up
 -- automatically by the Layer 1 instant check without touching this file.

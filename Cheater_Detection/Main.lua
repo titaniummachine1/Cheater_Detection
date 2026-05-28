@@ -193,9 +193,9 @@ local function Init()
 	DetectionConfig.RegisterWithHistoryManager()
 	CosmeticAbuse.Init()
 
-	-- Automate Database Fetch (Local then Online) - Respects AutoSync setting
+	-- Auto-sync: HTTP spread via scheduler + HttpQueue; parsing merges run in full per response/file.
 	if G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false then
-		Fetcher.Start() -- Begin async local import followed by online sync
+		Fetcher.Start()
 	else
 		print("[CD] Auto-Sync disabled via config.")
 	end

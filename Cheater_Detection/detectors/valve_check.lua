@@ -69,7 +69,11 @@ local function isKnownValveID64(s64)
 end
 
 local function isKnownValveIDSteam2(s2)
-	return s2 ~= nil and ValveData.ManualIDsSteam2[s2] == true
+	if not s2 then
+		return false
+	end
+	local legacyList = ValveData.ManualIDsSteam2
+	return type(legacyList) == "table" and legacyList[s2] == true
 end
 
 local function isKnownStaticValvePlayer(playerState)

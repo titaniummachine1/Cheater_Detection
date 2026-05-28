@@ -440,16 +440,7 @@ local function onLifecycleEvent(_event) arrDirty = true end
 
 local function onPlayerSpawnOrClassChange(event)
 	arrDirty = true
-	local uid = event:GetInt("userid")
-	if not uid then return end
-	local ent = entities.GetByUserID(uid)
-	if not ent or not ent:IsValid() then return end
-	local steamID = Common.GetSteamID64(ent)
-	if not steamID then return end
-	local state = activeSet[tostring(steamID)]
-	if state then
-		state.wearablesScanned = nil
-	end
+	-- wearablesScanned stays true across respawn; loadout regions do not change mid-session.
 end
 
 local function onNewMapOrRoundStart()

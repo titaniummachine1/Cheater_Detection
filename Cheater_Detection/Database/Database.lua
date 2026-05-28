@@ -331,8 +331,8 @@ local function OnFireEvent(event)
 	end
 
 	if eventName == "game_newmap" or eventName == "teamplay_round_start" or eventName == "round_end" then
-		Logger.Debug("Database", "[DB] Session boundary event, scheduling save...")
-		Database.SaveDatabase()
+		Logger.Debug("Database", "[DB] Session boundary event, marking dirty (save when safe)...")
+		Database.State.isDirty = true
 	end
 end
 
@@ -844,6 +844,8 @@ function Database.PurgeFriendsAndSelf()
 	return purged
 end
 
+-- Runtime upsert (detectors, Valve, SteamHistory): no reason-weight arbitration.
+-- List/fetch weights live in Parsers.ParseTF2BotDetector_MergeEntry; load-time embed in LoadDatabase.
 function Database.UpsertCheater(steamID, data)
 	if not steamID or type(steamID) ~= "string" then
 		return false
@@ -887,17 +889,9 @@ function Database.UpsertCheater(steamID, data)
 		local scoreDelta = math.abs(score - (existing.Score or 0))
 		local timeDelta = currentTime - (existing.Timestamp or 0)
 
-		-- Weight-based evidence selection: only update if incoming reason/source is stronger
-		local effectiveReason = data.reason
-		local existingReason = existing.Reason
-		if effectiveReason and existingReason then
-			if not ReasonWeightResolver.ShouldOverrideEvidence(existingReason, effectiveReason, existing.Static, data.Static) then
-				effectiveReason = existingReason
-				data.Static = existing.Static
-				data.source = existing.Source
-			end
-		end
-		local reasonChanged = effectiveReason ~= existingReason
+		-- Reason weights apply only to list/fetch merges (Parsers) and embedded DB load below.
+		-- Runtime callers (detectors, Valve, SteamHistory) pass authoritative updates as-is.
+		local reasonChanged = data.reason ~= nil and data.reason ~= existing.Reason
 
 		local existingKarma = type(existing.Karma) == "number" and existing.Karma or 0
 		local existingRetaliation = existing.Retaliation == true
@@ -915,9 +909,6 @@ function Database.UpsertCheater(steamID, data)
 		if scoreDelta < 1 and timeDelta < 3600 and not reasonChanged and persistentFlags == existing.Flags and not karmaChanged and not retaliationChanged then
 			return false
 		end
-
-		-- Use the weight-selected reason for storage
-		data.reason = effectiveReason
 	end
 
 	local finalKarma = incomingKarma
@@ -935,14 +926,30 @@ function Database.UpsertCheater(steamID, data)
 		finalSource = existing.Source
 	end
 
+	local finalReason = data.reason
+	if not finalReason and existing and existing.Reason then
+		finalReason = existing.Reason
+	end
+	if not finalReason then
+		finalReason = "Cheater"
+	end
+
+	local finalStatic = data.Static
+	if finalStatic == nil and existing then
+		finalStatic = existing.Static
+	end
+	if finalStatic == nil then
+		finalStatic = false
+	end
+
 	G.DataBase[steamID] = {
-		Name = data.name or "Unknown",
-		Reason = data.reason or "Cheater",
+		Name = data.name or (existing and existing.Name) or "Unknown",
+		Reason = finalReason,
 		Source = finalSource,
 		Flags = persistentFlags,
 		Score = score,
 		Timestamp = currentTime,
-		Static = data.Static or false,
+		Static = finalStatic,
 		Karma = finalKarma,
 		Retaliation = finalRetaliation,
 	}

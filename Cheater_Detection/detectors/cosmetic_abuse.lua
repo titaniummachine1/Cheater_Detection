@@ -26,6 +26,10 @@ local regionCache = {}
 -- per-player scan results: id -> { regions = {region->count}, totalWearables = n }
 local playerScanData = {}
 
+-- One entities.FindByClass("CTFWearable") pass per game tick, shared by all players.
+local wearableCacheTick = -1
+local wearablesByPlayerIndex = {}
+
 local function readPropInt(ent, propName)
 	local value = ent:GetPropInt(propName)
 	if type(value) ~= "number" then return nil end
@@ -57,6 +61,33 @@ local COSMETIC_SLOTS = {
 	LOADOUT_POSITION_ACTION,
 }
 
+local function refreshWearableCacheForTick()
+	local tick = globals.TickCount()
+	if wearableCacheTick == tick then
+		return
+	end
+	wearableCacheTick = tick
+	wearablesByPlayerIndex = {}
+
+	for _, wearable in pairs(entities.FindByClass("CTFWearable")) do
+		if wearable and wearable:IsValid() then
+			local owner = wearable:GetPropEntity("m_hOwnerEntity")
+			local parent = wearable:GetPropEntity("m_hMoveParent")
+			local ownerIdx = owner and owner:IsValid() and owner:GetIndex()
+			local parentIdx = parent and parent:IsValid() and parent:GetIndex()
+			local playerIdx = ownerIdx or parentIdx
+			if playerIdx then
+				local list = wearablesByPlayerIndex[playerIdx]
+				if not list then
+					list = {}
+					wearablesByPlayerIndex[playerIdx] = list
+				end
+				list[#list + 1] = wearable
+			end
+		end
+	end
+end
+
 local function scanPlayerWearables(player, targetID, isDebug)
 	if not player then return false end
 
@@ -87,17 +118,12 @@ local function scanPlayerWearables(player, targetID, isDebug)
 		data.totalWearables = data.totalWearables + 1
 	end
 
-	-- Primary: scan ALL live CTFWearable entities owned by this player.
-	-- This catches exploit hats networked outside the standard loadout slots.
-	for _, wearable in pairs(entities.FindByClass("CTFWearable")) do
-		if wearable:IsValid() then
-			local owner = wearable:GetPropEntity("m_hOwnerEntity")
-			local parent = wearable:GetPropEntity("m_hMoveParent")
-			local ownerIdx = owner and owner:IsValid() and owner:GetIndex()
-			local parentIdx = parent and parent:IsValid() and parent:GetIndex()
-			if ownerIdx == playerIdx or parentIdx == playerIdx then
-				processWearable(wearable)
-			end
+	-- Primary: wearables from one shared per-tick cache (avoids FindByClass per player).
+	refreshWearableCacheForTick()
+	local cachedWearables = wearablesByPlayerIndex[playerIdx]
+	if cachedWearables then
+		for i = 1, #cachedWearables do
+			processWearable(cachedWearables[i])
 		end
 	end
 

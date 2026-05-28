@@ -423,6 +423,71 @@ function Parsers.GetPlayersFromIll5DB(contentString, fallbackReason)
 	return players, nil
 end
 
+local function lookupTableString(slot, lookupTable)
+	if type(slot) == "number" and lookupTable then
+		return lookupTable[slot]
+	end
+	if type(slot) == "string" then
+		return slot
+	end
+	return nil
+end
+
+-- Fetch/list merge only: skip rows that cannot beat existing evidence (no full-DB walk).
+local function shouldSkipExistingMerge(existingEntry, playerName, reason, staticSource)
+	if type(existingEntry[1]) == "number" then
+		local existingName = lookupTableString(existingEntry[5], GlobalLookupTables.Names)
+		local canImproveName = playerName and playerName ~= "Unknown"
+			and (not existingName or existingName == "Unknown")
+		if canImproveName then
+			return false
+		end
+
+		if reason and reason ~= "Unknown Source" then
+			local existingReason = lookupTableString(existingEntry[3], GlobalLookupTables.Reasons)
+			if not existingReason or existingReason == "Unknown Source" then
+				return false
+			end
+			if ReasonWeightResolver.ShouldOverride(existingReason, reason) then
+				return false
+			end
+		end
+
+		local staticSlot = existingEntry[4]
+		local hasStatic = staticSlot ~= nil and staticSlot ~= false and staticSlot ~= 0 and staticSlot ~= ""
+		if not hasStatic and staticSource then
+			return false
+		end
+
+		return true
+	end
+
+	if type(existingEntry) ~= "table" then
+		return true
+	end
+
+	local canImproveName = playerName and playerName ~= "Unknown"
+		and (not existingEntry.Name or existingEntry.Name == "Unknown")
+	if canImproveName then
+		return false
+	end
+
+	if reason and reason ~= "Unknown Source" then
+		if not existingEntry.Reason or existingEntry.Reason == "Unknown Source" then
+			return false
+		end
+		if ReasonWeightResolver.ShouldOverride(existingEntry.Reason, reason) then
+			return false
+		end
+	end
+
+	if not existingEntry.Static and staticSource then
+		return false
+	end
+
+	return true
+end
+
 -- Processes a single player entry into the database
 -- Returns: wasAdded, wasUpdated, wasError
 function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticSource, defaultReason, sourceName)
@@ -449,11 +514,15 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 
 	local reason = buildReasonFromAttributes(player.attributes, defaultReason)
 
+	local existingEntry = existingEntries[steamID64]
+	if existingEntry and shouldSkipExistingMerge(existingEntry, playerName, reason, staticSource) then
+		return false, false, false
+	end
+
 	-- Add to entries if not already there
-	if existingEntries[steamID64] then
+	if existingEntry then
 		-- IN-PLACE UPDATE OPTIMIZATION:
 		-- Data is pre-allocated from database.txt load. Update existing entry fields.
-		local existingEntry = existingEntries[steamID64]
 		local updName, updReason, updStatic = false, false, false
 
 		-- If it's compressed, expand it into a verbose table in-place so we can mutate it
