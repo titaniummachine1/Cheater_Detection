@@ -361,7 +361,7 @@ local function OnCreateMove(cmd)
 		Profiler.End("History_Push")
 	end
 
-	-- ValveCheck now runs on DirtySystem (connected flag) like cosmetics
+	-- ValveCheck runs via scheduler + DirtySystem "checks" (once per player per map)
 	-- Auto-disconnect enforcement still runs every tick for confirmed Valve employees
 	if enableValveCheck then
 		for _, pState in ipairs(activePlayers) do

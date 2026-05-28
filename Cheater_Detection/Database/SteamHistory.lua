@@ -15,6 +15,7 @@ local Constants = require("Cheater_Detection.Core.constants")
 local Json = Common.Json
 local Events = require("Cheater_Detection.Core.Events")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
+local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
 
 --[[ Constants ]]
 local KEYWORDS = {
@@ -573,6 +574,8 @@ local function setSteamHistoryChecks(steamID, entry)
 		playerState.flags = playerState.flags | Constants.Flags.CHECKED
 	end
 
+	DirtySystem.MarkDirty(steamID, "checks")
+
 	if
 		playerState.flags ~= oldFlags
 		and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0
@@ -761,6 +764,10 @@ local function handleBatchResponse(ids, contexts, responseTable)
 end
 
 local function requestBatch()
+	if HttpQueue.ShouldDeferGameplayHTTP and HttpQueue.ShouldDeferGameplayHTTP() then
+		return
+	end
+
 	local cfg = getConfig()
 	if not cfg or not cfg.ApiKey or cfg.ApiKey == "" then
 		return

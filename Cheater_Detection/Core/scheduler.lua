@@ -63,7 +63,7 @@ function Scheduler.Tick()
         SteamLookup.TickGroupFetch()
     end
 
-    if ValveCheck and ValveCheck.Tick then
+    if ValveCheck.IsEnabled() then
         ValveCheck.Tick()
     end
 

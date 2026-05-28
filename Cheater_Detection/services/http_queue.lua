@@ -1,11 +1,12 @@
 --[[ services/http_queue.lua
-     Safe-window HTTP queue.
-     Uses blocking http.Get only during non-intrusive windows
-     (main menu, console open, not in server, or local player dead long enough).
+     HTTP queue with optional local Python bridge.
+     Bridge: one /health at Lua require; if unhealthy, zero bridge HTTP until reload.
+     Blocking fallback (bridge off): console open, or on-server dead 3s+ (not spawn grace).
 ]]
 
 local Common = require("Cheater_Detection.Utils.Common")
 local Json = Common.Json
+local Events = require("Cheater_Detection.Core.Events")
 
 local HttpQueue = {}
 
@@ -16,8 +17,9 @@ local lastSerialDispatchTime = 0
 local BRIDGE_BASE = "http://127.0.0.1:17354"
 local bridgeState = {
     isAlive = false,
-    lastHealthCheck = 0,
     isConfirmed = false,
+    loadProbeDone = false,
+    abandoned = false, -- any failed bridge I/O or failed load probe; no bridge contact until reload
 }
 local activeBridgeJobs = {} -- { [jobId] = item }
 
@@ -26,7 +28,8 @@ local GITHUB_REQUEST_DELAY = 1.2
 local REQUEST_TIMEOUT = 120.0
 local REQUEST_RETRY_INTERVAL = 0.25
 local SLOW_BLOCKING_HTTP_WARN_SECONDS = 0.015
-local LOCAL_DEATH_SAFE_WINDOW_DELAY = 1.0
+local LOCAL_DEATH_SAFE_WINDOW_DELAY = 3.0
+local SPAWN_GRACE_SECONDS = 6.0
 local BRIDGE_POLL_INTERVAL = 0.5 -- 500ms when alive, faster when dead/menu
 local lastBridgePoll = 0
 local lastBridgeDispatch = 0
@@ -44,10 +47,43 @@ local function GetLocalPlayerEntity()
     return localPlayer
 end
 
+local function IsEntityAlive(entity)
+    if not entity then
+        return false
+    end
+    local isAliveFn = entity.IsAlive
+    if type(isAliveFn) ~= "function" then
+        return false
+    end
+    -- Lmaobox/TF2 often returns 1 instead of true
+    local alive = isAliveFn(entity)
+    return alive == true or alive == 1
+end
+
 local function IsLocalPlayerAliveNow()
-    local localPlayer = GetLocalPlayerEntity()
-    if not localPlayer then return false end
-    return localPlayer:IsAlive() == true
+    return IsEntityAlive(GetLocalPlayerEntity())
+end
+
+local spawnGraceState = {
+    graceUntil = 0,
+}
+
+local function ExtendSpawnGrace()
+    spawnGraceState.graceUntil = Now() + SPAWN_GRACE_SECONDS
+end
+
+local function IsInSpawnGrace()
+    return Now() < spawnGraceState.graceUntil
+end
+
+local function ShouldDeferGameplayHTTP()
+    if IsInSpawnGrace() then
+        return true
+    end
+    if IsLocalPlayerAliveNow() then
+        return true
+    end
+    return false
 end
 
 local function SafeEngineBoolean(methodName)
@@ -133,38 +169,56 @@ local blockingWindowState = {
     deadSince = 0,
 }
 
-local function CheckBridgeHealth(now)
-    local interval = bridgeState.isAlive and 60.0 or 15.0
-    -- On startup, check immediately (lastHealthCheck is 0)
-    if bridgeState.lastHealthCheck ~= 0 and now - bridgeState.lastHealthCheck < interval then
+local function IsBridgeUsable()
+    return bridgeState.loadProbeDone
+        and bridgeState.isAlive
+        and not bridgeState.abandoned
+end
+
+local function AbandonBridge(reason)
+    if bridgeState.abandoned then
         return
     end
+    bridgeState.abandoned = true
+    bridgeState.isAlive = false
+    bridgeState.isConfirmed = false
 
-    -- If in-game and alive, only check if it's the very first time or we've waited a long time
-    if bridgeState.lastHealthCheck ~= 0 and IsLocalPlayerAliveNow() and not SafeEngineBoolean("IsGameUIVisible") then
-        if now - bridgeState.lastHealthCheck < 300.0 then -- 5 minutes
-            return
-        end
+    for jobId, item in pairs(activeBridgeJobs) do
+        InvokeCallback(item, nil, reason or "Bridge unavailable")
+        activeBridgeJobs[jobId] = nil
     end
 
-    bridgeState.lastHealthCheck = now
+    print("[HTTP QUEUE] Bridge disabled until Lua reload: " .. tostring(reason))
+end
 
-    local body, err = HttpGet(BRIDGE_BASE .. "/health")
-    if body and body:find('"ok":true') then
-        if not bridgeState.isAlive then
-            print("[HTTP QUEUE] Local bridge detected and connected.")
-        end
-        bridgeState.isAlive = true
-        bridgeState.isConfirmed = true
-    else
-        if bridgeState.isAlive then
-            print("[HTTP QUEUE] Local bridge connection lost.")
-        end
-        bridgeState.isAlive = false
+local function ParseBridgeHealthBody(body)
+    if type(body) ~= "string" or body == "" then
+        return false
     end
+    local ok, data = pcall(Json.decode, body)
+    if ok and type(data) == "table" then
+        return data.ok == true
+    end
+    return false
+end
+
+-- All bridge traffic except the one-shot /health at module load.
+local function BridgeHttpGet(url)
+    if not IsBridgeUsable() then
+        return nil, "bridge disabled"
+    end
+    local body, err = HttpGet(url)
+    if not body then
+        AbandonBridge("bridge request failed: " .. tostring(err))
+        return nil, err
+    end
+    return body, nil
 end
 
 local function PollBridgeResults(now)
+    if not IsBridgeUsable() then
+        return
+    end
     local interval = BRIDGE_POLL_INTERVAL
     if not IsLocalPlayerAliveNow() or SafeEngineBoolean("IsGameUIVisible") then
         interval = 0.1 -- Faster polling when dead or in menu
@@ -193,7 +247,7 @@ local function PollBridgeResults(now)
 
     -- Use batch result endpoint for efficiency
     local url = BRIDGE_BASE .. "/result_batch?" .. table.concat(ids, "&")
-    local body, err = HttpGet(url)
+    local body, err = BridgeHttpGet(url)
     if not body then
         return
     end
@@ -223,7 +277,7 @@ local function PollBridgeResults(now)
 end
 
 local function TryDispatchToBridge(now)
-    if not bridgeState.isAlive then
+    if not IsBridgeUsable() then
         return false
     end
 
@@ -269,16 +323,18 @@ local function TryDispatchToBridge(now)
                 submitUrl = string.format("%s/submit?url=%s", BRIDGE_BASE, UrlEncode(item.url))
             end
 
-            local body, err = HttpGet(submitUrl)
-            if body then
-                local ok, data = pcall(Json.decode, body)
-                if ok and data and data.ok and data.id then
-                    activeBridgeJobs[data.id] = item
-                else
-                    InvokeCallback(item, nil, "Bridge submission failed: " .. tostring(body))
-                end
-            else
+            local body, err = BridgeHttpGet(submitUrl)
+            if not body then
                 InvokeCallback(item, nil, "Bridge submission error: " .. tostring(err))
+                return false
+            end
+
+            local ok, data = pcall(Json.decode, body)
+            if ok and data and data.ok and data.id then
+                activeBridgeJobs[data.id] = item
+            else
+                AbandonBridge("bridge submit rejected")
+                InvokeCallback(item, nil, "Bridge submission failed: " .. tostring(body))
             end
         end
     end
@@ -291,12 +347,12 @@ local function ResetBlockingWindowState()
     blockingWindowState.deadSince = 0
 end
 
+-- Blocking fallback: on server, dead long enough, not during post-spawn grace.
 local function CanRunBlockingHTTPNow(now)
     local currentTime = type(now) == "number" and now or Now()
 
-    if SafeEngineBoolean("IsGameUIVisible") then
-        ResetBlockingWindowState()
-        return true
+    if IsInSpawnGrace() then
+        return false
     end
 
     if SafeEngineBoolean("Con_IsVisible") then
@@ -306,18 +362,18 @@ local function CanRunBlockingHTTPNow(now)
 
     local serverIP = GetServerIP()
     if serverIP == nil or serverIP == "" then
-        ResetBlockingWindowState()
-        return true
+        return false
     end
 
     local localPlayer = GetLocalPlayerEntity()
     if not localPlayer then
-        ResetBlockingWindowState()
-        return true
+        return false
     end
 
-    local alive = localPlayer:IsAlive()
-    if alive == true then
+    if IsEntityAlive(localPlayer) then
+        if blockingWindowState.wasAlive ~= true then
+            ExtendSpawnGrace()
+        end
         blockingWindowState.wasAlive = true
         blockingWindowState.deadSince = 0
         return false
@@ -335,6 +391,27 @@ local function CanRunBlockingHTTPNow(now)
     end
 
     return (currentTime - blockingWindowState.deadSince) >= LOCAL_DEATH_SAFE_WINDOW_DELAY
+end
+
+-- One blocking /health at Lua require time only (never on join / Tick).
+local function ProbeBridgeAtModuleLoad()
+    if bridgeState.loadProbeDone then
+        return
+    end
+    bridgeState.loadProbeDone = true
+
+    local body, err = HttpGet(BRIDGE_BASE .. "/health")
+    if ParseBridgeHealthBody(body) then
+        bridgeState.isAlive = true
+        bridgeState.isConfirmed = true
+        bridgeState.abandoned = false
+        print("[HTTP QUEUE] Local bridge detected and connected.")
+    else
+        bridgeState.abandoned = true
+        bridgeState.isAlive = false
+        bridgeState.isConfirmed = false
+        print("[HTTP QUEUE] Local bridge not available at load; safe-window HTTP only (reload Lua to retry).")
+    end
 end
 
 local function ResetActiveRequestState()
@@ -359,6 +436,10 @@ local function DispatchBlockingAttempt(now)
         return
     end
 
+    if ShouldDeferGameplayHTTP() then
+        return
+    end
+
     if not CanRunBlockingHTTPNow(now) then
         return
     end
@@ -367,12 +448,6 @@ local function DispatchBlockingAttempt(now)
     activeAttemptInFlight = true
 
     local item = activeItem
-    if IsLocalPlayerAliveNow() then
-        print(string.format(
-            "[HTTP QUEUE WARN] blocking http.Get attempted while local player alive; url=%s",
-            tostring(item and item.url)
-        ))
-    end
 
     local startedAt = Now()
     local dataOrErr, err = HttpGet(item.url)
@@ -404,6 +479,10 @@ end
 
 local function TryStartBlockingRequest(now)
     if activeItem ~= nil then
+        return false
+    end
+
+    if ShouldDeferGameplayHTTP() then
         return false
     end
 
@@ -449,11 +528,19 @@ function HttpQueue.IsBusy()
 end
 
 function HttpQueue.IsBridgeAlive()
-    return bridgeState.isAlive
+    return IsBridgeUsable()
 end
 
 function HttpQueue.IsBridgeConfirmed()
-    return bridgeState.isConfirmed
+    return bridgeState.isConfirmed and not bridgeState.abandoned
+end
+
+function HttpQueue.CanRunBlockingHTTPNow()
+    return CanRunBlockingHTTPNow(Now())
+end
+
+function HttpQueue.ShouldDeferGameplayHTTP()
+    return ShouldDeferGameplayHTTP()
 end
 
 function HttpQueue.Enqueue(url, callback, context, options)
@@ -474,7 +561,7 @@ function HttpQueue.Enqueue(url, callback, context, options)
         contentType = options.contentType
     end
 
-    if not bridgeState.isAlive and (method ~= "GET" or body ~= nil or contentType ~= nil) then
+    if not IsBridgeUsable() and (method ~= "GET" or body ~= nil or contentType ~= nil) then
         print(
             "[HTTP QUEUE ERROR] only GET without body/contentType is supported in safe-window mode (bridge is offline)")
         return false
@@ -506,15 +593,14 @@ function HttpQueue.Tick()
 
     local now = Now()
 
-    -- 1. Manage Bridge
-    CheckBridgeHealth(now)
-    if bridgeState.isAlive then
+    -- 1. Manage Bridge (discovery runs once at module load, not here)
+    if IsBridgeUsable() and not ShouldDeferGameplayHTTP() then
         PollBridgeResults(now)
         TryDispatchToBridge(now)
     end
 
     -- 2. Manage Blocking Fallback (only if bridge is not handling everything)
-    if not bridgeState.isAlive then
+    if not IsBridgeUsable() then
         if activeItem and now >= activeDeadline and activeAttemptCount > 0 then
             local err = "HTTP request timed out after " .. tostring(REQUEST_TIMEOUT) .. "s"
             if activeLastError ~= "" then
@@ -534,14 +620,42 @@ function HttpQueue.Tick()
     end
 end
 
+local function OnLocalPlayerSpawnEvent(event)
+    local localPlayer = GetLocalPlayerEntity()
+    if not localPlayer then
+        ExtendSpawnGrace()
+        return
+    end
+    if type(event) ~= "userdata" and type(event) ~= "table" then
+        ExtendSpawnGrace()
+        return
+    end
+    if type(event.GetInt) ~= "function" then
+        ExtendSpawnGrace()
+        return
+    end
+    local userID = event:GetInt("userid")
+    local ent = entities.GetByUserID(userID)
+    if ent and ent:GetIndex() == localPlayer:GetIndex() then
+        ExtendSpawnGrace()
+        ResetBlockingWindowState()
+    end
+end
+
+Events.Unregister("FireGameEvent", "HttpQueue_LocalSpawnGrace")
+Events.Register("FireGameEvent", "HttpQueue_LocalSpawnGrace", OnLocalPlayerSpawnEvent, "player_spawn")
+
 local function OnHttpQueueUnload()
     isAlive = false
     queue = {}
     ResetActiveRequestState()
     ResetBlockingWindowState()
+    Events.Unregister("FireGameEvent", "HttpQueue_LocalSpawnGrace")
 end
 
 callbacks.Unregister("Unload", "HttpQueue_Unload")
 callbacks.Register("Unload", "HttpQueue_Unload", OnHttpQueueUnload)
+
+ProbeBridgeAtModuleLoad()
 
 return HttpQueue

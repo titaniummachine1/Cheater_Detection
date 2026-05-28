@@ -54,36 +54,11 @@ local function parseGroupXML(xml)
 	return count
 end
 
-local function GetLocalPlayerEntity()
-	local localPlayer = entities.GetLocalPlayer()
-	if not localPlayer then return nil end
-	if localPlayer.IsValid and not localPlayer:IsValid() then return nil end
-	return localPlayer
-end
-
 local function CanUseSafeWindowBurst()
-	if engine.IsGameUIVisible() or engine.Con_IsVisible() then
+	if HttpQueue.CanRunBlockingHTTPNow and HttpQueue.CanRunBlockingHTTPNow() then
 		return true
 	end
-
-	local serverIP = engine.GetServerIP()
-	if not serverIP or serverIP == "" then
-		return true
-	end
-
-	local localPlayer = GetLocalPlayerEntity()
-	if not localPlayer then
-		return true
-	end
-
-	local isAliveFn = localPlayer.IsAlive
-	if type(isAliveFn) ~= "function" then
-		return false
-	end
-
-	local alive = isAliveFn(localPlayer)
-
-	return alive ~= true
+	return false
 end
 
 local function GetGroupFetchParallelLimit()
@@ -100,6 +75,16 @@ local function IsGroupFetchActive()
 	return fetchState.done ~= true and fetchState.nextPage <= MAX_FETCH_PAGES
 end
 
+local function markValveGroupRecheck()
+	local PlayerCache = require("Cheater_Detection.Core.player_cache")
+	local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
+	for id, state in pairs(PlayerCache.GetActiveTable()) do
+		if state and state.checkFlags and not state.checkFlags.valveGroupChecked then
+			DirtySystem.MarkDirty(id, "checks")
+		end
+	end
+end
+
 local function FinishGroupFetchIfReady()
 	if fetchState.done == true then
 		return
@@ -113,6 +98,7 @@ local function FinishGroupFetchIfReady()
 
 	fetchState.done = true
 	print(string.format("[SteamLookup] Group fetch done: %d IDs loaded.", fetchState.totalFetched))
+	markValveGroupRecheck()
 end
 
 local function OnValveGroupPageResponse(data, errorMessage, context)
@@ -140,6 +126,10 @@ end
 
 --- Tick Valve group fetching. Safe windows can dispatch all remaining pages at once.
 function SteamLookup.TickGroupFetch()
+	if HttpQueue.ShouldDeferGameplayHTTP and HttpQueue.ShouldDeferGameplayHTTP() then
+		return
+	end
+
 	if fetchState.done then
 		return
 	end
@@ -193,6 +183,7 @@ function SteamLookup.RefreshValveGroup(force)
 			fetchState.totalFetched = cachedCount
 			fetchState.cooldownUntil = 0
 			print(string.format("[SteamLookup] Reusing cached Valve group IDs: %d loaded.", cachedCount))
+			markValveGroupRecheck()
 			return false
 		end
 	else
@@ -267,6 +258,9 @@ function SteamLookup.CheckProfileAsync(steamID64, callback)
 		if type(callback) == "function" then callback(nil) end
 		return
 	end
+	if HttpQueue.ShouldDeferGameplayHTTP and HttpQueue.ShouldDeferGameplayHTTP() then
+		return false
+	end
 	local url = "https://steamcommunity.com/profiles/" .. steamID64 .. "/?xml=1"
 	local enqueued = HttpQueue.Enqueue(url, function(data)
 		if type(callback) ~= "function" then
@@ -309,6 +303,7 @@ function SteamLookup.CheckProfileAsync(steamID64, callback)
 	if not enqueued and type(callback) == "function" then
 		callback(nil)
 	end
+	return enqueued
 end
 
 return SteamLookup
