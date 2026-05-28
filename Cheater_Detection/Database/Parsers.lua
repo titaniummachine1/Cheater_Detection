@@ -497,7 +497,7 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 			if existingReason == nil or existingReason == "Unknown Source" then
 				existingEntry.Reason = reason
 				updReason = true
-			elseif ReasonWeightResolver.ShouldOverride(existingReason, reason) then
+			elseif ReasonWeightResolver.ShouldOverrideEvidence(existingReason, reason, existingEntry.Static, staticSource) then
 				existingEntry.Reason = reason
 				updReason = true
 			end

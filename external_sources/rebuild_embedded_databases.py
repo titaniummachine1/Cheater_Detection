@@ -76,9 +76,13 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
     ("SPEEDHACK",               100),
     ("TICKBASE ABUSE",          100),
     # Anti-aim
+    ("ANTI.AIM",                98),
+    ("anti.aim",                98),
+    ("ANTI_AIM",                98),
     ("AntiAim",                 98),
     ("anti_aim",                98),
     ("Anti-Aim",                98),
+    ("anti-aim",                98),
     # Aimbot
     ("Aimbot",                  98),
     ("aimbot",                  98),
@@ -119,6 +123,10 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
     ("resolver",                 90),
     ("Edge Jump",                80),
     ("edge jump",                80),
+    ("Edge-Jump",                80),
+    ("edge-jump",                80),
+    ("Edgejump",                 80),
+    ("edgejump",                 80),
     ("Noisemaker",               75),
     ("noisemaker",               75),
     ("Noise maker",              75),
@@ -144,6 +152,8 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
     ("Suspicious",              30),
     ("suspicious",              30),
     # Bot marks (high priority - distinguish bots from real players)
+    ("Not a Bot",                0),
+    ("not a bot",                0),
     ("Bot (",                   85),
     ("BOT SUBMITTED",           85),
     # Generic / low-quality marks
@@ -578,7 +588,7 @@ INDIVIDUAL_SOURCES = [
         "static_id":     "tf2bd_off",
         "default_reason":"Bot (TF2BD Official)",
         "output":        "tf2bd_official_embedded.lua",
-        "weight":        70,
+        "weight":        75,
     },
     {
         "name":          "MegaScaterbomb",
@@ -588,7 +598,7 @@ INDIVIDUAL_SOURCES = [
         "static_id":     "mega_scat",
         "default_reason":"MegaScaterbomb (cheater)",
         "output":        "megascat_embedded.lua",
-        "weight":        50,
+        "weight":        78,
     },
 ]
 
@@ -601,7 +611,7 @@ COMBINED_ONLY_SOURCES = [
         "source_label":  "TF2BD Community Biglist",
         "static_id":     "cc_biglist",
         "default_reason":"Bot (TF2BD Community Biglist)",
-        "weight":        20,
+        "weight":        29,
     },
     {
         "name":          "TF2BD Community Trusted",

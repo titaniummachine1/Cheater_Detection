@@ -77,4 +77,24 @@ function ReasonWeightResolver.PickBestSource(sourceA, sourceB)
 	return sourceB
 end
 
+--- Check if incoming evidence should override existing evidence.
+--- Reason weight is primary; source/static weight only breaks equal-reason ties.
+---@param reasonA string|nil Existing reason
+---@param reasonB string|nil Incoming reason
+---@param sourceA string|nil Existing static/source ID
+---@param sourceB string|nil Incoming static/source ID
+---@return boolean shouldOverride
+function ReasonWeightResolver.ShouldOverrideEvidence(reasonA, reasonB, sourceA, sourceB)
+	local reasonWeightA = ReasonWeightResolver.ScoreReason(reasonA)
+	local reasonWeightB = ReasonWeightResolver.ScoreReason(reasonB)
+
+	if reasonWeightB ~= reasonWeightA then
+		return reasonWeightB > reasonWeightA
+	end
+
+	local sourceWeightA = ReasonWeightResolver.GetSourceWeight(sourceA)
+	local sourceWeightB = ReasonWeightResolver.GetSourceWeight(sourceB)
+	return sourceWeightB > sourceWeightA
+end
+
 return ReasonWeightResolver

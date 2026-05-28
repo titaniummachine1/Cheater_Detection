@@ -674,7 +674,9 @@ function Database.LoadEmbeddedDatabases()
 							-- Weight-based merge: resolve both reasons to strings and compare
 							local existingReason = Database.ResolveReason(existing)
 							local incomingReason = Database.ResolveReason(entry)
-							if ReasonWeightResolver.ShouldOverride(existingReason, incomingReason) then
+							local existingStatic = Database.ResolveStatic(existing)
+							local incomingStatic = Database.ResolveStatic(entry)
+							if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, incomingReason, existingStatic, incomingStatic) then
 								G.DataBase[steamID] = entry
 								overridden = overridden + 1
 							end
@@ -704,7 +706,9 @@ function Database.LoadEmbeddedDatabases()
 						else
 							local existingReason = Database.ResolveReason(existing)
 							local incomingReason = entry.Reason or "Cheater"
-							if ReasonWeightResolver.ShouldOverride(existingReason, incomingReason) then
+							local existingStatic = Database.ResolveStatic(existing)
+							local incomingStatic = entry.Static or dbName
+							if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, incomingReason, existingStatic, incomingStatic) then
 								G.DataBase[steamID] = {
 									Name = entry.Name or existing.Name or "Unknown",
 									Reason = incomingReason,
@@ -749,6 +753,25 @@ function Database.ResolveReason(entry)
 	end
 	-- Verbose format
 	return entry.Reason
+end
+
+--- Resolve a static/source ID from a database entry (handles compressed and verbose formats)
+---@param entry table
+---@return string|nil
+function Database.ResolveStatic(entry)
+	if not entry then
+		return nil
+	end
+	-- Compressed format: entry[4] is static ID
+	if entry[1] ~= nil and type(entry[1]) == "number" then
+		local staticID = entry[4]
+		if type(staticID) == "number" then
+			return GlobalLookupTables.Statics[staticID]
+		end
+		return staticID
+	end
+	-- Verbose format
+	return entry.Static
 end
 
 function Database.Initialize(silent)
@@ -864,12 +887,14 @@ function Database.UpsertCheater(steamID, data)
 		local scoreDelta = math.abs(score - (existing.Score or 0))
 		local timeDelta = currentTime - (existing.Timestamp or 0)
 
-		-- Weight-based reason selection: only update if incoming reason has higher weight
+		-- Weight-based evidence selection: only update if incoming reason/source is stronger
 		local effectiveReason = data.reason
 		local existingReason = existing.Reason
 		if effectiveReason and existingReason then
-			if not ReasonWeightResolver.ShouldOverride(existingReason, effectiveReason) then
+			if not ReasonWeightResolver.ShouldOverrideEvidence(existingReason, effectiveReason, existing.Static, data.Static) then
 				effectiveReason = existingReason
+				data.Static = existing.Static
+				data.source = existing.Source
 			end
 		end
 		local reasonChanged = effectiveReason ~= existingReason
