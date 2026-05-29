@@ -156,7 +156,13 @@ local function entriesEquivalent(entryA, entryB)
 	if getEntryFlags(entryA) ~= getEntryFlags(entryB) then
 		return false
 	end
-	if Database.ResolveReason(entryA) ~= Database.ResolveReason(entryB) then
+	local reasonA = Database.ResolveReason(entryA)
+	local reasonB = Database.ResolveReason(entryB)
+	if type(reasonA) == "string" and type(reasonB) == "string" then
+		if reasonA:lower() ~= reasonB:lower() then
+			return false
+		end
+	elseif reasonA ~= reasonB then
 		return false
 	end
 	if Database.ResolveStatic(entryA) ~= Database.ResolveStatic(entryB) then
@@ -662,17 +668,28 @@ function Database.PruneOverlayAgainstBaseline()
 	end
 
 	local pruned = 0
+	local refreshed = 0
 	for steamID, overlayEntry in pairs(Database.Overlay) do
-		if not Database.ShouldPersistEntry(steamID, overlayEntry, nil) then
+		-- Prefer runtime evidence: overlay can lag behind G.DataBase after fetch/validation.
+		local runtimeEntry = G.DataBase and G.DataBase[steamID]
+		local persistEntry = runtimeEntry or overlayEntry
+		if not Database.ShouldPersistEntry(steamID, persistEntry, nil) then
 			Database.Overlay[steamID] = nil
 			pruned = pruned + 1
 			Database.State.isDirty = true
+		elseif runtimeEntry and not entriesEquivalent(runtimeEntry, overlayEntry) then
+			Database.SyncOverlayEntry(steamID)
+			refreshed = refreshed + 1
 		end
 	end
 
 	if pruned > 0 then
 		Logger.Info("Database",
 			string.format("[DB] Pruned %d overlay entries already covered by embedded baseline", pruned))
+	end
+	if refreshed > 0 then
+		Logger.Debug("Database",
+			string.format("[DB] Refreshed %d stale overlay entries from runtime", refreshed))
 	end
 
 	return pruned

@@ -183,14 +183,58 @@ def score_reason(reason: Optional[str]) -> int:
     """Return the highest matching reason weight (supports merged 'Cheater | Bot' strings)."""
     if not reason:
         return 0
+    reason_cf = reason.casefold()
     # "Not a Bot (...)" contains "Bot (" — treat explicit clears before max-match scoring.
-    if "Not a Bot" in reason or "not a bot" in reason:
+    if "not a bot" in reason_cf:
         return 0
     best = 0
     for substring, weight in REASON_WEIGHTS:
-        if substring in reason and weight > best:
+        if substring.casefold() in reason_cf and weight > best:
             best = weight
     return best
+
+
+def pick_preferred_reason(existing: str, incoming: str) -> str:
+    """When case variants collide, keep the higher-weight / more informative string."""
+    ew = score_reason(existing)
+    iw = score_reason(incoming)
+    if iw != ew:
+        return incoming if iw > ew else existing
+    if len(incoming) != len(existing):
+        return incoming if len(incoming) > len(existing) else existing
+    return existing
+
+
+def build_reason_canonical_map(all_verbose: Dict[str, Dict[str, dict]]) -> Dict[str, str]:
+    """Map casefold(reason) -> single canonical display string for lookup dedupe."""
+    canonical: Dict[str, str] = {}
+    for entries in all_verbose.values():
+        for entry in entries.values():
+            reason = entry.get("Reason")
+            if not isinstance(reason, str) or not reason:
+                continue
+            key = reason.casefold()
+            prev = canonical.get(key)
+            if prev is None:
+                canonical[key] = reason
+            elif prev != reason:
+                canonical[key] = pick_preferred_reason(prev, reason)
+    return canonical
+
+
+def apply_reason_canonical(all_verbose: Dict[str, Dict[str, dict]], canonical: Dict[str, str]) -> int:
+    """Rewrite entry reasons to canonical casing; returns number of rows changed."""
+    changed = 0
+    for entries in all_verbose.values():
+        for entry in entries.values():
+            reason = entry.get("Reason")
+            if not isinstance(reason, str) or not reason:
+                continue
+            normalized = canonical.get(reason.casefold(), reason)
+            if normalized != reason:
+                entry["Reason"] = normalized
+                changed += 1
+    return changed
 
 
 def score_source(static_id: Optional[str]) -> int:
@@ -1194,6 +1238,12 @@ def main() -> None:
             print(f"  [TFCL] {TFCL_FILE.name} not found or empty — skipping")
     else:
         print(f"  [TFCL] {TFCL_FILE.name} not found — skipping")
+
+    reason_canonical = build_reason_canonical_map(all_verbose)
+    reason_rows_normalized = apply_reason_canonical(all_verbose, reason_canonical)
+    if reason_rows_normalized:
+        print(f"  Reasons : normalized {reason_rows_normalized:,} case-variant rows "
+              f"({len(reason_canonical):,} unique casefold keys)")
 
     src_m, rsn_m, stc_m, nme_m = build_global_lookup(all_verbose)
     print(f"  Sources : {len(src_m):,}")

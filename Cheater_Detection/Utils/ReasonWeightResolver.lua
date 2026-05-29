@@ -18,14 +18,16 @@ function ReasonWeightResolver.ScoreReason(reason)
 		return 0
 	end
 
+	local reasonLower = reason:lower()
+
 	-- "Not a Bot (...)" contains "Bot (" — treat explicit clears before max-match scoring.
-	if reason:find("Not a Bot", 1, true) or reason:find("not a bot", 1, true) then
+	if reasonLower:find("not a bot", 1, true) then
 		return 0
 	end
 
 	local best = 0
 	for _, entry in ipairs(categoryWeights) do
-		if reason:find(entry.pattern, 1, true) and entry.weight > best then
+		if reasonLower:find(entry.pattern:lower(), 1, true) and entry.weight > best then
 			best = entry.weight
 		end
 	end

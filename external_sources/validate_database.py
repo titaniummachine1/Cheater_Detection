@@ -64,6 +64,8 @@ FLAG_VAC = 32
 FLAG_COMM = 16
 BATCH_SIZE = 100
 REQUEST_GAP_SEC = 0.35
+HTTP_MAX_RETRIES = 4
+HTTP_BACKOFF_SEC = 45
 
 
 def load_key_list(path: Path) -> List[str]:
@@ -117,12 +119,27 @@ class KeyPool:
 
 def http_get_json(url: str, timeout: int = 45) -> Optional[dict]:
     req = urllib.request.Request(url, headers={"User-Agent": "CheaterDetection-DBValidate/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
-        print(f"  [HTTP] {exc}")
-        return None
+    for attempt in range(HTTP_MAX_RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 503) and attempt + 1 < HTTP_MAX_RETRIES:
+                wait = HTTP_BACKOFF_SEC * (attempt + 1)
+                print(f"  [HTTP] {exc.code} rate limited — backing off {wait}s (attempt {attempt + 1}/{HTTP_MAX_RETRIES})")
+                time.sleep(wait)
+                continue
+            print(f"  [HTTP] {exc}")
+            return None
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+            if attempt + 1 < HTTP_MAX_RETRIES:
+                wait = min(HTTP_BACKOFF_SEC, 5 * (attempt + 1))
+                print(f"  [HTTP] {exc} — retry in {wait}s")
+                time.sleep(wait)
+                continue
+            print(f"  [HTTP] {exc}")
+            return None
+    return None
 
 
 def fetch_player_summaries(steam_ids: List[str], pool: KeyPool) -> Dict[str, dict]:
@@ -280,18 +297,19 @@ def process_batch(
     history_pool: KeyPool,
     removals: set,
     overlay: Dict[str, dict],
+    request_gap: float = REQUEST_GAP_SEC,
 ) -> Tuple[int, int, int]:
     removed = upgraded = alive = 0
 
     summaries = fetch_player_summaries(batch, steam_pool)
-    time.sleep(REQUEST_GAP_SEC)
+    time.sleep(request_gap)
     bans = fetch_player_bans(batch, steam_pool)
-    time.sleep(REQUEST_GAP_SEC)
+    time.sleep(request_gap)
     # SteamHistory only for live accounts (VAC/comm/name enrichment)
     history: Dict[str, dict] = {}
     if history_pool.keys:
         history = fetch_steamhistory(batch, history_pool)
-        time.sleep(REQUEST_GAP_SEC)
+        time.sleep(request_gap)
 
     for sid in batch:
         existing = entries[sid]
@@ -362,6 +380,8 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="Sort + stats only, no HTTP")
     ap.add_argument("--limit", type=int, default=0, help="Max IDs to scan (0 = all)")
     ap.add_argument("--resume", action="store_true", help="Continue from validate_checkpoint.json")
+    ap.add_argument("--request-gap", type=float, default=REQUEST_GAP_SEC,
+                    help="Seconds between API calls (default: safe for single Steam key)")
     ap.add_argument("--steam-keys-dir", type=Path, default=DEFAULT_STEAM_KEYS_DIR)
     ap.add_argument("--steamhistory-keys", type=Path, default=DEFAULT_STEAMHISTORY_KEYS)
     args = ap.parse_args()
@@ -402,6 +422,7 @@ def main() -> None:
 
     steam_pool = KeyPool(steam_keys, "steam")
     history_pool = KeyPool(history_keys, "steamhistory")
+    request_gap = max(0.2, args.request_gap)
 
     removals: set = set(load_build_removals())
     overlay: Dict[str, dict] = load_build_overlay()
@@ -415,7 +436,12 @@ def main() -> None:
         print(f"  Resumed: {len(processed):,} already processed")
 
     todo = [sid for sid in ordered if sid not in processed]
-    print(f"\n  Scanning {len(todo):,} IDs in batches of {BATCH_SIZE}...")
+    est_batches = (len(todo) + BATCH_SIZE - 1) // BATCH_SIZE
+    calls_per_batch = 2 + (1 if history_pool.keys else 0)
+    print(f"\n  Scanning {len(todo):,} IDs in batches of {BATCH_SIZE} (~{est_batches:,} batches)")
+    print(f"  API pacing: {request_gap}s gap, {calls_per_batch} calls/batch "
+          f"(Steam x2 + SteamHistory x{1 if history_pool.keys else 0})")
+    print(f"  Keys: {len(steam_keys)} Steam Web, {len(history_keys)} SteamHistory (round-robin)")
 
     total_removed = total_upgraded = total_alive = 0
     batch_num = 0
@@ -424,25 +450,25 @@ def main() -> None:
         batch = todo[i : i + BATCH_SIZE]
         batch_num += 1
         removed, upgraded, alive = process_batch(
-            batch, entries, steam_pool, history_pool, removals, overlay
+            batch, entries, steam_pool, history_pool, removals, overlay, request_gap
         )
         total_removed += removed
         total_upgraded += upgraded
         total_alive += alive
         processed.update(batch)
 
-        if batch_num % 10 == 0 or i + BATCH_SIZE >= len(todo):
+        if batch_num == 1 or batch_num % 10 == 0 or i + BATCH_SIZE >= len(todo):
             print(
                 f"  [{batch_num:4d}] processed {len(processed):,}/{len(ordered):,} | "
                 f"dead {len(removals):,} | overlay {len(overlay):,}"
             )
-            save_checkpoint({
-                "processed": sorted(processed),
-                "removals": sorted(removals),
-                "overlay": overlay,
-            })
+        save_checkpoint({
+            "processed": sorted(processed),
+            "removals": sorted(removals),
+            "overlay": overlay,
+        })
 
-        time.sleep(REQUEST_GAP_SEC)
+        time.sleep(request_gap)
 
     BUILD_REMOVALS_PATH.write_text("\n".join(sorted(removals)) + "\n", encoding="utf-8")
     BUILD_OVERLAY_PATH.write_text(json.dumps(overlay, indent=2), encoding="utf-8")
