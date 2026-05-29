@@ -170,6 +170,11 @@ local function isDebugEnabled()
 	return Common.IsDebugEnabled()
 end
 
+local function isMenuProfilerEnabled()
+	local adv = G.Menu and G.Menu.Advanced
+	return adv and adv["profiler"] == true
+end
+
 -- [[ Initialization ]]
 local function Init()
 	JoinNotifications.Init()
@@ -209,7 +214,10 @@ local function OnCreateMove(cmd)
 	Evidence.ApplyDecay()
 	Scheduler.Tick()
 
-	Profiler.SetContext("tick")
+	-- SetContext is expensive; Begin/End already no-op when profiler overlay is off.
+	if isMenuProfilerEnabled() then
+		Profiler.SetContext("tick")
+	end
 	Profiler.Begin("CreateMove_Total")
 	local isGameUI = engine.IsGameUIVisible()
 	if isGameUI then
@@ -440,7 +448,7 @@ local function OnCreateMove(cmd)
 end
 
 local function OnDraw()
-	local profilerEnabled = G.Menu and G.Menu.Advanced and G.Menu.Advanced["profiler"] == true
+	local profilerEnabled = isMenuProfilerEnabled()
 
 	if sessionState.lastProfilerEnabled ~= profilerEnabled then
 		sessionState.lastProfilerEnabled = profilerEnabled
