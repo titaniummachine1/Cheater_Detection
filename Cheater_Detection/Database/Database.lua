@@ -14,24 +14,62 @@ local Logger = require("Cheater_Detection.Utils.Logger")
 local Events = require("Cheater_Detection.Core.Events")
 local ReasonWeightResolver = require("Cheater_Detection.Utils.ReasonWeightResolver")
 
-local EmbeddedDBs = {
-	["d3fc0n6_embedded"]           = require("Cheater_Detection.Database.Static_Embeded_Databases.d3fc0n6_embedded"),
-	["sleepy_main_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_main_embedded"),
-	["sleepy_ext_embedded"]        = require("Cheater_Detection.Database.Static_Embeded_Databases.sleepy_ext_embedded"),
-	["sleepy_nullc0re_embedded"]   = require(
-		"Cheater_Detection.Database.Static_Embeded_Databases.sleepy_nullc0re_embedded"),
-	["tf2bd_official_embedded"]    = require(
-		"Cheater_Detection.Database.Static_Embeded_Databases.tf2bd_official_embedded"),
-	["qfoxb_embedded"]             = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
-	["joekiller_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
-	["megascat_embedded"]          = require("Cheater_Detection.Database.Static_Embeded_Databases.megascat_embedded"),
-	["local_64ids_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.local_64ids_embedded"),
-	["local_text_embedded"]        = require("Cheater_Detection.Database.Static_Embeded_Databases.local_text_embedded"),
-	["local_k13imz_embedded"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.local_k13imz_embedded"),
-	["external_combined_embedded"] = require(
-		"Cheater_Detection.Database.Static_Embeded_Databases.external_combined_embedded"),
-	["tfcl_combined_lua"]          = require("Cheater_Detection.Database.Static_Embeded_Databases.tfcl_combined_lua"),
+local UNIFIED_EMBED_MODULE = "Cheater_Detection.Database.Static_Embeded_Databases.unified_embedded"
+
+-- Fallback when unified_embedded.lua is missing or invalid (dev checkout without rebuild).
+local LEGACY_EMBED_MODULES = {
+	"d3fc0n6_embedded",
+	"sleepy_main_embedded",
+	"sleepy_ext_embedded",
+	"sleepy_nullc0re_embedded",
+	"tf2bd_official_embedded",
+	"qfoxb_embedded",
+	"joekiller_embedded",
+	"megascat_embedded",
+	"external_combined_embedded",
+	"tfcl_combined_lua",
+	"local_64ids_embedded",
+	"local_k13imz_embedded",
+	"local_text_embedded",
 }
+
+local EmbeddedDBs = {}
+local embeddedLoadMode = "none" -- "unified" | "legacy" | "none"
+
+local function tryRequireEmbed(modulePath)
+	local ok, result = pcall(require, modulePath)
+	if ok and type(result) == "table" then
+		return result
+	end
+	return nil
+end
+
+local function resolveEmbeddedSources()
+	local unified = tryRequireEmbed(UNIFIED_EMBED_MODULE)
+	if unified and type(unified.Data) == "table" then
+		EmbeddedDBs.unified_embedded = unified
+		embeddedLoadMode = "unified"
+		return
+	end
+
+	Logger.Warning("Database",
+		"[DB] unified_embedded missing or invalid — falling back to per-source embed files")
+	for _, moduleName in ipairs(LEGACY_EMBED_MODULES) do
+		local modulePath = "Cheater_Detection.Database.Static_Embeded_Databases." .. moduleName
+		local embeddedDB = tryRequireEmbed(modulePath)
+		if embeddedDB then
+			EmbeddedDBs[moduleName] = embeddedDB
+		end
+	end
+
+	if next(EmbeddedDBs) then
+		embeddedLoadMode = "legacy"
+	else
+		embeddedLoadMode = "none"
+	end
+end
+
+resolveEmbeddedSources()
 
 -- Global lookup tables for embedded databases (shared across all databases)
 local GlobalLookupTables = require("Cheater_Detection.Database.Static_Embeded_Databases.global_lookup_tables")
@@ -517,43 +555,71 @@ function Database.SanitizeAll()
 	end
 end
 
+local function ingestEmbeddedDBIntoBaseline(baseline, embeddedDB, dbName)
+	if type(embeddedDB) ~= "table" then
+		return 0
+	end
+
+	local usesGlobalFormat = embeddedDB.Data ~= nil and embeddedDB.Sources == nil
+	local added = 0
+
+	if usesGlobalFormat then
+		for steamID, entry in pairs(embeddedDB.Data) do
+			if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+				mergeEntryIntoBaseline(baseline, steamID, entry)
+				added = added + 1
+			end
+		end
+	else
+		for steamID, entry in pairs(embeddedDB) do
+			if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+				mergeEntryIntoBaseline(baseline, steamID, {
+					Name = entry.Name or "Unknown",
+					Reason = entry.Reason or "Cheater",
+					Source = entry.Source or "Embedded",
+					Static = entry.Static or dbName,
+					Flags = entry.Flags or 0,
+				})
+				added = added + 1
+			end
+		end
+	end
+
+	return added
+end
+
 function Database.BuildEmbeddedBaseline()
 	Database.EmbeddedBaseline = {}
 	local baseline = Database.EmbeddedBaseline
 
-	for _, embeddedDB in pairs(EmbeddedDBs) do
-		if type(embeddedDB) ~= "table" then
-			goto continue_db
-		end
+	if embeddedLoadMode == "none" then
+		Logger.Error("Database",
+			"[DB] No embedded databases loaded — run external_sources/rebuild_embedded_databases.py")
+		return
+	end
 
-		local usesGlobalFormat = embeddedDB.Data ~= nil and embeddedDB.Sources == nil
-		if usesGlobalFormat then
-			for steamID, entry in pairs(embeddedDB.Data) do
-				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-					mergeEntryIntoBaseline(baseline, steamID, entry)
-				end
-			end
-		else
-			for steamID, entry in pairs(embeddedDB) do
-				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-					mergeEntryIntoBaseline(baseline, steamID, {
-						Name = entry.Name or "Unknown",
-						Reason = entry.Reason or "Cheater",
-						Source = entry.Source or "Embedded",
-						Static = entry.Static or false,
-						Flags = entry.Flags or 0,
-					})
-				end
-			end
+	local totalIngested = 0
+	if embeddedLoadMode == "unified" then
+		totalIngested = ingestEmbeddedDBIntoBaseline(baseline, EmbeddedDBs.unified_embedded, "unified_embedded")
+	else
+		for dbName, embeddedDB in pairs(EmbeddedDBs) do
+			totalIngested = totalIngested + ingestEmbeddedDBIntoBaseline(baseline, embeddedDB, dbName)
 		end
-		::continue_db::
 	end
 
 	local count = 0
 	for _ in pairs(baseline) do
 		count = count + 1
 	end
-	Logger.Debug("Database", string.format("[DB] Embedded baseline built: %d entries", count))
+
+	if count == 0 then
+		Logger.Error("Database",
+			"[DB] Embedded baseline is empty — rebuild embeds with rebuild_embedded_databases.py")
+	else
+		Logger.Debug("Database",
+			string.format("[DB] Embedded baseline built: %d entries (%s, %d rows ingested)",
+				count, embeddedLoadMode, totalIngested))
+	end
 end
 
 function Database.ShouldPersistEntry(steamID, entry, options)
@@ -597,8 +663,7 @@ function Database.PruneOverlayAgainstBaseline()
 
 	local pruned = 0
 	for steamID, overlayEntry in pairs(Database.Overlay) do
-		local runtimeEntry = G.DataBase and G.DataBase[steamID] or overlayEntry
-		if not Database.ShouldPersistEntry(steamID, runtimeEntry, nil) then
+		if not Database.ShouldPersistEntry(steamID, overlayEntry, nil) then
 			Database.Overlay[steamID] = nil
 			pruned = pruned + 1
 			Database.State.isDirty = true
@@ -807,86 +872,110 @@ function Database.LoadOverlayFromDisk(silent)
 end
 
 function Database.LoadEmbeddedDatabases()
+	if embeddedLoadMode == "none" then
+		Logger.Error("Database",
+			"[DB] Cannot load embedded player data — run external_sources/rebuild_embedded_databases.py")
+		return
+	end
+
 	local totalNew = 0
 	local totalOverridden = 0
 
-	for dbName, embeddedDB in pairs(EmbeddedDBs) do
-		if type(embeddedDB) == "table" then
-			-- Check if database uses global lookup format (has Data field, no individual lookup tables)
-			local usesGlobalFormat = embeddedDB.Data ~= nil and embeddedDB.Sources == nil
+	local function loadFromEmbeddedDB(embeddedDB, dbName)
+		if type(embeddedDB) ~= "table" then
+			return
+		end
 
-			if usesGlobalFormat then
-				-- New format: Data arrays reference global lookup IDs
-				local added = 0
-				local overridden = 0
-				for steamID, entry in pairs(embeddedDB.Data) do
-					if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-						local existing = G.DataBase[steamID]
-						if not existing then
+		local usesGlobalFormat = embeddedDB.Data ~= nil and embeddedDB.Sources == nil
+		if usesGlobalFormat then
+			for steamID, entry in pairs(embeddedDB.Data) do
+				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+					local existing = G.DataBase[steamID]
+					if not existing then
+						G.DataBase[steamID] = entry
+						totalNew = totalNew + 1
+					else
+						local existingReason = Database.ResolveReason(existing)
+						local incomingReason = Database.ResolveReason(entry)
+						local existingStatic = Database.ResolveStatic(existing)
+						local incomingStatic = Database.ResolveStatic(entry)
+						if ReasonWeightResolver.ShouldOverrideEvidence(
+							existingReason, incomingReason, existingStatic, incomingStatic) then
 							G.DataBase[steamID] = entry
-							added = added + 1
-						else
-							-- Weight-based merge: resolve both reasons to strings and compare
-							local existingReason = Database.ResolveReason(existing)
-							local incomingReason = Database.ResolveReason(entry)
-							local existingStatic = Database.ResolveStatic(existing)
-							local incomingStatic = Database.ResolveStatic(entry)
-							if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, incomingReason, existingStatic, incomingStatic) then
-								G.DataBase[steamID] = entry
-								overridden = overridden + 1
-							end
+							totalOverridden = totalOverridden + 1
 						end
 					end
 				end
-				totalNew = totalNew + added
-				totalOverridden = totalOverridden + overridden
-				Logger.Debug("Database",
-					string.format("[DB] Embedded '%s' (global format): +%d new, %d overridden", dbName, added, overridden))
-			else
-				-- Legacy format: individual lookup tables per file
-				local added = 0
-				local overridden = 0
-				for steamID, entry in pairs(embeddedDB) do
-					if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
-						local existing = G.DataBase[steamID]
-						if not existing then
-							G.DataBase[steamID] = {
-								Name = entry.Name or "Unknown",
-								Reason = entry.Reason or "Cheater",
-								Source = entry.Source or "Embedded",
-								Static = entry.Static or dbName,
-								Flags = entry.Flags or 0,
-							}
-							added = added + 1
-						else
-							local existingReason = Database.ResolveReason(existing)
-							local incomingReason = entry.Reason or "Cheater"
-							local existingStatic = Database.ResolveStatic(existing)
-							local incomingStatic = entry.Static or dbName
-							if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, incomingReason, existingStatic, incomingStatic) then
-								G.DataBase[steamID] = {
-									Name = entry.Name or existing.Name or "Unknown",
-									Reason = incomingReason,
-									Source = entry.Source or existing.Source or "Embedded",
-									Static = entry.Static or existing.Static or dbName,
-									Flags = entry.Flags or existing.Flags or 0,
-								}
-								overridden = overridden + 1
-							end
-						end
+			end
+			return
+		end
+
+		for steamID, entry in pairs(embeddedDB) do
+			if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+				local existing = G.DataBase[steamID]
+				if not existing then
+					G.DataBase[steamID] = {
+						Name = entry.Name or "Unknown",
+						Reason = entry.Reason or "Cheater",
+						Source = entry.Source or "Embedded",
+						Static = entry.Static or dbName,
+						Flags = entry.Flags or 0,
+					}
+					totalNew = totalNew + 1
+				else
+					local existingReason = Database.ResolveReason(existing)
+					local incomingReason = entry.Reason or "Cheater"
+					local existingStatic = Database.ResolveStatic(existing)
+					local incomingStatic = entry.Static or dbName
+					if ReasonWeightResolver.ShouldOverrideEvidence(
+						existingReason, incomingReason, existingStatic, incomingStatic) then
+						G.DataBase[steamID] = {
+							Name = entry.Name or existing.Name or "Unknown",
+							Reason = incomingReason,
+							Source = entry.Source or existing.Source or "Embedded",
+							Static = entry.Static or existing.Static or dbName,
+							Flags = entry.Flags or existing.Flags or 0,
+						}
+						totalOverridden = totalOverridden + 1
 					end
 				end
-				totalNew = totalNew + added
-				totalOverridden = totalOverridden + overridden
-				Logger.Debug("Database",
-					string.format("[DB] Embedded '%s' (legacy format): +%d new, %d overridden", dbName, added, overridden))
 			end
 		end
 	end
 
-	if totalNew > 0 or totalOverridden > 0 then
+	if embeddedLoadMode == "unified" then
+		loadFromEmbeddedDB(EmbeddedDBs.unified_embedded, "unified_embedded")
+		local count = 0
+		for _ in pairs(G.DataBase) do
+			count = count + 1
+		end
+		if count == 0 then
+			Logger.Error("Database",
+				"[DB] unified_embedded loaded zero entries — rebuild embeds with rebuild_embedded_databases.py")
+		else
+			Logger.Info("Database",
+				string.format("[DB] Unified embedded loaded: %d entries (pre-merged at build time)", count))
+		end
+		return
+	end
+
+	for dbName, embeddedDB in pairs(EmbeddedDBs) do
+		loadFromEmbeddedDB(embeddedDB, dbName)
+	end
+
+	local count = 0
+	for _ in pairs(G.DataBase) do
+		count = count + 1
+	end
+
+	if count == 0 then
+		Logger.Error("Database",
+			"[DB] Legacy embed fallback loaded zero entries — rebuild embeds with rebuild_embedded_databases.py")
+	elseif totalNew > 0 or totalOverridden > 0 then
 		Logger.Info("Database",
-			string.format("[DB] Embedded DBs loaded: %d new, %d overridden (weight-based)", totalNew, totalOverridden))
+			string.format("[DB] Legacy embeds loaded: %d entries (+ %d new, %d overridden)", count, totalNew, totalOverridden))
+	else
+		Logger.Info("Database", string.format("[DB] Legacy embeds loaded: %d entries", count))
 	end
 end
 

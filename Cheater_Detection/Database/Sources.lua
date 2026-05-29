@@ -25,7 +25,7 @@ Sources.List = {
 		cause = "Bot (TF2BD Community Biglist)",
 		parser = "tf2db",
 		sourceID = "cc_biglist",
-		weight = 100
+		weight = 20
 	},
 	-- Curated by Trusted-role members of the official TF2BD Discord (high verification bar)
 	{

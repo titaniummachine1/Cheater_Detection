@@ -1,3 +1,8 @@
 .cursor/rules/
 node_modules/
 lua/
+__pycache__/
+*.py[cod]
+external_sources/build_removals.txt
+external_sources/build_overlay.json
+external_sources/validate_checkpoint.json

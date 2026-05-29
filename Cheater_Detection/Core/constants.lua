@@ -63,14 +63,14 @@ Constants.SourceWeights = {
 	["masterbase_broadcasts"] = 79,
 	["mega_scat"] = 78,
 
-	-- Bot lists (critical — second only to Valve employee marks)
-	["cc_biglist"] = 100,
-	["tf2bd_off"] = 100,
-	["tfcl_bot"] = 95,
-	["tfcl_botnames"] = 95,
-	["bots_tf"] = 100,
-	["d3_tacobot"] = 100,
-	["tf2bd_pazer"] = 100,
+	-- Bot lists (informational source tier — bot priority comes from reason patterns, not source weight)
+	["cc_biglist"] = 29,
+	["tf2bd_off"] = 75,
+	["tfcl_bot"] = 29,
+	["tfcl_botnames"] = 29,
+	["bots_tf"] = 29,
+	["d3_tacobot"] = 29,
+	["tf2bd_pazer"] = 29,
 
 	-- Established community cheater lists
 	["sleepy_main"] = 65,

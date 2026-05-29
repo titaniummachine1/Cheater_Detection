@@ -8,9 +8,10 @@ file with weight-based reason normalization:
   - When the same player appears in multiple sources, the highest-weight reason
     is kept.  Lower-weight sources (bot lists, generic griefing) can never
     override higher-weight detections (aimbot, VAC ban, trusted cheater marks).
-  - Each individual per-source file contains only that source's data.
-  - external_combined_embedded.lua contains the best-reason-per-player across
-    all sources.
+  - Each individual per-source file contains only that source's data (Python
+    pipeline only — Lua loads unified_embedded.lua at runtime).
+  - unified_embedded.lua is the single weight-merged bundle (all sources + TFCL
+    + build_overlay.json, minus build_removals.txt).
   - global_lookup_tables.lua is regenerated from scratch after all files are
     produced, so integer IDs stay consistent across every file.
 
@@ -35,6 +36,10 @@ SCRIPT_DIR  = Path(__file__).parent
 REPO_ROOT   = SCRIPT_DIR.parent
 OUTPUT_DIR  = REPO_ROOT / "Cheater_Detection" / "Database" / "Static_Embeded_Databases"
 TFCL_FILE   = OUTPUT_DIR / "tfcl_combined_lua.lua"
+LOOKUP_FILE = OUTPUT_DIR / "global_lookup_tables.lua"
+UNIFIED_OUTPUT = "unified_embedded.lua"
+BUILD_REMOVALS_PATH = SCRIPT_DIR / "build_removals.txt"
+BUILD_OVERLAY_PATH  = SCRIPT_DIR / "build_overlay.json"
 
 # ---------------------------------------------------------------------------
 # Weight tables (mirrors constants.lua exactly)
@@ -49,8 +54,8 @@ SOURCE_WEIGHTS: Dict[str, int] = {
     "cc_trusted":           80,
     "masterbase_broadcasts": 79,
     "mega_scat":            78,
-    "cc_biglist":           100,
-    "tf2bd_off":            100,
+    "cc_biglist":           29,
+    "tf2bd_off":            75,
     "sleepy_main":          65,
     "sleepy_nullc0re":      65,
     "d3_cheat":             60,
@@ -60,14 +65,14 @@ SOURCE_WEIGHTS: Dict[str, int] = {
     "external_combined":    35,
     "tfcl_dev":             30,
     "tfcl_alias":           30,
-    "tfcl_bot":             95,
-    "tfcl_botnames":        95,
+    "tfcl_bot":             29,
+    "tfcl_botnames":        29,
     "tfcl_combined":        30,
     "local_64ids":          60,
     "local_k13imz":         60,
-    "bots_tf":              100,
-    "d3_tacobot":           100,
-    "tf2bd_pazer":          100,
+    "bots_tf":              29,
+    "d3_tacobot":           29,
+    "tf2bd_pazer":          29,
     "mcdb_cheat":           65,
     "mcdb_susp":            30,
     "unknown":              0,
@@ -673,6 +678,156 @@ def parse_existing_tfcl(filepath: Path) -> Dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Read back embedded Lua (for validation / overlay tooling)
+# ---------------------------------------------------------------------------
+_EMBED_ROW_RE = re.compile(
+    r'\["(\d{17})"\]\s*=\s*\{\s*(\d+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^}]+)\s*\}'
+)
+
+
+def parse_global_lookup(filepath: Path) -> Dict[str, Dict[int, str]]:
+    """Parse global_lookup_tables.lua into {Sources, Reasons, Statics, Names} id→str maps."""
+    if not filepath.exists():
+        return {"Sources": {}, "Reasons": {}, "Statics": {}, "Names": {}}
+
+    content = filepath.read_text(encoding="utf-8", errors="ignore")
+    tables: Dict[str, Dict[int, str]] = {}
+    for table_name in ("Sources", "Reasons", "Statics", "Names"):
+        mapping: Dict[int, str] = {}
+        block = re.search(rf"{table_name}\s*=\s*\{{", content)
+        if block:
+            start = block.end()
+            depth = 1
+            pos = start
+            while pos < len(content) and depth > 0:
+                ch = content[pos]
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                pos += 1
+            body = content[start:pos - 1]
+            for m in re.finditer(r'\[(\d+)\]\s*=\s*"((?:\\.|[^"\\])*)"', body):
+                mapping[int(m.group(1))] = m.group(2).replace('\\"', '"').replace("\\\\", "\\")
+        tables[table_name] = mapping
+    return tables
+
+
+def _resolve_lookup_field(raw: str, table: Dict[int, str]) -> str:
+    token = raw.strip()
+    if token.startswith('"') and token.endswith('"'):
+        return token[1:-1]
+    if token.isdigit():
+        return table.get(int(token), f"id_{token}")
+    return token
+
+
+def decode_compressed_row(flags: int, src_t: str, rsn_t: str, stc_t: str, nme_t: str,
+                          lookup: Dict[str, Dict[int, str]]) -> dict:
+    return {
+        "Name":   _resolve_lookup_field(nme_t, lookup["Names"]),
+        "Reason": _resolve_lookup_field(rsn_t, lookup["Reasons"]),
+        "Source": _resolve_lookup_field(src_t, lookup["Sources"]),
+        "Static": _resolve_lookup_field(stc_t, lookup["Statics"]),
+        "Flags":  flags,
+    }
+
+
+def parse_embed_lua_file(filepath: Path, lookup: Dict[str, Dict[int, str]]) -> Dict[str, dict]:
+    """Parse a global-lookup embedded database file into verbose entries."""
+    if not filepath.exists():
+        return {}
+
+    content = filepath.read_text(encoding="utf-8", errors="ignore")
+    entries: Dict[str, dict] = {}
+    for m in _EMBED_ROW_RE.finditer(content):
+        entries[m.group(1)] = decode_compressed_row(
+            int(m.group(2)), m.group(3), m.group(4), m.group(5), m.group(6), lookup
+        )
+    return entries
+
+
+def compute_data_richness(entry: dict) -> int:
+    """
+    Higher score = more profile/list data = scan later.
+    Low score = likely abandoned raw-ID rows = scan first for dead-account purge.
+    """
+    name = (entry.get("Name") or "Unknown").strip()
+    reason = entry.get("Reason") or ""
+    flags = int(entry.get("Flags") or 0)
+    static = entry.get("Static") or ""
+
+    score = 0
+    lower_name = name.lower()
+    if lower_name not in ("unknown", "invalid", ""):
+        score += 30
+        score += min(len(name), 25)
+
+    rw = score_reason(reason)
+    score += rw
+    score += min(len(reason), 35)
+
+    sw = score_source(static)
+    score += sw // 2
+
+    if flags & 32:
+        score += 45
+    if flags & 16:
+        score += 30
+    if flags & 128:
+        score += 35
+    if flags & 4:
+        score += 15
+    if flags & 8:
+        score += 50
+
+    if " - " in reason:
+        score += 15
+    if "(" in reason and ")" in reason:
+        score += 5
+
+    if lower_name == "unknown" and static in ("local_64ids", "d3_cheat", "local_k13imz", "bots_tf"):
+        score -= 15
+
+    return max(0, score)
+
+
+def load_all_embed_entries() -> Dict[str, dict]:
+    """Merge every per-source embed + TFCL into one verbose map (weight-based)."""
+    lookup = parse_global_lookup(LOOKUP_FILE)
+    combined: Dict[str, dict] = {}
+
+    skip = {UNIFIED_OUTPUT, "external_combined_embedded.lua"}
+    for path in sorted(OUTPUT_DIR.glob("*_embedded.lua")):
+        if path.name in skip:
+            continue
+        merge_into(combined, parse_embed_lua_file(path, lookup))
+
+    merge_into(combined, parse_embed_lua_file(TFCL_FILE, lookup))
+    return combined
+
+
+def load_build_removals() -> set:
+    if not BUILD_REMOVALS_PATH.exists():
+        return set()
+    out: set = set()
+    for line in BUILD_REMOVALS_PATH.read_text(encoding="utf-8").splitlines():
+        sid = line.strip()
+        if sid64_valid(sid):
+            out.add(sid)
+    return out
+
+
+def load_build_overlay() -> Dict[str, dict]:
+    if not BUILD_OVERLAY_PATH.exists():
+        return {}
+    data = json.loads(BUILD_OVERLAY_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if sid64_valid(k) and isinstance(v, dict)}
+
+
+# ---------------------------------------------------------------------------
 # Source definitions
 # ---------------------------------------------------------------------------
 # Sources that produce individual embedded files
@@ -915,7 +1070,7 @@ def main() -> None:
     # Step 1: Fetch individual sources
     # -----------------------------------------------------------------------
     print("=" * 64)
-    print("Step 1/4 — Fetching individual sources")
+    print("Step 1/5 — Fetching individual sources")
     print("=" * 64)
 
     individual_data: Dict[str, Dict[str, dict]] = {}   # source name → entries
@@ -938,7 +1093,7 @@ def main() -> None:
     # Step 2: Fetch combined-only sources
     # -----------------------------------------------------------------------
     print("\n" + "=" * 64)
-    print("Step 2/4 — Fetching combined-only sources")
+    print("Step 2/5 — Fetching combined-only sources")
     print("=" * 64)
 
     for source in sorted(COMBINED_ONLY_SOURCES, key=lambda s: -s["weight"]):
@@ -953,7 +1108,7 @@ def main() -> None:
     # Step 2b: Local snapshot files (external_sources/*.txt)
     # -----------------------------------------------------------------------
     print("\n" + "=" * 64)
-    print("Step 2b/4 — Loading local embed snapshots")
+    print("Step 2b/5 — Loading local embed snapshots")
     print("=" * 64)
 
     for source in sorted(LOCAL_EMBED_SOURCES, key=lambda s: -s["weight"]):
@@ -968,10 +1123,54 @@ def main() -> None:
     print(f"\n[COMBINED] {len(combined):,} unique players after weight-based merge")
 
     # -----------------------------------------------------------------------
+    # Step 2c: Apply build-time validation overlay (dead removals + API upgrades)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 64)
+    print("Step 2c/5 — Applying build_removals + build_overlay")
+    print("=" * 64)
+
+    removals = load_build_removals()
+    if removals:
+        removed = 0
+        for sid in removals:
+            if combined.pop(sid, None) is not None:
+                removed += 1
+        print(f"  [REMOVALS] Skipped {removed:,} dead IDs ({len(removals):,} listed)")
+    else:
+        print("  [REMOVALS] No build_removals.txt — skipping")
+
+    overlay = load_build_overlay()
+    if overlay:
+        new, ov = merge_into(combined, overlay)
+        print(f"  [OVERLAY]  +{new:,} new, {ov:,} upgraded entries from build_overlay.json")
+    else:
+        print("  [OVERLAY]  No build_overlay.json — skipping")
+
+    # -----------------------------------------------------------------------
+    # Step 2d: Final unified bundle (combined + TFCL, weight-merged)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 64)
+    print("Step 2d/5 — Building unified embed bundle")
+    print("=" * 64)
+
+    unified: Dict[str, dict] = {}
+    merge_into(unified, combined)
+
+    lookup = parse_global_lookup(LOOKUP_FILE)
+    tfcl_entries = parse_embed_lua_file(TFCL_FILE, lookup)
+    if tfcl_entries:
+        new, ov = merge_into(unified, tfcl_entries)
+        print(f"  [TFCL]     {len(tfcl_entries):,} rows -> +{new:,} new, {ov:,} overridden in unified")
+    else:
+        print(f"  [TFCL]     {TFCL_FILE.name} not found or empty — skipping")
+
+    print(f"\n[UNIFIED] {len(unified):,} unique players in runtime bundle")
+
+    # -----------------------------------------------------------------------
     # Step 3: Build global lookup tables (include existing TFCL strings)
     # -----------------------------------------------------------------------
     print("\n" + "=" * 64)
-    print("Step 3/4 — Building global lookup tables")
+    print("Step 3/5 — Building global lookup tables")
     print("=" * 64)
 
     all_verbose: Dict[str, Dict[str, dict]] = {}
@@ -981,14 +1180,20 @@ def main() -> None:
             all_verbose[key] = individual_data[key]
 
     all_verbose["_combined"] = combined
+    all_verbose["_unified"] = unified
 
-    # Include existing TFCL strings so IDs stay valid for that untouched file
-    tfcl_entries = parse_existing_tfcl(TFCL_FILE)
+    # Include TFCL strings so per-source files stay consistent if TFCL is updated later
     if tfcl_entries:
-        print(f"  [TFCL] Parsed {len(tfcl_entries):,} existing entries from {TFCL_FILE.name}")
         all_verbose["_tfcl"] = tfcl_entries
+    elif TFCL_FILE.exists():
+        legacy_tfcl = parse_existing_tfcl(TFCL_FILE)
+        if legacy_tfcl:
+            print(f"  [TFCL] Parsed {len(legacy_tfcl):,} legacy entries from {TFCL_FILE.name}")
+            all_verbose["_tfcl"] = legacy_tfcl
+        else:
+            print(f"  [TFCL] {TFCL_FILE.name} not found or empty — skipping")
     else:
-        print(f"  [TFCL] {TFCL_FILE.name} not found or empty — skipping")
+        print(f"  [TFCL] {TFCL_FILE.name} not found — skipping")
 
     src_m, rsn_m, stc_m, nme_m = build_global_lookup(all_verbose)
     print(f"  Sources : {len(src_m):,}")
@@ -1000,7 +1205,7 @@ def main() -> None:
     # Step 4: Write files
     # -----------------------------------------------------------------------
     print("\n" + "=" * 64)
-    print("Step 4/4 — Writing Lua files")
+    print("Step 4/5 — Writing Lua files")
     print("=" * 64)
 
     if args.dry_run:
@@ -1008,7 +1213,7 @@ def main() -> None:
             key = source["name"]
             if key in individual_data:
                 print(f"  [DRY] Would write {source['output']}  ({len(individual_data[key]):,} entries)")
-        print(f"  [DRY] Would write external_combined_embedded.lua  ({len(combined):,} entries)")
+        print(f"  [DRY] Would write {UNIFIED_OUTPUT}  ({len(unified):,} entries)")
         print(f"  [DRY] Would write global_lookup_tables.lua")
         print("\nDry run complete. No files changed.")
         return
@@ -1027,16 +1232,16 @@ def main() -> None:
         )
         print(f"  [SAVED] {out_path.name}  ({len(individual_data[key]):,} entries)")
 
-    # Combined file
-    combined_path = OUTPUT_DIR / "external_combined_embedded.lua"
+    # Single runtime bundle (Lua loads only this file)
+    unified_path = OUTPUT_DIR / UNIFIED_OUTPUT
     write_individual_file(
-        combined_path,
-        "External Sources Combined",
-        "d3fc0n6 + qfoxb + joekiller + sleepy + tf2bd_official + megascat + cc_biglist + cc_trusted + local snapshots",
-        combined,
+        unified_path,
+        "Unified Embedded Database",
+        "Python weight-merge of all sources + TFCL + build_overlay (minus build_removals)",
+        unified,
         src_m, rsn_m, stc_m, nme_m,
     )
-    print(f"  [SAVED] {combined_path.name}  ({len(combined):,} entries)")
+    print(f"  [SAVED] {unified_path.name}  ({len(unified):,} entries)")
 
     # Global lookup tables
     lookup_path = OUTPUT_DIR / "global_lookup_tables.lua"
@@ -1054,13 +1259,14 @@ def main() -> None:
     print(f"  Remote sources  : {len([s for s in INDIVIDUAL_SOURCES if s['name'] in individual_data])}/{len(INDIVIDUAL_SOURCES)}")
     print(f"  Local snapshots : {len([s for s in LOCAL_EMBED_SOURCES if s['name'] in individual_data])}/{len(LOCAL_EMBED_SOURCES)}")
     print(f"  Total raw rows  : {total:,}")
-    print(f"  Combined unique : {len(combined):,}")
-    print(f"  Files written   : {len(individual_data) + 2}  (+global_lookup, +combined)")
+    print(f"  Combined (pre-TFCL): {len(combined):,}")
+    print(f"  Unified (runtime)   : {len(unified):,}")
+    print(f"  Files written       : {len(individual_data) + 2}  (+global_lookup, +unified)")
 
-    # Show reason-weight distribution for combined
-    print("\n  Reason weight distribution (combined):")
+    # Show reason-weight distribution for unified
+    print("\n  Reason weight distribution (unified):")
     buckets: Counter = Counter()
-    for e in combined.values():
+    for e in unified.values():
         w = score_reason(e.get("Reason"))
         if w >= 90:
             label = "90-100 (hard cheat / VAC)"
