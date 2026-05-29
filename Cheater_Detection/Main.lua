@@ -205,6 +205,10 @@ end
 
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
+	-- Game logic only on CreateMove (never on Draw).
+	Evidence.ApplyDecay()
+	Scheduler.Tick()
+
 	Profiler.SetContext("tick")
 	Profiler.Begin("CreateMove_Total")
 	local isGameUI = engine.IsGameUIVisible()
@@ -448,8 +452,6 @@ local function OnDraw()
 		Profiler.Draw()
 	end
 
-	Evidence.ApplyDecay()
-	Scheduler.Tick()
 	Visuals.DrawTags()
 	BridgePrompt.Draw()
 end

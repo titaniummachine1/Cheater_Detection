@@ -4,12 +4,10 @@
        • Alive      → never blocking http.Get() to remote hosts (walking = no game-thread stalls).
        • Bridge down + alive → queue waits (dead 3s+, menu, or console-only exceptions).
        • Bridge down + dead/menu → blocking fallback may run.
-     Spawn grace: pause bridge submit/poll briefly after local spawn to avoid post-spawn hitches.
 ]]
 
 local Common = require("Cheater_Detection.Utils.Common")
 local Json = Common.Json
-local Events = require("Cheater_Detection.Core.Events")
 
 local HttpQueue = {}
 
@@ -32,7 +30,6 @@ local REQUEST_TIMEOUT = 120.0
 local REQUEST_RETRY_INTERVAL = 0.25
 local SLOW_BLOCKING_HTTP_WARN_SECONDS = 0.015
 local LOCAL_DEATH_SAFE_WINDOW_DELAY = 3.0
-local SPAWN_GRACE_SECONDS = 6.0
 local BRIDGE_POLL_INTERVAL = 0.5 -- 500ms when alive, faster when dead/menu
 local lastBridgePoll = 0
 local BRIDGE_POLL_INTERVAL_ACTIVE = 0.15
@@ -68,32 +65,9 @@ local function IsLocalPlayerAliveNow()
     return IsEntityAlive(GetLocalPlayerEntity())
 end
 
-local spawnGraceState = {
-    graceUntil = 0,
-}
-
-local function ExtendSpawnGrace()
-    spawnGraceState.graceUntil = Now() + SPAWN_GRACE_SECONDS
-end
-
-local function IsInSpawnGrace()
-    return Now() < spawnGraceState.graceUntil
-end
-
 -- True when remote work must not use blocking http.Get on the game thread.
 local function ShouldDeferGameplayHTTP()
-    if IsInSpawnGrace() then
-        return true
-    end
-    if IsLocalPlayerAliveNow() then
-        return true
-    end
-    return false
-end
-
--- Bridge submit/poll paused during spawn grace (remote work already async in Python).
-local function ShouldDeferBridgeTick()
-    return IsInSpawnGrace()
+    return IsLocalPlayerAliveNow()
 end
 
 local function SafeEngineBoolean(methodName)
@@ -233,7 +207,7 @@ local function hasActiveBridgeJobs()
 end
 
 local function PollBridgeResults(now)
-    if not IsBridgeUsable() or ShouldDeferBridgeTick() then
+    if not IsBridgeUsable() then
         return
     end
     local interval = BRIDGE_POLL_INTERVAL
@@ -302,7 +276,7 @@ local function PollBridgeResults(now)
 end
 
 local function TryDispatchToBridge(now)
-    if not IsBridgeUsable() or ShouldDeferBridgeTick() then
+    if not IsBridgeUsable() then
         return false
     end
 
@@ -371,10 +345,6 @@ end
 local function CanRunBlockingHTTPNow(now)
     local currentTime = type(now) == "number" and now or Now()
 
-    if IsInSpawnGrace() then
-        return false
-    end
-
     local serverIP = GetServerIP()
     if serverIP == nil or serverIP == "" then
         -- Main menu / not on server: allow blocking fetch (no gameplay to stutter).
@@ -388,9 +358,6 @@ local function CanRunBlockingHTTPNow(now)
 
     if IsEntityAlive(localPlayer) then
         -- Alive on server: remote blocking http.Get is never allowed.
-        if blockingWindowState.wasAlive ~= true then
-            ExtendSpawnGrace()
-        end
         blockingWindowState.wasAlive = true
         blockingWindowState.deadSince = 0
         return false
@@ -642,37 +609,11 @@ function HttpQueue.Tick()
     end
 end
 
-local function OnLocalPlayerSpawnEvent(event)
-    local localPlayer = GetLocalPlayerEntity()
-    if not localPlayer then
-        ExtendSpawnGrace()
-        return
-    end
-    if type(event) ~= "userdata" and type(event) ~= "table" then
-        ExtendSpawnGrace()
-        return
-    end
-    if type(event.GetInt) ~= "function" then
-        ExtendSpawnGrace()
-        return
-    end
-    local userID = event:GetInt("userid")
-    local ent = entities.GetByUserID(userID)
-    if ent and ent:GetIndex() == localPlayer:GetIndex() then
-        ExtendSpawnGrace()
-        ResetBlockingWindowState()
-    end
-end
-
-Events.Unregister("FireGameEvent", "HttpQueue_LocalSpawnGrace")
-Events.Register("FireGameEvent", "HttpQueue_LocalSpawnGrace", OnLocalPlayerSpawnEvent, "player_spawn")
-
 local function OnHttpQueueUnload()
     isAlive = false
     queue = {}
     ResetActiveRequestState()
     ResetBlockingWindowState()
-    Events.Unregister("FireGameEvent", "HttpQueue_LocalSpawnGrace")
 end
 
 callbacks.Unregister("Unload", "HttpQueue_Unload")
