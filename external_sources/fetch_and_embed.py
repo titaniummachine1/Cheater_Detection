@@ -99,7 +99,7 @@ SOURCES = [
     },
     {
         "name": "TF2BD Community Biglist (wgetJane)",
-        "url": "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.biglist.json",
+        "url": "https://gist.githubusercontent.com/wgetJane/0bc01bd46d7695362253c5a2fa49f2e9/raw/playerlist.biglist.json",
         "parser": "tf2bd",
         "source_label": "TF2BD Community Biglist",
         "static_id": "cc_biglist",
@@ -108,7 +108,7 @@ SOURCES = [
     },
     {
         "name": "TF2BD Community Trusted",
-        "url": "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.trusted.json",
+        "url": "https://trusted.roto.lol/v1/steamids",
         "parser": "tf2bd",
         "source_label": "TF2BD Community Trusted",
         "static_id": "cc_trusted",

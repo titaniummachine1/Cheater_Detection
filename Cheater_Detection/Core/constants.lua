@@ -63,22 +63,30 @@ Constants.SourceWeights = {
 	["masterbase_broadcasts"] = 79,
 	["mega_scat"] = 78,
 
-	-- Established community lists
-	["tf2bd_off"] = 75,
+	-- Bot lists (critical — second only to Valve employee marks)
+	["cc_biglist"] = 100,
+	["tf2bd_off"] = 100,
+	["tfcl_bot"] = 95,
+	["tfcl_botnames"] = 95,
+	["bots_tf"] = 100,
+	["d3_tacobot"] = 100,
+	["tf2bd_pazer"] = 100,
+
+	-- Established community cheater lists
 	["sleepy_main"] = 65,
 	["sleepy_nullc0re"] = 65,
+	["mcdb_cheat"] = 65,
 	["d3_cheat"] = 60,
+	["local_64ids"] = 60,
+	["local_k13imz"] = 60,
 	["qfoxb"] = 55,
 	["joekiller"] = 55,
 
-
 	-- Broader community lists
 	["sleepy_ext"] = 40,
+	["mcdb_susp"] = 30,
 	["external_combined"] = 35,
 	["tfcl_combined"] = 30,
-
-	-- Bot lists (informational, not cheat-detection)
-	["cc_biglist"] = 29,
 
 	-- Unknown / fallback
 	["unknown"] = 0,
@@ -87,7 +95,7 @@ Constants.SourceWeights = {
 -- [[ Reason Category Weights ]]
 -- Used to score reason strings by their semantic category.
 -- When comparing two reasons, the one with the higher category weight wins.
--- Patterns are checked in order; first match wins.
+-- Patterns are matched with highest weight wins (see ReasonWeightResolver.ScoreReason).
 Constants.ReasonCategoryWeights = {
 	-- Hard cheats (physically impossible)
 	{ pattern = "ANGLE ANALYTICAL",        weight = 100 },
@@ -149,9 +157,18 @@ Constants.ReasonCategoryWeights = {
 	{ pattern = "Noise maker",             weight = 75 },
 	{ pattern = "noise maker",             weight = 75 },
 
-	-- Valve / VAC confirmed
+	-- Valve / VAC confirmed (highest — nothing beats Valve employee)
+	{ pattern = "Valve employee",          weight = 110 },
+	{ pattern = "valve employee",          weight = 110 },
 	{ pattern = "VALVe",                   weight = 110 },
 	{ pattern = "Valve",                   weight = 110 },
+
+	-- Bot marks (critical — any bot mention beats cheater/trusted; only Valve ranks above)
+	{ pattern = "Not a Bot",               weight = 0 },
+	{ pattern = "not a bot",               weight = 0 },
+	{ pattern = "Bot (",                   weight = 105 },
+	{ pattern = "BOT SUBMITTED",           weight = 105 },
+
 	{ pattern = "VAC",                     weight = 90 },
 	{ pattern = "Game Ban",                weight = 88 },
 
@@ -172,12 +189,6 @@ Constants.ReasonCategoryWeights = {
 	-- Suspicious (lower confidence)
 	{ pattern = "Suspicious",              weight = 30 },
 	{ pattern = "suspicious",              weight = 30 },
-
-	-- Bot marks (high priority - distinguish bots from real players)
-	{ pattern = "Not a Bot",               weight = 0 },
-	{ pattern = "not a bot",               weight = 0 },
-	{ pattern = "Bot (",                   weight = 85 },
-	{ pattern = "BOT SUBMITTED",           weight = 85 },
 
 	-- Generic / low-quality marks
 	{ pattern = "TOO MANY INFRACTIONS",    weight = 10 },

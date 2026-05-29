@@ -25,6 +25,9 @@ local EmbeddedDBs = {
 	["qfoxb_embedded"]             = require("Cheater_Detection.Database.Static_Embeded_Databases.qfoxb_embedded"),
 	["joekiller_embedded"]         = require("Cheater_Detection.Database.Static_Embeded_Databases.joekiller_embedded"),
 	["megascat_embedded"]          = require("Cheater_Detection.Database.Static_Embeded_Databases.megascat_embedded"),
+	["local_64ids_embedded"]       = require("Cheater_Detection.Database.Static_Embeded_Databases.local_64ids_embedded"),
+	["local_text_embedded"]        = require("Cheater_Detection.Database.Static_Embeded_Databases.local_text_embedded"),
+	["local_k13imz_embedded"]      = require("Cheater_Detection.Database.Static_Embeded_Databases.local_k13imz_embedded"),
 	["external_combined_embedded"] = require(
 		"Cheater_Detection.Database.Static_Embeded_Databases.external_combined_embedded"),
 	["tfcl_combined_lua"]          = require("Cheater_Detection.Database.Static_Embeded_Databases.tfcl_combined_lua"),
@@ -565,14 +568,17 @@ function Database.ShouldPersistEntry(steamID, entry, options)
 	if not baseline then
 		return true
 	end
-	if entriesEquivalent(entry, baseline) then
-		return false
-	end
 
 	local baseReason = Database.ResolveReason(baseline)
 	local curReason = Database.ResolveReason(entry)
 	local baseStatic = Database.ResolveStatic(baseline)
 	local curStatic = Database.ResolveStatic(entry)
+
+	if entriesEquivalent(entry, baseline) then
+		return false
+	end
+
+	-- Disk only stores runtime evidence that beats the build-time embed winner.
 	if ReasonWeightResolver.ShouldOverrideEvidence(baseReason, curReason, baseStatic, curStatic) then
 		return true
 	end
@@ -582,6 +588,29 @@ function Database.ShouldPersistEntry(steamID, entry, options)
 	end
 
 	return false
+end
+
+function Database.PruneOverlayAgainstBaseline()
+	if type(Database.Overlay) ~= "table" then
+		return 0
+	end
+
+	local pruned = 0
+	for steamID, overlayEntry in pairs(Database.Overlay) do
+		local runtimeEntry = G.DataBase and G.DataBase[steamID] or overlayEntry
+		if not Database.ShouldPersistEntry(steamID, runtimeEntry, nil) then
+			Database.Overlay[steamID] = nil
+			pruned = pruned + 1
+			Database.State.isDirty = true
+		end
+	end
+
+	if pruned > 0 then
+		Logger.Info("Database",
+			string.format("[DB] Pruned %d overlay entries already covered by embedded baseline", pruned))
+	end
+
+	return pruned
 end
 
 function Database.SyncOverlayEntry(steamID, options)
@@ -914,6 +943,7 @@ function Database.Initialize(silent)
 	Database.LoadOverlayFromDisk(silent)
 	Database.LoadEmbeddedDatabases()
 	Database.ApplyOverlayToDataBase()
+	Database.PruneOverlayAgainstBaseline()
 
 	local total = 0
 	for _ in pairs(G.DataBase) do

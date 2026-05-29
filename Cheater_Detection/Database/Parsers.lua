@@ -9,6 +9,7 @@ local G = require("Cheater_Detection.Utils.Globals")
 
 local GlobalLookupTables = require("Cheater_Detection.Database.Static_Embeded_Databases.global_lookup_tables")
 local ReasonWeightResolver = require("Cheater_Detection.Utils.ReasonWeightResolver")
+local Database = require("Cheater_Detection.Database.Database")
 
 local Parsers = {}
 
@@ -423,69 +424,36 @@ function Parsers.GetPlayersFromIll5DB(contentString, fallbackReason)
 	return players, nil
 end
 
-local function lookupTableString(slot, lookupTable)
-	if type(slot) == "number" and lookupTable then
-		return lookupTable[slot]
+-- Resolve the best-known evidence for a player: runtime DB first, then embed baseline.
+local function resolveKnownEvidence(steamID64)
+	local existingEntry = G.DataBase and G.DataBase[steamID64]
+	if existingEntry then
+		return Database.ResolveReason(existingEntry), Database.ResolveStatic(existingEntry)
 	end
-	if type(slot) == "string" then
-		return slot
+
+	local baseline = Database.EmbeddedBaseline and Database.EmbeddedBaseline[steamID64]
+	if baseline then
+		return Database.ResolveReason(baseline), Database.ResolveStatic(baseline)
 	end
-	return nil
+
+	return nil, nil
 end
 
--- Fetch/list merge only: skip rows that cannot beat existing evidence (no full-DB walk).
-local function shouldSkipExistingMerge(existingEntry, playerName, reason, staticSource)
-	if type(existingEntry[1]) == "number" then
-		local existingName = lookupTableString(existingEntry[5], GlobalLookupTables.Names)
-		local canImproveName = playerName and playerName ~= "Unknown"
-			and (not existingName or existingName == "Unknown")
-		if canImproveName then
-			return false
-		end
-
-		if reason and reason ~= "Unknown Source" then
-			local existingReason = lookupTableString(existingEntry[3], GlobalLookupTables.Reasons)
-			if not existingReason or existingReason == "Unknown Source" then
-				return false
-			end
-			if ReasonWeightResolver.ShouldOverride(existingReason, reason) then
-				return false
-			end
-		end
-
-		local staticSlot = existingEntry[4]
-		local hasStatic = staticSlot ~= nil and staticSlot ~= false and staticSlot ~= 0 and staticSlot ~= ""
-		if not hasStatic and staticSource then
-			return false
-		end
-
-		return true
-	end
-
-	if type(existingEntry) ~= "table" then
-		return true
-	end
-
-	local canImproveName = playerName and playerName ~= "Unknown"
-		and (not existingEntry.Name or existingEntry.Name == "Unknown")
-	if canImproveName then
+-- Skip live list rows that cannot beat existing runtime or build-time embed evidence.
+-- Uses the same reason+source weight rules as merge and overlay persistence.
+local function shouldSkipListMerge(steamID64, staticSource, reason)
+	if type(steamID64) ~= "string" or type(staticSource) ~= "string" or staticSource == "" then
 		return false
 	end
 
-	if reason and reason ~= "Unknown Source" then
-		if not existingEntry.Reason or existingEntry.Reason == "Unknown Source" then
-			return false
-		end
-		if ReasonWeightResolver.ShouldOverride(existingEntry.Reason, reason) then
-			return false
-		end
-	end
-
-	if not existingEntry.Static and staticSource then
+	local existingReason, existingStatic = resolveKnownEvidence(steamID64)
+	if not existingReason and not existingStatic then
 		return false
 	end
 
-	return true
+	local incomingReason = reason or "Unknown Source"
+	return not ReasonWeightResolver.ShouldOverrideEvidence(
+		existingReason, incomingReason, existingStatic, staticSource)
 end
 
 -- Processes a single player entry into the database
@@ -514,10 +482,11 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 
 	local reason = buildReasonFromAttributes(player.attributes, defaultReason)
 
-	local existingEntry = existingEntries[steamID64]
-	if existingEntry and shouldSkipExistingMerge(existingEntry, playerName, reason, staticSource) then
+	if shouldSkipListMerge(steamID64, staticSource, reason) then
 		return false, false, false
 	end
+
+	local existingEntry = existingEntries[steamID64]
 
 	-- Add to entries if not already there
 	if existingEntry then

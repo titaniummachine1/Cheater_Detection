@@ -10,7 +10,7 @@ local ReasonWeightResolver = {}
 local categoryWeights = Constants.ReasonCategoryWeights
 
 --- Score a reason string by matching against category weight patterns.
---- Returns a weight number (0-100). Higher = more authoritative detection.
+--- Uses the highest matching weight so merged reasons like "Cheater | Bot (...)" keep bot priority.
 ---@param reason string|nil The reason string to score
 ---@return number weight
 function ReasonWeightResolver.ScoreReason(reason)
@@ -18,13 +18,19 @@ function ReasonWeightResolver.ScoreReason(reason)
 		return 0
 	end
 
+	-- "Not a Bot (...)" contains "Bot (" — treat explicit clears before max-match scoring.
+	if reason:find("Not a Bot", 1, true) or reason:find("not a bot", 1, true) then
+		return 0
+	end
+
+	local best = 0
 	for _, entry in ipairs(categoryWeights) do
-		if reason:find(entry.pattern, 1, true) then
-			return entry.weight
+		if reason:find(entry.pattern, 1, true) and entry.weight > best then
+			best = entry.weight
 		end
 	end
 
-	return 0
+	return best
 end
 
 --- Compare two reasons and return the one with higher weight.

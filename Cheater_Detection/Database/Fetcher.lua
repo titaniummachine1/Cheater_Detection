@@ -743,6 +743,14 @@ function Fetcher.FinishFetch()
 	end
 	printc(0, 255, 140, 255, string.format("Total database entries: %d", dbCount))
 
+	local overlayCount = 0
+	if type(Database.Overlay) == "table" then
+		for _ in pairs(Database.Overlay) do
+			overlayCount = overlayCount + 1
+		end
+	end
+	printc(0, 255, 140, 255, string.format("Overlay entries on disk: %d (embedded lists are in the bundle)", overlayCount))
+
 	if isDebugMode then
 		Logger.Debug(
 			"Fetcher",
@@ -758,6 +766,7 @@ function Fetcher.FinishFetch()
 
 	Fetcher.State.isRunning = false
 	Database.PurgeFriendsAndSelf()
+	Database.PruneOverlayAgainstBaseline()
 	if Database.State.isDirty then
 		Database.SaveDatabase()
 	end

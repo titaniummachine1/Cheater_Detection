@@ -25,7 +25,7 @@ Sources.List = {
 		cause = "Bot (TF2BD Community Biglist)",
 		parser = "tf2db",
 		sourceID = "cc_biglist",
-		weight = 20
+		weight = 100
 	},
 	-- Curated by Trusted-role members of the official TF2BD Discord (high verification bar)
 	{
@@ -36,24 +36,7 @@ Sources.List = {
 		sourceID = "cc_trusted",
 		weight = 80
 	},
-	-- qfoxb live fetch — embedded snapshot exists but live fetch picks up new entries between re-embeds
-	{
-		name = "qfoxb Player List (live)",
-		url = "https://raw.githubusercontent.com/qfoxb/tf2bd-lists/main/playerlist.qfoxb.json",
-		cause = "Cheater (qfoxb)",
-		parser = "tf2db",
-		sourceID = "qfoxb",
-		weight = 55
-	},
-	-- joekiller live fetch — US-East/Virginia focused, manually verified cheaters
-	{
-		name = "joekiller Player List (live)",
-		url = "https://raw.githubusercontent.com/joekiller/joekiller-list/main/playerlist.joekiller.json",
-		cause = "Cheater (joekiller)",
-		parser = "tf2db",
-		sourceID = "joekiller",
-		weight = 55
-	},
+	-- qfoxb / joekiller: embedded via rebuild_embedded_databases.py (no live fetch — avoids overlay bloat)
 }
 
 --[[ Helper/Private Functions (None) ]]

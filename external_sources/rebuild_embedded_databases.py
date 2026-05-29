@@ -48,26 +48,32 @@ SOURCE_WEIGHTS: Dict[str, int] = {
     "vac_ban":              85,
     "cc_trusted":           80,
     "masterbase_broadcasts": 79,
-    "tf2bd_off":            75,
+    "mega_scat":            78,
+    "cc_biglist":           100,
+    "tf2bd_off":            100,
     "sleepy_main":          65,
     "sleepy_nullc0re":      65,
     "d3_cheat":             60,
     "qfoxb":                55,
     "joekiller":            55,
-    "mega_scat":            78,
     "sleepy_ext":           40,
     "external_combined":    35,
     "tfcl_dev":             30,
     "tfcl_alias":           30,
-    "tfcl_bot":             30,
-    "tfcl_botnames":        30,
+    "tfcl_bot":             95,
+    "tfcl_botnames":        95,
     "tfcl_combined":        30,
-    "cc_biglist":           29,
+    "local_64ids":          60,
+    "local_k13imz":         60,
+    "bots_tf":              100,
+    "d3_tacobot":           100,
+    "tf2bd_pazer":          100,
+    "mcdb_cheat":           65,
+    "mcdb_susp":            30,
     "unknown":              0,
 }
 
-# Reason category weights: list of (substring, weight) pairs checked in order.
-# First match wins.  Plain-string containment (case-sensitive), mirroring Lua.
+# Reason category weights: (substring, weight). Highest matching weight wins (see score_reason).
 REASON_WEIGHTS: List[Tuple[str, int]] = [
     # Hard-cheat analytical signals (physically impossible)
     ("ANGLE ANALYTICAL",        100),
@@ -131,10 +137,16 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
     ("noisemaker",               75),
     ("Noise maker",              75),
     ("noise maker",              75),
-    # Valve / VAC confirmed
-    ("VALVe",                   110),
+    # Valve / VAC confirmed (highest)
     ("Valve employee",          110),
     ("valve employee",          110),
+    ("VALVe",                   110),
+    ("Valve",                   110),
+    # Bot marks (critical — any bot mention beats cheater; only Valve ranks above)
+    ("Not a Bot",                0),
+    ("not a bot",                0),
+    ("Bot (",                   105),
+    ("BOT SUBMITTED",           105),
     ("VAC",                     90),
     ("Game Ban",                88),
     # Trusted source cheater marks
@@ -151,11 +163,6 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
     # Suspicious
     ("Suspicious",              30),
     ("suspicious",              30),
-    # Bot marks (high priority - distinguish bots from real players)
-    ("Not a Bot",                0),
-    ("not a bot",                0),
-    ("Bot (",                   85),
-    ("BOT SUBMITTED",           85),
     # Generic / low-quality marks
     ("TOO MANY INFRACTIONS",    10),
     ("Racist",                  5),
@@ -168,13 +175,17 @@ REASON_WEIGHTS: List[Tuple[str, int]] = [
 
 
 def score_reason(reason: Optional[str]) -> int:
-    """Return the weight of a reason string (0 if unknown/None)."""
+    """Return the highest matching reason weight (supports merged 'Cheater | Bot' strings)."""
     if not reason:
         return 0
+    # "Not a Bot (...)" contains "Bot (" — treat explicit clears before max-match scoring.
+    if "Not a Bot" in reason or "not a bot" in reason:
+        return 0
+    best = 0
     for substring, weight in REASON_WEIGHTS:
-        if substring in reason:
-            return weight
-    return 0
+        if substring in reason and weight > best:
+            best = weight
+    return best
 
 
 def score_source(static_id: Optional[str]) -> int:
@@ -318,6 +329,152 @@ def parse_megascat(raw: bytes, source: dict) -> Dict[str, dict]:
             "Static": source["static_id"],
             "Flags":  0,
         }
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Local-only parsers (external_sources/*.txt — not used by remote fetches)
+# ---------------------------------------------------------------------------
+
+_K13_SECTION_RE = re.compile(r"^-- (.+?) - (Bot|Cheater|Tacobot|Pazer|Cheaters|Suspicious|Watched|Legit)$")
+_K13_SID64_RE = re.compile(r"^-- (\d{17})")
+
+# Section labels from k13imz.txt (BotListConverter). Legit = skip. Unmarked IDs → cheater fallback.
+_K13IMZ_SECTIONS: Dict[Tuple[str, str], dict] = {
+    ("bots.tf", "Bot"): {
+        "source_label": "bots.tf",
+        "static_id": "bots_tf",
+        "default_reason": "Bot (bots.tf)",
+    },
+    ("d3fc0n6", "Cheater"): {
+        "source_label": "d3fc0n6 Cheater List",
+        "static_id": "d3_cheat",
+        "default_reason": "Cheater (d3fc0n6)",
+    },
+    ("d3fc0n6", "Tacobot"): {
+        "source_label": "d3fc0n6 Tacobot",
+        "static_id": "d3_tacobot",
+        "default_reason": "Bot (Tacobot)",
+    },
+    ("d3fc0n6", "Pazer"): {
+        "source_label": "TF2BD Pazer List",
+        "static_id": "tf2bd_pazer",
+        "default_reason": "Bot (Pazer)",
+    },
+    ("MCDB", "Cheaters"): {
+        "source_label": "MCDB",
+        "static_id": "mcdb_cheat",
+        "default_reason": "Cheater (MCDB)",
+    },
+    ("MCDB", "Suspicious"): {
+        "source_label": "MCDB",
+        "static_id": "mcdb_susp",
+        "default_reason": "Suspicious (MCDB)",
+    },
+    ("MCDB", "Watched"): {
+        "source_label": "MCDB",
+        "static_id": "mcdb_susp",
+        "default_reason": "Suspicious (MCDB)",
+    },
+}
+
+_K13IMZ_FALLBACK = {
+    "source_label": "Local k13imz",
+    "static_id": "local_k13imz",
+    "default_reason": "Cheater (k13imz)",
+}
+
+
+def parse_k13imz(raw: bytes, source: dict) -> Dict[str, dict]:
+    """Parse BotListConverter priority-script export. Respects section labels; raw IDs → cheater."""
+    entries: Dict[str, dict] = {}
+    current: Optional[dict] = None
+    skip_section = False
+
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        section_match = _K13_SECTION_RE.match(line)
+        if section_match:
+            key = (section_match.group(1).strip(), section_match.group(2).strip())
+            if key[1] == "Legit":
+                current = None
+                skip_section = True
+                continue
+            skip_section = False
+            current = _K13IMZ_SECTIONS.get(key)
+            if current is None:
+                print(f"  [WARN] Unknown k13imz section: {key[0]} - {key[1]}")
+            continue
+
+        if skip_section:
+            continue
+
+        sid_match = _K13_SID64_RE.match(line)
+        if not sid_match:
+            continue
+
+        sid = sid_match.group(1)
+        if not sid64_valid(sid):
+            continue
+
+        meta = current if current is not None else _K13IMZ_FALLBACK
+        entries[sid] = {
+            "Name": "Unknown",
+            "Reason": meta["default_reason"],
+            "Source": meta["source_label"],
+            "Static": meta["static_id"],
+            "Flags": 0,
+        }
+
+    return entries
+
+
+def parse_text_txt(raw: bytes, source: dict) -> Dict[str, dict]:
+    """Parse text.txt: one TF2BD JSON document per non-empty line (trusted + biglist snapshots)."""
+    entries: Dict[str, dict] = {}
+    text = raw.decode("utf-8", errors="replace")
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        try:
+            doc = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"  [WARN] text.txt JSON line skipped: {exc}")
+            continue
+
+        title = ((doc.get("file_info") or {}).get("title") or "").lower()
+        if "biglist" in title:
+            sub = {
+                **source,
+                "source_label": "TF2BD Community Biglist",
+                "static_id": "cc_biglist",
+                "default_reason": "Bot (TF2BD Community Biglist)",
+            }
+        elif "trusted" in title:
+            sub = {
+                **source,
+                "source_label": "TF2BD Community Trusted",
+                "static_id": "cc_trusted",
+                "default_reason": "Cheater (TF2BD Trusted)",
+            }
+        else:
+            print(f"  [WARN] text.txt unknown document title: {title!r} — treating IDs as cheater")
+            sub = {
+                **source,
+                "source_label": source["source_label"],
+                "static_id": source["static_id"],
+                "default_reason": "Cheater (local text.txt)",
+            }
+
+        chunk = parse_tf2bd(line.encode("utf-8"), sub)
+        merge_into(entries, chunk)
+
     return entries
 
 
@@ -588,7 +745,7 @@ INDIVIDUAL_SOURCES = [
         "static_id":     "tf2bd_off",
         "default_reason":"Bot (TF2BD Official)",
         "output":        "tf2bd_official_embedded.lua",
-        "weight":        75,
+        "weight":        100,
     },
     {
         "name":          "MegaScaterbomb",
@@ -602,20 +759,21 @@ INDIVIDUAL_SOURCES = [
     },
 ]
 
-# Sources that feed only into the combined file (kept live by the Lua fetcher)
+# Sources that feed only into the combined file.
+# URLs must match Cheater_Detection/Database/Sources.lua (ClusterConsultant repo is schema-only).
 COMBINED_ONLY_SOURCES = [
     {
         "name":          "TF2BD Community Biglist",
-        "url":           "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.biglist.json",
+        "url":           "https://gist.githubusercontent.com/wgetJane/0bc01bd46d7695362253c5a2fa49f2e9/raw/playerlist.biglist.json",
         "parser":        "tf2bd",
         "source_label":  "TF2BD Community Biglist",
         "static_id":     "cc_biglist",
         "default_reason":"Bot (TF2BD Community Biglist)",
-        "weight":        29,
+        "weight":        100,
     },
     {
         "name":          "TF2BD Community Trusted",
-        "url":           "https://raw.githubusercontent.com/ClusterConsultant/TF2BD-Community-Lists/main/playerlist.trusted.json",
+        "url":           "https://trusted.roto.lol/v1/steamids",
         "parser":        "tf2bd",
         "source_label":  "TF2BD Community Trusted",
         "static_id":     "cc_trusted",
@@ -624,30 +782,87 @@ COMBINED_ONLY_SOURCES = [
     },
 ]
 
+# Local snapshot files in external_sources/ (embedded at build time only).
+LOCAL_EMBED_SOURCES = [
+    {
+        "name":          "Local Supplementary 64ids",
+        "local_path":    "64ids (1).txt",
+        "parser":        "raw64",
+        "source_label":  "Local Supplementary 64ids",
+        "static_id":     "local_64ids",
+        "default_reason":"Cheater (64ids)",
+        "output":        "local_64ids_embedded.lua",
+        "weight":        60,
+    },
+    {
+        "name":          "Local text.txt snapshots",
+        "local_path":    "text.txt",
+        "parser":        "text_txt",
+        "source_label":  "Local text.txt",
+        "static_id":     "local_text",
+        "default_reason":"Cheater (local text.txt)",
+        "output":        "local_text_embedded.lua",
+        "weight":        80,
+    },
+    {
+        "name":          "Local k13imz BotListConverter",
+        "local_path":    "k13imz.txt",
+        "parser":        "k13imz",
+        "source_label":  "Local k13imz",
+        "static_id":     "local_k13imz",
+        "default_reason":"Cheater (k13imz)",
+        "output":        "local_k13imz_embedded.lua",
+        "weight":        100,
+    },
+]
+
 
 # ---------------------------------------------------------------------------
 # Fetch + parse dispatcher
 # ---------------------------------------------------------------------------
 
+def _source_origin(source: dict) -> str:
+    if source.get("local_path"):
+        return f"local:{source['local_path']}"
+    return source.get("url", "unknown")
+
+
+def load_source_raw(source: dict) -> bytes:
+    local_path = source.get("local_path")
+    if local_path:
+        path = SCRIPT_DIR / local_path
+        if not path.exists():
+            raise FileNotFoundError(f"Local source not found: {path}")
+        return path.read_bytes()
+    return fetch_url(source["url"])
+
+
+def parse_source_raw(raw: bytes, source: dict) -> Dict[str, dict]:
+    parser = source["parser"]
+    if parser == "raw64":
+        return parse_raw64(raw, source)
+    if parser == "tf2bd":
+        return parse_tf2bd(raw, source)
+    if parser == "megascat":
+        return parse_megascat(raw, source)
+    if parser == "text_txt":
+        return parse_text_txt(raw, source)
+    if parser == "k13imz":
+        return parse_k13imz(raw, source)
+    raise ValueError(f"Unknown parser: {parser}")
+
+
 def fetch_and_parse(source: dict) -> Optional[Dict[str, dict]]:
-    print(f"  [FETCH] {source['name']} ...")
+    action = "LOAD" if source.get("local_path") else "FETCH"
+    print(f"  [{action}] {source['name']} ...")
     try:
-        raw = fetch_url(source["url"])
+        raw = load_source_raw(source)
     except Exception as exc:
-        print(f"  [ERROR] Fetch failed: {exc}")
+        print(f"  [ERROR] {action} failed: {exc}")
         return None
 
-    parser = source["parser"]
     try:
-        if parser == "raw64":
-            entries = parse_raw64(raw, source)
-        elif parser == "tf2bd":
-            entries = parse_tf2bd(raw, source)
-        elif parser == "megascat":
-            entries = parse_megascat(raw, source)
-        else:
-            print(f"  [ERROR] Unknown parser: {parser}")
-            return None
+        entries = parse_source_raw(raw, source)
     except Exception as exc:
         print(f"  [ERROR] Parse failed: {exc}")
         return None
@@ -734,6 +949,22 @@ def main() -> None:
         new, ov = merge_into(combined, entries)
         print(f"  [MERGE] +{new:,} new, {ov:,} overridden in combined")
 
+    # -----------------------------------------------------------------------
+    # Step 2b: Local snapshot files (external_sources/*.txt)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 64)
+    print("Step 2b/4 — Loading local embed snapshots")
+    print("=" * 64)
+
+    for source in sorted(LOCAL_EMBED_SOURCES, key=lambda s: -s["weight"]):
+        print(f"\n[SOURCE] {source['name']}  (weight={source['weight']})")
+        entries = fetch_and_parse(source)
+        if entries is None:
+            continue
+        individual_data[source["name"]] = entries
+        new, ov = merge_into(combined, entries)
+        print(f"  [MERGE] +{new:,} new, {ov:,} overridden in combined")
+
     print(f"\n[COMBINED] {len(combined):,} unique players after weight-based merge")
 
     # -----------------------------------------------------------------------
@@ -744,7 +975,7 @@ def main() -> None:
     print("=" * 64)
 
     all_verbose: Dict[str, Dict[str, dict]] = {}
-    for source in INDIVIDUAL_SOURCES:
+    for source in INDIVIDUAL_SOURCES + LOCAL_EMBED_SOURCES:
         key = source["name"]
         if key in individual_data:
             all_verbose[key] = individual_data[key]
@@ -773,7 +1004,7 @@ def main() -> None:
     print("=" * 64)
 
     if args.dry_run:
-        for source in INDIVIDUAL_SOURCES:
+        for source in INDIVIDUAL_SOURCES + LOCAL_EMBED_SOURCES:
             key = source["name"]
             if key in individual_data:
                 print(f"  [DRY] Would write {source['output']}  ({len(individual_data[key]):,} entries)")
@@ -783,14 +1014,14 @@ def main() -> None:
         return
 
     # Individual per-source files
-    for source in INDIVIDUAL_SOURCES:
+    for source in INDIVIDUAL_SOURCES + LOCAL_EMBED_SOURCES:
         key = source["name"]
         if key not in individual_data:
-            print(f"  [SKIP] {source['output']} (fetch failed)")
+            print(f"  [SKIP] {source['output']} (load failed)")
             continue
         out_path = OUTPUT_DIR / source["output"]
         write_individual_file(
-            out_path, source["name"], source["url"],
+            out_path, source["name"], _source_origin(source),
             individual_data[key],
             src_m, rsn_m, stc_m, nme_m,
         )
@@ -801,7 +1032,7 @@ def main() -> None:
     write_individual_file(
         combined_path,
         "External Sources Combined",
-        "d3fc0n6 + qfoxb + joekiller + sleepy (main/ext/nullc0re) + tf2bd_official + megascat + cc_biglist + cc_trusted",
+        "d3fc0n6 + qfoxb + joekiller + sleepy + tf2bd_official + megascat + cc_biglist + cc_trusted + local snapshots",
         combined,
         src_m, rsn_m, stc_m, nme_m,
     )
@@ -820,7 +1051,8 @@ def main() -> None:
     print("=" * 64)
 
     total = sum(len(v) for k, v in all_verbose.items() if not k.startswith("_"))
-    print(f"  Sources fetched : {len(individual_data)}/{len(INDIVIDUAL_SOURCES)}")
+    print(f"  Remote sources  : {len([s for s in INDIVIDUAL_SOURCES if s['name'] in individual_data])}/{len(INDIVIDUAL_SOURCES)}")
+    print(f"  Local snapshots : {len([s for s in LOCAL_EMBED_SOURCES if s['name'] in individual_data])}/{len(LOCAL_EMBED_SOURCES)}")
     print(f"  Total raw rows  : {total:,}")
     print(f"  Combined unique : {len(combined):,}")
     print(f"  Files written   : {len(individual_data) + 2}  (+global_lookup, +combined)")
