@@ -244,7 +244,10 @@ local function mergePlayersFromActiveSource(state, parseMode)
 						s.updStatic = (s.updStatic or 0) + 1
 					end
 				end
-				Database.State.isDirty = true
+				local steamID64 = Parsers.GetSteamID64(player.steamid)
+				if steamID64 then
+					Database.SyncOverlayEntry(steamID64)
+				end
 			else
 				s.existing = s.existing + 1
 			end

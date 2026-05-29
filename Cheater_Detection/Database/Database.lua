@@ -48,6 +48,10 @@ local Database = {
 	},
 }
 
+-- Disk-bound deltas only (embedded lists are not re-saved here)
+Database.Overlay = {}
+Database.EmbeddedBaseline = {}
+
 -- Cache for decoded database entries (avoids repeated decoding of compressed entries)
 local decodedCache = {}
 local cacheHits = 0
@@ -68,6 +72,71 @@ local function nowSeconds()
 		end
 	end
 	return os.clock()
+end
+
+local function copyEntry(entry)
+	if type(entry) ~= "table" then
+		return nil
+	end
+	if type(entry[1]) == "number" then
+		local copy = {}
+		for i = 1, #entry do
+			copy[i] = entry[i]
+		end
+		return copy
+	end
+	return {
+		Name = entry.Name,
+		Reason = entry.Reason,
+		Source = entry.Source,
+		Static = entry.Static,
+		Flags = entry.Flags,
+		Score = entry.Score,
+		Timestamp = entry.Timestamp,
+		Karma = entry.Karma,
+		Retaliation = entry.Retaliation,
+	}
+end
+
+local function getEntryFlags(entry)
+	if type(entry) ~= "table" then
+		return 0
+	end
+	if type(entry[1]) == "number" then
+		return tonumber(entry[1]) or 0
+	end
+	return tonumber(entry.Flags) or 0
+end
+
+local function entriesEquivalent(entryA, entryB)
+	if not entryA or not entryB then
+		return false
+	end
+	if getEntryFlags(entryA) ~= getEntryFlags(entryB) then
+		return false
+	end
+	if Database.ResolveReason(entryA) ~= Database.ResolveReason(entryB) then
+		return false
+	end
+	if Database.ResolveStatic(entryA) ~= Database.ResolveStatic(entryB) then
+		return false
+	end
+	return true
+end
+
+local function mergeEntryIntoBaseline(baseline, steamID, entry)
+	local existing = baseline[steamID]
+	if not existing then
+		baseline[steamID] = copyEntry(entry)
+		return
+	end
+	local existingReason = Database.ResolveReason(existing)
+	local incomingReason = Database.ResolveReason(entry)
+	local existingStatic = Database.ResolveStatic(existing)
+	local incomingStatic = Database.ResolveStatic(entry)
+	if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, incomingReason, existingStatic, incomingStatic) then
+		baseline[steamID] = copyEntry(entry)
+	end
 end
 
 local function ReapplyDetectedPriorities()
@@ -143,7 +212,7 @@ local function serializeCompressedDatabase(normalizedData)
 	local chunks = {}
 	local count = 1
 	chunks[count] =
-	"return {\n    _Metadata = {\n        Version = 4,\n        Format = \"global_lookup\"\n    },\n    Data = {\n"
+	"return {\n    _Metadata = {\n        Version = 5,\n        Format = \"global_lookup\",\n        Kind = \"overlay\"\n    },\n    Data = {\n"
 	count = count + 1
 
 	local isFirst = true
@@ -175,8 +244,8 @@ end
 
 function Database.SaveDatabase(force)
 	local saveStartedAt = nowSeconds()
-	if not G.DataBase then
-		return
+	if type(Database.Overlay) ~= "table" then
+		Database.Overlay = {}
 	end
 	local localPlayer = entities.GetLocalPlayer()
 	if not force and localPlayer and localPlayer:IsValid() and localPlayer:IsAlive() then
@@ -193,13 +262,17 @@ function Database.SaveDatabase(force)
 	end
 
 	local filepath = Database.GetFilePath()
-	Logger.Debug("Database", "[DB] Synchronous save to disk (global lookup format)...")
+	local overlayCount = 0
+	for _ in pairs(Database.Overlay) do
+		overlayCount = overlayCount + 1
+	end
+	Logger.Debug("Database", string.format("[DB] Saving overlay (%d entries)...", overlayCount))
 	ReapplyDetectedPriorities()
 
 	-- Use global lookup tables for compression
 	local normalizedData = {}
 
-	for k, v in pairs(G.DataBase) do
+	for k, v in pairs(Database.Overlay) do
 		if type(v) == "table" and type(k) == "string" then
 			if v[1] ~= nil and type(v[1]) == "number" then
 				normalizedData[k] = v
@@ -292,7 +365,7 @@ function Database.SaveDatabase(force)
 		if Serializer.writeFile(filepath, encoded) then
 			Database.State.isDirty = false
 			Database.State.lastSave = os.time()
-			Logger.Info("Database", "Database flushed to disk (global lookup): " .. filepath)
+			Logger.Info("Database", string.format("Database overlay saved (%d entries): %s", overlayCount, filepath))
 			local elapsed = nowSeconds() - saveStartedAt
 			if elapsed >= SLOW_SAVE_WARN_SECONDS then
 				Logger.Warning(
@@ -373,220 +446,10 @@ function Database.LoadDatabase(silent, force)
 	if Database.State.isInitialized and not force then
 		return
 	end
-
-	Logger.Debug("Database", "[DB] Loading database...")
-	local filePath = Database.GetFilePath()
-
-	-- Try loading .txt first, fallback to .lua, .cfg or .json if not found (for migration)
-	local content = Serializer.readFile(filePath)
-	if not content then
-		local luaPath = filePath:gsub("%.txt$", ".lua")
-		content = Serializer.readFile(luaPath)
-		if not content then
-			local cfgPath = filePath:gsub("%.txt$", ".cfg")
-			content = Serializer.readFile(cfgPath)
-			if not content then
-				local oldPath = filePath:gsub("%.txt$", ".json")
-				local oldFile = io.open(oldPath, "r")
-				if oldFile then
-					content = oldFile:read("*a")
-					oldFile:close()
-					Logger.Debug("Database", "[DB] Migrating old JSON database to new format...")
-				end
-			else
-				Logger.Debug("Database", "[DB] Migrating .cfg database to .txt format...")
-			end
-		else
-			Logger.Debug("Database", "[DB] Migrating .lua database to .txt format...")
-		end
+	if force then
+		Database.State.isInitialized = false
 	end
-
-	if not content or #content == 0 then
-		G.DataBase = {}
-	else
-		local success, decodedData = pcall(function()
-			-- Try Lua load with return prepended (new format)
-			local chunk, err = load("return " .. content)
-			if not chunk then
-				error("Lua parse error (prepended return): " .. tostring(err))
-			end
-			local success, result = pcall(chunk)
-			if not success then
-				error("Lua execution error (prepended return): " .. tostring(result))
-			end
-			if type(result) == "table" then
-				return result
-			end
-
-			-- Try raw Lua load (old format)
-			chunk, err = load(content)
-			if not chunk then
-				error("Lua parse error (raw): " .. tostring(err))
-			end
-			success, result = pcall(chunk)
-			if not success then
-				error("Lua execution error (raw): " .. tostring(result))
-			end
-			if type(result) == "table" then
-				return result
-			end
-
-			-- Fallback to JSON for migration
-			local decodedJson = Common.Json.decode(content)
-			if type(decodedJson) == "table" then
-				return decodedJson
-			end
-
-			error("Failed to decode content in any format.")
-		end)
-		content = nil
-
-		if not success or type(decodedData) ~= "table" then
-			Logger.Error("Database", "[DB] Load Failed: " .. tostring(decodedData))
-			Logger.Warning("Database", "[DB] Data might be corrupted. Resetting database base layer.")
-			G.DataBase = {}
-		else
-			-- Check if data is in normalized format (Version 2, 3 or 4)
-			local isNormalized = decodedData._Metadata and
-				(decodedData._Metadata.Format == "normalized" or decodedData._Metadata.Format == "global_lookup")
-			local version = decodedData._Metadata and decodedData._Metadata.Version or 2
-
-			if isNormalized then
-				if version >= 4 then
-					G.DataBase = decodedData.Data or {}
-					local count = 0
-					for _ in pairs(G.DataBase) do
-						count = count + 1
-					end
-					Logger.Info("Database",
-						string.format("[DB] Loaded %d entries from disk (global lookup format v%d).", count, version))
-				else
-					-- Decode normalized format back to verbose format for runtime compatibility
-					local sources = decodedData.Sources or {}
-					local reasons = decodedData.Reasons or {}
-					local statics = decodedData.Statics or {}
-					local names = decodedData.Names or {}
-					local data = decodedData.Data or {}
-
-					local expandedData = {}
-					for steamID, entry in pairs(data) do
-						if type(entry) == "table" and type(steamID) == "string" then
-							local expanded = {}
-							expanded.Flags = entry[1] or 0
-
-							-- Decode Source: integer ID to string
-							local sourceID = entry[2]
-							if type(sourceID) == "number" and sourceID > 0 then
-								expanded.Source = sources[sourceID] or "Unknown"
-							elseif type(sourceID) == "string" then
-								expanded.Source = sourceID
-							else
-								expanded.Source = "Unknown"
-							end
-
-							-- Decode Static: integer ID to string (Version 3: index 3)
-							local staticID = entry[3]
-							if type(staticID) == "number" and staticID > 0 then
-								expanded.Static = statics[staticID] or false
-							else
-								expanded.Static = false
-							end
-
-							-- Decode Name: integer ID to string or raw string (Version 3: index 4)
-							local nameValue = entry[4]
-							if type(nameValue) == "number" and nameValue > 0 then
-								expanded.Name = names[nameValue] or "Unknown"
-							elseif type(nameValue) == "string" and nameValue ~= "" then
-								expanded.Name = nameValue
-							else
-								expanded.Name = "Unknown"
-							end
-
-							-- Decode Reason: integer ID to string or raw string (Version 3: index 5)
-							local reasonValue = entry[5]
-							if type(reasonValue) == "number" and reasonValue > 0 then
-								expanded.Reason = reasons[reasonValue] or "Unknown"
-							elseif type(reasonValue) == "string" then
-								expanded.Reason = reasonValue
-							else
-								expanded.Reason = "Cheater"
-							end
-
-							-- Decode Timestamp (Version 3: index 6, optional)
-							-- Only set if present in file (saves runtime memory)
-							if entry[6] and type(entry[6]) == "number" and entry[6] ~= 0 then
-								expanded.Timestamp = entry[6]
-							end
-
-							-- Decode Karma (Version 3: index 6 or 7, optional)
-							-- If Timestamp is missing, Karma is at index 6
-							-- If Timestamp is present, Karma is at index 7
-							if entry[6] and type(entry[6]) == "number" and entry[6] > 0 then
-								-- entry[6] is Timestamp, check entry[7] for Karma
-								if entry[7] then
-									expanded.Karma = entry[7]
-								end
-							elseif entry[6] and type(entry[6]) == "number" and entry[6] < 0 then
-								-- entry[6] could be negative Karma (unlikely but possible)
-								expanded.Karma = entry[6]
-							elseif entry[6] == nil and entry[7] then
-								-- entry[6] is missing, entry[7] is Karma
-								expanded.Karma = entry[7]
-							elseif entry[6] == 0 and entry[7] then
-								-- entry[6] is 0 (omitted Timestamp), entry[7] is Karma
-								expanded.Karma = entry[7]
-							end
-
-							-- Decode Retaliation from Flags bit
-							expanded.Retaliation = (expanded.Flags & Constants.Flags.RETALIATION) ~= 0
-							if expanded.Retaliation then
-								expanded.Flags = expanded.Flags & ~Constants.Flags.RETALIATION
-							end
-
-							expandedData[steamID] = expanded
-						end
-					end
-
-					G.DataBase = expandedData
-					local count = 0
-					for _ in pairs(G.DataBase) do
-						count = count + 1
-					end
-					Logger.Info("Database",
-						string.format("[DB] Loaded %d entries from disk (normalized format v%d).", count, version))
-				end
-			else
-				-- Legacy format: use as-is
-				G.DataBase = decodedData
-				local count = 0
-				for _ in pairs(G.DataBase) do
-					count = count + 1
-				end
-				Logger.Info("Database", string.format("[DB] Loaded %d entries from disk (legacy format).", count))
-			end
-		end
-	end
-
-	local entriesToRemove = {}
-	local total = 0
-
-	for steamID, value in pairs(G.DataBase) do
-		total = total + 1
-		if type(value) ~= "table" or type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
-			table.insert(entriesToRemove, steamID)
-		end
-	end
-
-	for _, key in ipairs(entriesToRemove) do
-		G.DataBase[key] = nil
-	end
-
-	Database.State.lastLoaded = os.time()
-	Logger.Info("Database", string.format("[DB] Database ready: %d entries", total - #entriesToRemove))
-
-	Database.SanitizeAll()
-	Database.ClearLocalPlayer()
-	Database.State.isInitialized = true
+	Database.Initialize(silent)
 end
 
 function Database.SanitizeAll()
@@ -649,6 +512,269 @@ function Database.SanitizeAll()
 		Logger.Info("Database", string.format("[DB] Aggressively sanitized %d entries (stripped URLs)", sanitized))
 		-- isDirty is already set by UpsertCheater; save will happen on next natural trigger
 	end
+end
+
+function Database.BuildEmbeddedBaseline()
+	Database.EmbeddedBaseline = {}
+	local baseline = Database.EmbeddedBaseline
+
+	for _, embeddedDB in pairs(EmbeddedDBs) do
+		if type(embeddedDB) ~= "table" then
+			goto continue_db
+		end
+
+		local usesGlobalFormat = embeddedDB.Data ~= nil and embeddedDB.Sources == nil
+		if usesGlobalFormat then
+			for steamID, entry in pairs(embeddedDB.Data) do
+				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+					mergeEntryIntoBaseline(baseline, steamID, entry)
+				end
+			end
+		else
+			for steamID, entry in pairs(embeddedDB) do
+				if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+					mergeEntryIntoBaseline(baseline, steamID, {
+						Name = entry.Name or "Unknown",
+						Reason = entry.Reason or "Cheater",
+						Source = entry.Source or "Embedded",
+						Static = entry.Static or false,
+						Flags = entry.Flags or 0,
+					})
+				end
+			end
+		end
+		::continue_db::
+	end
+
+	local count = 0
+	for _ in pairs(baseline) do
+		count = count + 1
+	end
+	Logger.Debug("Database", string.format("[DB] Embedded baseline built: %d entries", count))
+end
+
+function Database.ShouldPersistEntry(steamID, entry, options)
+	if type(entry) ~= "table" or type(steamID) ~= "string" then
+		return false
+	end
+	if options and options.runtime == true then
+		return true
+	end
+
+	local baseline = Database.EmbeddedBaseline[steamID]
+	if not baseline then
+		return true
+	end
+	if entriesEquivalent(entry, baseline) then
+		return false
+	end
+
+	local baseReason = Database.ResolveReason(baseline)
+	local curReason = Database.ResolveReason(entry)
+	local baseStatic = Database.ResolveStatic(baseline)
+	local curStatic = Database.ResolveStatic(entry)
+	if ReasonWeightResolver.ShouldOverrideEvidence(baseReason, curReason, baseStatic, curStatic) then
+		return true
+	end
+
+	if getEntryFlags(entry) ~= getEntryFlags(baseline) then
+		return true
+	end
+
+	return false
+end
+
+function Database.SyncOverlayEntry(steamID, options)
+	if type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
+		return
+	end
+	if type(Database.Overlay) ~= "table" then
+		Database.Overlay = {}
+	end
+
+	local entry = G.DataBase and G.DataBase[steamID]
+	if not entry then
+		if Database.Overlay[steamID] then
+			Database.Overlay[steamID] = nil
+			Database.State.isDirty = true
+		end
+		return
+	end
+
+	if Database.ShouldPersistEntry(steamID, entry, options) then
+		local snapshot = copyEntry(entry)
+		if not entriesEquivalent(snapshot, Database.Overlay[steamID]) then
+			Database.Overlay[steamID] = snapshot
+			Database.State.isDirty = true
+		end
+	elseif Database.Overlay[steamID] then
+		Database.Overlay[steamID] = nil
+		Database.State.isDirty = true
+	end
+end
+
+function Database.ApplyOverlayToDataBase()
+	if type(Database.Overlay) ~= "table" or type(G.DataBase) ~= "table" then
+		return
+	end
+
+	local applied = 0
+	for steamID, entry in pairs(Database.Overlay) do
+		if type(entry) == "table" and steamID:match("^7656119%d+$") then
+			local existing = G.DataBase[steamID]
+			if not existing then
+				G.DataBase[steamID] = copyEntry(entry)
+				applied = applied + 1
+			else
+				local existingReason = Database.ResolveReason(existing)
+				local overlayReason = Database.ResolveReason(entry)
+				local existingStatic = Database.ResolveStatic(existing)
+				local overlayStatic = Database.ResolveStatic(entry)
+				if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, overlayReason, existingStatic, overlayStatic) then
+					G.DataBase[steamID] = copyEntry(entry)
+					applied = applied + 1
+				end
+			end
+		end
+	end
+
+	if applied > 0 then
+		Logger.Debug("Database", string.format("[DB] Overlay applied to runtime: %d entries merged", applied))
+	end
+end
+
+local function decodeDatabaseFileContent(content)
+	if not content or #content == 0 then
+		return nil
+	end
+
+	local success, decodedData = pcall(function()
+		local chunk, err = load("return " .. content)
+		if not chunk then
+			error("Lua parse error (prepended return): " .. tostring(err))
+		end
+		local ok, result = pcall(chunk)
+		if not ok then
+			error("Lua execution error (prepended return): " .. tostring(result))
+		end
+		if type(result) == "table" then
+			return result
+		end
+
+		chunk, err = load(content)
+		if not chunk then
+			error("Lua parse error (raw): " .. tostring(err))
+		end
+		ok, result = pcall(chunk)
+		if not ok then
+			error("Lua execution error (raw): " .. tostring(result))
+		end
+		if type(result) == "table" then
+			return result
+		end
+
+		local decodedJson = Common.Json.decode(content)
+		if type(decodedJson) == "table" then
+			return decodedJson
+		end
+
+		error("Failed to decode content in any format.")
+	end)
+
+	if not success or type(decodedData) ~= "table" then
+		return nil, decodedData
+	end
+	return decodedData
+end
+
+local function extractDataTableFromDecoded(decodedData)
+	if type(decodedData) ~= "table" then
+		return {}
+	end
+	if decodedData._Metadata and decodedData.Data and type(decodedData.Data) == "table" then
+		return decodedData.Data
+	end
+	return decodedData
+end
+
+function Database.MigrateLegacyFullToOverlay(legacyData, filePath)
+	local legacyTable = extractDataTableFromDecoded(legacyData)
+	local kept = 0
+	local skipped = 0
+	Database.Overlay = {}
+
+	for steamID, entry in pairs(legacyTable) do
+		if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+			if Database.ShouldPersistEntry(steamID, entry, nil) then
+				Database.Overlay[steamID] = copyEntry(entry)
+				kept = kept + 1
+			else
+				skipped = skipped + 1
+			end
+		end
+	end
+
+	Logger.Info("Database",
+		string.format("[DB] Migrated legacy database: %d overlay entries kept, %d embedded duplicates skipped",
+			kept, skipped))
+
+	if filePath and type(filePath) == "string" then
+		local backupPath = filePath .. ".bak"
+		local ok, err = os.rename(filePath, backupPath)
+		if ok then
+			Logger.Info("Database", "[DB] Legacy database backed up to: " .. backupPath)
+		else
+			Logger.Warning("Database", "[DB] Could not rename legacy database: " .. tostring(err))
+		end
+	end
+
+	Database.State.isDirty = true
+	Database.SaveDatabase(true)
+end
+
+function Database.LoadOverlayFromDisk(silent)
+	local filePath = Database.GetFilePath()
+	if not silent then
+		Logger.Debug("Database", "[DB] Loading overlay from disk...")
+	end
+
+	local content = Serializer.readFile(filePath)
+	if not content then
+		local luaPath = filePath:gsub("%.txt$", ".lua")
+		content = Serializer.readFile(luaPath)
+	end
+
+	if not content or #content == 0 then
+		Database.Overlay = {}
+		return
+	end
+
+	local decodedData, decodeErr = decodeDatabaseFileContent(content)
+	content = nil
+
+	if not decodedData then
+		Logger.Error("Database", "[DB] Overlay load failed: " .. tostring(decodeErr))
+		Database.Overlay = {}
+		return
+	end
+
+	local metadata = decodedData._Metadata
+	local isOverlayKind = metadata and metadata.Kind == "overlay"
+	local dataTable = extractDataTableFromDecoded(decodedData)
+
+	if isOverlayKind then
+		Database.Overlay = dataTable
+		local count = 0
+		for _ in pairs(Database.Overlay) do
+			count = count + 1
+		end
+		Logger.Info("Database", string.format("[DB] Loaded overlay: %d entries", count))
+		return
+	end
+
+	-- Legacy full database on disk: one-time migration to overlay-only file
+	Logger.Info("Database", "[DB] Legacy full database detected; migrating to overlay format...")
+	Database.MigrateLegacyFullToOverlay(decodedData, filePath)
 end
 
 function Database.LoadEmbeddedDatabases()
@@ -730,7 +856,6 @@ function Database.LoadEmbeddedDatabases()
 	end
 
 	if totalNew > 0 or totalOverridden > 0 then
-		Database.State.isDirty = true
 		Logger.Info("Database",
 			string.format("[DB] Embedded DBs loaded: %d new, %d overridden (weight-based)", totalNew, totalOverridden))
 	end
@@ -778,15 +903,28 @@ function Database.Initialize(silent)
 	if Database.State.isInitialized then
 		return
 	end
-	if type(G.DataBase) ~= "table" then
-		G.DataBase = {}
-	end
-	-- Clear cache on init
+	G.DataBase = {}
+	Database.Overlay = {}
 	decodedCache = {}
 	cacheHits = 0
 	cacheMisses = 0
-	Database.LoadDatabase(silent, false)
+	Database.State.isDirty = false
+
+	Database.BuildEmbeddedBaseline()
+	Database.LoadOverlayFromDisk(silent)
 	Database.LoadEmbeddedDatabases()
+	Database.ApplyOverlayToDataBase()
+
+	local total = 0
+	for _ in pairs(G.DataBase) do
+		total = total + 1
+	end
+	Database.State.lastLoaded = os.time()
+	Logger.Info("Database", string.format("[DB] Database ready: %d runtime entries", total))
+
+	Database.SanitizeAll()
+	Database.ClearLocalPlayer()
+	Database.State.isInitialized = true
 end
 
 function Database.ClearLocalPlayer()
@@ -797,7 +935,7 @@ function Database.ClearLocalPlayer()
 			Database.SetPriority(localPlayer, 0)
 			if G.DataBase[mySteamID] then
 				G.DataBase[mySteamID] = nil
-				Database.State.isDirty = true
+				Database.SyncOverlayEntry(mySteamID)
 			end
 		end
 	end
@@ -818,7 +956,7 @@ function Database.PurgeFriendsAndSelf()
 			if G.DataBase[mySteamID] then
 				G.DataBase[mySteamID] = nil
 				purged = purged + 1
-				Database.State.isDirty = true
+				Database.SyncOverlayEntry(mySteamID)
 			end
 			playerlist.SetPriority(localPlayer, 0)
 		end
@@ -832,7 +970,7 @@ function Database.PurgeFriendsAndSelf()
 			if steamID64 and steamID64:match("^7656119%d+$") and G.DataBase[steamID64] then
 				G.DataBase[steamID64] = nil
 				purged = purged + 1
-				Database.State.isDirty = true
+				Database.SyncOverlayEntry(steamID64)
 			end
 		end
 	end
@@ -956,7 +1094,7 @@ function Database.UpsertCheater(steamID, data)
 
 	-- Invalidate cache for this entry
 	decodedCache[steamID] = nil
-	Database.State.isDirty = true
+	Database.SyncOverlayEntry(steamID, { runtime = true })
 
 	return true
 end
@@ -1029,7 +1167,7 @@ function Database.RemoveCheater(steamID)
 	if G.DataBase[steamID] then
 		G.DataBase[steamID] = nil
 		decodedCache[steamID] = nil
-		Database.State.isDirty = true
+		Database.SyncOverlayEntry(steamID)
 		Logger.Debug("Database", "[DB] Removed cheater: " .. steamID)
 		return true
 	end
