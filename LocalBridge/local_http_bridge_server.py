@@ -21,6 +21,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import json
+import os
 import threading
 import time
 import uuid
@@ -33,9 +34,9 @@ from urllib.request import Request, urlopen
 HOST = "127.0.0.1"
 PORT = 17354
 PROTOCOL = "local-http-bridge-v2"
-DEFAULT_TIMEOUT_MS = 10000
+DEFAULT_TIMEOUT_MS = 30000  # 30s remote fetch; Lua uses the same budget
 DEFAULT_MAX_BYTES = 2 * 1024 * 1024
-MAX_TIMEOUT_MS = 120000
+MAX_TIMEOUT_MS = 30000
 MAX_MAX_BYTES = 16 * 1024 * 1024
 MAX_JOB_AGE_SEC = 300
 MAX_PENDING_JOBS = 20000
@@ -89,6 +90,35 @@ QUEUE_SEQUENCE = itertools.count()
 
 JOBS_LOCK = threading.Lock()
 JOBS_COND = threading.Condition(JOBS_LOCK)
+
+VERBOSE_BRIDGE_HTTP = os.environ.get("BRIDGE_VERBOSE_HTTP", "").lower() in ("1", "true", "yes")
+
+STATS: dict[str, float | int] = {
+    "submits": 0,
+    "cache_hits": 0,
+    "dedupe_subscribes": 0,
+    "poll_batches": 0,
+    "poll_ids": 0,
+    "fetch_ok": 0,
+    "fetch_fail": 0,
+    "fetch_ms_total": 0.0,
+}
+STATS_LOCK = threading.Lock()
+
+
+def bump_stat(key: str, amount: float | int = 1) -> None:
+    with STATS_LOCK:
+        STATS[key] = STATS.get(key, 0) + amount  # type: ignore[operator]
+
+
+def short_url(url: str, max_len: int = 96) -> str:
+    if len(url) <= max_len:
+        return url
+    return url[: max_len - 3] + "..."
+
+
+def log_event(message: str) -> None:
+    print(f"[bridge] {message}")
 
 
 def clamp_int(raw_value: str | None, default: int, minimum: int, maximum: int) -> int:
@@ -286,6 +316,7 @@ def create_job(
 
         cache_entry = RESULT_CACHE.get(request_key)
         if cache_entry is not None and now < cache_entry.expires_at:
+            bump_stat("cache_hits")
             job_id = str(uuid.uuid4())
             JOBS[job_id] = Job(
                 created_at=now,
@@ -329,6 +360,8 @@ def create_job(
                     worker_started=False,
                 )
                 SUBSCRIBERS.setdefault(in_flight, set()).add(job_id)
+                bump_stat("dedupe_subscribes")
+                log_event(f"DEDUP id={job_id[:8]} waits on {in_flight[:8]} {short_url(url)}")
                 return job_id
 
         if len(PENDING) >= MAX_PENDING_JOBS:
@@ -360,6 +393,7 @@ def create_job(
         priority = LAST_SERVED_BY_KEY.get(request_key, 0.0)
         heapq.heappush(PENDING, QueueItem(priority=priority, sequence=next(QUEUE_SEQUENCE), job_id=job_id))
         JOBS_COND.notify()
+        log_event(f"QUEUED id={job_id[:8]} {short_url(url)}")
         return job_id
 
 
@@ -426,7 +460,23 @@ def worker_loop(worker_index: int) -> None:
             if job_id is None:
                 continue
 
+        fetch_started = time.time()
         success, data, error = fetch_url(url, timeout_ms, max_bytes, method, body, content_type)
+        fetch_ms = (time.time() - fetch_started) * 1000.0
+        byte_len = len(data) if data else 0
+        if success:
+            bump_stat("fetch_ok")
+        else:
+            bump_stat("fetch_fail")
+        bump_stat("fetch_ms_total", fetch_ms)
+        if success:
+            log_event(
+                f"FETCH OK {fetch_ms:.0f}ms {byte_len}B id={job_id[:8]} {short_url(url)}"
+            )
+        else:
+            log_event(
+                f"FETCH FAIL {fetch_ms:.0f}ms id={job_id[:8]} {short_url(url)} err={error}"
+            )
 
         with JOBS_COND:
             finish_job_locked(job_id, success, data, error)
@@ -437,6 +487,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
     server_version = "LocalLuaBridge/2.0"
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        if not VERBOSE_BRIDGE_HTTP:
+            msg = format % args
+            if "GET /result_batch" in msg or "GET /result?" in msg:
+                return
         print(f"[bridge] {self.address_string()} - {format % args}")
 
     def do_GET(self) -> None:  # noqa: N802
@@ -487,11 +541,19 @@ class BridgeHandler(BaseHTTPRequestHandler):
             send_text(self, f"err|{job.error or 'remote request failed'}\n")
             return
 
-        if parsed.path == "/health":
+        if parsed.path == "/health" or parsed.path == "/stats":
             with JOBS_LOCK:
                 pending = len(PENDING)
                 in_flight = len(INFLIGHT_BY_KEY)
                 cache_size = len(RESULT_CACHE)
+                job_count = len(JOBS)
+            with STATS_LOCK:
+                stats_snapshot = dict(STATS)
+            fetch_ok = int(stats_snapshot.get("fetch_ok", 0))
+            fetch_fail = int(stats_snapshot.get("fetch_fail", 0))
+            fetch_ms_total = float(stats_snapshot.get("fetch_ms_total", 0.0))
+            fetch_count = fetch_ok + fetch_fail
+            avg_fetch_ms = (fetch_ms_total / fetch_count) if fetch_count > 0 else 0.0
             send_json(
                 self,
                 {
@@ -502,6 +564,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "pending": pending,
                     "in_flight": in_flight,
                     "cache_entries": cache_size,
+                    "jobs_tracked": job_count,
+                    "stats": stats_snapshot,
+                    "avg_fetch_ms": round(avg_fetch_ms, 1),
                     "error": None,
                 },
             )
@@ -517,12 +582,25 @@ class BridgeHandler(BaseHTTPRequestHandler):
             max_bytes = clamp_int(first_value(query, "max_bytes"), DEFAULT_MAX_BYTES, 1024, MAX_MAX_BYTES)
 
             try:
+                bump_stat("submits")
                 job_id = create_job(url, timeout_ms, max_bytes)
             except RuntimeError as exc:
                 send_json(self, {"ok": False, "error": str(exc)}, 503)
                 return
 
-            send_json(self, {"ok": True, "id": job_id, "done": False, "error": None})
+            job = read_job(job_id)
+            instant = job is not None and job.done
+            if not instant:
+                log_event(f"SUBMIT pending id={job_id[:8]} {short_url(url)}")
+            send_json(
+                self,
+                {
+                    "ok": True,
+                    "id": job_id,
+                    "done": instant,
+                    "error": None,
+                },
+            )
             return
 
         if parsed.path == "/submit_json":
@@ -604,6 +682,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 send_json(self, {"ok": False, "error": "missing id"}, 400)
                 return
 
+            bump_stat("poll_batches")
+            bump_stat("poll_ids", len(ids))
+
             items: list[dict[str, object]] = []
             for job_id in ids:
                 job = read_job(job_id)
@@ -644,6 +725,8 @@ def main() -> None:
         "[bridge] endpoints: /health /submit /submit_json /result /submit_batch /result_batch /health_txt /submit_txt /result_txt"
     )
     print(f"[bridge] workers={WORKER_COUNT} max_pending={MAX_PENDING_JOBS} max_cache_entries={MAX_CACHE_ENTRIES}")
+    print("[bridge] verbose HTTP access log: set BRIDGE_VERBOSE_HTTP=1")
+    print("[bridge] useful lines: QUEUED / FETCH OK|FAIL / CACHE HIT / SUBMIT / stats on GET /stats")
     server.serve_forever()
 
 

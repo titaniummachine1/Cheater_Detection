@@ -215,6 +215,8 @@ local function mergePlayersFromActiveSource(state, parseMode)
 		staticID = "Ext"
 	end
 
+	local mergeStartedAt = globals.RealTime()
+
 	for i = 1, #players do
 		local player = players[i]
 		s.processed = s.processed + 1
@@ -264,6 +266,7 @@ local function mergePlayersFromActiveSource(state, parseMode)
 	state.results.total_updated = state.results.total_updated + s.updated
 	state.results.errors = state.results.errors + s.errors
 
+	local mergeMs = (globals.RealTime() - mergeStartedAt) * 1000.0
 	Logger.Debug(
 		"Fetcher",
 		string.format(
@@ -276,6 +279,16 @@ local function mergePlayersFromActiveSource(state, parseMode)
 			s.errors
 		)
 	)
+	if mergeMs >= 50.0 then
+		print(string.format(
+			"[FETCHER] MERGE %s | %d rows in %.0fms (added=%d updated=%d) — hitch if this ran while walking",
+			tostring(source.name),
+			s.processed,
+			mergeMs,
+			s.added,
+			s.updated
+		))
+	end
 
 	state.playersToProcess = nil
 	state.entryIdx = 1
