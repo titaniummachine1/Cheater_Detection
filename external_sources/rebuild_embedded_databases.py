@@ -237,6 +237,59 @@ def apply_reason_canonical(all_verbose: Dict[str, Dict[str, dict]], canonical: D
     return changed
 
 
+def _reason_has_bot_mark(reason_cf: str) -> bool:
+    if "not a bot" in reason_cf:
+        return False
+    bot_tokens = ("b0t", " bot ", "bot (", "tacobot", "royalhack.net b", "bot submitted")
+    return any(token in reason_cf for token in bot_tokens) or reason_cf.endswith(" bot")
+
+
+def normalize_entry_reason(entry: dict) -> None:
+    """
+    Collapse noisy per-player reason strings into semantic families.
+    Proof text belongs in Name, not the Reasons lookup table.
+    """
+    reason = entry.get("Reason")
+    if not isinstance(reason, str) or not reason:
+        return
+
+    static = entry.get("Static") or ""
+    reason_cf = reason.casefold()
+
+    if "not a bot" in reason_cf:
+        return
+
+    # MegaScat: fixed family + move trailing proof into Name when missing.
+    if static == "mega_scat" or reason_cf.startswith("megascaterbomb"):
+        proof = None
+        if " - " in reason:
+            _, proof = reason.split(" - ", 1)
+            proof = proof.strip()
+        if "watched" in reason_cf:
+            entry["Reason"] = "Suspicious (MegaScaterbomb)"
+        elif _reason_has_bot_mark(reason_cf):
+            entry["Reason"] = "Bot (MegaScaterbomb)"
+        else:
+            entry["Reason"] = "Cheater (MegaScaterbomb)"
+        if proof and entry.get("Name") in (None, "", "Unknown"):
+            entry["Name"] = _sanitize_name(proof)
+        return
+
+    # qfoxb raw proof strings -> bot/cheater families.
+    if static == "qfoxb":
+        if _reason_has_bot_mark(reason_cf):
+            entry["Reason"] = "Bot (qfoxb)"
+        elif reason.startswith("(") or score_reason(reason) <= 5:
+            entry["Reason"] = "Cheater (qfoxb)"
+        return
+
+    # TFCL / generic raw bot proof lines.
+    if static in ("tfcl_bot", "tfcl_botnames", "d3_tacobot", "tf2bd_pazer", "bots_tf"):
+        if _reason_has_bot_mark(reason_cf) and "bot (" not in reason_cf:
+            label = static.replace("_", " ")
+            entry["Reason"] = f"Bot ({label})"
+
+
 def score_source(static_id: Optional[str]) -> int:
     """Return the weight of a source static_id (0 if unknown/None)."""
     if not static_id:
@@ -361,15 +414,20 @@ def parse_megascat(raw: bytes, source: dict) -> Dict[str, dict]:
         if not sid or not sid64_valid(sid):
             continue
 
-        name    = _sanitize_name(player.get("label", "") or "")
-        ptype   = player.get("type", "cheater")
-        reason  = f"MegaScaterbomb ({ptype})"
+        name = _sanitize_name(player.get("label", "") or "")
+        ptype = (player.get("type") or "cheater").casefold()
+        if ptype in ("bot", "tacobot"):
+            reason = "Bot (MegaScaterbomb)"
+        elif ptype == "watched":
+            reason = "Suspicious (MegaScaterbomb)"
+        else:
+            reason = "Cheater (MegaScaterbomb)"
 
         aliases = player.get("aliases", [])
-        if aliases:
+        if aliases and name in ("", "Unknown"):
             alias = str(aliases[0]).encode("ascii", "ignore").decode("ascii")[:40].strip()
             if alias:
-                reason = f"{reason} - {alias}"
+                name = _sanitize_name(alias)
 
         entries[sid] = {
             "Name":   name,
@@ -1074,6 +1132,43 @@ def fetch_and_parse(source: dict) -> Optional[Dict[str, dict]]:
 # Weight-based merge helper
 # ---------------------------------------------------------------------------
 
+def overlay_beats_baseline(overlay_entry: dict, baseline_entry: dict) -> bool:
+    """True when overlay carries stronger evidence than the embed row (not name-only)."""
+    if should_override(baseline_entry, overlay_entry):
+        return True
+    if int(overlay_entry.get("Flags") or 0) != int(baseline_entry.get("Flags") or 0):
+        return True
+    return False
+
+
+def prune_name_only_overlay(
+    overlay: Dict[str, dict],
+    baseline_entries: Dict[str, dict],
+) -> int:
+    """Drop overlay rows that only fill Name when reason/static/flags match embed."""
+    pruned = 0
+    for sid in list(overlay.keys()):
+        overlay_entry = overlay[sid]
+        baseline = baseline_entries.get(sid)
+        if not baseline:
+            continue
+        if overlay_beats_baseline(overlay_entry, baseline):
+            continue
+        overlay_reason = (overlay_entry.get("Reason") or "").casefold()
+        baseline_reason = (baseline.get("Reason") or "").casefold()
+        if overlay_reason != baseline_reason:
+            continue
+        overlay_static = (overlay_entry.get("Static") or "").casefold()
+        baseline_static = (baseline.get("Static") or "").casefold()
+        if overlay_static != baseline_static:
+            continue
+        if int(overlay_entry.get("Flags") or 0) != int(baseline.get("Flags") or 0):
+            continue
+        del overlay[sid]
+        pruned += 1
+    return pruned
+
+
 def merge_into(combined: Dict[str, dict], incoming: Dict[str, dict]) -> Tuple[int, int]:
     """
     Merge `incoming` into `combined` using weight-based selection.
@@ -1081,17 +1176,19 @@ def merge_into(combined: Dict[str, dict], incoming: Dict[str, dict]) -> Tuple[in
     """
     new_count = overridden_count = 0
     for sid, entry in incoming.items():
+        row = dict(entry)
+        normalize_entry_reason(row)
         existing = combined.get(sid)
         if existing is None:
-            combined[sid] = dict(entry)
+            combined[sid] = row
             new_count += 1
-        elif should_override(existing, entry):
-            combined[sid] = dict(entry)
+        elif should_override(existing, row):
+            combined[sid] = row
             overridden_count += 1
         else:
             # Keep existing (higher or equal weight) - update name if missing
-            if existing.get("Name") in (None, "Unknown", "") and entry.get("Name") not in (None, "Unknown", ""):
-                existing["Name"] = entry["Name"]
+            if existing.get("Name") in (None, "Unknown", "") and row.get("Name") not in (None, "Unknown", ""):
+                existing["Name"] = row["Name"]
     return new_count, overridden_count
 
 
@@ -1185,6 +1282,13 @@ def main() -> None:
 
     overlay = load_build_overlay()
     if overlay:
+        for entry in overlay.values():
+            normalize_entry_reason(entry)
+        pruned = prune_name_only_overlay(overlay, combined)
+        if pruned:
+            print(f"  [OVERLAY]  Pruned {pruned:,} name-only rows from build_overlay.json")
+            BUILD_OVERLAY_PATH.write_text(json.dumps(overlay, indent=2), encoding="utf-8")
+            print(f"  [OVERLAY]  Saved trimmed overlay ({len(overlay):,} evidence rows)")
         new, ov = merge_into(combined, overlay)
         print(f"  [OVERLAY]  +{new:,} new, {ov:,} upgraded entries from build_overlay.json")
     else:
@@ -1239,6 +1343,9 @@ def main() -> None:
     else:
         print(f"  [TFCL] {TFCL_FILE.name} not found — skipping")
 
+    for entries in all_verbose.values():
+        for entry in entries.values():
+            normalize_entry_reason(entry)
     reason_canonical = build_reason_canonical_map(all_verbose)
     reason_rows_normalized = apply_reason_canonical(all_verbose, reason_canonical)
     if reason_rows_normalized:

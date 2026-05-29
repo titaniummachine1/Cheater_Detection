@@ -39,8 +39,10 @@ from rebuild_embedded_databases import (
     load_all_embed_entries,
     load_build_overlay,
     load_build_removals,
+    normalize_entry_reason,
     parse_embed_lua_file,
     parse_global_lookup,
+    prune_name_only_overlay,
     should_override,
     sid64_valid,
 )
@@ -281,12 +283,7 @@ def build_upgrade(existing: dict, name: Optional[str], vac: bool, comm: bool) ->
         if should_override(existing, candidate) or new_flags != flags:
             return candidate
 
-    if name and name != "Unknown" and (existing.get("Name") or "Unknown") == "Unknown":
-        candidate = dict(existing)
-        candidate["Name"] = name
-        candidate["Flags"] = new_flags
-        return candidate
-
+    # Name-only fills stay in the embed from sources — do not bloat build_overlay.json.
     return None
 
 
@@ -350,6 +347,7 @@ def process_batch(
 
         upgrade = build_upgrade(existing, name, vac, comm)
         if upgrade:
+            normalize_entry_reason(upgrade)
             overlay[sid] = upgrade
             upgraded += 1
 
@@ -426,6 +424,12 @@ def main() -> None:
 
     removals: set = set(load_build_removals())
     overlay: Dict[str, dict] = load_build_overlay()
+    for entry in overlay.values():
+        normalize_entry_reason(entry)
+    overlay_pruned = prune_name_only_overlay(overlay, entries)
+    if overlay_pruned:
+        print(f"  Pruned {overlay_pruned:,} name-only rows from existing build_overlay.json")
+        BUILD_OVERLAY_PATH.write_text(json.dumps(overlay, indent=2), encoding="utf-8")
     processed: set = set()
 
     if args.resume and CHECKPOINT_PATH.exists():
