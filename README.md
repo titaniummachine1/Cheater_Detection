@@ -69,11 +69,11 @@ We have completely re-engineered the backend storage and in-memory execution pip
 
 Every push to `main` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml): embedded DBs are rebuilt, Lua is bundled, a semver tag is bumped from the **first line of the commit message**, and a GitHub Release is published with:
 
-| Bump | Version change | Keywords in commit (examples) |
-|------|----------------|--------------------------------|
-| **patch** (default) | `+0.0.1` | `fix`, `perf`, `patch`, `hotfix` — or no keyword |
-| **minor** | `+0.1.0` (patch reset to 0) | `minor`, `feat`, `feature`, `update` |
-| **major** | `+1.0.0` (minor/patch reset) | `major`, `breaking`, `break` |
+| Bump                | Version change               | Keywords in commit (examples)                    |
+| ------------------- | ---------------------------- | ------------------------------------------------ |
+| **patch** (default) | `+0.0.1`                     | `fix`, `perf`, `patch`, `hotfix` — or no keyword |
+| **minor**           | `+0.1.0` (patch reset to 0)  | `minor`, `feat`, `feature`, `update`             |
+| **major**           | `+1.0.0` (minor/patch reset) | `major`, `breaking`, `break`                     |
 
 Example: `v1.4.2` + commit `perf: faster bhop gate` → `v1.4.3`. Commit `update: new detections` → `v1.5.0`. Commit `major: rewrite evidence` → `v2.0.0`.
 

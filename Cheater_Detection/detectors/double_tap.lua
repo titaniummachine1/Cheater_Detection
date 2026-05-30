@@ -36,6 +36,8 @@ local DT_EVIDENCE_COOLDOWN_S      = 0.5
 local REJECT_LOG_INTERVAL_S       = 0.35
 local HURT_LOG_INTERVAL_S         = 1.0
 local WATCH_BURST_SCAN_INTERVAL   = 4 -- ticks between scans while waiting for post-hit burst
+local ROUTINE_BURST_SCAN_INTERVAL = 8 -- idle background: deep scan only every N ticks
+local ROUTINE_MIN_VEL2D           = 15 -- standing on ground: skip routine DT scan entirely
 local MAX_HURT_BURST_SCANS_TICK   = 10 -- routine cap per game tick (busy fights)
 local MAX_HURT_BURST_SCANS_HOT    = 14 -- absolute cap; hot shooters may exceed routine budget
 
@@ -267,7 +269,18 @@ local function getDtEvidenceCap()
 	return cap
 end
 
-local function getDtFocusPriority(id)
+local function isStandingIdle(pdata)
+	if not pdata or pdata.onGround == false then
+		return false
+	end
+	local vel = pdata.velocity
+	if not vel then
+		return false
+	end
+	return vel:Length2D() <= ROUTINE_MIN_VEL2D
+end
+
+local function getDtFocusPriority(id, pdata)
 	if not id or id:sub(1, 4) == "BOT_" then
 		return -1
 	end
@@ -285,6 +298,10 @@ local function getDtFocusPriority(id)
 	end
 	if weight > 0 then
 		return DT_FOCUS_PRIORITY_SUSPECT
+	end
+	-- No hurt/watch/burst: do not routine-scan players just standing on ground.
+	if pdata and isStandingIdle(pdata) then
+		return -1
 	end
 	return DT_FOCUS_PRIORITY_ROUTINE
 end
@@ -347,7 +364,7 @@ function DoubleTap.BeginDetectionTick(activePlayers, curTick)
 		if not id then
 			goto continue
 		end
-		local priority = getDtFocusPriority(id)
+		local priority = getDtFocusPriority(id, pState.pdata)
 		if priority == DT_FOCUS_PRIORITY_WATCH or priority == DT_FOCUS_PRIORITY_BURST then
 			hotPool[#hotPool + 1] = id
 		elseif priority == DT_FOCUS_PRIORITY_SUSPECT then
@@ -569,18 +586,25 @@ local function onBurstDetected(id, burstAmount, curTick, burstIndex)
 	end
 end
 
-local function shouldScanBurstThisTick(id, curTick)
-	if isFocusedPlayer(id) and getDtFocusPriority(id) >= DT_FOCUS_PRIORITY_BURST then
+local function shouldScanBurstThisTick(id, curTick, pdata)
+	local priority = getDtFocusPriority(id, pdata)
+	if priority == DT_FOCUS_PRIORITY_BURST then
 		return true
 	end
-	if not isWatchingForBurst(id) then
-		return true
+	if priority == DT_FOCUS_PRIORITY_WATCH then
+		return (curTick % WATCH_BURST_SCAN_INTERVAL) == 0
 	end
-	return (curTick % WATCH_BURST_SCAN_INTERVAL) == 0
+	if priority == DT_FOCUS_PRIORITY_SUSPECT then
+		return (curTick % WATCH_BURST_SCAN_INTERVAL) == 0
+	end
+	if priority ~= DT_FOCUS_PRIORITY_ROUTINE then
+		return false
+	end
+	return (curTick % ROUTINE_BURST_SCAN_INTERVAL) == 0
 end
 
-local function tryDetectBurstForPlayer(id, curTick, forceScan)
-	if not forceScan and not shouldScanBurstThisTick(id, curTick) then
+local function tryDetectBurstForPlayer(id, curTick, forceScan, pdata)
+	if not forceScan and not shouldScanBurstThisTick(id, curTick, pdata) then
 		return
 	end
 
@@ -628,7 +652,7 @@ local function tryHurtBurstScan(id, curTick, wasWatchingBeforeHurt)
 	end
 	data.lastHurtBurstScanTick = curTick
 	hurtBurstScansUsed = hurtBurstScansUsed + 1
-	tryDetectBurstForPlayer(id, curTick, true)
+	tryDetectBurstForPlayer(id, curTick, true, nil)
 end
 
 function DoubleTap.HasWork(playerState)
@@ -639,10 +663,17 @@ function DoubleTap.HasWork(playerState)
 		return false
 	end
 	local id = playerState.id
-	if getDtFocusPriority(id) < 0 then
+	if not isFocusedPlayer(id) then
 		return false
 	end
-	return isFocusedPlayer(id)
+	local pdata = playerState.pdata
+	if getDtFocusPriority(id, pdata) < 0 then
+		return false
+	end
+	if not shouldScanBurstThisTick(id, globals.TickCount(), pdata) then
+		return false
+	end
+	return true
 end
 
 function DoubleTap.ProcessPlayer(playerState)
@@ -676,7 +707,7 @@ function DoubleTap.ProcessPlayer(playerState)
 
 	local curTick = globals.TickCount()
 	clearStaleBurstState(getState(id), curTick)
-	tryDetectBurstForPlayer(id, curTick)
+	tryDetectBurstForPlayer(id, curTick, false, playerState.pdata)
 end
 
 function DoubleTap.Tick()
