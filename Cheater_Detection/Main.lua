@@ -440,14 +440,6 @@ local function OnCreateMove(cmd)
 		Profiler.End("FakeLag")
 	end
 
-	if enableCosmetics then
-		Profiler.Begin("CosmeticAbuse")
-		for _, pState in ipairs(activePlayers) do
-			CosmeticAbuse.ProcessPlayer(pState)
-		end
-		Profiler.End("CosmeticAbuse")
-	end
-
 	Profiler.End("PlayerScan_Loop")
 	Profiler.End("CreateMove_Total")
 end

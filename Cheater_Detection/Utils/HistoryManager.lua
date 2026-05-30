@@ -253,6 +253,7 @@ function HistoryManager.RequestField(player, field)
 end
 
 function HistoryManager.RequestFields(player, fields)
+	if not fields then return end
 	for i = 1, #fields do
 		HistoryManager.RequestField(player, fields[i])
 	end
@@ -294,12 +295,16 @@ function HistoryManager.ApplyFireSnapshot(steamID, tick, pitch, yaw, eyePos)
 end
 
 function HistoryManager.MarkDamageDealt(steamID, tick)
+	if not steamID then return end
 	local history = playerHistories[tostring(steamID)]
 	if not history or history._count == 0 then return end
 
 	local record
-	if tick then
-		record = HistoryManager.GetRecordAt(history, globals.TickCount() - tick)
+	if type(tick) == "number" then
+		local offset = globals.TickCount() - tick
+		if offset >= 0 and offset < history._count then
+			record = HistoryManager.GetRecordAt(history, offset)
+		end
 	else
 		record = history[history._head]
 	end

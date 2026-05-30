@@ -8,11 +8,17 @@ local FireTickTracker = {}
 local STALE_TICKS       = 8
 local lastFireBySteamID = {}
 
-local function copyEyePos(prev, src)
-	if not src then return prev end
-	local t = type(prev) == "table" and prev or {}
-	t.x, t.y, t.z = src.x, src.y, src.z
-	return t
+local function isUsableVector(v)
+	return v and type(v.x) == "number" and type(v.y) == "number" and type(v.z) == "number"
+end
+
+local function buildEyePos(shooter)
+	local origin = shooter:GetAbsOrigin()
+	local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]")
+	if not isUsableVector(origin) or not isUsableVector(viewOffset) then
+		return nil
+	end
+	return origin + viewOffset
 end
 
 local function onProcessTempEntities(teTable)
@@ -33,17 +39,16 @@ local function onProcessTempEntities(teTable)
 			goto continue
 		end
 
-		local shooterID = tostring(Common.GetSteamID64(shooter))
+		local sid = Common.GetSteamID64(shooter)
+		if not sid then goto continue end
+		local shooterID = tostring(sid)
 		if not shooterID:match("^7656119%d+$") then goto continue end
 
 		local pitch = ent:GetPropFloat("m_vecAngles[0]")
 		local yaw   = ent:GetPropFloat("m_vecAngles[1]")
-		if not pitch or not yaw then goto continue end
+		if type(pitch) ~= "number" or type(yaw) ~= "number" then goto continue end
 
-		local prev = lastFireBySteamID[shooterID]
-		local origin = shooter:GetAbsOrigin()
-		local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]")
-		local eyePos = (origin and viewOffset) and (origin + viewOffset) or nil
+		local eyePos = buildEyePos(shooter)
 
 		local snapshot = {
 			shooterID   = shooterID,
@@ -51,7 +56,7 @@ local function onProcessTempEntities(teTable)
 			tick        = curTick,
 			pitch       = pitch,
 			yaw         = yaw,
-			eyePos      = copyEyePos(prev and prev.eyePos, eyePos),
+			eyePos      = eyePos,
 		}
 		lastFireBySteamID[shooterID] = snapshot
 		Events.Publish("OnPlayerFired", snapshot)
@@ -61,6 +66,7 @@ local function onProcessTempEntities(teTable)
 end
 
 function FireTickTracker.GetRecentFire(steamID, maxAgeTicks)
+	if not steamID then return nil end
 	local snap = lastFireBySteamID[tostring(steamID)]
 	if not snap then return nil end
 	if globals.TickCount() - snap.tick > (maxAgeTicks or STALE_TICKS) then return nil end
@@ -73,6 +79,7 @@ function FireTickTracker.DidFireThisTick(steamID)
 end
 
 function FireTickTracker.ClearPlayer(steamID)
+	if not steamID then return end
 	lastFireBySteamID[tostring(steamID)] = nil
 end
 

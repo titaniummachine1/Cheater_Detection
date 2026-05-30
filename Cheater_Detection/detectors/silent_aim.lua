@@ -12,6 +12,7 @@ local DetectorUtils                     = require("Cheater_Detection.Utils.Detec
 local Logger                            = require("Cheater_Detection.Utils.Logger")
 local PlayerData                        = require("Cheater_Detection.Utils.PlayerData")
 local HistoryManager                    = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig                   = require("Cheater_Detection.Utils.DetectionConfig")
 local FireTickTracker                   = require("Cheater_Detection.Core.FireTickTracker")
 local PlayerCache                       = require("Cheater_Detection.Core.player_cache")
 local mathAbs                           = math.abs
@@ -67,10 +68,13 @@ local _histYaws                         = {}
 local _histTicks                        = {}
 
 local FIRE_SNAPSHOT_STALE_TICKS         = 8
-local ANGLE_WATCH_FIRE_TICKS            = 8
+local ANGLE_WATCH_PRE_SHOT_TICKS        = 5
 local ANGLE_WATCH_POST_SHOT_TICKS       = 4
+local ANGLE_WATCH_FIRE_TAIL_TICKS       = 8
+local SPAWN_ANGLE_WARMUP_TICKS          = 66
 
-local angleWatchUntil                 = {}
+local angleWatchFrom                    = {}
+local angleWatchUntil                   = {}
 
 -- Shot accuracy tracking: keyed by steamID64 string.
 -- Tracks hitscan shots fired and hits to compute a session hit rate.
@@ -104,24 +108,37 @@ local function canPrintFiltered(now)
 	return true
 end
 
-local function watchAngles(id, curTick, tailTicks)
-	local untilTick = curTick + (tailTicks or ANGLE_WATCH_FIRE_TICKS)
+local function watchAngles(id, anchorTick, preTicks, postTicks)
+	if not id or type(anchorTick) ~= "number" then return end
+	local pre = preTicks or ANGLE_WATCH_PRE_SHOT_TICKS
+	local post = postTicks or ANGLE_WATCH_FIRE_TAIL_TICKS
+	local fromTick = anchorTick - pre
+	local untilTick = anchorTick + post
+	if not angleWatchFrom[id] or fromTick < angleWatchFrom[id] then
+		angleWatchFrom[id] = fromTick
+	end
 	if (angleWatchUntil[id] or 0) < untilTick then
 		angleWatchUntil[id] = untilTick
 	end
 end
 
+local function clearAngleWatch(id)
+	angleWatchFrom[id] = nil
+	angleWatchUntil[id] = nil
+end
+
 function SilentAim.RecordTickHistory()
 	local curTick = globals.TickCount()
 	for id, untilTick in pairs(angleWatchUntil) do
-		if curTick > untilTick then
-			angleWatchUntil[id] = nil
+		local fromTick = angleWatchFrom[id] or untilTick
+		if curTick > untilTick or curTick < fromTick then
+			clearAngleWatch(id)
 		else
 			local pState = PlayerCache.GetByID(id)
 			if not pState or not pState.pdata.isAlive then
-				angleWatchUntil[id] = nil
+				clearAngleWatch(id)
 			else
-				HistoryManager.RequestField(pState.wrap, HistoryManager.Fields.Angles)
+				DetectionConfig.RecordHistory(pState.wrap, "SilentAim")
 			end
 		end
 	end
@@ -365,7 +382,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		end
 	end
 
-	local attackerClass = ply:GetPropInt("m_iClass")
+	local attackerClass = playerState.wrap:GetClass()
 	local debugInterested = Common.IsLogCategoryEnabled("SilentAim") and
 		(attackerClass == TF_CLASS_SNIPER or attackerClass == TF_CLASS_SPY)
 
@@ -833,9 +850,9 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	if not fireSnap then return end
 
 	local shotTick = fireSnap.tick
-	watchAngles(attackerID, curTick, ANGLE_WATCH_POST_SHOT_TICKS)
+	watchAngles(attackerID, shotTick, ANGLE_WATCH_PRE_SHOT_TICKS, ANGLE_WATCH_POST_SHOT_TICKS)
 	if attackerState and attackerState.wrap then
-		HistoryManager.RequestField(attackerState.wrap, HistoryManager.Fields.Angles)
+		DetectionConfig.RecordHistory(attackerState.wrap, "SilentAim")
 		HistoryManager.ApplyFireSnapshot(attackerID, shotTick, fireSnap.pitch, fireSnap.yaw, fireSnap.eyePos)
 	end
 	HistoryManager.MarkDamageDealt(attackerID, shotTick)
@@ -913,8 +930,20 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	end
 end)
 
+local function onAngleWatchSpawn(event)
+	local uid = event:GetInt("userid")
+	local ent = entities.GetByUserID(uid)
+	if not ent or not ent:IsValid() then return end
+	local sid = Common.GetSteamID64(ent)
+	if not sid then return end
+	local id = tostring(sid)
+	if not id:match("^7656119%d+$") then return end
+	local tick = globals.TickCount()
+	watchAngles(id, tick, 0, SPAWN_ANGLE_WARMUP_TICKS)
+end
+
 Events.Subscribe("OnPlayerFired", function(fire)
-	watchAngles(fire.shooterID, fire.tick)
+	watchAngles(fire.shooterID, fire.tick, ANGLE_WATCH_PRE_SHOT_TICKS, ANGLE_WATCH_FIRE_TAIL_TICKS)
 	local acc = shotAccuracy[fire.shooterID]
 	if acc then
 		acc.fired = acc.fired + 1
@@ -975,10 +1004,11 @@ local function onPlayerGone(id)
 	playerData[id]            = nil
 	shotAccuracy[id]          = nil
 	lastNonSniperTickByID[id] = nil
-	angleWatchUntil[id]       = nil
+	clearAngleWatch(id)
 end
 
 Events.Subscribe("OnPlayerDisconnect", onPlayerGone)
 Events.Subscribe("OnPlayerRemoved", onPlayerGone)
+Events.Register("FireGameEvent", "SilentAim_SpawnWatch", onAngleWatchSpawn, "player_spawn")
 
 return SilentAim

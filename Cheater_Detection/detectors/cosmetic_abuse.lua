@@ -1,5 +1,6 @@
 local Common = require("Cheater_Detection.Utils.Common")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
+local Events = require("Cheater_Detection.Core.Events")
 local G = require("Cheater_Detection.Utils.Globals")
 local Constants = require("Cheater_Detection.Core.constants")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
@@ -202,26 +203,21 @@ function CosmeticAbuse.InvalidatePlayer(id)
 	end
 end
 
-function CosmeticAbuse.NeedsScan(id)
-	local state = PlayerCache.GetByID(id)
-	return state == nil or not state.wearablesScanned
-end
-
-function CosmeticAbuse.ProcessPlayer(playerState)
+function CosmeticAbuse.ScanPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then return end
-	local id = tostring(playerState.id)
-
-	-- Skip bots
-	if id:sub(1, 4) == "BOT_" then return end
-
 	if playerState.wearablesScanned then return end
 	if not isEnabled() then return end
 	if not Common.IsPlayerConnected() then return end
 	if not Common.IsDebugEnabled() and playerState.isFriend then return end
 	if playerState.pdata.isDormant then return end
 
-	local disguiseClass = playerState.wrap:GetPropInt("m_iDisguiseTargetClass")
-	if disguiseClass and disguiseClass > 0 then return end
+	local id = tostring(playerState.id)
+
+	local disguiseClass = playerState.wrap:GetDisguiseTargetClass()
+	if disguiseClass and disguiseClass > 0 then
+		playerState.wearablesScanned = true
+		return
+	end
 
 	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
 	local scanned = scanPlayerWearables(playerState.wrap:GetEntity(), id, isDebug)
@@ -247,5 +243,40 @@ function CosmeticAbuse.ProcessPlayer(playerState)
 		end
 	end
 end
+
+local function scanPlayerById(id)
+	if not id or not isEnabled() then return end
+	local state = PlayerCache.GetByID(tostring(id))
+	if state then
+		CosmeticAbuse.ScanPlayer(state)
+	end
+end
+
+local function onPlayerSpawn(event)
+	if not isEnabled() then return end
+	local uid = event:GetInt("userid")
+	local ent = entities.GetByUserID(uid)
+	if not ent or not ent:IsValid() then return end
+	local id = tostring(Common.GetSteamID64(ent))
+	if id:match("^7656119%d+$") then
+		scanPlayerById(id)
+	end
+end
+
+local function onPlayerChangeClass(event)
+	if not isEnabled() then return end
+	local uid = event:GetInt("userid")
+	local ent = entities.GetByUserID(uid)
+	if not ent or not ent:IsValid() then return end
+	local id = tostring(Common.GetSteamID64(ent))
+	if id:match("^7656119%d+$") then
+		CosmeticAbuse.InvalidatePlayer(id)
+		scanPlayerById(id)
+	end
+end
+
+Events.Subscribe("OnPlayerJoinTeam", scanPlayerById)
+Events.Register("FireGameEvent", "CosmeticAbuse_Spawn", onPlayerSpawn, "player_spawn")
+Events.Register("FireGameEvent", "CosmeticAbuse_ClassChange", onPlayerChangeClass, "player_changeclass")
 
 return CosmeticAbuse

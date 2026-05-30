@@ -164,16 +164,15 @@ function AimLock.ProcessPlayer(playerState)
 		return
 	end
 
+	if not playerState.wrap:IsValid() then return end
+
 	local attackerAngles = playerState.wrap:GetEyeAngles()
 	local attackerEyePos = playerState.wrap:GetEyePos()
-	if not attackerAngles or not attackerEyePos then
-		return
-	end
+	if not attackerAngles or not attackerEyePos then return end
 
 	local victimState = PlayerCache.GetByID(targetID)
-	if not victimState or not victimState.wrap then
-		return
-	end
+	if not victimState or not victimState.wrap:IsValid() then return end
+
 	local victimEyePos = victimState.wrap:GetEyePos()
 	if not victimEyePos then
 		return

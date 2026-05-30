@@ -923,7 +923,7 @@ function Database.PruneOverlayAgainstBaseline()
 			string.format("[DB] Refreshed %d stale database entries from runtime", refreshed))
 	end
 
-	return purged
+	return pruned
 end
 
 --- Merge vote karma into runtime without clobbering embed reason/static/evidence.

@@ -9,10 +9,13 @@ local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig = {}
 
 DetectionConfig.Detectors = {
-	-- ~5 ticks pre-shot extrapolation + shot + 3 post; eye comes from FireTickTracker on hit.
+	-- ~5 ticks pre-shot extrapolation + shot + 3 post; fire tick eye patched via ApplyFireSnapshot.
 	SilentAim = {
-		retentionTicks = 8,
-		fields = { HistoryManager.Fields.Angles },
+		retentionTicks = 12,
+		fields = {
+			HistoryManager.Fields.Angles,
+			HistoryManager.Fields.EyePosition,
+		},
 	},
 	FakeLag = {
 		retentionTicks = 22,
@@ -51,7 +54,9 @@ end
 
 --- Record all history fields required by a detector for this tick (deduped inside HistoryManager).
 function DetectionConfig.RecordHistory(player, detectorName)
+	if not player then return end
 	local spec = DetectionConfig.Detectors[detectorName]
+	if not spec or not spec.fields then return end
 	HistoryManager.RequestFields(player, spec.fields)
 end
 

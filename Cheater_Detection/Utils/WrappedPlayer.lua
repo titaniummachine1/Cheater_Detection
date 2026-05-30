@@ -24,6 +24,10 @@ local WrappedPlayer      = {}
 -- Must be declared before WrappedPlayerMT so the closure captures it as an upvalue.
 local activeTickEntities = {}
 
+local function isUsableVector(v)
+	return v and type(v.x) == "number" and type(v.y) == "number" and type(v.z) == "number"
+end
+
 local WrappedPlayerMT    = {
 	__index = function(self, key)
 		-- Check raw table fields first (index, _steamID64, etc.)
@@ -174,6 +178,18 @@ function WrappedPlayer:GetTeamNumber()
 	end)
 end
 
+function WrappedPlayer:GetClass()
+	return self:_getCached("playerClass", function()
+		return activeTickEntities[self.index]:GetPropInt("m_iClass")
+	end)
+end
+
+function WrappedPlayer:GetDisguiseTargetClass()
+	return self:_getCached("disguiseClass", function()
+		return activeTickEntities[self.index]:GetPropInt("m_iDisguiseTargetClass")
+	end)
+end
+
 function WrappedPlayer:GetAbsOrigin()
 	return self:_getCached("absOrigin", function()
 		return activeTickEntities[self.index]:GetAbsOrigin()
@@ -194,7 +210,10 @@ end
 
 function WrappedPlayer:GetEyePos()
 	return self:_getCached("eyePos", function()
-		return self:GetAbsOrigin() + self:GetViewOffset()
+		local origin = self:GetAbsOrigin()
+		local offset = self:GetViewOffset()
+		if not isUsableVector(origin) or not isUsableVector(offset) then return nil end
+		return origin + offset
 	end)
 end
 
@@ -206,6 +225,7 @@ function WrappedPlayer:GetEyeAngles()
 		local ent = activeTickEntities[self.index]
 		if not ent then return nil end
 		local a = ent:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+		if not a then return nil end
 		return EulerAngles(a.x, a.y, a.z)
 	end)
 end
