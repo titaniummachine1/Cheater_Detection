@@ -26,7 +26,7 @@
          minicrit          bool     true if minicrit hit
          victimHealthAfter int      victim HP after the hit
 
-     Fire detection lives in Core/FireTickTracker.lua ("OnPlayerFired").
+     Fire detection: Core/FireTickTracker.lua ("OnPlayerFired" via weapon_fire + CTEFireBullets).
 ]]
 
 local Events      = require("Cheater_Detection.Core.Events")
@@ -49,10 +49,11 @@ local function onPlayerHurt(event)
 	if not victimEnt or not victimEnt:IsValid() then return end
 
 	local attackerID = tostring(Common.GetSteamID64(attackerEnt))
-	if not attackerID or not attackerID:match("^7656119%d+$") then return end
+	if not Common.IsTrackablePlayerID(attackerID) then return end
 
-	local victimID = tostring(Common.GetSteamID64(victimEnt))
-	if not victimID or not victimID:match("^7656119%d+$") then return end
+	-- Victim may be a bot (no real SteamID). Keep the event — attacker-side
+	-- detectors (DoubleTap, etc.) only need the attacker. Pass victimID as-is.
+	local victimID = tostring(Common.GetSteamID64(victimEnt) or victimEnt:GetIndex())
 
 	local weaponID   = event:GetInt("weaponid")
 	local weaponName = event.GetString and event:GetString("weapon") or nil

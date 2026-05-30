@@ -500,51 +500,74 @@ function Common.IsPlayerConnected()
 	return signonState >= 2
 end
 
--- Returns true when the local connection is stable enough to trust
--- simulation-time-based detectors (WarpDT, FakeLag).
---
--- Rules (per spec):
---   • Must be fully connected (signon state 6 = FULL)
---   • FPS below server tick rate → engine can't process every packet → unreliable
---   • Incoming avg latency > 2 tick intervals → our view of remote sim times is too stale
---   • Any incoming packet loss > 1%
-function Common.IsConnectionStableForDetection()
-	-- Must be fully connected (signon state 6 = FULL)
-	-- States: 0=NONE, 1=CHALLENGE, 2=CONNECTED, 3=NEW, 4=PRESPAWN, 5=SPAWN, 6=FULL
+--- True on listen / offline bot practice (simtime gates are relaxed in debug self-test).
+function Common.IsLocalListenServer()
+	local ip = engine.GetServerIP and engine.GetServerIP() or nil
+	if not ip or ip == "" then
+		return false
+	end
+	local host = ip:match("^([^:]+)")
+	if not host then
+		return false
+	end
+	return host == "loopback"
+		or host == "127.0.0.1"
+		or host == "0.0.0.0"
+		or host:match("^192%.168%.")
+		or host:match("^10%.")
+end
+
+--- Human SteamID64, or LOCAL_* fallback used when SteamID is unavailable (debug self-test).
+function Common.IsTrackablePlayerID(id)
+	if type(id) ~= "string" or id == "" then
+		return false
+	end
+	if id:match("^7656119%d+$") then
+		return true
+	end
+	return Common.IsDebugEnabled() and id:sub(1, 6) == "LOCAL_"
+end
+
+-- Returns nil when stable, otherwise a short reason string (for debug logging).
+function Common.GetConnectionStabilityBlockReason()
 	local signonState = clientstate.GetClientSignonState()
 	if signonState ~= 6 then
-		return false
+		return string.format("signon=%s (need 6)", tostring(signonState))
 	end
 
 	local tickInterval = globals.TickInterval()
 	local tickRate = 1.0 / tickInterval
-
-	-- FPS gate: must be able to process at tick frequency
 	local fps = 1.0 / globals.FrameTime()
 	if fps < tickRate then
-		return false
+		return string.format("fps=%.0f < tickrate=%.0f", fps, tickRate)
 	end
 
 	local netChannel = clientstate.GetNetChannel()
 	if not netChannel then
-		return false
+		return "no net channel"
 	end
 
-	-- Latency threshold: ~180 ms (≈12 ticks at 66 Hz).
-	-- Latency is measured in seconds; compare directly against the equivalent time value.
 	local latency = netChannel:GetAvgLatency(E_Flows.FLOW_INCOMING)
 	local maxLatency = tickInterval * 12.0
 	if latency > maxLatency then
-		return false
+		return string.format("latency=%.0fms", latency * 1000.0)
 	end
 
-	-- Any packet loss means we are missing data; deltas are unreliable
 	local loss = netChannel:GetAvgLoss(E_Flows.FLOW_INCOMING)
 	if loss > 0.01 then
-		return false
+		return string.format("packet loss=%.1f%%", loss * 100.0)
 	end
 
-	return true
+	return nil
+end
+
+-- Returns true when the local connection is stable enough to trust
+-- simulation-time-based detectors (WarpDT, FakeLag).
+function Common.IsConnectionStableForDetection()
+	if Common.IsDebugEnabled() and Common.IsLocalListenServer() then
+		return true
+	end
+	return Common.GetConnectionStabilityBlockReason() == nil
 end
 
 return Common

@@ -7,6 +7,9 @@ local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 local Config = require("Cheater_Detection.Utils.Config")
 local Common = require("Cheater_Detection.Utils.Common")
+local FireTickTracker = require("Cheater_Detection.Core.FireTickTracker")
+local WarpDT = require("Cheater_Detection.detectors.warp_dt")
+local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local Commands = {}
 local registered = {}
@@ -217,6 +220,42 @@ local function setupDiagnostics()
 		)
 		if not inValveData and not inValveEmployees then
 			printc(255, 200, 100, 255, string.format('  !! Add "%s" to Database/ValveEmployees.lua', idStr))
+		end
+	end)
+
+	Commands.Register("cd_dt_status", function(_args)
+		local lp = entities.GetLocalPlayer()
+		local localID = PlayerCache.GetLocalID()
+		if not localID and lp and lp:IsValid() then
+			localID = tostring(Common.GetSteamID64(lp) or "")
+		end
+
+		local stats = WarpDT.GetDebugStats()
+		printc(100, 220, 255, 255, "[CD] DoubleTap diagnostic:")
+		printc(200, 200, 200, 255, string.format("  menu enabled     : %s", tostring(stats.enabled)))
+		printc(200, 200, 200, 255, string.format("  debug mode       : %s", tostring(Common.IsDebugEnabled())))
+		printc(200, 200, 200, 255, string.format("  local player id  : %s", tostring(localID)))
+		printc(200, 200, 200, 255, string.format("  trackable id     : %s", tostring(Common.IsTrackablePlayerID(localID))))
+		printc(200, 200, 200, 255, string.format("  listen / local   : %s", tostring(Common.IsLocalListenServer())))
+		printc(200, 200, 200, 255, string.format("  fetch blocking   : %s", tostring(stats.fetchBlocking)))
+		printc(200, 200, 200, 255, string.format("  conn block       : %s", tostring(stats.connectionBlock or "none")))
+		printc(200, 200, 200, 255, string.format("  listen bypass    : %s", tostring(stats.localListenBypass)))
+		printc(200, 200, 200, 255, string.format("  fires tracked    : %d", stats.fireEventsSeen or 0))
+		local src = FireTickTracker.GetSourceCounts()
+		printc(200, 200, 200, 255, string.format(
+			"  fire sources     : weapon_fire=%d CTEFireBullets=%d",
+			src.weapon_fire or 0, src.fire_bullets or 0))
+		printc(200, 200, 200, 255, string.format("  DT bursts armed  : %d", stats.dtBurstsArmed or 0))
+		printc(200, 200, 200, 255, string.format("  bursts no prefire: %d", stats.burstsNoPreFire or 0))
+
+		local snap = localID and FireTickTracker.GetRecentFire(localID, 32) or nil
+		if snap then
+			printc(200, 200, 200, 255, string.format(
+				"  last fire        : tick=%d (age=%d ticks)",
+				snap.tick, globals.TickCount() - snap.tick))
+		else
+			printc(255, 200, 100, 255,
+				"  last fire        : NONE — no weapon_fire / CTEFireBullets for you yet")
 		end
 	end)
 end

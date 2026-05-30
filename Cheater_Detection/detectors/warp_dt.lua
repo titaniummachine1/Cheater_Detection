@@ -3,10 +3,12 @@
 
      DT = choke → unchoke → ~24 tick simtime jump (66 Hz). Fake lag stays below 22 ticks.
 
-     Detection (evidence only with combat correlation):
-       1. Simtime burst 24–33 ticks after choke stalls (release step).
-       2. Player fired or dealt damage within the confirm window — no shot, no evidence.
-       3. ProcessPlayer tracks bursts for fake_lag suppress only; never adds evidence alone.
+     DT cycle (temp-entity fire tracking):
+       1. Shot (CTEFireBullets) — arms detection.
+       2. Warp — simtime burst 24–33 ticks.
+       3. Shot again / damage in the next few ticks (warp window speed pump).
+
+     Evidence only when all three line up; no shot = no flag.
 ]]
 
 local Constants                             = require("Cheater_Detection.Core.constants")
@@ -18,6 +20,7 @@ local Common                                = require("Cheater_Detection.Utils.C
 local Fetcher                               = require("Cheater_Detection.Database.Fetcher")
 local HistoryManager                        = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig                       = require("Cheater_Detection.Utils.DetectionConfig")
+local FireTickTracker                       = require("Cheater_Detection.Core.FireTickTracker")
 
 local WarpDT                                = {}
 
@@ -35,16 +38,13 @@ local BURST_MAX_TICKS_66HZ                  = 34.0 -- DT window is 24–33 ticks
 local WARP_COOLDOWN_TICKS_66HZ              = 24.0 -- min spacing between ProcessPlayer burst flags
 local FAKE_LAG_SUPPRESS_TICKS_66HZ          = 66.0 -- ~1s: no fake_lag scoring after DT release
 
--- Correlation: damage must land within this many ticks of the burst to count.
--- Default DT is ~24 ticks at 66Hz = ~0.36s; 33 ticks (0.5s) gives a small network buffer.
-local DT_CONFIRM_WINDOW_TICKS               = 33.0 -- ~0.5s at 66 tickrate
+-- Tight combat windows (66 Hz): shot → warp → follow-up shot/hit, not a full second later.
+local PRE_BURST_FIRE_TICKS_66HZ             = 14.0 -- must have fired before the warp
+local POST_BURST_WINDOW_TICKS_66HZ          = 14.0 -- post-warp shots / damage register here
 
-local DT_EVIDENCE_WEIGHT                    = 30.0 -- base evidence weight at max delay (t=0.5s)
-local DT_EVIDENCE_MAX_MULT                  = 5.0  -- multiplier at t=0 (instant hit after burst)
-local DT_EVIDENCE_COOLDOWN_S                = 1.0  -- min seconds between evidence adds per player
-
--- Hit history constants
-local MAX_SHOT_HISTORY                      = 8 -- keep last N confirmed hits per player
+local DT_EVIDENCE_WEIGHT                    = 30.0
+local DT_EVIDENCE_MAX_MULT                  = 5.0
+local DT_EVIDENCE_COOLDOWN_S                = 0.35 -- short; separate DT cycles use tick cooldown
 
 -- Cached tick calculations (recalculated when tick interval changes)
 local cachedTickInterval                    = nil
@@ -98,17 +98,19 @@ local dtSuppressUntil   = {} -- [id] = tick until fake_lag should ignore this pl
 local _simTimes         = {}
 local _deltaTicks       = {}
 
-local DT_STALL_MAX_TICKS        = 1
-local DT_STALL_LOOKAHEAD        = 8
-local DT_STALL_MIN_BEFORE_BURST = 2
--- Must cover DT release (~24 ticks) after damage; match BURST_MAX window.
-local ACTIVITY_WINDOW_TICKS = 66
+-- Sample simtime while a shooter was recently active (fire arms the window).
+local ACTIVITY_WINDOW_TICKS_66HZ            = 20.0
 
 
 -- Server-hitch suppression: track which ticks had simultaneous bursts
 local burstThisTick       = {}
 local lastBurstCleanTick  = 0
 local lastServerHitchTick = -math.huge
+
+local lastDtDebugLogTime  = 0
+local dtDebugFireCount    = 0
+local dtDebugBurstCount   = 0
+local dtDebugNoPreFire    = 0
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 
@@ -167,7 +169,11 @@ local function getState(id)
 			lastProcessBurstTick     = 0,
 			lastCreditedBurstTick    = 0,
 			lastFiredTick            = 0,
-			recentHits               = { _data = {}, _head = 1, _count = 0 },
+			lastBurstAmount          = 0,
+			awaitingPostConfirm      = false,
+			preFireTick              = 0,
+			firesOnBurstTick         = 0,
+			postBurstHits            = 0,
 			prevSimTick              = nil,
 			lastSimTick              = nil,
 			lastSampleTick           = 0,
@@ -178,6 +184,18 @@ end
 
 local function getFakeLagSuppressTicks()
 	return math.floor(FAKE_LAG_SUPPRESS_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+end
+
+local function getPreBurstFireTicks()
+	return math.floor(PRE_BURST_FIRE_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+end
+
+local function getPostBurstWindowTicks()
+	return math.floor(POST_BURST_WINDOW_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+end
+
+local function getActivityWindowTicks()
+	return math.floor(ACTIVITY_WINDOW_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 end
 
 function WarpDT.ShouldSuppressFakeLag(id)
@@ -205,7 +223,7 @@ local function _collectSimTime(_, record)
 end
 
 local function watchPlayer(id, curTick)
-	watchUntil[id] = curTick + ACTIVITY_WINDOW_TICKS
+	watchUntil[id] = curTick + getActivityWindowTicks()
 end
 
 local function isEnabled()
@@ -214,6 +232,18 @@ end
 
 local function isDtLogEnabled()
 	return Common.IsLogCategoryEnabled("DoubleTap")
+end
+
+local function shouldLogDtDebug()
+	return Common.IsDebugEnabled() or isDtLogEnabled()
+end
+
+local function logDtDebug(msg)
+	if not shouldLogDtDebug() then return end
+	local now = globals.RealTime()
+	if (now - lastDtDebugLogTime) < 0.35 then return end
+	lastDtDebugLogTime = now
+	print(msg)
 end
 
 function WarpDT.MarkDtRelease(id)
@@ -303,25 +333,7 @@ local function addCappedDtEvidence(id, wantedWeight)
 	return actual
 end
 
-local function trackProcessBurst(playerState, burstAmount, curTick)
-	local id = playerState.id
-	local data = getState(id)
-
-	markDtRelease(id, curTick)
-	data.lastBurstTick = curTick
-	data.lastProcessBurstTick = curTick
-
-	if isDtLogEnabled() then
-		print(string.format(
-			"[DoubleTap] %s sim burst %d ticks (tracking only — evidence needs fire/hit)",
-			id, burstAmount))
-	end
-end
-
 local function canCreditDtEvidence(id, curTick)
-	if not isPlayerWatched(id) then
-		return false
-	end
 	local data = getState(id)
 	local cooldownTicks = math.floor(WARP_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	if data.lastCreditedBurstTick > 0 and (curTick - data.lastCreditedBurstTick) <= cooldownTicks then
@@ -334,29 +346,132 @@ local function canCreditDtEvidence(id, curTick)
 	return true
 end
 
-local function tryAddDtBurstEvidence(id, burstAmount, curTick, weight)
+local function getPreBurstFireTick(id, burstTick)
+	local window = getPreBurstFireTicks()
+	local snap = FireTickTracker.GetRecentFire(id, window)
+	if snap and snap.tick <= burstTick and (burstTick - snap.tick) <= window then
+		return snap.tick
+	end
+	local data = getState(id)
+	if data.lastFiredTick > 0
+		and data.lastFiredTick <= burstTick
+		and (burstTick - data.lastFiredTick) <= window then
+		return data.lastFiredTick
+	end
+	return nil
+end
+
+-- Post-warp shot: later tick, or same tick as warp if fire tick is after pre-fire
+-- or a second CTEFireBullets on the warp tick (shot → warp → shot in one tick).
+local function isPostWarpFire(data, tick)
+	if not data.awaitingPostConfirm or data.lastBurstTick <= 0 then
+		return false
+	end
+	if tick > data.lastBurstTick then
+		return true
+	end
+	if tick < data.lastBurstTick then
+		return false
+	end
+	if data.preFireTick > 0 and tick > data.preFireTick then
+		return true
+	end
+	return (data.firesOnBurstTick or 0) >= 2
+end
+
+local function tryCreditDtEvidence(id, burstAmount, curTick, reason)
 	if not canCreditDtEvidence(id, curTick) then
 		return 0
 	end
+
 	local data = getState(id)
+	local elapsed = math.max(0, curTick - data.lastBurstTick)
+	local postWindow = getPostBurstWindowTicks()
+	local k = math.log(DT_EVIDENCE_MAX_MULT) / math.max(1, postWindow)
+	local timeMult = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsed)
+	local weight = math.min(40, burstAmount * 1.2) * timeMult
+
+	local extraHits = data.postBurstHits or 0
+	if extraHits > 1 then
+		weight = weight * (1 + 0.2 * (extraHits - 1))
+	end
+
 	data.lastCreditedBurstTick = curTick
 	data.lastBurstEvidenceTime = globals.RealTime()
+	data.awaitingPostConfirm = false
+
 	local added = addCappedDtEvidence(id, weight)
-	if added > 0 and isDtLogEnabled() then
-		print(string.format(
-			"[DoubleTap] %s packet burst: %d ticks → evidence +%.1f",
-			id, burstAmount, added))
+	if added > 0 then
+		local msg = string.format(
+			"[DoubleTap] %s packet burst: %d ticks (%s, +%d post hits) → evidence +%.1f",
+			id, burstAmount, reason, extraHits, added)
+		if isDtLogEnabled() or Common.IsDebugEnabled() then
+			print(msg)
+		end
 	end
 	return added
 end
 
-local function recordConfirmedHit(attackerID, tick)
-	local ring = getState(attackerID).recentHits
-	ring._data[ring._head] = tick
-	ring._head = (ring._head % MAX_SHOT_HISTORY) + 1
-	if ring._count < MAX_SHOT_HISTORY then
-		ring._count = ring._count + 1
+local function confirmPostWarpActivity(id, curTick, reason)
+	local data = getState(id)
+	if not data.awaitingPostConfirm or data.lastBurstTick <= 0 then
+		return 0
 	end
+	local elapsed = curTick - data.lastBurstTick
+	if elapsed < 0 or elapsed > getPostBurstWindowTicks() then
+		return 0
+	end
+	return tryCreditDtEvidence(id, data.lastBurstAmount, curTick, reason)
+end
+
+local function handleWarpBurst(id, burstAmount, curTick)
+	local data = getState(id)
+
+	if data.awaitingPostConfirm and data.lastBurstTick == curTick then
+		return
+	end
+
+	data.lastBurstTick = curTick
+	data.lastBurstAmount = burstAmount
+	data.lastProcessBurstTick = curTick
+	markDtRelease(id, curTick)
+
+	local preFireTick = getPreBurstFireTick(id, curTick)
+	if not preFireTick then
+		data.awaitingPostConfirm = false
+		dtDebugNoPreFire = dtDebugNoPreFire + 1
+		if shouldLogDtDebug() then
+			logDtDebug(string.format(
+				"[DoubleTap] %s DT-sized burst (%d ticks) ignored — no pre-warp shot (need weapon_fire / CTEFireBullets)",
+				id, burstAmount))
+		end
+		return
+	end
+
+	dtDebugBurstCount = dtDebugBurstCount + 1
+
+	data.awaitingPostConfirm = true
+	data.preFireTick = preFireTick
+	data.postBurstHits = 0
+	data.firesOnBurstTick = 0
+	if data.lastFiredTick == curTick then
+		data.firesOnBurstTick = 1
+	end
+
+	if Common.IsDebugEnabled() or isDtLogEnabled() then
+		print(string.format(
+			"[DoubleTap] %s warp %d ticks armed (pre-fire tick %d, awaiting post shot/hit)",
+			id, burstAmount, preFireTick))
+	end
+end
+
+-- Fire temp-ent can arrive after CreateMove; re-check history once shot is known.
+local function reconcileBurstAfterFire(id, fireTick)
+	local burstAmount = findNewestHistoryBurst(id)
+	if burstAmount == 0 then
+		return
+	end
+	handleWarpBurst(id, burstAmount, globals.TickCount())
 end
 
 local function sampleSimBurst(pState, curTick)
@@ -397,22 +512,32 @@ local function sampleSimBurst(pState, curTick)
 		return
 	end
 
-	data.lastBurstTick = curTick
-	markDtRelease(id, curTick)
-	if data.lastDamageTick > 0 and (curTick - data.lastDamageTick) <= DT_CONFIRM_WINDOW_TICKS then
-		local elapsedTicks = curTick - data.lastDamageTick
-		local k = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
-		local weight = DT_EVIDENCE_WEIGHT * DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
-		data.lastDamageTick = 0
-		tryAddDtBurstEvidence(id, burstAmount, curTick, weight)
-	end
+	handleWarpBurst(id, burstAmount, curTick)
+end
+
+function WarpDT.GetDebugStats()
+	return {
+		enabled            = isEnabled(),
+		fetchBlocking      = Fetcher.State.isRunning == true,
+		connectionBlock    = Common.GetConnectionStabilityBlockReason(),
+		localListenBypass  = Common.IsDebugEnabled() and Common.IsLocalListenServer(),
+		fireEventsSeen     = dtDebugFireCount,
+		dtBurstsArmed      = dtDebugBurstCount,
+		burstsNoPreFire    = dtDebugNoPreFire,
+	}
 end
 
 function WarpDT.ProcessPlayer(playerState)
-	if Fetcher.State.isRunning or not isEnabled() then
+	if not isEnabled() then
 		return
 	end
-	if not Common.IsConnectionStableForDetection() then
+	if Fetcher.State.isRunning then
+		logDtDebug("[DoubleTap] paused — database fetch in progress")
+		return
+	end
+	local connBlock = Common.GetConnectionStabilityBlockReason()
+	if connBlock and not (Common.IsDebugEnabled() and Common.IsLocalListenServer()) then
+		logDtDebug("[DoubleTap] paused — connection unstable: " .. connBlock)
 		return
 	end
 	if not playerState or not playerState.pdata or not playerState.id then
@@ -435,35 +560,20 @@ function WarpDT.ProcessPlayer(playerState)
 
 	DetectionConfig.RecordHistory(playerState.wrap, "FakeLag")
 
-	local burstAmount = findNewestHistoryBurst(id)
-	if burstAmount == 0 then
-		return
-	end
-
 	local curTick = globals.TickCount()
 	cleanBurstTable(curTick)
-	recordBurstTick(curTick, id)
 
-	if isInHitchWindow(curTick) then
-		return
-	end
-
-	if isServerHitch(curTick) then
-		lastServerHitchTick = curTick
-		if isDtLogEnabled() then
-			print(string.format(
-				"[DoubleTap] server hitch suppressed burst for %s (tick=%d, humans=%d)",
-				id, curTick, countHumanBurstsOnTick(curTick)))
-		end
-		return
-	end
-
-	trackProcessBurst(playerState, burstAmount, curTick)
+	-- Live simtime step every tick (history-only missed same-tick DT).
+	sampleSimBurst(playerState, curTick)
 end
 
 function WarpDT.Tick()
-	if Fetcher.State.isRunning or not isEnabled() then return end
-	if not Common.IsConnectionStableForDetection() then return end
+	if not isEnabled() then return end
+	if Fetcher.State.isRunning then return end
+	if Common.GetConnectionStabilityBlockReason()
+		and not (Common.IsDebugEnabled() and Common.IsLocalListenServer()) then
+		return
+	end
 
 	local curTick = globals.TickCount()
 	cleanBurstTable(curTick)
@@ -488,11 +598,41 @@ end
 -- already done once for all detectors.
 
 Events.Subscribe("OnPlayerFired", function(fire)
-	if isEnabled() then watchPlayer(fire.shooterID, fire.tick) end
+	if not isEnabled() then
+		return
+	end
+
+	local id = fire.shooterID
+	dtDebugFireCount = dtDebugFireCount + 1
+	if shouldLogDtDebug() and (dtDebugFireCount <= 3 or dtDebugFireCount % 25 == 0) then
+		print(string.format("[DoubleTap] fire tracked: %s tick=%d src=%s (total=%d)",
+			id, fire.tick or -1, tostring(fire.source or "?"), dtDebugFireCount))
+	end
+	local tick = fire.tick
+	local data = getState(id)
+
+	data.lastFiredTick = tick
+	watchPlayer(id, tick)
+
+	local pState = PlayerCache.GetByID(id)
+	if pState and pState.pdata and pState.pdata.isAlive then
+		DetectionConfig.RecordHistory(pState.wrap, "FakeLag")
+		reconcileBurstAfterFire(id, tick)
+	end
+
+	if data.awaitingPostConfirm and data.lastBurstTick > 0 and tick == data.lastBurstTick then
+		data.firesOnBurstTick = (data.firesOnBurstTick or 0) + 1
+	end
+
+	if isPostWarpFire(data, tick) then
+		confirmPostWarpActivity(id, tick, "post-warp shot")
+	end
 end)
 
 Events.Subscribe("OnHitscanHit", function(hit)
-	if not isEnabled() then return end
+	if not isEnabled() then
+		return
+	end
 
 	local attackerID = hit.attackerID
 	local curTick    = hit.tickCount
@@ -502,52 +642,16 @@ Events.Subscribe("OnHitscanHit", function(hit)
 
 	local attackerState = PlayerCache.GetByID(attackerID)
 	if attackerState and attackerState.pdata.isAlive then
-		-- Sample on hurt tick too (CreateMove may run before player_hurt this frame).
+		DetectionConfig.RecordHistory(attackerState.wrap, "FakeLag")
 		sampleSimBurst(attackerState, curTick)
 	end
 
-	recordConfirmedHit(attackerID, curTick)
-
-	if data.lastBurstTick > 0 and (curTick - data.lastBurstTick) <= DT_CONFIRM_WINDOW_TICKS then
-		local hitsInWindow = 0
-		local ring = data.recentHits
-		for i = 0, ring._count - 1 do
-			local idx = ((ring._head - 2 - i) % MAX_SHOT_HISTORY) + 1
-			local hitTick = ring._data[idx]
-			if hitTick and hitTick >= data.lastBurstTick then
-				hitsInWindow = hitsInWindow + 1
-			else
-				break
-			end
+	if data.awaitingPostConfirm and data.lastBurstTick > 0 then
+		local elapsed = curTick - data.lastBurstTick
+		if elapsed >= 0 and elapsed <= getPostBurstWindowTicks() then
+			data.postBurstHits = (data.postBurstHits or 0) + 1
+			confirmPostWarpActivity(attackerID, curTick, "post-warp damage")
 		end
-
-		if hitsInWindow >= 2 then
-			local certaintyMult = 2 ^ (hitsInWindow - 2)
-			local elapsedTicks  = curTick - data.lastBurstTick
-			local k             = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
-			local timeMult      = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
-			local weight        = DT_EVIDENCE_WEIGHT * timeMult * certaintyMult
-
-			local now = globals.RealTime()
-			if (now - data.lastHitCountEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S
-				and canCreditDtEvidence(attackerID, curTick) then
-				data.lastHitCountEvidenceTime = now
-				local added = addCappedDtEvidence(attackerID, weight)
-				if added > 0 and isDtLogEnabled() then
-					print(string.format(
-						"[DoubleTap] %s DT: %d hits in %d ticks after burst, dmg=%d → evidence +%.1f",
-						attackerID, hitsInWindow, elapsedTicks, hit.damage, added))
-				end
-			end
-		end
-	end
-
-	data.lastDamageTick = curTick
-
-	if isDtLogEnabled() then
-		print(string.format(
-			"[DoubleTap] %s dealt dmg=%d — watching for burst (lastBurstTick=%d, window=%d ticks)",
-			attackerID, hit.damage, data.lastBurstTick, DT_CONFIRM_WINDOW_TICKS))
 	end
 end)
 

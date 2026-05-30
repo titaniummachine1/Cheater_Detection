@@ -330,9 +330,10 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	-- Rate-limited scan status logging (once every 5 seconds)
+	-- Rate-limited scan status logging (once every 5 seconds, debug only)
 	local now = globals.RealTime()
-	if Common.IsLogCategoryEnabled("All") then
+	if Common.IsDebugEnabled()
+		and (Common.IsLogCategoryEnabled("All") or enableDoubleTap) then
 		if not sessionState.lastScanLogTime or (now - sessionState.lastScanLogTime) >= 5.0 then
 			sessionState.lastScanLogTime = now
 			print(string.format(
