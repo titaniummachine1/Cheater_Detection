@@ -18,6 +18,7 @@
         Fires Evidence.AddEvidence so it decays and stacks with other signals.
 ]]
 
+local Constants                   = require("Cheater_Detection.Core.constants")
 local G                           = require("Cheater_Detection.Utils.Globals")
 local Common                      = require("Cheater_Detection.Utils.Common")
 local Evidence                    = require("Cheater_Detection.Core.Evidence_system")
@@ -104,12 +105,18 @@ function FakeLag.HasWork(playerState)
 	if not playerState or not playerState.id then
 		return false
 	end
-	if Common.IsLogCategoryEnabled("Choke") then
-		return true
+	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
+		return Common.IsLogCategoryEnabled("Choke")
 	end
 	local id = playerState.id
-	if Evidence.GetMethodWeight(id, "fake_lag") < FAKE_LAG_EVIDENCE_CAP then
+	if Common.IsLogCategoryEnabled("Choke") then
+		if Evidence.GetMethodWeight(id, "fake_lag") >= FAKE_LAG_EVIDENCE_CAP then
+			return false
+		end
 		return true
+	end
+	if Evidence.GetMethodWeight(id, "fake_lag") >= FAKE_LAG_EVIDENCE_CAP then
+		return false
 	end
 	return (globals.TickCount() % 4) == 0
 end
@@ -302,6 +309,34 @@ local function getRhythmicChokeEvidence(posDeltas, posCount)
 
 	return anchorDelta, "rhythmic choke", string.format(
 		"%d ticks (%d/%d within +/-%d)", anchorDelta, matching, checked, tolerance)
+end
+
+-- Evidence fallback after sustained: avg path OR rhythm, never both.
+-- With RHYTHM_MIN_EVENTS (6) > AVG_CHOKE_MIN_SAMPLES (4), rhythm is unreachable in practice;
+-- still must not fall through to rhythm when avg fails but posCount >= 4 (regression from nested else).
+local function tryAvgOrRhythmChokeEvidence(posDeltas, posCount, tryAddChokeEvidenceFn)
+	if posCount >= AVG_CHOKE_MIN_SAMPLES then
+		local avgChoke = getPositiveAvgChoke(posDeltas, posCount)
+		if avgChoke then
+			tryAddChokeEvidenceFn(
+				buildEvidenceWeight(avgChoke),
+				"avg choke",
+				string.format("%.1f ticks (%d releases)", avgChoke, posCount)
+			)
+		end
+		return
+	end
+	if posCount < RHYTHM_MIN_EVENTS then
+		return
+	end
+	local rhythmTicks, rhythmLabel, rhythmDetail = getRhythmicChokeEvidence(posDeltas, posCount)
+	if rhythmTicks then
+		tryAddChokeEvidenceFn(
+			buildEvidenceWeight(rhythmTicks),
+			rhythmLabel,
+			rhythmDetail
+		)
+	end
 end
 
 -- Choke debug: simtime gap kinds (newest-first deltas).
@@ -650,23 +685,7 @@ function FakeLag.ProcessPlayer(playerState)
 				string.format("avg %.1f ticks", sustainedAvg)
 			)
 		else
-			local avgChoke = getPositiveAvgChoke(posDeltas, posCount)
-			if avgChoke then
-				tryAddChokeEvidence(
-					buildEvidenceWeight(avgChoke),
-					"avg choke",
-					string.format("%.1f ticks (%d releases)", avgChoke, posCount)
-				)
-			else
-				local rhythmTicks, rhythmLabel, rhythmDetail = getRhythmicChokeEvidence(posDeltas, posCount)
-				if rhythmTicks then
-					tryAddChokeEvidence(
-						buildEvidenceWeight(rhythmTicks),
-						rhythmLabel,
-						rhythmDetail
-					)
-				end
-			end
+			tryAvgOrRhythmChokeEvidence(posDeltas, posCount, tryAddChokeEvidence)
 		end
 	end
 end

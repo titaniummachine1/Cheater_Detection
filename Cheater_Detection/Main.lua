@@ -264,7 +264,6 @@ end
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
 	-- Game logic only on CreateMove (never on Draw).
-	Evidence.ApplyDecay()
 	Scheduler.Tick()
 
 	-- SetContext is expensive; Begin/End already no-op when profiler overlay is off.
@@ -375,6 +374,9 @@ local function OnCreateMove(cmd)
 		return
 	end
 	lastDetectorTick = curTick
+
+	-- Once per game tick: decay only for alive, non-dormant players (60s grace after HoldDecay).
+	Evidence.ApplyDecay()
 
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer) or "")

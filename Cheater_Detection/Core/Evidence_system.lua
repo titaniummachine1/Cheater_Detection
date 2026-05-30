@@ -39,6 +39,9 @@ Evidence.Config = {
 		},
 	},
 
+	-- No decay until this many seconds after LastDecayTime (HoldDecay resets the clock).
+	MethodDecayGraceSec = 60.0,
+
 	-- Per-method decay (weight/sec). double_tap: ~1 usage (30) per minute when idle.
 	MethodDecayPerSec = {
 		double_tap = 30.0 / 60.0,
@@ -167,19 +170,41 @@ local function getMethodDecayRate(detectionName, category)
 	return getCategoryDecayRate(category)
 end
 
-local function applyLazyDecayToReason(reason, detectionName)
+local function getDecayGraceSec()
+	return Evidence.Config.MethodDecayGraceSec or 60.0
+end
+
+local function applyWeightDecay(reason, detectionName, methodName, now)
 	if not reason or reason.ManualDecay == true then
-		return
+		return false
 	end
-	local now = globals.RealTime()
+
 	local elapsed = now - (reason.LastDecayTime or now)
-	if elapsed > 0 then
-		local rate = reason.DecayRate or getMethodDecayRate(detectionName, reason.Category)
-		if rate > 0 and reason.Weight > 0 then
-			reason.Weight = math.max(Evidence.Config.MinWeightFloor, reason.Weight - rate * elapsed)
-		end
+	local grace = getDecayGraceSec()
+	if elapsed <= grace then
+		return false
 	end
+
+	local rate = reason.DecayRate or getMethodDecayRate(methodName or detectionName, reason.Category)
+	if not isDetectionEnabled(methodName or detectionName) then
+		rate = rate * 5.0
+	end
+	if rate <= 0 or reason.Weight <= 0 then
+		reason.LastDecayTime = now
+		return false
+	end
+
+	local oldWeight = reason.Weight
+	reason.Weight = math.max(
+		Evidence.Config.MinWeightFloor,
+		reason.Weight - rate * (elapsed - grace)
+	)
 	reason.LastDecayTime = now
+	return reason.Weight ~= oldWeight
+end
+
+local function applyLazyDecayToReason(reason, detectionName)
+	applyWeightDecay(reason, detectionName, detectionName, globals.RealTime())
 end
 
 local function applyReasonOptions(reason, opts)
@@ -522,29 +547,20 @@ local function applyDecayToEvidence(steamID, evidence, now)
 	-- downgraded by score decay (syncPlayerStateFromEvidence guards against it),
 	-- so computing decay is wasted work once the flag is set.
 	local state = PlayerCache.GetByID(steamID)
-	if state and (state.flags & Constants.Flags.CHEATER) ~= 0 then
-		return false
+	if state then
+		if (state.flags & Constants.Flags.CHEATER) ~= 0 then
+			return false
+		end
+		local pdata = state.pdata
+		if pdata and (pdata.isDormant or not pdata.isAlive) then
+			return false
+		end
 	end
 
 	local changed = false
 	for methodName, reason in pairs(evidence.Reasons) do
-		if reason.ManualDecay ~= true then
-			local oldWeight = reason.Weight
-			local now = globals.RealTime()
-			local elapsed = now - (reason.LastDecayTime or now)
-			if elapsed > 0 then
-				local rate = reason.DecayRate or getMethodDecayRate(methodName, reason.Category)
-				if not isDetectionEnabled(methodName) then
-					rate = rate * 5.0
-				end
-				if rate > 0 and reason.Weight > 0 then
-					reason.Weight = math.max(Evidence.Config.MinWeightFloor, reason.Weight - rate * elapsed)
-				end
-				reason.LastDecayTime = now
-			end
-			if reason.Weight ~= oldWeight then
-				changed = true
-			end
+		if applyWeightDecay(reason, methodName, methodName, now) then
+			changed = true
 		end
 	end
 

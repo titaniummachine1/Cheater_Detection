@@ -22,14 +22,6 @@ DetectionConfig.Detectors = {
 		retentionTicks = 40,
 		fields = { HistoryManager.Fields.SimulationTime },
 	},
-	FakeLag = {
-		retentionTicks = 40,
-		fields = { HistoryManager.Fields.SimulationTime },
-	},
-	DoubleTap = {
-		retentionTicks = 40,
-		fields = { HistoryManager.Fields.SimulationTime },
-	},
 }
 
 DetectionConfig.DefaultRetentionTicks = 24
