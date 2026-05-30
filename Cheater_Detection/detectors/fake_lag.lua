@@ -1,13 +1,10 @@
 --[[ detectors/fake_lag.lua
      Sustained / rhythmic packet choke only — NOT double tap.
 
-     Double tap (choke → release → ~18+ tick simtime jump) is handled by warp_dt.lua.
-     This module uses the same simtime history but README-era fake-lag rules only:
+     Double tap (~24 tick release at 66 Hz) is warp_dt.lua only.
 
-     1. Rhythmic – consecutive deltas within ±1 tick of the first.
-     2. Average choke – mean gap >= AVG_CHOKE_THRESHOLD across the window.
-
-     DT-sized bursts are stripped and trigger a short scoring suppress via WarpDT.
+     Fake lag = rhythmic choke in the 4–21 tick band only (always strictly below 22 ticks).
+     Normal 1–2 tick movement and DT-sized gaps never score here.
 ]]
 
 local G                           = require("Cheater_Detection.Utils.Globals")
@@ -27,20 +24,12 @@ local FAKELAG_EVIDENCE_COOLDOWN_S = 1.0
 local RHYTHM_MIN_EVENTS           = 3   -- README-era rhythmic minimum
 local RHYTHM_TOLERANCE_TICKS      = 1   -- README: ±1 tick
 
--- Rijin-derived avg choke (README threshold)
-local AVG_CHOKE_THRESHOLD         = 2.0
+local AVG_CHOKE_THRESHOLD         = 5.0  -- mean of 4–21 tick choke samples only (not normal 2-tick steps)
 local AVG_CHOKE_MIN_SAMPLES       = 5
 local AVG_CHOKE_EVIDENCE_W        = 6.0
--- DT release: stall then large simtime jump (must match warp_dt burst floor)
-local DT_BURST_MIN_TICKS          = 18
-local DT_RELEASE_MIN_TICKS        = DT_BURST_MIN_TICKS
-local DT_RELEASE_STALL_MAX        = 1
-local DT_RELEASE_STALL_LOOKAHEAD  = 8
-local DT_RELEASE_STALL_MIN        = 2
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
-local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
-local MIN_FPS_FOR_DETECTION       = 40                                     -- below ~40 fps, frame gaps can exceed the 8-tick choke threshold (ticks/frame = tickrate/fps)
-local MAX_FAKELAG_TICKS           = 33
+local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag")
+local MIN_FPS_FOR_DETECTION       = 40
 local MAX_DELTA_SEC               = 2.5
 
 local evidenceCooldowns           = {} -- [id] = last globals.RealTime() evidence was added
@@ -75,21 +64,12 @@ local function timeToTicks(time)
 	return math.floor(time / globals.TickInterval() + 0.5)
 end
 
--- deltaTicks[1] = newest. DT = frozen simtime (stall) then one large forward step (release).
-local function isDoubleTapReleaseStep(deltaTicks, index)
-	local step = deltaTicks[index]
-	if not step or step < DT_RELEASE_MIN_TICKS then
+local function isFakeLagChokeDelta(tickDelta)
+	if not tickDelta then
 		return false
 	end
-	local stalls = 0
-	local lookEnd = math.min(index + DT_RELEASE_STALL_LOOKAHEAD, #deltaTicks)
-	for j = index + 1, lookEnd do
-		local prev = deltaTicks[j]
-		if prev and prev <= DT_RELEASE_STALL_MAX then
-			stalls = stalls + 1
-		end
-	end
-	return stalls >= DT_RELEASE_STALL_MIN
+	return tickDelta >= WarpDT.GetFakeLagMinChokeTicks()
+		and tickDelta <= WarpDT.GetFakeLagMaxChokeTicks()
 end
 
 local function buildFakeLagDeltaWindow(rawDeltas, filtered)
@@ -98,9 +78,10 @@ local function buildFakeLagDeltaWindow(rawDeltas, filtered)
 	end
 	local sumTicks = 0
 	for i = 1, #rawDeltas do
-		if not isDoubleTapReleaseStep(rawDeltas, i) then
-			filtered[#filtered + 1] = rawDeltas[i]
-			sumTicks = sumTicks + rawDeltas[i]
+		local d = rawDeltas[i]
+		if isFakeLagChokeDelta(d) then
+			filtered[#filtered + 1] = d
+			sumTicks = sumTicks + d
 		end
 	end
 	return sumTicks
@@ -108,30 +89,41 @@ end
 
 local function hasDtBurstInWindow(deltaTicks)
 	for i = 1, #deltaTicks do
-		if deltaTicks[i] >= DT_BURST_MIN_TICKS then
-			return true
-		end
-		if isDoubleTapReleaseStep(deltaTicks, i) then
+		if WarpDT.IsDtSizedBurst(deltaTicks[i]) then
 			return true
 		end
 	end
 	return false
 end
 
-local function isRhythmicChoke(deltaTicks)
-	if #deltaTicks < RHYTHM_MIN_EVENTS then
+local function isRhythmicChoke(chokeDeltas)
+	if #chokeDeltas < RHYTHM_MIN_EVENTS then
 		return false
 	end
-	local firstDelta = deltaTicks[1]
-	if not firstDelta or firstDelta <= 1 then
+	local firstDelta = chokeDeltas[1]
+	if not isFakeLagChokeDelta(firstDelta) then
 		return false
 	end
-	for i = 2, #deltaTicks do
-		if math.abs(deltaTicks[i] - firstDelta) > RHYTHM_TOLERANCE_TICKS then
+	for i = 2, #chokeDeltas do
+		if not isFakeLagChokeDelta(chokeDeltas[i]) then
+			return false
+		end
+		if math.abs(chokeDeltas[i] - firstDelta) > RHYTHM_TOLERANCE_TICKS then
 			return false
 		end
 	end
 	return true
+end
+
+local function getFakeLagChokeAverage(chokeDeltas)
+	if #chokeDeltas < AVG_CHOKE_MIN_SAMPLES then
+		return nil
+	end
+	local sum = 0
+	for i = 1, #chokeDeltas do
+		sum = sum + chokeDeltas[i]
+	end
+	return sum / #chokeDeltas
 end
 
 local function formatTopDeltas(counts)
@@ -213,15 +205,13 @@ local function isChokeDetectionEnabled()
 	return adv and adv.Choke == true
 end
 
-local function isActiveChokePattern(deltaTicks, sumTicks)
-	if isRhythmicChoke(deltaTicks) then
+local function isActiveChokePattern(chokeDeltas)
+	if isRhythmicChoke(chokeDeltas) then
 		return true
 	end
-	if #deltaTicks >= AVG_CHOKE_MIN_SAMPLES then
-		local avgChoke = sumTicks / #deltaTicks
-		if avgChoke >= AVG_CHOKE_THRESHOLD then
-			return true
-		end
+	local avgChoke = getFakeLagChokeAverage(chokeDeltas)
+	if avgChoke and avgChoke >= AVG_CHOKE_THRESHOLD then
+		return true
 	end
 	return false
 end
@@ -261,7 +251,9 @@ function FakeLag.ProcessPlayer(playerState)
 	if not Common.IsConnectionStableForDetection() then return end
 
 	if not playerState.pdata.isAlive then return end
-	if WarpDT.ShouldSuppressFakeLag(id) then return end
+	if WarpDT.ShouldSuppressFakeLag(id) or WarpDT.IsPlayerWatched(id) then
+		return
+	end
 
 	DetectionConfig.RecordHistory(playerState.wrap, "FakeLag")
 
@@ -286,15 +278,6 @@ function FakeLag.ProcessPlayer(playerState)
 		local delta = simTimes[i] - simTimes[i + 1] -- simTimes[i] is newer
 		if delta > 0 and delta <= MAX_DELTA_SEC then
 			local t = timeToTicks(delta)
-			-- Spike filter: reject isolated massive gaps (>33 ticks) as packet loss
-			if t > MAX_FAKELAG_TICKS then
-				local prevLarge = (i > 1) and (timeToTicks(simTimes[i - 1] - simTimes[i]) > MAX_FAKELAG_TICKS)
-				local nextLarge = (i < #simTimes - 1) and
-					(timeToTicks(simTimes[i + 1] - simTimes[i + 2]) > MAX_FAKELAG_TICKS)
-				if not (prevLarge or nextLarge) then
-					t = nil
-				end
-			end
 			if t then
 				deltaTicks[#deltaTicks + 1] = t
 			end
@@ -307,8 +290,8 @@ function FakeLag.ProcessPlayer(playerState)
 	end
 
 	local filteredDeltas = _filteredDeltaTicks
-	local filteredSum = buildFakeLagDeltaWindow(deltaTicks, filteredDeltas)
-	if #filteredDeltas < AVG_CHOKE_MIN_SAMPLES then
+	buildFakeLagDeltaWindow(deltaTicks, filteredDeltas)
+	if #filteredDeltas < RHYTHM_MIN_EVENTS then
 		return
 	end
 
@@ -319,7 +302,7 @@ function FakeLag.ProcessPlayer(playerState)
 		recordDebugSample(id, #filteredDeltas, filteredDeltas[1] or 0, now)
 	end
 
-	if isActiveChokePattern(filteredDeltas, filteredSum) then
+	if isActiveChokePattern(filteredDeltas) then
 		Evidence.HoldDecayForMethod(id, "fake_lag")
 	end
 
@@ -328,16 +311,17 @@ function FakeLag.ProcessPlayer(playerState)
 			id, now, isDebug,
 			AVG_CHOKE_EVIDENCE_W,
 			"rhythmic choke",
-			string.format("%d ticks", filteredDeltas[1])
+			string.format("%d ticks (<%d max)", filteredDeltas[1], WarpDT.GetDtBurstMinTicks())
 		)
-	elseif #filteredDeltas >= AVG_CHOKE_MIN_SAMPLES then
-		local avgChoke = filteredSum / #filteredDeltas
-		if avgChoke >= AVG_CHOKE_THRESHOLD then
+	else
+		local avgChoke = getFakeLagChokeAverage(filteredDeltas)
+		if avgChoke and avgChoke >= AVG_CHOKE_THRESHOLD then
 			tryAddChokeEvidence(
 				id, now, isDebug,
 				AVG_CHOKE_EVIDENCE_W,
 				"avg choke",
-				string.format("%.2f ticks (>= %.1f)", avgChoke, AVG_CHOKE_THRESHOLD)
+				string.format("%.2f ticks in 4–%d band (>= %.1f)",
+					avgChoke, WarpDT.GetFakeLagMaxChokeTicks(), AVG_CHOKE_THRESHOLD)
 			)
 		end
 	end

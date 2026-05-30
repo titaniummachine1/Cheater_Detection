@@ -1,11 +1,10 @@
 --[[ detectors/warp_dt.lua
      Double Tap only (not generic warp — too noisy).
 
-     DT = choke packets (simtime stalls), unchoke + shoot, large simtime jump
-     (~18–22 ticks) to “time travel” damage forward.
+     DT = choke → unchoke → ~24 tick simtime jump (66 Hz). Fake lag stays below 22 ticks.
 
      Detection:
-       1. ProcessPlayer — history scan for packet bursts (README-era, 18–64 ticks).
+       1. ProcessPlayer — history scan for bursts >= 22 ticks (typical DT ~24).
        2. Tick / OnHitscanHit — optional burst+damage correlation (stronger signal).
        3. markDtRelease — suppress fake_lag scoring briefly after a burst.
 ]]
@@ -28,10 +27,11 @@ local WarpDT                                = {}
 local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
 
 -- Burst detection: simtime spike must be in this tick range (scaled to server tickrate)
-local BURST_MIN_TICKS_66HZ                  = 18.0 -- README-era DT burst floor (~270ms at 66 Hz)
+-- At 66 Hz: FL choke < 22 ticks (~330 ms); DT release is almost always ~24 ticks.
+local BURST_MIN_TICKS_66HZ                  = 22.0
 local BURST_MAX_TICKS_66HZ                  = 64.0 -- above this is disconnect/lag, not DT
 local WARP_COOLDOWN_TICKS_66HZ              = 24.0 -- min spacing between ProcessPlayer burst flags
-local FAKE_LAG_SUPPRESS_TICKS_66HZ          = 33.0 -- ~0.5s: fake_lag ignores window after DT release
+local FAKE_LAG_SUPPRESS_TICKS_66HZ          = 66.0 -- ~1s: no fake_lag scoring after DT release
 
 -- Correlation: damage must land within this many ticks of the burst to count.
 -- Default DT is ~24 ticks at 66Hz = ~0.36s; 33 ticks (0.5s) gives a small network buffer.
@@ -64,6 +64,28 @@ local function getBurstThresholds()
 		end
 	end
 	return cachedBurstMinTicks, cachedBurstMaxTicks
+end
+
+-- Shared tick-band limits for fake_lag.lua (keep DT vs FL boundary aligned).
+function WarpDT.GetDtBurstMinTicks()
+	local burstMin, _ = getBurstThresholds()
+	return burstMin
+end
+
+function WarpDT.GetFakeLagMaxChokeTicks()
+	return WarpDT.GetDtBurstMinTicks() - 1
+end
+
+function WarpDT.GetFakeLagMinChokeTicks()
+	return math.max(3, math.floor(4.0 / 66.0 / globals.TickInterval() + 0.5))
+end
+
+function WarpDT.IsDtSizedBurst(tickDelta)
+	if not tickDelta or tickDelta <= 0 then
+		return false
+	end
+	local burstMin, burstMax = getBurstThresholds()
+	return tickDelta >= burstMin and tickDelta < burstMax
 end
 
 -- ── state ──────────────────────────────────────────────────────────────────
@@ -190,6 +212,14 @@ function WarpDT.MarkDtRelease(id)
 		return
 	end
 	markDtRelease(id, globals.TickCount())
+end
+
+function WarpDT.IsPlayerWatched(id)
+	local untilTick = watchUntil[id]
+	if not untilTick then
+		return false
+	end
+	return globals.TickCount() <= untilTick
 end
 
 local function findHistoryBurst(id)
