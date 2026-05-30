@@ -261,6 +261,54 @@ function HistoryManager.RequestFields(player, fields)
 	end
 end
 
+local function writeAngles(record, pitch, yaw)
+	local angField = HistoryManager.Fields.Angles
+	local t = record[angField]
+	if type(t) ~= "table" then
+		t = {}
+		record[angField] = t
+	end
+	t.pitch = pitch
+	t.yaw   = yaw
+end
+
+--- Write fire-tick aim into an existing history slot (from CTEFireBullets, not live eye angles).
+function HistoryManager.ApplyFireSnapshot(steamID, tick, pitch, yaw, eyePos)
+	if not initialized or not steamID or not tick or type(pitch) ~= "number" or type(yaw) ~= "number" then
+		return false
+	end
+
+	local id = tostring(steamID)
+	local history = playerHistories[id]
+	if not history or history._count == 0 then
+		return false
+	end
+
+	local offset = globals.TickCount() - tick
+	if offset < 0 or offset >= history._count then
+		return false
+	end
+
+	local record = HistoryManager.GetRecordAt(history, offset)
+	if not record or record._tick ~= tick then
+		return false
+	end
+
+	writeAngles(record, pitch, yaw)
+	if eyePos then
+		reuseVec(record, HistoryManager.Fields.EyePosition, eyePos)
+	end
+
+	local stored = _storedFieldsByPlayer[id]
+	if not stored then
+		stored = {}
+		_storedFieldsByPlayer[id] = stored
+	end
+	stored[HistoryManager.Fields.Angles] = tick
+	stored[HistoryManager.Fields.EyePosition] = tick
+	return true
+end
+
 function HistoryManager.MarkDamageDealt(steamID)
 	if not initialized or not steamID then
 		return

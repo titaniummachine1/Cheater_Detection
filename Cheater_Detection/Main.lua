@@ -27,8 +27,9 @@ local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")
 
--- Combat event hub (must load before detectors so OnHitscanHit/OnFireBullets are available)
+-- Combat hub + weapon-fire tracker (must load before detectors)
 require("Cheater_Detection.Core.CombatEvents")
+require("Cheater_Detection.Core.FireTickTracker")
 
 -- Detectors
 local ValveCheck            = require("Cheater_Detection.detectors.valve_check")

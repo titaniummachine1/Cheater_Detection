@@ -13,6 +13,7 @@ local Logger                            = require("Cheater_Detection.Utils.Logge
 local PlayerData                        = require("Cheater_Detection.Utils.PlayerData")
 local HistoryManager                    = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig                   = require("Cheater_Detection.Utils.DetectionConfig")
+local FireTickTracker                   = require("Cheater_Detection.Core.FireTickTracker")
 local PlayerCache                       = require("Cheater_Detection.Core.player_cache")
 local mathAbs                           = math.abs
 
@@ -66,11 +67,7 @@ local _histPitches                      = {}
 local _histYaws                         = {}
 local _histTicks                        = {}
 
--- Fire-event cache: keyed by shooter entity index.
--- Populated by CTEFireBullets (exact shot tick), consumed by onDamageEvent.
--- { eyePos = Vector3, tick = n }
-local fireShotCache                     = {}
-local FIRE_CACHE_STALE_TICKS            = 8
+local FIRE_SNAPSHOT_STALE_TICKS         = 8
 
 -- Shot accuracy tracking: keyed by steamID64 string.
 -- Tracks hitscan shots fired and hits to compute a session hit rate.
@@ -353,21 +350,26 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	local shotOffset = curTick - pending.shotTick
 	local shotRecord = HistoryManager.GetRecordAt(history, shotOffset)
 	if not shotRecord or shotRecord._tick ~= pending.shotTick then
-		return
+		shotRecord = nil
 	end
 
-	local shotAngles = shotRecord[HistoryManager.Fields.Angles]
-	if not shotAngles then
+	local shotPitch = pending.firePitch
+	local shotYaw   = pending.fireYaw
+	if shotPitch and shotYaw then
+		shotYaw = wrapAngle(shotYaw)
+	elseif shotRecord then
+		local shotAngles = shotRecord[HistoryManager.Fields.Angles]
+		if not shotAngles or type(shotAngles.pitch) ~= "number" or type(shotAngles.yaw) ~= "number" then
+			return
+		end
+		if mathAbs(shotAngles.pitch) > 180 or mathAbs(shotAngles.yaw) > 1000000 then
+			return
+		end
+		shotPitch = shotAngles.pitch
+		shotYaw   = wrapAngle(shotAngles.yaw)
+	else
 		return
 	end
-	if type(shotAngles.pitch) ~= "number" or type(shotAngles.yaw) ~= "number" then
-		return
-	end
-	if mathAbs(shotAngles.pitch) > 180 or mathAbs(shotAngles.yaw) > 1000000 then
-		return
-	end
-	local shotPitch = shotAngles.pitch
-	local shotYaw   = wrapAngle(shotAngles.yaw)
 
 	if debugInterested then
 		print(string.format(
@@ -389,9 +391,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		bodyPos = pending.victimOrigin + Vector3(0, 0, 40)
 	end
 
-	local eyePos = pending.shooterEyePos
-		or shotRecord[HistoryManager.Fields.EyePosition]
-		or playerState.wrap:GetEyePos()
+	local recordEye = shotRecord and shotRecord[HistoryManager.Fields.EyePosition]
+	local eyePos = pending.shooterEyePos or recordEye or playerState.wrap:GetEyePos()
 
 	local aimedAtTarget = false
 	if eyePos then
@@ -648,9 +649,8 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		if not sniperBodyPos and pending.victimOrigin then
 			sniperBodyPos = pending.victimOrigin + Vector3(0, 0, 40)
 		end
-		local eyePos = pending.shooterEyePos
-			or shotRecord[HistoryManager.Fields.EyePosition]
-			or playerState.wrap:GetEyePos()
+		local sniperRecordEye = shotRecord and shotRecord[HistoryManager.Fields.EyePosition]
+		local eyePos = pending.shooterEyePos or sniperRecordEye or playerState.wrap:GetEyePos()
 
 		if eyePos and sniperHeadPos then
 			local hp, hy = getAngleToPos(eyePos, sniperHeadPos)
@@ -817,8 +817,18 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	if not Common.IsValidPlayer(victimEnt, nil, nil, nil) then return end
 
 	local attackerState = PlayerCache.GetByID(attackerID)
+	local fireSnap      = FireTickTracker.GetRecentFire(attackerID, FIRE_SNAPSHOT_STALE_TICKS)
+	local shotTick      = curTick
+	if fireSnap then
+		shotTick = fireSnap.tick
+	end
+
 	if attackerState and attackerState.wrap then
 		DetectionConfig.RecordHistory(attackerState.wrap, "SilentAim")
+		if fireSnap then
+			HistoryManager.ApplyFireSnapshot(
+				attackerID, shotTick, fireSnap.pitch, fireSnap.yaw, fireSnap.eyePos)
+		end
 	end
 	HistoryManager.MarkDamageDealt(attackerID)
 
@@ -838,13 +848,6 @@ Events.Subscribe("OnHitscanHit", function(hit)
 		pdata.lastSmallSnapDecay = 0
 	end
 
-	if pdata.shotPending and pdata.shotPending.shotTick < curTick then
-		local state = PlayerCache.GetByID(attackerID)
-		if state and attackerEnt:IsValid() then
-			analyzePendingShot(state, attackerEnt, pdata, pdata.shotPending, curTick)
-		end
-		pdata.shotPending = nil
-	end
 	if not pdata.shotPending or pdata.shotPending.shotTick < curTick then
 		local weapon = attackerEnt:GetPropEntity("m_hActiveWeapon")
 		local activeWeaponName = "unknown"
@@ -853,7 +856,9 @@ Events.Subscribe("OnHitscanHit", function(hit)
 		end
 
 		pdata.shotPending = {
-			shotTick          = curTick,
+			shotTick          = shotTick,
+			firePitch         = fireSnap and fireSnap.pitch or nil,
+			fireYaw           = fireSnap and fireSnap.yaw or nil,
 			victimID          = victimID,
 			weaponID          = hit.weaponID,
 			weaponClass       = hit.weaponClass,
@@ -871,11 +876,8 @@ Events.Subscribe("OnHitscanHit", function(hit)
 			victimOrigin      = nil,
 		}
 
-		local attackerIdx = attackerEnt:GetIndex()
-		local fireEntry   = fireShotCache[attackerIdx]
-		if fireEntry and (curTick - fireEntry.tick) <= FIRE_CACHE_STALE_TICKS then
-			pdata.shotPending.shooterEyePos = fireEntry.eyePos
-			fireShotCache[attackerIdx] = nil
+		if fireSnap and fireSnap.eyePos then
+			pdata.shotPending.shooterEyePos = fireSnap.eyePos
 		else
 			local origin     = attackerEnt:GetAbsOrigin()
 			local viewOffset = attackerEnt:GetPropVector("localdata", "m_vecViewOffset[0]")
@@ -911,18 +913,7 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	end
 end)
 
--- Consumes the pre-resolved fire-bullet event from Core/CombatEvents.lua.
--- Populates fireShotCache with the exact shooter eye pos captured at fire time,
--- and increments the per-player shots-fired accuracy counter.
-Events.Subscribe("OnFireBullets", function(fire)
-	local existing = fireShotCache[fire.shooterIdx]
-	if existing then
-		existing.eyePos = fire.eyePos
-		existing.tick   = fire.tickCount
-	elseif fire.eyePos then
-		fireShotCache[fire.shooterIdx] = { eyePos = fire.eyePos, tick = fire.tickCount }
-	end
-
+Events.Subscribe("OnPlayerFired", function(fire)
 	local acc = shotAccuracy[fire.shooterID]
 	if acc then
 		acc.fired = acc.fired + 1
@@ -983,12 +974,6 @@ Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerData[id]            = nil
 	shotAccuracy[id]          = nil
 	lastNonSniperTickByID[id] = nil
-	local curTick             = globals.TickCount()
-	for idx, entry in pairs(fireShotCache) do
-		if (curTick - entry.tick) > FIRE_CACHE_STALE_TICKS then
-			fireShotCache[idx] = nil
-		end
-	end
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)

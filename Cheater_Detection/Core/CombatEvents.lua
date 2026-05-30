@@ -26,13 +26,7 @@
          minicrit          bool     true if minicrit hit
          victimHealthAfter int      victim HP after the hit
 
-     "OnFireBullets" – every CTEFireBullets temp-entity observation
-       Payload fields:
-         shooterID   string   SteamID64 of the shooter
-         shooterEnt  Entity   shooter entity
-         shooterIdx  int      entity index (key for fireShotCache)
-         eyePos      Vector3? shooter eye position at fire time (may be nil)
-         tickCount   int      globals.TickCount() when observed
+     Fire detection lives in Core/FireTickTracker.lua ("OnPlayerFired").
 ]]
 
 local Events      = require("Cheater_Detection.Core.Events")
@@ -87,41 +81,5 @@ local function onPlayerHurt(event)
 end
 
 Events.Register("FireGameEvent", "CombatEvents_PlayerHurt", onPlayerHurt, "player_hurt")
-
--- ── ProcessTempEntities → OnFireBullets ────────────────────────────────────
-
-local function onProcessTempEntities(teTable)
-	if type(teTable) ~= "table" then return end
-
-	local curTick     = globals.TickCount()
-	local localPlayer = entities.GetLocalPlayer()
-	local localIdx    = localPlayer and localPlayer:GetIndex() or -1
-
-	for ent in pairs(teTable) do
-		if ent:GetNetworkName() == "CTEFireBullets" then
-			local shooterIdx = ent:GetPropInt("m_iPlayer") + 1
-			if shooterIdx > 1 and shooterIdx ~= localIdx then
-				local shooter = entities.GetByIndex(shooterIdx)
-				if shooter and shooter:IsValid() and shooter:IsAlive() and not shooter:IsDormant() then
-					local shooterID = tostring(Common.GetSteamID64(shooter))
-					if shooterID and shooterID:match("^7656119%d+$") then
-						local origin     = shooter:GetAbsOrigin()
-						local viewOffset = shooter:GetPropVector("localdata", "m_vecViewOffset[0]")
-						Events.Publish("OnFireBullets", {
-							shooterID  = shooterID,
-							shooterEnt = shooter,
-							shooterIdx = shooterIdx,
-							eyePos     = (origin and viewOffset) and (origin + viewOffset) or nil,
-							tickCount  = curTick,
-						})
-					end
-				end
-			end
-		end
-	end
-end
-
-callbacks.Unregister("ProcessTempEntities", "CombatEvents_FireBullets")
-callbacks.Register("ProcessTempEntities", "CombatEvents_FireBullets", onProcessTempEntities)
 
 return CombatEvents
