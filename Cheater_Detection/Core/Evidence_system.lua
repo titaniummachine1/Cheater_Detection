@@ -46,6 +46,7 @@ Evidence.Config = {
 	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
 	MethodScoreCaps = {
 		fake_lag = 60.0,
+		warp_dt  = 80.0,
 	},
 
 	-- Category mappings (only implemented detections)

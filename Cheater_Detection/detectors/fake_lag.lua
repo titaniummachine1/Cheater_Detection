@@ -3,7 +3,7 @@
 
      Double tap (~24 tick release at 66 Hz) is warp_dt.lua only.
 
-     Fake lag = repeated choke → release (8–21 ticks) → immediate re-choke, same
+     Fake lag = repeated choke → release (8–21 ticks, never 22+) → re-choke, same
      release size, at least 3 cycles in a row (stalls only between releases).
      One isolated burst is not fake lag — that is DT or normal movement.
 ]]

@@ -26,9 +26,9 @@ local WarpDT                                = {}
 -- Hitch = multiple *humans* bursting same tick (bots on itemtest choke constantly).
 local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
 
--- Burst detection: simtime spike must be in this tick range (scaled to server tickrate)
--- At 66 Hz: FL choke < 22 ticks (~330 ms); DT release is almost always ~24 ticks.
-local BURST_MIN_TICKS_66HZ                  = 22.0
+-- At 66 Hz: fake lag releases top out below 22 ticks; DT is almost always ~24+.
+local BURST_MIN_TICKS_66HZ                  = 24.0
+local FAKELAG_MAX_CHOKE_TICKS_66HZ          = 21.0
 local BURST_MAX_TICKS_66HZ                  = 64.0 -- above this is disconnect/lag, not DT
 local WARP_COOLDOWN_TICKS_66HZ              = 24.0 -- min spacing between ProcessPlayer burst flags
 local FAKE_LAG_SUPPRESS_TICKS_66HZ          = 66.0 -- ~1s: no fake_lag scoring after DT release
@@ -73,7 +73,7 @@ function WarpDT.GetDtBurstMinTicks()
 end
 
 function WarpDT.GetFakeLagMaxChokeTicks()
-	return WarpDT.GetDtBurstMinTicks() - 1
+	return math.floor(FAKELAG_MAX_CHOKE_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 end
 
 function WarpDT.GetFakeLagMinChokeTicks()
@@ -158,6 +158,7 @@ local function getState(id)
 			lastBurstEvidenceTime    = 0,
 			lastHitCountEvidenceTime = 0,
 			lastProcessBurstTick     = 0,
+			lastCreditedBurstTick    = 0,
 			recentHits               = { _data = {}, _head = 1, _count = 0 },
 			prevSimTick              = nil,
 			lastSimTick              = nil,
@@ -222,9 +223,10 @@ function WarpDT.IsPlayerWatched(id)
 	return globals.TickCount() <= untilTick
 end
 
-local function findHistoryBurst(id)
+-- Only the newest simtime step — avoids re-flagging the same burst while it sits in the ring.
+local function findNewestHistoryBurst(id)
 	local history = HistoryManager.GetPlayerHistory(id)
-	if not history or history._count < 10 then
+	if not history or history._count < 2 then
 		return 0
 	end
 
@@ -232,21 +234,33 @@ local function findHistoryBurst(id)
 		_simTimes[k] = nil
 	end
 	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTime)
-	if #_simTimes < 10 then
+	if #_simTimes < 2 then
 		return 0
 	end
 
+	local delta = _simTimes[1] - _simTimes[2]
+	if delta <= 0 then
+		return 0
+	end
+
+	local d = timeToTicks(delta)
 	local burstMin, burstMax = getBurstThresholds()
-	for i = 1, #_simTimes - 1 do
-		local delta = _simTimes[i] - _simTimes[i + 1]
-		if delta > 0 then
-			local d = timeToTicks(delta)
-			if d >= burstMin and d < burstMax then
-				return d
-			end
-		end
+	if d >= burstMin and d < burstMax then
+		return d
 	end
 	return 0
+end
+
+local function addCappedDtEvidence(id, wantedWeight)
+	local cap = Evidence.GetMethodScoreCap("warp_dt")
+	local current = Evidence.GetMethodWeight(id, "warp_dt")
+	local remaining = cap - current
+	if remaining <= 0 then
+		return 0
+	end
+	local actual = math.min(wantedWeight, remaining)
+	Evidence.AddEvidence(id, "warp_dt", actual)
+	return actual
 end
 
 local function tryAddProcessBurstEvidence(playerState, burstAmount, curTick)
@@ -257,10 +271,14 @@ local function tryAddProcessBurstEvidence(playerState, burstAmount, curTick)
 	data.lastBurstTick = curTick
 
 	local cooldownTicks = math.floor(WARP_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
+	if data.lastCreditedBurstTick > 0 and (curTick - data.lastCreditedBurstTick) <= cooldownTicks then
+		return
+	end
 	if data.lastProcessBurstTick > 0 and (curTick - data.lastProcessBurstTick) <= cooldownTicks then
 		return
 	end
 	data.lastProcessBurstTick = curTick
+	data.lastCreditedBurstTick = curTick
 
 	local now = globals.RealTime()
 	if (now - data.lastBurstEvidenceTime) < DT_EVIDENCE_COOLDOWN_S then
@@ -269,10 +287,10 @@ local function tryAddProcessBurstEvidence(playerState, burstAmount, curTick)
 	data.lastBurstEvidenceTime = now
 
 	local weight = math.min(40, burstAmount * 1.2)
-	Evidence.AddEvidence(id, "warp_dt", weight)
-	if isDtLogEnabled() then
+	local added = addCappedDtEvidence(id, weight)
+	if added > 0 and isDtLogEnabled() then
 		print(string.format("[DoubleTap] %s packet burst: %d ticks → evidence +%.1f",
-			id, burstAmount, weight))
+			id, burstAmount, added))
 	end
 end
 
@@ -334,10 +352,10 @@ local function sampleSimBurst(pState, curTick)
 		local now = globals.RealTime()
 		if (now - data.lastBurstEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
 			data.lastBurstEvidenceTime = now
-			Evidence.AddEvidence(id, "warp_dt", weight)
-			if isDebug then
+			local added = addCappedDtEvidence(id, weight)
+			if added > 0 and isDebug then
 				print(string.format("[DoubleTap] %s burst after dmg (delay=%d ticks, %d ticks) → evidence +%.1f",
-					id, elapsedTicks, burstAmount, weight))
+					id, elapsedTicks, burstAmount, added))
 			end
 		end
 	end
@@ -370,7 +388,7 @@ function WarpDT.ProcessPlayer(playerState)
 
 	DetectionConfig.RecordHistory(playerState.wrap, "FakeLag")
 
-	local burstAmount = findHistoryBurst(id)
+	local burstAmount = findNewestHistoryBurst(id)
 	if burstAmount == 0 then
 		return
 	end
@@ -466,12 +484,12 @@ Events.Subscribe("OnHitscanHit", function(hit)
 				local timeMult                = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
 				local weight                  = DT_EVIDENCE_WEIGHT * timeMult * certaintyMult
 
-				Evidence.AddEvidence(attackerID, "warp_dt", weight)
-				if isDtLogEnabled() then
+				local added = addCappedDtEvidence(attackerID, weight)
+				if added > 0 and isDtLogEnabled() then
 					print(string.format(
 						"[DoubleTap] %s DT: %d hits in %d ticks after %d-tick burst, dmg=%d → evidence +%.1f",
 						attackerID, hitsInWindow, elapsedTicks,
-						data.lastBurstTick > 0 and (curTick - data.lastBurstTick) or 0, hit.damage, weight))
+						data.lastBurstTick > 0 and (curTick - data.lastBurstTick) or 0, hit.damage, added))
 				end
 			end
 		end
