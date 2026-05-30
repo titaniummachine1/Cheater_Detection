@@ -39,6 +39,9 @@ Sources.List = {
 	-- qfoxb / joekiller: embedded via rebuild_embedded_databases.py (no live fetch — avoids overlay bloat)
 }
 
+-- Live fetch is only biglist + trusted; broadcasts are embed-only at build time.
+Sources.List[1].__disabled = true
+
 --[[ Helper/Private Functions (None) ]]
 
 --[[ Public Module Functions ]]

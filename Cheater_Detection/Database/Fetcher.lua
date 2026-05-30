@@ -244,8 +244,8 @@ local function mergePlayersFromActiveSource(state, parseMode)
 						s.updStatic = (s.updStatic or 0) + 1
 					end
 				end
-				-- Overlay is evidence-only; embed owns names and profile fields.
-				if added or updReason or updStatic then
+				-- Local database file: karma/VAC deltas only — not live biglist/trusted rows.
+				if (added or updReason or updStatic) and not Database.IsLiveFetchListStatic(staticID) then
 					local steamID64 = Parsers.GetSteamID64(player.steamid)
 					if steamID64 then
 						Database.SyncOverlayEntry(steamID64)
@@ -731,10 +731,10 @@ function Fetcher.FinishFetch()
 	local results = Fetcher.State.results
 
 	-- Always show high-level summary to user
-	printc(0, 255, 140, 255, string.format("Database entries processed: %d", Parsers.ParseStats.totalProcessed))
-	printc(0, 255, 140, 255, string.format("Database entries added: %d", Parsers.ParseStats.totalAdded))
+	printc(0, 255, 140, 255, string.format("Live list rows processed: %d", Parsers.ParseStats.totalProcessed))
+	printc(0, 255, 140, 255, string.format("Live list rows merged in memory: %d", Parsers.ParseStats.totalAdded))
 	if results.total_updated > 0 then
-		printc(255, 255, 100, 255, string.format("Database entries updated: %d", results.total_updated))
+		printc(255, 255, 100, 255, string.format("Live list rows updated in memory: %d", results.total_updated))
 	end
 	if results.errors > 0 then
 		printc(255, 100, 100, 255, "Errors encountered: " .. results.errors)
@@ -744,7 +744,7 @@ function Fetcher.FinishFetch()
 	for _ in pairs(G.DataBase) do
 		dbCount = dbCount + 1
 	end
-	printc(0, 255, 140, 255, string.format("Total database entries: %d", dbCount))
+	printc(0, 255, 140, 255, string.format("Runtime database entries: %d", dbCount))
 
 	local overlayCount = 0
 	if type(Database.Overlay) == "table" then
@@ -752,7 +752,7 @@ function Fetcher.FinishFetch()
 			overlayCount = overlayCount + 1
 		end
 	end
-	printc(0, 255, 140, 255, string.format("Database entries on disk: %d (embedded lists are in the bundle)", overlayCount))
+	printc(0, 255, 140, 255, string.format("Local database file entries: %d (karma/deltas only; lists are in embed)", overlayCount))
 
 	if isDebugMode then
 		Logger.Debug(
@@ -769,9 +769,12 @@ function Fetcher.FinishFetch()
 
 	Fetcher.State.isRunning = false
 	Database.PurgeFriendsAndSelf()
-	Database.PruneOverlayAgainstBaseline()
+	local pruned = Database.PruneOverlayAgainstBaseline()
 	if Database.State.isDirty then
 		Database.SaveDatabase()
+	end
+	if pruned > 0 then
+		printc(255, 255, 100, 255, string.format("Database redundant rows pruned: %d", pruned))
 	end
 	Logger.Debug("Fetcher", "Fetch process finished")
 end

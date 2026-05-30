@@ -273,10 +273,38 @@ function Database.EntryBeatsBaseline(steamID, entry)
 	local curReason = Database.ResolveReason(entry)
 	local baseStatic = Database.ResolveStatic(baseline)
 	local curStatic = Database.ResolveStatic(entry)
+
+	if Database.IsRedundantListFetch(steamID, curStatic or "", curReason) then
+		return getEntryFlags(entry) ~= getEntryFlags(baseline)
+	end
+
 	if ReasonWeightResolver.ShouldOverrideEvidence(baseReason, curReason, baseStatic, curStatic) then
 		return true
 	end
 	return getEntryFlags(entry) ~= getEntryFlags(baseline)
+end
+
+--- True when a live list row duplicates embed evidence (same static, not stronger reason).
+function Database.IsRedundantListFetch(steamID, staticSource, reason)
+	if type(steamID) ~= "string" or type(staticSource) ~= "string" or staticSource == "" then
+		return false
+	end
+
+	local baseline = Database.EmbeddedBaseline and Database.EmbeddedBaseline[steamID]
+	if not baseline then
+		return false
+	end
+
+	local baseReason = Database.ResolveReason(baseline)
+	local baseStatic = Database.ResolveStatic(baseline)
+	local incomingReason = reason or "Unknown Source"
+
+	if type(baseStatic) == "string" and baseStatic:lower() == staticSource:lower() then
+		return true
+	end
+
+	return not ReasonWeightResolver.ShouldOverrideEvidence(
+		baseReason, incomingReason, baseStatic, staticSource)
 end
 
 --- True when local database file should keep karma / retaliation not present in embed.
@@ -761,10 +789,17 @@ function Database.BuildEmbeddedBaseline()
 		Logger.Error("Database",
 			"[DB] Embedded baseline is empty — rebuild embeds with rebuild_embedded_databases.py")
 	else
-		Logger.Debug("Database",
-			string.format("[DB] Embedded baseline built: %d entries (%s, %d rows ingested)",
+		Logger.Info("Database",
+			string.format("[DB] Embed baseline ready: %d entries (%s, %d rows ingested)",
 				count, embeddedLoadMode, totalIngested))
 	end
+end
+
+function Database.IsLiveFetchListStatic(staticID)
+	if type(staticID) ~= "string" or staticID == "" then
+		return false
+	end
+	return Constants.LiveFetchOnlyStatics[staticID] == true
 end
 
 function Database.ShouldPersistEntry(steamID, entry, options)
@@ -773,6 +808,10 @@ function Database.ShouldPersistEntry(steamID, entry, options)
 	end
 	if Database.HasLocalDatabaseDelta(steamID, entry) then
 		return true
+	end
+	-- Biglist/trusted live fetch updates memory for this session; embed rebuild persists list data.
+	if Database.IsLiveFetchListStatic(Database.ResolveStatic(entry)) then
+		return false
 	end
 	return Database.EntryBeatsBaseline(steamID, entry)
 end

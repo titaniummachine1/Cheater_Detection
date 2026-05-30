@@ -21,6 +21,8 @@ require("Cheater_Detection.Misc.ChatPrefix")
 require("Cheater_Detection.Misc.Vote_Reveal")
 require("Cheater_Detection.Misc.Auto_Vote")
 require("Cheater_Detection.Misc.Visuals.Menu")
+-- Bundler must see a static require; dynamic tryRequireEmbed() in Database.lua is not traced.
+require("Cheater_Detection.Database.Static_Embeded_Databases.unified_embedded")
 local Database = require("Cheater_Detection.Database.Database")
 require("Cheater_Detection.Database.SteamHistory")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")

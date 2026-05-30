@@ -11,6 +11,13 @@ if exist "%targetFile%" (
 	)
 )
 
+echo [BundleAndDeploy] Rebuilding embedded databases from live sources...
+python "%~dp0external_sources\rebuild_embedded_databases.py"
+if errorlevel 1 (
+	echo [BundleAndDeploy] NOT DEPLOYED: embed rebuild failed.
+	exit /b 1
+)
+
 node bundle.js
 if errorlevel 1 (
 	echo [BundleAndDeploy] NOT DEPLOYED: bundle.js returned non-zero exit code.

@@ -92,6 +92,12 @@ Constants.SourceWeights = {
 	["unknown"] = 0,
 }
 
+-- Live biglist/trusted fetch: runtime detection only — embed rebuild owns persistence.
+Constants.LiveFetchOnlyStatics = {
+	["cc_biglist"] = true,
+	["cc_trusted"] = true,
+}
+
 -- [[ Reason Category Weights ]]
 -- Used to score reason strings by their semantic category.
 -- When comparing two reasons, the one with the higher category weight wins.

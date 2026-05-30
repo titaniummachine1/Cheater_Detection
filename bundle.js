@@ -59,6 +59,16 @@ function main() {
     const bundledLua = bundleLua("./Cheater_Detection/Main.lua");
     writeLuaTarget(targetPath, bundledLua, "main");
 
+    const embedKeyCount = (bundledLua.match(/\["7656119/g) || []).length;
+    if (embedKeyCount < 30000) {
+      console.error(
+        `[BundleAndDeploy] NOT DEPLOYED: bundle only contains ${embedKeyCount} embedded SteamIDs (expected ~34000). unified_embedded may be missing from the bundle.`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`[BundleAndDeploy] Embedded SteamIDs in bundle: ${embedKeyCount}`);
+
     const prototypeEntryPath = "./Prototypes/Main.lua";
     if (fs.existsSync(prototypeEntryPath)) {
       const bundledPrototypeMain = bundleLua(prototypeEntryPath);

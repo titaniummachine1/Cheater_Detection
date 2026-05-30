@@ -424,35 +424,15 @@ function Parsers.GetPlayersFromIll5DB(contentString, fallbackReason)
 	return players, nil
 end
 
--- Resolve the best-known evidence for a player: runtime DB first, then embed baseline.
-local function resolveKnownEvidence(steamID64)
-	local existingEntry = G.DataBase and G.DataBase[steamID64]
-	if existingEntry then
-		return Database.ResolveReason(existingEntry), Database.ResolveStatic(existingEntry)
-	end
-
-	local baseline = Database.EmbeddedBaseline and Database.EmbeddedBaseline[steamID64]
-	if baseline then
-		return Database.ResolveReason(baseline), Database.ResolveStatic(baseline)
-	end
-
-	return nil, nil
-end
-
 -- True when incoming reason/static can replace what runtime or embed already holds.
 local function incomingBeatsKnownEvidence(steamID64, staticSource, reason)
 	if type(steamID64) ~= "string" or type(staticSource) ~= "string" or staticSource == "" then
 		return true
 	end
-
-	local existingReason, existingStatic = resolveKnownEvidence(steamID64)
-	if not existingReason and not existingStatic then
-		return true
+	if Database.IsRedundantListFetch(steamID64, staticSource, reason) then
+		return false
 	end
-
-	local incomingReason = reason or "Unknown Source"
-	return ReasonWeightResolver.ShouldOverrideEvidence(
-		existingReason, incomingReason, existingStatic, staticSource)
+	return true
 end
 
 -- Processes a single player entry into the database

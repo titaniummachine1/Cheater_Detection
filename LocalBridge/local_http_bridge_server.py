@@ -121,6 +121,14 @@ def log_event(message: str) -> None:
     print(f"[bridge] {message}")
 
 
+def clear_console() -> None:
+    """Clear terminal when Lua probes /health at load (fresh script session)."""
+    if os.name == "nt":
+        os.system("cls")
+    else:
+        print("\033[2J\033[H", end="", flush=True)
+
+
 def clamp_int(raw_value: str | None, default: int, minimum: int, maximum: int) -> int:
     if raw_value is None:
         return default
@@ -498,6 +506,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
 
         if parsed.path == "/health_txt":
+            clear_console()
+            log_event("Lua session started (console cleared on /health_txt)")
             send_text(self, f"ok|{PROTOCOL}\n")
             return
 
@@ -542,6 +552,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/health" or parsed.path == "/stats":
+            if parsed.path == "/health":
+                clear_console()
+                log_event("Lua session started (console cleared on /health)")
             with JOBS_LOCK:
                 pending = len(PENDING)
                 in_flight = len(INFLIGHT_BY_KEY)
