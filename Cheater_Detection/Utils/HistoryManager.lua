@@ -350,7 +350,8 @@ function HistoryManager.ClearPlayer(steamID)
 	_storedFieldsByPlayer[id] = nil
 end
 
---- Newest-first simtime gaps in ticks (computed once when simtime is stored).
+--- Newest-first simtime gaps in ticks (precomputed on each simtime store).
+--- Only walks the newest maxDeltas gaps (ring may retain more ticks for other detectors).
 ---@return table buf Reused per-player buffer (do not hold across ticks)
 ---@return number count Dense entries in buf[1..count]
 ---@return number sumTicks Sum of buf[1..count]
@@ -365,13 +366,18 @@ function HistoryManager.GetSimDeltaDeltas(history, maxDeltas)
 		history._simDeltaBuf = buf
 	end
 
-	local n = 0
-	local sum = 0
 	local maxPairs = history._count - 1
 	local limit = math.min(maxDeltas or maxPairs, maxPairs)
+	local head = history._head
+	local cap = maxRetentionTicks
+	local n = 0
+	local sum = 0
 	for offset = 0, limit - 1 do
-		local record = HistoryManager.GetRecordAt(history, offset)
-		local tickDelta = record and record._sim_delta_ticks
+		local idx = head - offset
+		if idx < 1 then
+			idx = idx + cap
+		end
+		local tickDelta = history[idx]._sim_delta_ticks
 		if tickDelta ~= nil then
 			n = n + 1
 			buf[n] = tickDelta

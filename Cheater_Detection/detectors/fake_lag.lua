@@ -24,6 +24,7 @@ local Common                      = require("Cheater_Detection.Utils.Common")
 local Evidence                    = require("Cheater_Detection.Core.Evidence_system")
 local Events                      = require("Cheater_Detection.Core.Events")
 local HistoryManager              = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig             = require("Cheater_Detection.Utils.DetectionConfig")
 local Fetcher                     = require("Cheater_Detection.Database.Fetcher")
 local PlayerCache                 = require("Cheater_Detection.Core.player_cache")
 local DoubleTap                   = require("Cheater_Detection.detectors.double_tap")
@@ -60,9 +61,10 @@ local CHOKE_HOLD_MIN_STALLS       = 6                                     -- min
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
 local DEBUG_DELTA_WINDOW          = 16   -- newest simtime gaps to classify for Choke logs
 local DEBUG_SAMPLE_TICK_INTERVAL  = 4   -- Choke log rollup: full window snapshot every N ticks
-local HISTORY_SCAN_DELTAS         = 25   -- newest precomputed simtime gaps (HistoryManager)
+-- Newest simtime gaps to read; clamped to DetectionConfig simtime retention (see cd_simhistory).
 local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
-local MIN_FPS_FOR_DETECTION       = 40                                     -- below ~40 fps, frame gaps can exceed the 8-tick choke threshold (ticks/frame = tickrate/fps)
+-- Below ~40 fps, frame gaps can exceed the 8-tick choke threshold (tickrate/fps). No listen/debug bypass.
+local MIN_FPS_FOR_DETECTION       = 40
 
 local evidenceCooldowns           = {}                                     -- [id] = last globals.RealTime() evidence was added
 local consecutiveChokeCount       = {}                                     -- count consecutive large deltas for impulse detection
@@ -89,20 +91,51 @@ local function buildPositiveDeltaView(deltaTicks, deltaCount)
 end
 
 -- ?????? helpers ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
-local function isLocalFpsSufficient()
+local function getLocalSmoothedFps()
 	local ft = globals.AbsoluteFrameTime()
 	if ft and ft > 0 then
 		smoothedFrameTime = smoothedFrameTime * 0.9 + ft * 0.1
 	end
-	return (1.0 / smoothedFrameTime) >= MIN_FPS_FOR_DETECTION
+	return 1.0 / smoothedFrameTime
 end
 
 function FakeLag.IsLowFps()
-	return (1.0 / smoothedFrameTime) < MIN_FPS_FOR_DETECTION
+	return getLocalSmoothedFps() < MIN_FPS_FOR_DETECTION
+end
+
+local function isChokeDetectionEnabled()
+	local adv = G.Menu and G.Menu.Advanced
+	return adv and adv.Choke == true
+end
+
+--- Why FakeLag did not run (nil = allowed). FPS gate is MIN_FPS only; no listen/debug bypass for net blocks.
+function FakeLag.GetDetectionBlockReason()
+	if not isChokeDetectionEnabled() then
+		return "menu off"
+	end
+
+	local smoothedFps = getLocalSmoothedFps()
+	if smoothedFps < MIN_FPS_FOR_DETECTION then
+		return string.format("fps=%.0f < %d", smoothedFps, MIN_FPS_FOR_DETECTION)
+	end
+
+	local connReason = Common.GetConnectionStabilityBlockReason()
+	if connReason and not connReason:match("^fps=") then
+		return connReason
+	end
+
+	return nil
+end
+
+function FakeLag.IsDetectionAllowed()
+	return FakeLag.GetDetectionBlockReason() == nil
 end
 
 function FakeLag.HasWork(playerState)
 	if not playerState or not playerState.id then
+		return false
+	end
+	if not FakeLag.IsDetectionAllowed() then
 		return false
 	end
 	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
@@ -479,11 +512,6 @@ local function addCappedFakeLagEvidence(id, wantedWeight)
 	return 0
 end
 
-local function isChokeDetectionEnabled()
-	local adv = G.Menu and G.Menu.Advanced
-	return adv and adv.Choke == true
-end
-
 local function isActiveChokePattern(deltaTicks, deltaCount)
 	if getChokeHoldSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT, deltaCount) then
 		return true
@@ -543,9 +571,8 @@ function FakeLag.ProcessPlayer(playerState)
 		return
 	end
 
-	if not isLocalFpsSufficient() then return end
-	if Common.GetConnectionStabilityBlockReason()
-		and not (Common.IsDebugEnabled() and Common.IsLocalListenServer()) then
+	local blockReason = FakeLag.GetDetectionBlockReason()
+	if blockReason then
 		return
 	end
 
@@ -575,7 +602,8 @@ function FakeLag.ProcessPlayer(playerState)
 		end
 	end
 
-	local deltaTicks, deltaCount, _sumTicks = HistoryManager.GetSimDeltaDeltas(history, HISTORY_SCAN_DELTAS)
+	local flScan = DetectionConfig.GetSimtimeScanLimits().flScan
+	local deltaTicks, deltaCount, _sumTicks = HistoryManager.GetSimDeltaDeltas(history, flScan)
 	if deltaCount < 1 then
 		return
 	end

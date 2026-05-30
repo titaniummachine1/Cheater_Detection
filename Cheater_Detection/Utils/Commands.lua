@@ -8,6 +8,8 @@ local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 local Config = require("Cheater_Detection.Utils.Config")
 local Common = require("Cheater_Detection.Utils.Common")
 local DoubleTap = require("Cheater_Detection.detectors.double_tap")
+local FakeLag = require("Cheater_Detection.detectors.fake_lag")
+local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local Commands = {}
@@ -241,6 +243,59 @@ local function setupDiagnostics()
 		printc(200, 200, 200, 255, string.format("  conn block   : %s", tostring(stats.connectionBlock)))
 		printc(200, 200, 200, 255, string.format("  listen bypass: %s", tostring(stats.localListenBypass)))
 		printc(200, 200, 200, 255, string.format("  model        : %s", tostring(stats.model)))
+		printc(200, 200, 200, 255, string.format("  simtime ring : %d ticks (%d delta pairs)",
+			stats.simtimeRetention or 0, (stats.simtimeRetention or 1) - 1))
+		printc(200, 200, 200, 255, string.format("  DT scan      : recent=%d watch=%d",
+			stats.dtRecentScanDeltas or 0, stats.dtWatchingScanDeltas or 0))
+	end)
+
+	Commands.Register("cd_fl_status", function(_args)
+		local block = FakeLag.GetDetectionBlockReason()
+		printc(100, 220, 255, 255, "[CD] FakeLag diagnostic:")
+		printc(200, 200, 200, 255, "  min FPS need  : >= 40 (smoothed)")
+		printc(200, 200, 200, 255, string.format("  allowed       : %s", tostring(FakeLag.IsDetectionAllowed())))
+		printc(200, 200, 200, 255, string.format("  block reason  : %s", block or "none"))
+	end)
+
+	Commands.Register("cd_simhistory", function(args)
+		local targets = DetectionConfig.SimtimeScanTargets
+		local limits = DetectionConfig.GetSimtimeScanLimits()
+
+		if not args or not args[1] or args[1] == "" then
+			printc(100, 220, 255, 255, "[CD] Simtime history (FakeLag + DoubleTap):")
+			printc(200, 200, 200, 255, string.format(
+				"  retention     : %d ticks  (max %d simtime delta pairs)",
+				limits.retentionTicks, limits.maxDeltaPairs))
+			printc(200, 200, 200, 255, string.format(
+				"  effective scan: FL=%d  DT recent=%d  DT watch=%d",
+				limits.flScan, limits.dtRecent, limits.dtWatching))
+			printc(200, 200, 200, 255, string.format(
+				"  targets       : FL=%d  DT recent=%d  DT watch=%d (clamp to ring)",
+				targets.FlScanDeltas, targets.DtRecentScanDeltas, targets.DtWatchingScanDeltas))
+			printc(255, 200, 100, 255, string.format(
+				"  floor: retention >= %d (FL scan %d, DT scan %d)",
+				DetectionConfig.GetSimtimeMinRetentionTicks(),
+				targets.FlScanDeltas, targets.DtRecentScanDeltas))
+			printc(180, 180, 180, 255, "  Usage: cd_simhistory <ticks>  — default 25; lower will be rejected")
+			printc(180, 180, 180, 255, "  Test 330ms FL + full-rage DT after each change; redeploy not required.")
+			return
+		end
+
+		local ok, err = DetectionConfig.SetSimtimeRetentionTicks(args[1])
+		if not ok then
+			printc(255, 100, 100, 255, "[CD] cd_simhistory: " .. tostring(err))
+			return
+		end
+
+		limits = DetectionConfig.GetSimtimeScanLimits()
+		printc(100, 255, 150, 255, string.format(
+			"[CD] Simtime retention set to %d ticks (ring reset). Scans: FL=%d DT recent=%d watch=%d",
+			limits.retentionTicks, limits.flScan, limits.dtRecent, limits.dtWatching))
+		if limits.maxDeltaPairs < DetectionConfig.GetSimtimeMaxScanDeltas() then
+			printc(255, 100, 100, 255, string.format(
+				"[CD] WARNING: only %d delta pairs — increase retention to at least %d.",
+				limits.maxDeltaPairs, DetectionConfig.GetSimtimeMinRetentionTicks()))
+		end
 	end)
 end
 

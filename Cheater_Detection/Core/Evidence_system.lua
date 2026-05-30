@@ -55,7 +55,7 @@ Evidence.Config = {
 	Evidence_Tolerance = 50,   -- Evidence threshold % (0–100) to mark as cheater
 	MinWeightFloor = 0,        -- Cannot decay below this
 	AutoPriorityThreshold = 12.0, -- Evidence score threshold to trigger SUSPICIOUS flag
-	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
+	ExploitAutoCheaterMin = 70, -- Per-method % of cap; also marks CHEATER (see isExploitAtAutoCheaterMin)
 	MethodScoreCaps = {
 		fake_lag    = 120.0, -- ~24 credits at 5 pts (stricter than old 60 cap)
 		double_tap  = 300.0, -- ~10 usages at DT_USAGE_WEIGHT (30) in double_tap.lua
@@ -242,6 +242,50 @@ local function getEvidenceScoreCap(evidence)
 	return cap
 end
 
+-- Cheater line uses strongest active method cap so a little fake_lag weight does not
+-- inflate the bar when double_tap is already near cap (sum cap would be 300+120=420).
+local function getEvidenceMaxMethodCap(evidence)
+	local maxCap = 0
+	if evidence and evidence.Reasons then
+		for method, reason in pairs(evidence.Reasons) do
+			if reason.Weight and reason.Weight > 0 then
+				maxCap = math.max(maxCap, getMethodScoreCap(method))
+			end
+		end
+	end
+	if maxCap <= 0 then
+		return 200.0
+	end
+	return maxCap
+end
+
+local exploitMethodSet = nil
+local function isExploitMethod(detectionName)
+	if not exploitMethodSet then
+		exploitMethodSet = {}
+		for _, name in ipairs(Evidence.Config.Categories.Exploit or {}) do
+			exploitMethodSet[name] = true
+		end
+	end
+	return exploitMethodSet[detectionName] == true
+end
+
+local function isExploitAtAutoCheaterMin(evidence)
+	local minPct = Evidence.Config.ExploitAutoCheaterMin or 70
+	if not evidence or not evidence.Reasons then
+		return false
+	end
+	for method, reason in pairs(evidence.Reasons) do
+		if isExploitMethod(method) and reason.Weight and reason.Weight > 0 then
+			local cap = getMethodScoreCap(method)
+			if reason.Weight >= cap * (minPct / 100) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 local function getEvidencePercent(evidence)
 	local cap = getEvidenceScoreCap(evidence)
 	local score = evidence and evidence.TotalScore or 0
@@ -292,6 +336,7 @@ local function syncPlayerStateFromEvidence(steamID, evidence)
 	local primaryMethod, onlyFakeLag = getPrimaryMethod(evidence)
 	local shouldMarkSuspicious = evidence.TotalScore >= threshold
 	local shouldMarkCheater = evidence.TotalScore >= cheaterThreshold
+		or isExploitAtAutoCheaterMin(evidence)
 
 	-- Track active evidence to prevent double-decay in player_cache
 	if evidence.TotalScore > 0 then
@@ -393,7 +438,7 @@ end
 
 function Evidence.GetCheaterThreshold(evidence)
 	local pct = getMenuPercent("Evidence_Tolerance", 85)
-	return getEvidenceScoreCap(evidence) * (pct / 100)
+	return getEvidenceMaxMethodCap(evidence) * (pct / 100)
 end
 
 function Evidence.GetMethodScoreCap(detectionName)

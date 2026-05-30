@@ -14,8 +14,9 @@ local Evidence        = require("Cheater_Detection.Core.Evidence_system")
 local Events          = require("Cheater_Detection.Core.Events")
 local PlayerCache     = require("Cheater_Detection.Core.player_cache")
 local Common          = require("Cheater_Detection.Utils.Common")
-local Fetcher         = require("Cheater_Detection.Database.Fetcher")
-local HistoryManager  = require("Cheater_Detection.Utils.HistoryManager")
+local Fetcher          = require("Cheater_Detection.Database.Fetcher")
+local HistoryManager   = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig  = require("Cheater_Detection.Utils.DetectionConfig")
 
 local DoubleTap = {}
 
@@ -25,8 +26,6 @@ local BURST_MIN_TICKS_66HZ         = 24.0
 local FAKELAG_MAX_CHOKE_TICKS_66HZ   = 21.0
 local BURST_MAX_TICKS_66HZ         = 34.0
 local BURST_REPEAT_TOLERANCE       = 8
-local RECENT_DT_BURST_SCAN         = 20
-local WATCHING_DT_BURST_SCAN       = 40
 local DT_CONFIRM_WINDOW_TICKS_66HZ = 48.0
 local FAKE_LAG_SUPPRESS_TICKS_66HZ   = 66.0
 
@@ -135,13 +134,21 @@ function DoubleTap.MarkDtRelease(id)
 	dtSuppressUntil[id] = globals.TickCount() + getFakeLagSuppressTicks()
 end
 
+local function getDtScanLimits()
+	return DetectionConfig.GetSimtimeScanLimits()
+end
+
 function DoubleTap.GetDebugStats()
+	local scan = getDtScanLimits()
 	return {
-		enabled           = Common.IsDoubleTapDetectionEnabled(),
-		fetchBlocking     = Fetcher.State.isRunning == true,
-		connectionBlock   = Common.GetConnectionStabilityBlockReason(),
-		localListenBypass = Common.IsDebugEnabled() and Common.IsLocalListenServer(),
-		model             = "simtime burst <-> hitscan hurt (48t bidirectional)",
+		enabled             = Common.IsDoubleTapDetectionEnabled(),
+		fetchBlocking       = Fetcher.State.isRunning == true,
+		connectionBlock     = Common.GetConnectionStabilityBlockReason(),
+		localListenBypass   = Common.IsDebugEnabled() and Common.IsLocalListenServer(),
+		model               = "simtime burst <-> hitscan hurt (48t bidirectional)",
+		simtimeRetention    = scan.retentionTicks,
+		dtRecentScanDeltas  = scan.dtRecent,
+		dtWatchingScanDeltas = scan.dtWatching,
 	}
 end
 
@@ -368,10 +375,14 @@ local function isFocusedPlayer(id)
 end
 
 local function clearStaleBurstState(data, curTick)
+	local confirmWindow = getConfirmWindowTicks()
+	if data.lastDamageTick > 0 and (curTick - data.lastDamageTick) > confirmWindow then
+		data.lastDamageTick = 0
+	end
 	if data.lastBurstTick <= 0 then
 		return
 	end
-	if (curTick - data.lastBurstTick) > getConfirmWindowTicks() then
+	if (curTick - data.lastBurstTick) > confirmWindow then
 		data.lastBurstTick = 0
 		data.lastBurstAmount = 0
 	end
@@ -468,9 +479,10 @@ local function findRecentDtBurst(id, scanDepthOverride, quietOnMiss)
 	end
 
 	local burstMin, burstMax = getBurstThresholds()
+	local scanLimits = getDtScanLimits()
 	local scanDepth = scanDepthOverride
 	if not scanDepth then
-		scanDepth = isWatchingForBurst(id) and WATCHING_DT_BURST_SCAN or RECENT_DT_BURST_SCAN
+		scanDepth = isWatchingForBurst(id) and scanLimits.dtWatching or scanLimits.dtRecent
 	end
 	local deltaTicks, deltaCount = HistoryManager.GetSimDeltaDeltas(history, scanDepth)
 	if deltaCount < 1 then
@@ -532,16 +544,21 @@ local function onBurstDetected(id, burstAmount, curTick, burstIndex)
 
 	if data.lastDamageTick > 0 then
 		local damageTick = data.lastDamageTick
-		local added = tryCreditDtCorrelation(id, burstAmount, burstTick, damageTick, "burst after dmg")
-		data.lastDamageTick = 0
-		data.lastBurstTick = 0
-		data.lastBurstAmount = 0
-		if added <= 0 and isDtLogEnabled() then
-			logDtReject(id, "burst_after_dmg", string.format(
-				"burst=%d dmgTick=%d burstTick=%d (see prior reject)",
-				burstAmount, damageTick, burstTick))
+		local delayAfterDmg = burstTick - damageTick
+		if delayAfterDmg <= getConfirmWindowTicks() then
+			local added = tryCreditDtCorrelation(
+				id, burstAmount, burstTick, damageTick, "burst after dmg")
+			data.lastDamageTick = 0
+			data.lastBurstTick = 0
+			data.lastBurstAmount = 0
+			if added <= 0 and isDtLogEnabled() then
+				logDtReject(id, "burst_after_dmg", string.format(
+					"burst=%d dmgTick=%d burstTick=%d (see prior reject)",
+					burstAmount, damageTick, burstTick))
+			end
+			return
 		end
-		return
+		data.lastDamageTick = 0
 	end
 
 	data.lastBurstTick = burstTick
@@ -567,7 +584,7 @@ local function tryDetectBurstForPlayer(id, curTick, forceScan)
 		return
 	end
 
-	local scanDepth = forceScan and RECENT_DT_BURST_SCAN or nil
+	local scanDepth = forceScan and getDtScanLimits().dtRecent or nil
 	local quietOnMiss = forceScan == true
 	local burstAmount, burstIndex = findRecentDtBurst(id, scanDepth, quietOnMiss)
 	if burstAmount == 0 then
@@ -595,14 +612,15 @@ local function tryDetectBurstForPlayer(id, curTick, forceScan)
 end
 
 -- Hurt path: correlate every hit; burst scan at most once per attacker per tick (+ global cap).
-local function tryHurtBurstScan(id, curTick)
+-- wasWatchingBeforeHurt: watch state *before* this hit updates lastDamageTick (see OnHitscanHit).
+local function tryHurtBurstScan(id, curTick, wasWatchingBeforeHurt)
 	resetHurtBurstScanBudget(curTick)
 	local data = getState(id)
 	if data.lastHurtBurstScanTick == curTick then
 		return
 	end
 	local scanCap = MAX_HURT_BURST_SCANS_TICK
-	if getDtFocusPriority(id) >= DT_FOCUS_PRIORITY_WATCH then
+	if wasWatchingBeforeHurt then
 		scanCap = MAX_HURT_BURST_SCANS_HOT
 	end
 	if hurtBurstScansUsed >= scanCap then
@@ -694,8 +712,9 @@ Events.Subscribe("OnHitscanHit", function(hit)
 		end
 	end
 
+	local wasWatchingBeforeHurt = isWatchingForBurst(attackerID)
+	tryHurtBurstScan(attackerID, curTick, wasWatchingBeforeHurt)
 	data.lastDamageTick = curTick
-	tryHurtBurstScan(attackerID, curTick)
 
 	if isDtLogEnabled() then
 		local now = globals.RealTime()
