@@ -137,11 +137,10 @@ local function scanPlayerWearables(player, targetID, isDebug)
 	end
 
 	if data.totalWearables == 0 then
-		-- Only log zero wearables for real players in debug, not bots
 		if isDebug and targetID:sub(1, 4) ~= "BOT_" then
 			print(string.format("[CosmeticAbuse] id=%s - 0 wearables found", targetID))
 		end
-		return false
+		return nil
 	end
 
 	playerScanData[targetID] = data
@@ -221,8 +220,16 @@ function CosmeticAbuse.ScanPlayer(playerState)
 
 	local isDebug = Common.IsLogCategoryEnabled("Cosmetics")
 	local scanned = scanPlayerWearables(playerState.wrap:GetEntity(), id, isDebug)
-	if not scanned then
-		-- No wearables found - mark as scanned (F2P or no hats equipped)
+	if scanned == nil then
+		local attempts = (playerState.wearableScanAttempts or 0) + 1
+		playerState.wearableScanAttempts = attempts
+		if attempts < 66 then
+			return
+		end
+		playerState.wearablesScanned = true
+		return
+	end
+	if scanned == false then
 		playerState.wearablesScanned = true
 		return
 	end
@@ -232,7 +239,7 @@ function CosmeticAbuse.ScanPlayer(playerState)
 	if illegal then
 		local localPlayer = entities.GetLocalPlayer()
 		local isLocal = localPlayer and tostring(Common.GetSteamID64(localPlayer)) == id
-		-- In debug mode, allow local player detection
+		-- DEBUG MODE: flag yourself when testing cosmetic conflicts. Off = never flag local.
 		if not isLocal or Common.IsDebugEnabled() then
 			local flagged = DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER,
 				"Equip region abuse: " .. (reason or "unknown conflict"))

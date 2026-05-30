@@ -22,6 +22,7 @@ local Events                      = require("Cheater_Detection.Core.Events")
 local HistoryManager              = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig             = require("Cheater_Detection.Utils.DetectionConfig")
 local Fetcher                     = require("Cheater_Detection.Database.Fetcher")
+local PlayerCache                 = require("Cheater_Detection.Core.player_cache")
 
 local FakeLag                     = {}
 
@@ -337,6 +338,12 @@ function FakeLag.ProcessPlayer(playerState)
 
 	local id = playerState.id
 	if id:sub(1, 4) == "BOT_" then return end
+
+	-- DEBUG MODE: scan local player for self-test. Off = skip yourself.
+	local localID = PlayerCache.GetLocalID()
+	if localID and id == localID and not Common.IsDebugEnabled() then
+		return
+	end
 
 	if not isLocalFpsSufficient() then return end
 	if not Common.IsConnectionStableForDetection() then return end

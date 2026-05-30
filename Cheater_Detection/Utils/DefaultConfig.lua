@@ -21,7 +21,7 @@ local Default_Config = {
 		Evidence_Tolerance = 85,            -- Evidence percent needed to mark cheater
 		AutoPriority = true,
 		LogLevel = { false, true, false, false }, -- [Debug, Info, Warning, Error] (default: Info)
-		debug = false,                      -- Debug mode (removes self from database, enables verbose logging)
+		debug = false,                      -- ON = detectors/evidence apply to LOCAL player for self-test; OFF = never scan yourself
 		profiler = false,                   -- Performance Profiler (uses global Profiler library)
 		-- Detection toggles (only for implemented detections)
 		Choke = false,                      -- Fake Lag detection
@@ -29,9 +29,9 @@ local Default_Config = {
 		Bhop = true,                        -- Bunny hop detection
 		DuckSpeed = true,                   -- Duck speed detection
 		AntiAim = true,                     -- Anti-aim detection
-		SilentAimbot = true,                -- Silent aimbot (extrapolation) detection
+		SilentAimbot = false,               -- Disabled pending rework (forced off in Main.lua)
 		Cosmetics = true,                   -- Cosmetic exploit detection
-		AimLock = true,                     -- AimLock detection (requires SilentAimbot)
+		AimLock = false,                    -- Disabled with SilentAimbot until rework
 	},
 
 	Notifications = {

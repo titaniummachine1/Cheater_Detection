@@ -169,6 +169,8 @@ local function resetRuntimeSessionState()
 	end
 end
 
+-- DEBUG MODE (menu Advanced.debug): includes YOU in detector scans, evidence, and flags.
+-- Use this to test bhop / choke / cosmetics / duck on yourself. When debug is OFF, local is never scanned.
 local function isDebugEnabled()
 	return Common.IsDebugEnabled()
 end
@@ -262,8 +264,9 @@ local function OnCreateMove(cmd)
 	local adv              = menu.Advanced
 
 	local enableValveCheck = menu.Main.ValveCheck == true
-	local enableSilent     = adv.SilentAimbot == true
-	local enableAimLock    = enableSilent and adv.AimLock ~= false
+	-- Silent aim / aimlock disabled pending rework; menu toggles ignored until restored.
+	local enableSilent     = false
+	local enableAimLock    = false
 	local enableAntiAim    = adv.AntiAim == true
 	local enableDuckSpeed  = adv.DuckSpeed == true
 	local enableBhop       = adv.Bhop == true
@@ -345,15 +348,15 @@ local function OnCreateMove(cmd)
 
 		existingState.wasDormant = false
 
-		if not isDebug then
-			if id == localID then
-				if not sessionState.cleanedFriendIDs[id] then
-					sessionState.cleanedFriendIDs[id] = true
-					Database.RemoveCheater(id)
-					existingState.wrap:SetPriority(0)
-				end
+		-- Normal play: never scan yourself. Debug mode: YOU are a valid target for all detectors.
+		if id == localID then
+			if not isDebug then
+				Evidence.ClearPlayer(id)
+				Database.RemoveCheater(id)
+				existingState.wrap:SetPriority(0)
 				goto continue
 			end
+		elseif not isDebug then
 			if existingState.isFriend then
 				local friendID = existingState.id
 				if friendID and not sessionState.cleanedFriendIDs[friendID] then
@@ -424,10 +427,7 @@ local function OnCreateMove(cmd)
 	if enableBhop then
 		Profiler.Begin("Bhop")
 		for _, pState in ipairs(activePlayers) do
-			-- Only check players who are midair (potential bhop)
-			if Bhop.HasWork(pState) then
-				Bhop.ProcessPlayer(pState)
-			end
+			Bhop.ProcessPlayer(pState)
 		end
 		Profiler.End("Bhop")
 	end
@@ -444,6 +444,16 @@ local function OnCreateMove(cmd)
 			FakeLag.ProcessPlayer(pState)
 		end
 		Profiler.End("FakeLag")
+	end
+
+	if enableCosmetics then
+		Profiler.Begin("Cosmetics")
+		for _, pState in ipairs(activePlayers) do
+			if not pState.wearablesScanned then
+				CosmeticAbuse.ScanPlayer(pState)
+			end
+		end
+		Profiler.End("Cosmetics")
 	end
 
 	Profiler.End("PlayerScan_Loop")

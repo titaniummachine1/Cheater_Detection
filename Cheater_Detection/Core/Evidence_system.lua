@@ -437,41 +437,10 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 
 	steamID = tostring(steamID)
 
-	-- Skip local player unless debug or active choke self-test (Choke detection on).
-	if detectionName == "fake_lag" then
-		local adv = G.Menu and G.Menu.Advanced
-		if adv and adv.Choke == true then
-			-- allow evidence while testing fakelag on yourself
-		elseif not Common.IsDebugEnabled() then
-			local localPlayer = entities.GetLocalPlayer()
-			if localPlayer and localPlayer:IsValid() then
-				local localSteamID = Common.GetSteamID64(localPlayer)
-				if localSteamID and steamID == tostring(localSteamID) then
-					return
-				end
-			end
-		end
-	elseif detectionName == "warp_dt" then
-		local adv = G.Menu and G.Menu.Advanced
-		if adv and adv["Warp"] == true then
-			-- allow evidence while testing double tap on yourself
-		elseif not Common.IsDebugEnabled() then
-			local localPlayer = entities.GetLocalPlayer()
-			if localPlayer and localPlayer:IsValid() then
-				local localSteamID = Common.GetSteamID64(localPlayer)
-				if localSteamID and steamID == tostring(localSteamID) then
-					return
-				end
-			end
-		end
-	elseif not Common.IsDebugEnabled() then
-		local localPlayer = entities.GetLocalPlayer()
-		if localPlayer and localPlayer:IsValid() then
-			local localSteamID = Common.GetSteamID64(localPlayer)
-			if localSteamID and steamID == tostring(localSteamID) then
-				return
-			end
-		end
+	-- DEBUG MODE: evidence on local player is allowed (self-test). Off = never flag yourself.
+	local localID = PlayerCache.GetLocalID()
+	if localID and steamID == localID and not Common.IsDebugEnabled() then
+		return
 	end
 
 	-- Debug: Log successful evidence add
@@ -749,6 +718,32 @@ end
 function Evidence.OnPlayerLeave(steamID)
 	-- Clean up evidence data
 	evidenceStore[steamID] = nil
+end
+
+--- Drop runtime evidence stack (used for local player when debug mode is OFF).
+---@param steamID string
+function Evidence.ClearPlayer(steamID)
+	if not steamID then
+		return
+	end
+	steamID = tostring(steamID)
+	evidenceStore[steamID] = nil
+
+	local playerState = PlayerCache.GetByID(steamID)
+	if not playerState then
+		return
+	end
+
+	playerState.hasActiveEvidence = nil
+	local hardMask = Constants.Flags.CHEATER | Constants.Flags.SUSPICIOUS | Constants.Flags.HIGH_RISK
+	if (playerState.flags & hardMask) ~= 0 or (playerState.score or 0) > 0 then
+		playerState.flags = (playerState.flags or 0) & ~hardMask
+		playerState.score = 0
+		playerState.detectionReason = nil
+		playerState.wrap:SetPriority(0)
+		DirtySystem.MarkDirty(steamID, "flags")
+		DirtySystem.MarkDirty(steamID, "score")
+	end
 end
 
 --- Set playerlist priority for a player by SteamID

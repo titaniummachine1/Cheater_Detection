@@ -149,6 +149,8 @@ local function DrawMenu()
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
 		TimMenu.NextLine()
+		TimMenu.Text("DEBUG ON = detectors run on YOU (self-test). OFF = you are never scanned.")
+		TimMenu.NextLine()
 		Advanced.profiler = TimMenu.Checkbox("Performance Profiler", Advanced.profiler == true)
 		TimMenu.NextLine()
 		-- Debug category selector to reduce console spam
@@ -190,9 +192,10 @@ local function DrawMenu()
 		TimMenu.NextLine()
 
 		TimMenu.BeginSector("Aim Detection")
-		Advanced.SilentAimbot = TimMenu.Checkbox("Silent Aimbot (Extrapolation)", Advanced.SilentAimbot == true)
-		TimMenu.NextLine()
-		Advanced.AimLock = TimMenu.Checkbox("AimLock Detection", Advanced.AimLock ~= false)
+		-- Disabled pending rework; forced off in Main.lua until silent aim is restored.
+		Advanced.SilentAimbot = false
+		Advanced.AimLock = false
+		TimMenu.Text("Silent Aim / AimLock: disabled (coming back later)")
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()

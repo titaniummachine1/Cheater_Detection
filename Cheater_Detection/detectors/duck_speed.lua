@@ -41,6 +41,7 @@ function DuckSpeed.ProcessPlayer(playerState)
 		return
 	end
 
+	-- DEBUG MODE: scan local player for self-test. Off = skip yourself.
 	if id == PlayerCache.GetLocalID() and not Common.IsDebugEnabled() then
 		return
 	end

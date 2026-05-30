@@ -56,7 +56,7 @@ function AntiAim.HasWork(playerState)
 	local pdata = playerState.pdata
 	if not pdata or not pdata.isAlive or pdata.isDormant then return false end
 
-	-- Skip friends and local player (unless debug)
+	-- DEBUG MODE: friends + local player are scanned (self-test). OFF = skip them.
 	if not Common.IsDebugEnabled() then
 		if playerState.isFriend or id == PlayerCache.GetLocalID() then
 			return false

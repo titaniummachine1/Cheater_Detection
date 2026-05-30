@@ -136,7 +136,8 @@ local function convertSteamStringTo64(rawSteamID)
 	return nil
 end
 
---- Returns true when debug mode is active in the menu (eliminates repeated inline checks).
+--- Debug mode ON: detectors and evidence run on the LOCAL player (personal self-test).
+--- Debug mode OFF: you are never scanned or flagged by runtime detectors.
 ---@return boolean
 function Common.IsDebugEnabled()
 	return G.Menu.Advanced.debug == true
