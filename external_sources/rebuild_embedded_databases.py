@@ -378,13 +378,11 @@ def _short_url(url: str, max_len: int = 72) -> str:
 
 
 def fetch_url(url: str) -> bytes:
-    now = time.time()
-
     if not _force_fetch:
         manifest = _load_fetch_manifest()
         entry = manifest.get("entries", {}).get(url)
         if entry:
-            age = now - float(entry.get("fetched_at", 0))
+            age = time.time() - float(entry.get("fetched_at", 0))
             if age < FETCH_CACHE_TTL_SEC:
                 cache_file = FETCH_CACHE_DIR / entry.get("file", "")
                 if cache_file.is_file():
@@ -399,13 +397,14 @@ def fetch_url(url: str) -> bytes:
     with urllib.request.urlopen(req, timeout=45) as resp:
         data = resp.read()
 
+    fetched_at = time.time()
     manifest = _load_fetch_manifest()
     cache_name = _url_cache_filename(url)
     FETCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     (FETCH_CACHE_DIR / cache_name).write_bytes(data)
     manifest.setdefault("entries", {})[url] = {
         "file": cache_name,
-        "fetched_at": now,
+        "fetched_at": fetched_at,
         "size": len(data),
     }
     _save_fetch_manifest(manifest)
