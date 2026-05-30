@@ -17,11 +17,15 @@ DetectionConfig.Detectors = {
 			HistoryManager.Fields.EyePosition,
 		},
 	},
-	FakeLag = {
-		retentionTicks = 40, -- room for 3+ choke→release cycles plus stalls between
+	-- Simtime + precomputed tick gaps (HistoryManager). FakeLag/DoubleTap only read deltas.
+	Simtime = {
+		retentionTicks = 40,
 		fields = { HistoryManager.Fields.SimulationTime },
 	},
-	-- Double Tap: same simtime ring; burst scan needs depth when FL masks delta[1].
+	FakeLag = {
+		retentionTicks = 40,
+		fields = { HistoryManager.Fields.SimulationTime },
+	},
 	DoubleTap = {
 		retentionTicks = 40,
 		fields = { HistoryManager.Fields.SimulationTime },

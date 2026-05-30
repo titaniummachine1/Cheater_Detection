@@ -345,7 +345,7 @@ local function OnCreateMove(cmd)
 		end
 	end
 
-	local historyEnabled = enableSilent or enableChoke
+	local historyEnabled = enableSilent or enableChoke or enableDoubleTap
 
 	-- Valve Steam group XML is only needed for Valve Check (not SteamHistory).
 	if enableValveCheck then
@@ -428,6 +428,15 @@ local function OnCreateMove(cmd)
 		Profiler.End("History_SilentAim")
 	end
 
+	-- Simtime + tick gaps stored once per player per tick (FakeLag/DoubleTap read only).
+	if enableChoke or enableDoubleTap then
+		Profiler.Begin("History_Simtime")
+		for _, pState in ipairs(activePlayers) do
+			DetectionConfig.RecordHistory(pState.wrap, "Simtime")
+		end
+		Profiler.End("History_Simtime")
+	end
+
 	-- ValveCheck runs via scheduler + DirtySystem "checks" (once per player per map)
 	-- Auto-disconnect enforcement still runs every tick for confirmed Valve employees
 	if enableValveCheck then
@@ -470,7 +479,9 @@ local function OnCreateMove(cmd)
 	if enableDuckSpeed then
 		Profiler.Begin("DuckSpeed")
 		for _, pState in ipairs(activePlayers) do
-			DuckSpeed.ProcessPlayer(pState)
+			if DuckSpeed.HasWork(pState) then
+				DuckSpeed.ProcessPlayer(pState)
+			end
 		end
 		Profiler.End("DuckSpeed")
 	end
@@ -478,7 +489,9 @@ local function OnCreateMove(cmd)
 	if enableBhop then
 		Profiler.Begin("Bhop")
 		for _, pState in ipairs(activePlayers) do
-			Bhop.ProcessPlayer(pState)
+			if Bhop.HasWork(pState) then
+				Bhop.ProcessPlayer(pState)
+			end
 		end
 		Profiler.End("Bhop")
 	end
@@ -486,7 +499,9 @@ local function OnCreateMove(cmd)
 	if enableDoubleTap then
 		Profiler.Begin("DoubleTap")
 		for _, pState in ipairs(activePlayers) do
-			DoubleTap.ProcessPlayer(pState)
+			if DoubleTap.HasWork(pState) then
+				DoubleTap.ProcessPlayer(pState)
+			end
 		end
 		Profiler.End("DoubleTap")
 	end
@@ -494,7 +509,9 @@ local function OnCreateMove(cmd)
 	if enableChoke then
 		Profiler.Begin("FakeLag")
 		for _, pState in ipairs(activePlayers) do
-			FakeLag.ProcessPlayer(pState)
+			if FakeLag.HasWork(pState) then
+				FakeLag.ProcessPlayer(pState)
+			end
 		end
 		Profiler.End("FakeLag")
 	end

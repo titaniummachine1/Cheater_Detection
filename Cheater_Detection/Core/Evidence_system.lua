@@ -43,6 +43,9 @@ Evidence.Config = {
 	MethodDecayPerSec = {
 		double_tap = 30.0 / 60.0,
 		warp_dt    = 30.0 / 60.0,
+		fake_lag   = 5.0 / 60.0, -- ~one FL credit (5 pts) per minute idle
+		bhop       = 2.0 / 60.0,
+		duck_speed = 5.0 / 60.0,
 	},
 
 	-- Thresholds
@@ -51,9 +54,11 @@ Evidence.Config = {
 	AutoPriorityThreshold = 12.0, -- Evidence score threshold to trigger SUSPICIOUS flag
 	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
 	MethodScoreCaps = {
-		fake_lag    = 60.0,
+		fake_lag    = 120.0, -- ~24 credits at 5 pts (stricter than old 60 cap)
 		double_tap  = 300.0, -- ~10 usages at DT_USAGE_WEIGHT (30) in double_tap.lua
 		warp_dt     = 300.0,
+		bhop        = 60.0,
+		duck_speed  = 100.0,
 	},
 
 	-- Category mappings (only implemented detections)

@@ -6,22 +6,43 @@
 
 local Constants                    = require("Cheater_Detection.Core.constants")
 local Common                       = require("Cheater_Detection.Utils.Common")
-local DetectorUtils                = require("Cheater_Detection.Utils.DetectorUtils")
+local Evidence                     = require("Cheater_Detection.Core.Evidence_system")
 local Events                       = require("Cheater_Detection.Core.Events")
+local G                            = require("Cheater_Detection.Utils.Globals")
 local PlayerData                   = require("Cheater_Detection.Utils.PlayerData")
 local PlayerCache                  = require("Cheater_Detection.Core.player_cache")
 
 local DuckSpeed                    = {}
 
--- View offset Z when fully crouched in TF2 (engine constant)
 local FULLY_CROUCHED_VIEW_OFFSET_Z = 45
+local DUCK_SPEED_EVIDENCE_WEIGHT   = 85.0
 
--- State storage for tick accumulation
 local tickCounters                 = {}
 
+local function isDuckSpeedEnabled()
+	local adv = G.Menu and G.Menu.Advanced
+	return adv and adv.DuckSpeed == true
+end
+
+function DuckSpeed.HasWork(playerState)
+	if not isDuckSpeedEnabled() then
+		return false
+	end
+	if not playerState or not playerState.id then
+		return false
+	end
+	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
+		return false
+	end
+	local pdata = playerState.pdata
+	if not pdata or pdata.isDormant or not pdata.isAlive then
+		return false
+	end
+	return true
+end
 
 function DuckSpeed.ProcessPlayer(playerState)
-	if not playerState or not playerState.pdata or not playerState.id then
+	if not DuckSpeed.HasWork(playerState) then
 		return
 	end
 
@@ -41,7 +62,6 @@ function DuckSpeed.ProcessPlayer(playerState)
 		return
 	end
 
-	-- DEBUG MODE: scan local player for self-test. Off = skip yourself.
 	if id == PlayerCache.GetLocalID() and not Common.IsDebugEnabled() then
 		return
 	end
@@ -50,15 +70,12 @@ function DuckSpeed.ProcessPlayer(playerState)
 		tickCounters[id] = 0
 	end
 
-	local ducking = (flags & 2) ~= 0 -- FL_DUCKING
+	local ducking = (flags & 2) ~= 0
 
-	-- Get View Offset Z (Fully crouched check)
 	local viewOffsetZ = viewOffset and viewOffset.z or 0
 	local isFullyCrouched = (math.floor(viewOffsetZ) == FULLY_CROUCHED_VIEW_OFFSET_Z)
 
 	if onGround and ducking and isFullyCrouched then
-		-- Calculate Max Speed
-		-- Note: m_flMaxspeed needs entity access - skip if can't get safe entity
 		local ent = PlayerData.GetEntity(pdata)
 		if not ent then
 			return
@@ -67,25 +84,26 @@ function DuckSpeed.ProcessPlayer(playerState)
 		local maxSpeed = ent:GetPropFloat("m_flMaxspeed")
 		local currentSpeed = velocity:Length()
 
-		-- Exploit check: Velocity > 66% of max standing speed while ducked
 		if currentSpeed >= (maxSpeed * 0.66) then
 			tickCounters[id] = tickCounters[id] + 1
 
-			-- 2 Second Threshold
 			if tickCounters[id] >= Constants.SecondsToTicks(2) then
-				DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER, "Duck Speed Exploit")
-				tickCounters[id] = 0 -- Reset after detection
+				Evidence.AddEvidence(id, "duck_speed", DUCK_SPEED_EVIDENCE_WEIGHT)
+				tickCounters[id] = 0
+				if Common.IsDebugEnabled() then
+					print(string.format(
+						"[DuckSpeed] %s duck speed exploit (evidence +%.1f)",
+						id, DUCK_SPEED_EVIDENCE_WEIGHT))
+				end
 			end
 		else
 			tickCounters[id] = math.max(0, tickCounters[id] - 1)
 		end
 	else
-		-- Reset counter if state breaks (not on ground or not ducking)
 		tickCounters[id] = 0
 	end
 end
 
--- Cleanup when player disconnects
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	tickCounters[id] = nil
 end)

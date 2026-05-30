@@ -5,18 +5,43 @@
 
 local Constants     = require("Cheater_Detection.Core.constants")
 local Common        = require("Cheater_Detection.Utils.Common")
-local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
+local Evidence      = require("Cheater_Detection.Core.Evidence_system")
 local Events        = require("Cheater_Detection.Core.Events")
+local G             = require("Cheater_Detection.Utils.Globals")
 local PlayerCache   = require("Cheater_Detection.Core.player_cache")
 
 local Bhop          = {}
 
 local playerData    = {}
+local evidenceCooldowns = {}
 local MAX_GROUND_TICKS = 2
 local CHAIN_BREAK_SECONDS = 1.5
+local BHOP_EVIDENCE_WEIGHT = 5.0
+local BHOP_EVIDENCE_COOLDOWN_S = 1.0
+
+local function isBhopEnabled()
+	local adv = G.Menu and G.Menu.Advanced
+	return adv and adv.Bhop == true
+end
+
+function Bhop.HasWork(playerState)
+	if not isBhopEnabled() then
+		return false
+	end
+	if not playerState or not playerState.id then
+		return false
+	end
+	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
+		return false
+	end
+	if playerState.pdata and (playerState.pdata.isDormant or not playerState.pdata.isAlive) then
+		return false
+	end
+	return true
+end
 
 function Bhop.ProcessPlayer(playerState)
-	if not playerState or not playerState.pdata or not playerState.id then
+	if not Bhop.HasWork(playerState) then
 		return
 	end
 
@@ -27,26 +52,13 @@ function Bhop.ProcessPlayer(playerState)
 	local id = playerState.id
 	local pdata = playerState.pdata
 
-	local isDormant = pdata.isDormant
-	local isAlive = pdata.isAlive
 	local onGround = pdata.onGround
 
-	if isDormant == nil or isAlive == nil or onGround == nil then
+	if onGround == nil then
 		return
 	end
 
-	-- DEBUG MODE: scan local player for self-test. Off = skip yourself.
 	if id == PlayerCache.GetLocalID() and not Common.IsDebugEnabled() then
-		return
-	end
-
-	if isDormant then
-		playerData[id] = nil
-		return
-	end
-
-	if not isAlive then
-		playerData[id] = nil
 		return
 	end
 
@@ -76,17 +88,15 @@ function Bhop.ProcessPlayer(playerState)
 				data.consecutivePerfects = data.consecutivePerfects + 1
 
 				if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
-					local increment = 2
-					if data.consecutivePerfects > 8 then
-						increment = 5
-					end
-
-					local reason = string.format("Bhop Script (%d perfect jumps)", data.consecutivePerfects)
-					DetectorUtils.ApplyPlayerFlag(playerState, increment, nil, reason)
-
-					if Common.IsDebugEnabled() then
-						print(string.format("[Bhop] %s perfect jump #%d (ground_ticks=%d) gain=%d",
-							id, data.consecutivePerfects, data.groundTicks, increment))
+					local lastEvidence = evidenceCooldowns[id] or 0
+					if (now - lastEvidence) >= BHOP_EVIDENCE_COOLDOWN_S then
+						Evidence.AddEvidence(id, "bhop", BHOP_EVIDENCE_WEIGHT)
+						evidenceCooldowns[id] = now
+						if Common.IsDebugEnabled() then
+							print(string.format(
+								"[Bhop] %s perfect jump #%d (ground_ticks=%d) evidence +%.1f",
+								id, data.consecutivePerfects, data.groundTicks, BHOP_EVIDENCE_WEIGHT))
+						end
 					end
 				end
 			else
@@ -101,10 +111,12 @@ end
 
 Events.Subscribe("OnPlayerDisconnect", function(id)
 	playerData[id] = nil
+	evidenceCooldowns[id] = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
 	playerData[id] = nil
+	evidenceCooldowns[id] = nil
 end)
 
 return Bhop

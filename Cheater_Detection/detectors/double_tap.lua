@@ -16,7 +16,6 @@ local PlayerCache     = require("Cheater_Detection.Core.player_cache")
 local Common          = require("Cheater_Detection.Utils.Common")
 local Fetcher         = require("Cheater_Detection.Database.Fetcher")
 local HistoryManager  = require("Cheater_Detection.Utils.HistoryManager")
-local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
 
 local DoubleTap = {}
 
@@ -29,7 +28,6 @@ local BURST_REPEAT_TOLERANCE       = 8
 local RECENT_DT_BURST_SCAN         = 20
 local WATCHING_DT_BURST_SCAN       = 40
 local DT_CONFIRM_WINDOW_TICKS_66HZ = 48.0
-local MAX_SIMTIME_DELTA_SEC        = 2.5
 local FAKE_LAG_SUPPRESS_TICKS_66HZ   = 66.0
 
 -- Flat ~30 per correlated burst (one "usage"). Cap 300 ≈ 10 usages before cheater threshold.
@@ -48,7 +46,6 @@ local dtSuppressUntil     = {}
 local burstThisTick       = {}
 local lastBurstCleanTick  = 0
 local lastServerHitchTick = -math.huge
-local _simTimes           = {}
 
 local function getBurstThresholds()
 	local tickInt = globals.TickInterval()
@@ -85,7 +82,7 @@ function DoubleTap.GetFakeLagMaxChokeTicks()
 end
 
 function DoubleTap.GetFakeLagMinChokeTicks()
-	return math.max(3, math.floor(4.0 / 66.0 / globals.TickInterval() + 0.5))
+	return math.max(8, math.floor(8.0 / 66.0 / globals.TickInterval() + 0.5))
 end
 
 function DoubleTap.IsDtSizedBurst(tickDelta)
@@ -108,13 +105,9 @@ function DoubleTap.ShouldSuppressFakeLag(id)
 	return true
 end
 
-function DoubleTap.IsPlayerWatched(id)
-	local data = playerState[id]
-	if not data or data.lastDamageTick <= 0 then
-		return false
-	end
-	local elapsed = globals.TickCount() - data.lastDamageTick
-	return elapsed >= 0 and elapsed <= getConfirmWindowTicks()
+-- Legacy API for fake_lag; must stay false (true blocked all FL while shooting on main).
+function DoubleTap.IsPlayerWatched(_id)
+	return false
 end
 
 function DoubleTap.MarkDtRelease(id)
@@ -231,25 +224,6 @@ local function isWatchingForBurst(id)
 	return elapsed >= 0 and elapsed <= getConfirmWindowTicks()
 end
 
-local function _collectSimTimeSec(_, record)
-	local simTime = record[HistoryManager.Fields.SimulationTime]
-	if simTime then
-		_simTimes[#_simTimes + 1] = simTime
-	end
-end
-
--- Same delta pipeline as fake_lag.lua (seconds between samples, then ticks).
-local function buildDeltaTicksFromSimHistory()
-	local deltaTicks = {}
-	for i = 1, #_simTimes - 1 do
-		local deltaSec = _simTimes[i] - _simTimes[i + 1]
-		if deltaSec > 0 and deltaSec <= MAX_SIMTIME_DELTA_SEC then
-			deltaTicks[#deltaTicks + 1] = timeToTicks(deltaSec)
-		end
-	end
-	return deltaTicks
-end
-
 local function clearStaleBurstState(data, curTick)
 	if data.lastBurstTick <= 0 then
 		return
@@ -345,29 +319,19 @@ local function findRecentDtBurst(id)
 	if not history or history._count < 2 then
 		logBurstScanFailure(id, "no_history", string.format(
 			"history missing or count=%s", history and tostring(history._count) or "nil"))
-		return 0, 1, {}
-	end
-
-	for k = 1, #_simTimes do
-		_simTimes[k] = nil
-	end
-	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTimeSec)
-	if #_simTimes < 2 then
-		logBurstScanFailure(id, "no_simtimes", string.format(
-			"simtime samples=%d (need >=2)", #_simTimes))
-		return 0, 1, {}
-	end
-
-	local deltaTicks = buildDeltaTicksFromSimHistory()
-	if #deltaTicks < 1 then
-		logBurstScanFailure(id, "no_deltas", string.format(
-			"simtime samples=%d but no positive deltas", #_simTimes))
-		return 0, 1, {}
+		return 0, 1, nil, 0
 	end
 
 	local burstMin, burstMax = getBurstThresholds()
 	local scanDepth = isWatchingForBurst(id) and WATCHING_DT_BURST_SCAN or RECENT_DT_BURST_SCAN
-	local scanLimit = math.min(scanDepth, #deltaTicks)
+	local deltaTicks, deltaCount = HistoryManager.GetSimDeltaDeltas(history, scanDepth)
+	if deltaCount < 1 then
+		logBurstScanFailure(id, "no_deltas", string.format(
+			"history count=%d but no simtime gaps", history._count))
+		return 0, 1, deltaTicks, 0
+	end
+
+	local scanLimit = math.min(scanDepth, deltaCount)
 	local sawDtBand = false
 	local rhythmBlocked = nil
 	local maxInScan = 0
@@ -382,7 +346,7 @@ local function findRecentDtBurst(id)
 			sawDtBand = true
 			local similar = countSimilarBursts(deltaTicks, burstAmount)
 			if skipRhythm or similar < 2 then
-				return burstAmount, index, deltaTicks
+				return burstAmount, index, deltaTicks, deltaCount
 			end
 			if not rhythmBlocked then
 				rhythmBlocked = string.format(
@@ -400,7 +364,7 @@ local function findRecentDtBurst(id)
 			scanLimit, burstMin, burstMax, tostring(sawDtBand), maxInScan, formatDeltaPreview(deltaTicks, 8)))
 	end
 
-	return 0, 1, deltaTicks
+	return 0, 1, deltaTicks, deltaCount
 end
 
 local function onBurstDetected(id, burstAmount, curTick, burstIndex)
@@ -436,6 +400,34 @@ local function onBurstDetected(id, burstAmount, curTick, burstIndex)
 	end
 end
 
+function DoubleTap.HasWork(playerState)
+	if not isEnabled() then
+		return false
+	end
+	if not playerState or not playerState.id then
+		return false
+	end
+	if Common.IsLogCategoryEnabled("DoubleTap") or Common.IsLogCategoryEnabled("Warp/DT") then
+		return true
+	end
+	local id = playerState.id
+	local weight = Evidence.GetMethodWeight(id, "double_tap")
+	if weight <= 0 then
+		weight = Evidence.GetMethodWeight(id, "warp_dt")
+	end
+	local cap = Evidence.GetMethodScoreCap("double_tap")
+	if cap <= 0 then
+		cap = Evidence.GetMethodScoreCap("warp_dt")
+	end
+	if weight < cap then
+		return true
+	end
+	if isWatchingForBurst(id) then
+		return true
+	end
+	return (globals.TickCount() % 4) == 0
+end
+
 function DoubleTap.ProcessPlayer(playerState)
 	if not isEnabled() then
 		return
@@ -464,8 +456,6 @@ function DoubleTap.ProcessPlayer(playerState)
 	if not playerState.pdata.isAlive then
 		return
 	end
-
-	DetectionConfig.RecordHistory(playerState.wrap, "DoubleTap")
 
 	local curTick = globals.TickCount()
 	clearStaleBurstState(getState(id), curTick)

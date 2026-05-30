@@ -23,6 +23,7 @@ local activeFields      = {}
 local _hasActiveFields  = false
 local maxRetentionTicks = 0
 local initialized       = false
+local MAX_SIMTIME_DELTA_SEC = 2.5
 
 -- playerHistories[steamID] = { [1]=current, [2]=prev, ..., _head=N, _count=N, _tick=N }
 local playerHistories   = {}
@@ -81,6 +82,35 @@ local FIELD_WRITERS = {
 		reuseVec(record, field, player:GetViewOffset())
 	end,
 }
+
+local function simtimeToTicks(deltaSec)
+	return math.floor(deltaSec / globals.TickInterval() + 0.5)
+end
+
+-- Stored on each ring slot when it becomes head: gap to the previous simtime sample (ticks).
+local function writeSimDeltaTicks(history, record)
+	local simField = HistoryManager.Fields.SimulationTime
+	local simNew = record[simField]
+	local older = HistoryManager.GetRecordAt(history, 1)
+	if not simNew or not older then
+		record._sim_delta_ticks = nil
+		return
+	end
+	local simPrev = older[simField]
+	if not simPrev then
+		record._sim_delta_ticks = nil
+		return
+	end
+	local deltaSec = simNew - simPrev
+	if deltaSec == 0 then
+		-- Frozen simtime while choking; fake_lag burst path needs these as stalls.
+		record._sim_delta_ticks = 0
+	elseif deltaSec > 0 and deltaSec <= MAX_SIMTIME_DELTA_SEC then
+		record._sim_delta_ticks = simtimeToTicks(deltaSec)
+	else
+		record._sim_delta_ticks = nil
+	end
+end
 
 function HistoryManager.Initialize(retentionTicks, fields)
 	if initialized and maxRetentionTicks == retentionTicks then
@@ -239,6 +269,9 @@ function HistoryManager.RequestField(player, field)
 	if writer then
 		writer(player, record, field)
 	end
+	if field == HistoryManager.Fields.SimulationTime then
+		writeSimDeltaTicks(history, record)
+	end
 
 	-- Mark field as stored for this tick
 	if not stored then
@@ -315,6 +348,42 @@ function HistoryManager.ClearPlayer(steamID)
 	local id = tostring(steamID)
 	playerHistories[id] = nil
 	_storedFieldsByPlayer[id] = nil
+end
+
+--- Newest-first simtime gaps in ticks (computed once when simtime is stored).
+---@return table buf Reused per-player buffer (do not hold across ticks)
+---@return number count Dense entries in buf[1..count]
+---@return number sumTicks Sum of buf[1..count]
+function HistoryManager.GetSimDeltaDeltas(history, maxDeltas)
+	if not history or history._count < 2 then
+		return nil, 0, 0
+	end
+
+	local buf = history._simDeltaBuf
+	if not buf then
+		buf = {}
+		history._simDeltaBuf = buf
+	end
+
+	local n = 0
+	local sum = 0
+	local maxPairs = history._count - 1
+	local limit = math.min(maxDeltas or maxPairs, maxPairs)
+	for offset = 0, limit - 1 do
+		local record = HistoryManager.GetRecordAt(history, offset)
+		local tickDelta = record and record._sim_delta_ticks
+		if tickDelta ~= nil then
+			n = n + 1
+			buf[n] = tickDelta
+			if tickDelta > 0 then
+				sum = sum + tickDelta
+			end
+		end
+	end
+	for k = n + 1, #buf do
+		buf[k] = nil
+	end
+	return buf, n, sum
 end
 
 function HistoryManager.GetRetentionTicks()
