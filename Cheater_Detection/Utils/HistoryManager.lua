@@ -253,9 +253,6 @@ function HistoryManager.RequestField(player, field)
 end
 
 function HistoryManager.RequestFields(player, fields)
-	if not fields then
-		return
-	end
 	for i = 1, #fields do
 		HistoryManager.RequestField(player, fields[i])
 	end
@@ -272,27 +269,14 @@ local function writeAngles(record, pitch, yaw)
 	t.yaw   = yaw
 end
 
---- Write fire-tick aim into an existing history slot (from CTEFireBullets, not live eye angles).
 function HistoryManager.ApplyFireSnapshot(steamID, tick, pitch, yaw, eyePos)
-	if not initialized or not steamID or not tick or type(pitch) ~= "number" or type(yaw) ~= "number" then
-		return false
-	end
-
 	local id = tostring(steamID)
 	local history = playerHistories[id]
-	if not history or history._count == 0 then
-		return false
-	end
+	if not history or history._count == 0 then return false end
 
 	local offset = globals.TickCount() - tick
-	if offset < 0 or offset >= history._count then
-		return false
-	end
-
 	local record = HistoryManager.GetRecordAt(history, offset)
-	if not record or record._tick ~= tick then
-		return false
-	end
+	if not record or record._tick ~= tick then return false end
 
 	writeAngles(record, pitch, yaw)
 	if eyePos then
@@ -309,21 +293,17 @@ function HistoryManager.ApplyFireSnapshot(steamID, tick, pitch, yaw, eyePos)
 	return true
 end
 
-function HistoryManager.MarkDamageDealt(steamID)
-	if not initialized or not steamID then
-		return
-	end
-
+function HistoryManager.MarkDamageDealt(steamID, tick)
 	local history = playerHistories[tostring(steamID)]
-	if not history or history._count == 0 then
-		return
-	end
+	if not history or history._count == 0 then return end
 
-	-- Mark at current head position
-	local record = history[history._head]
-	if record then
-		record.damageDealt = true
+	local record
+	if tick then
+		record = HistoryManager.GetRecordAt(history, globals.TickCount() - tick)
+	else
+		record = history[history._head]
 	end
+	if record then record.damageDealt = true end
 end
 
 function HistoryManager.ClearPlayer(steamID)

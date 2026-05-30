@@ -291,7 +291,7 @@ local function OnCreateMove(cmd)
 		end
 	end
 
-	local historyEnabled = enableSilent or enableWarpDT or enableChoke
+	local historyEnabled = enableSilent or enableChoke
 
 	if not sessionState.groupSearched then
 		SteamLookup.RefreshValveGroup()
@@ -364,9 +364,7 @@ local function OnCreateMove(cmd)
 
 	if enableSilent then
 		Profiler.Begin("History_SilentAim")
-		for _, pState in ipairs(activePlayers) do
-			DetectionConfig.RecordHistory(pState.wrap, "SilentAim")
-		end
+		SilentAim.RecordTickHistory()
 		Profiler.End("History_SilentAim")
 	end
 
@@ -430,9 +428,7 @@ local function OnCreateMove(cmd)
 
 	if enableWarpDT then
 		Profiler.Begin("WarpDT")
-		for _, pState in ipairs(activePlayers) do
-			WarpDT.ProcessPlayer(pState)
-		end
+		WarpDT.Tick()
 		Profiler.End("WarpDT")
 	end
 

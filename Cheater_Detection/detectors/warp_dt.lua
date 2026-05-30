@@ -6,10 +6,8 @@
      used by Scout to deal 2× damage or move through danger zones faster.
 
      Detection strategy:
-       1. ProcessPlayer tracks each player's simtime delta history and records a
-          "pending burst" when a large isolated spike appears (not a repeated
-          fake-lag pattern).
-       2. The player_hurt game event checks if the attacker has a pending burst
+       1. Tick() tracks simtime delta for combat-active players only (fire/damage).
+       2. OnHitscanHit checks if the attacker has a pending burst
           within DT_CONFIRM_WINDOW_S seconds. Only if burst + damage are
           correlated does evidence get added.
 
@@ -22,8 +20,7 @@ local Constants                             = require("Cheater_Detection.Core.co
 local G                                     = require("Cheater_Detection.Utils.Globals")
 local Evidence                              = require("Cheater_Detection.Core.Evidence_system")
 local Events                                = require("Cheater_Detection.Core.Events")
-local HistoryManager                        = require("Cheater_Detection.Utils.HistoryManager")
-local DetectionConfig                     = require("Cheater_Detection.Utils.DetectionConfig")
+local PlayerCache                           = require("Cheater_Detection.Core.player_cache")
 local Common                                = require("Cheater_Detection.Utils.Common")
 local Fetcher                               = require("Cheater_Detection.Database.Fetcher")
 
@@ -36,10 +33,6 @@ local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3 -- suppress if N players burst s
 -- Burst detection: simtime spike must be in this tick range (scaled to server tickrate)
 local BURST_MIN_TICKS_66HZ                  = 10.0 -- minimum choke for DT (~150ms), excludes normal jitter
 local BURST_MAX_TICKS_66HZ                  = 66.0 -- ~1.0s: above this is a disconnect artifact, not DT
-
--- A burst is only a spike if fewer than 2 other deltas in the window match it
--- (fake lag produces repeating matching deltas; DT is a single isolated spike)
-local BURST_REPEAT_TOLERANCE                = 8 -- ticks: ±this = "similar" delta
 
 -- Correlation: damage must land within this many ticks of the burst to count.
 -- Default DT is ~24 ticks at 66Hz = ~0.36s; 33 ticks (0.5s) gives a small network buffer.
@@ -76,12 +69,10 @@ end
 
 -- ── state ──────────────────────────────────────────────────────────────────
 
--- [id] = { lastDamageTick, lastBurstTick, lastBurstEvidenceTime, lastHitCountEvidenceTime, recentHits, lastActivityTick }
 local playerState = {}
+local watchUntil  = {}
 
--- Only run expensive burst detection if player had damage activity within this window
--- DT correlation window is DT_CONFIRM_WINDOW_TICKS (~33 ticks / 0.5s), no need to check longer
-local ACTIVITY_WINDOW_TICKS = 40 -- ~0.6s - slightly longer than DT window to catch edge cases
+local ACTIVITY_WINDOW_TICKS = 40
 
 
 -- Server-hitch suppression: track which ticks had simultaneous bursts
@@ -121,16 +112,6 @@ local function cleanBurstTable(curTick)
 	end
 end
 
-local _simTicks = {}
-local _deltaTicks = {}
-
-local function _collectSimTick(_, record)
-	local simTime = record[HistoryManager.Fields.SimulationTime]
-	if simTime then
-		_simTicks[#_simTicks + 1] = timeToTicks(simTime)
-	end
-end
-
 local function getState(id)
 	if not playerState[id] then
 		playerState[id] = {
@@ -139,19 +120,15 @@ local function getState(id)
 			lastBurstEvidenceTime    = 0,
 			lastHitCountEvidenceTime = 0,
 			recentHits               = { _data = {}, _head = 1, _count = 0 },
-			lastActivityTick         = 0,
+			prevSimTick              = nil,
+			lastSimTick              = nil,
 		}
 	end
 	return playerState[id]
 end
 
-local function hasRecentActivity(data, curTick)
-	if data.lastActivityTick == 0 then return false end
-	return (curTick - data.lastActivityTick) <= ACTIVITY_WINDOW_TICKS
-end
-
-local function recordActivity(data, curTick)
-	data.lastActivityTick = curTick
+local function watchPlayer(id, curTick)
+	watchUntil[id] = curTick + ACTIVITY_WINDOW_TICKS
 end
 
 local function isEnabled()
@@ -169,65 +146,27 @@ local function recordConfirmedHit(attackerID, tick)
 	end
 end
 
--- ── burst detection (called per-player each tick) ──────────────────────────
-
-function WarpDT.ProcessPlayer(pState)
-	if not pState or not pState.pdata or not pState.id then return end
-	if Fetcher.State.isRunning then return end
-	if not isEnabled() then return end
-	if not Common.IsConnectionStableForDetection() then return end
-
-	local pdata = pState.pdata
-	if not pdata.isAlive then return end
-
+local function tryBurst(pState, curTick)
 	local id = pState.id
-	if id:sub(1, 4) == "BOT_" then return end
-
-	local isDebug = Common.IsLogCategoryEnabled("Warp/DT")
-	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then return end
-	if (pState.flags & Constants.Flags.CHEATER) ~= 0 then return end
-
-	local curTick = globals.TickCount()
 	local data = getState(id)
+	local simTick = timeToTicks(pState.wrap:GetSimulationTime())
 
-	-- SKIP: No recent damage activity - don't waste CPU on burst detection
-	if not hasRecentActivity(data, curTick) then
-		return
-	end
-
-	DetectionConfig.RecordHistory(pState.wrap, "WarpDT")
-
-	local history = HistoryManager.GetPlayerHistory(id)
-	if not history then return end
-
-	local simN = 0
-	for i = 1, #_simTicks do _simTicks[i] = nil end
-	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTick)
-	simN = #_simTicks
-	if simN < 10 then return end
-
-	local deltaN = 0
-	for i = 1, #_deltaTicks do _deltaTicks[i] = nil end
-	for i = 1, simN - 1 do
-		deltaN = deltaN + 1
-		_deltaTicks[deltaN] = _simTicks[i] - _simTicks[i + 1]
-	end
-
-	local burstMin, burstMax = getBurstThresholds()
 	local burstAmount = 0
-	if deltaN >= 1 then
-		local d = _deltaTicks[1]
+	if data.prevSimTick then
+		local d = simTick - data.prevSimTick
+		local burstMin, burstMax = getBurstThresholds()
 		if d >= burstMin and d < burstMax then
 			burstAmount = d
 		end
 	end
+	data.prevSimTick = data.lastSimTick
+	data.lastSimTick = simTick
 	if burstAmount == 0 then return end
 
-	cleanBurstTable(curTick)
 	recordBurstTick(curTick, id)
-
 	if isInHitchWindow(curTick) then return end
 
+	local isDebug = Common.IsLogCategoryEnabled("Warp/DT")
 	if isServerHitch(curTick) then
 		lastServerHitchTick = curTick
 		if isDebug then
@@ -236,21 +175,12 @@ function WarpDT.ProcessPlayer(pState)
 		return
 	end
 
-	-- Record burst tick for reverse correlation (damage after burst)
 	data.lastBurstTick = curTick
-
-	-- Burst after damage = Double Tap confirmed.
-	-- Check if a prior damage event is still within the correlation window.
 	if data.lastDamageTick > 0 and (curTick - data.lastDamageTick) <= DT_CONFIRM_WINDOW_TICKS then
-		-- Damage → burst within window: DT usage.
-		-- Exponential weight: closer the burst to the damage, more suspicious.
-		-- k = ln(MAX_MULT) / WINDOW so at t=0 → MAX_MULT, at t=WINDOW → 1.0
 		local elapsedTicks = curTick - data.lastDamageTick
 		local k = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
-		local mult = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
-		local weight = DT_EVIDENCE_WEIGHT * mult
-
-		data.lastDamageTick = 0 -- consume so one burst only confirms once
+		local weight = DT_EVIDENCE_WEIGHT * DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
+		data.lastDamageTick = 0
 
 		local now = globals.RealTime()
 		if (now - data.lastBurstEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
@@ -262,14 +192,42 @@ function WarpDT.ProcessPlayer(pState)
 			end
 		end
 	end
+end
 
-	-- Note: bursts without prior damage are silently ignored (lag/fake lag, not DT)
+function WarpDT.Tick()
+	if Fetcher.State.isRunning or not isEnabled() then return end
+	if not Common.IsConnectionStableForDetection() then return end
+
+	local curTick = globals.TickCount()
+	local localID = tostring(Common.GetSteamID64(entities.GetLocalPlayer()))
+	cleanBurstTable(curTick)
+
+	for id, untilTick in pairs(watchUntil) do
+		if curTick > untilTick then
+			watchUntil[id] = nil
+		elseif id == localID and not Common.IsDebugEnabled() then
+			-- skip local player
+		elseif id:sub(1, 4) == "BOT_" then
+			watchUntil[id] = nil
+		else
+			local pState = PlayerCache.GetByID(id)
+			if not pState or not pState.pdata.isAlive or (pState.flags & Constants.Flags.CHEATER) ~= 0 then
+				watchUntil[id] = nil
+			else
+				tryBurst(pState, curTick)
+			end
+		end
+	end
 end
 
 -- ── damage recording (via CombatEvents hub) ──────────────────────────────
 -- Subscribes to the pre-resolved OnHitscanHit event published by
 -- Core/CombatEvents.lua — entity lookup and weapon classification are
 -- already done once for all detectors.
+
+Events.Subscribe("OnPlayerFired", function(fire)
+	if isEnabled() then watchPlayer(fire.shooterID, fire.tick) end
+end)
 
 Events.Subscribe("OnHitscanHit", function(hit)
 	if not isEnabled() then return end
@@ -278,8 +236,7 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	local curTick    = hit.tickCount
 	local data       = getState(attackerID)
 
-	-- Mark player as active - enables burst detection for next 2 seconds
-	recordActivity(data, curTick)
+	watchPlayer(attackerID, curTick)
 
 	recordConfirmedHit(attackerID, curTick)
 
@@ -328,12 +285,12 @@ end)
 
 -- ── cleanup ────────────────────────────────────────────────────────────────
 
-Events.Subscribe("OnPlayerDisconnect", function(id)
+local function onPlayerGone(id)
 	playerState[id] = nil
-end)
+	watchUntil[id] = nil
+end
 
-Events.Subscribe("OnPlayerRemoved", function(id)
-	playerState[id] = nil
-end)
+Events.Subscribe("OnPlayerDisconnect", onPlayerGone)
+Events.Subscribe("OnPlayerRemoved", onPlayerGone)
 
 return WarpDT

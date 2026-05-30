@@ -9,16 +9,10 @@ local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
 local DetectionConfig = {}
 
 DetectionConfig.Detectors = {
-	WarpDT = {
-		retentionTicks = 24,
-		fields = { HistoryManager.Fields.SimulationTime },
-	},
+	-- ~5 ticks pre-shot extrapolation + shot + 3 post; eye comes from FireTickTracker on hit.
 	SilentAim = {
-		retentionTicks = 10,
-		fields = {
-			HistoryManager.Fields.Angles,
-			HistoryManager.Fields.EyePosition,
-		},
+		retentionTicks = 8,
+		fields = { HistoryManager.Fields.Angles },
 	},
 	FakeLag = {
 		retentionTicks = 22,
@@ -58,9 +52,6 @@ end
 --- Record all history fields required by a detector for this tick (deduped inside HistoryManager).
 function DetectionConfig.RecordHistory(player, detectorName)
 	local spec = DetectionConfig.Detectors[detectorName]
-	if not spec or not player then
-		return
-	end
 	HistoryManager.RequestFields(player, spec.fields)
 end
 

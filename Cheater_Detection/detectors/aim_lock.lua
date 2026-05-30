@@ -3,8 +3,6 @@ local Common = require("Cheater_Detection.Utils.Common")
 local MathUtils = require("Cheater_Detection.Utils.MathUtils")
 local G = require("Cheater_Detection.Utils.Globals")
 local DetectorUtils = require("Cheater_Detection.Utils.DetectorUtils")
-local HistoryManager = require("Cheater_Detection.Utils.HistoryManager")
-local DetectionConfig = require("Cheater_Detection.Utils.DetectionConfig")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local PlayerData = require("Cheater_Detection.Utils.PlayerData")
 
@@ -166,10 +164,8 @@ function AimLock.ProcessPlayer(playerState)
 		return
 	end
 
-	DetectionConfig.RecordHistory(playerState.wrap, "SilentAim")
-	local attackerRecord = HistoryManager.GetPlayerRecordAt(id, 0)
-	local attackerAngles = attackerRecord and attackerRecord[HistoryManager.Fields.Angles] or nil
-	local attackerEyePos = attackerRecord and attackerRecord[HistoryManager.Fields.EyePosition] or nil
+	local attackerAngles = playerState.wrap:GetEyeAngles()
+	local attackerEyePos = playerState.wrap:GetEyePos()
 	if not attackerAngles or not attackerEyePos then
 		return
 	end
@@ -178,9 +174,7 @@ function AimLock.ProcessPlayer(playerState)
 	if not victimState or not victimState.wrap then
 		return
 	end
-	DetectionConfig.RecordHistory(victimState.wrap, "SilentAim")
-	local victimRecord = HistoryManager.GetPlayerRecordAt(targetID, 0)
-	local victimEyePos = victimRecord and victimRecord[HistoryManager.Fields.EyePosition] or nil
+	local victimEyePos = victimState.wrap:GetEyePos()
 	if not victimEyePos then
 		return
 	end
