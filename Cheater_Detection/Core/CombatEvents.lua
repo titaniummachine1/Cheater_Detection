@@ -26,7 +26,7 @@
          minicrit          bool     true if minicrit hit
          victimHealthAfter int      victim HP after the hit
 
-     Fire detection: Core/FireTickTracker.lua ("OnPlayerFired" via weapon_fire + CTEFireBullets).
+     Fire angles: Core/FireTickTracker.lua (CTEFireBullets, SilentAim). DT uses simtime + player_hurt.
 ]]
 
 local Events      = require("Cheater_Detection.Core.Events")

@@ -11,8 +11,6 @@
      Evidence only when all three line up; no shot = no flag.
 ]]
 
-local Constants                             = require("Cheater_Detection.Core.constants")
-local G                                     = require("Cheater_Detection.Utils.Globals")
 local Evidence                              = require("Cheater_Detection.Core.Evidence_system")
 local Events                                = require("Cheater_Detection.Core.Events")
 local PlayerCache                           = require("Cheater_Detection.Core.player_cache")
@@ -38,8 +36,8 @@ local BURST_MAX_TICKS_66HZ                  = 34.0 -- DT window is 24–33 ticks
 local WARP_COOLDOWN_TICKS_66HZ              = 24.0 -- min spacing between ProcessPlayer burst flags
 local FAKE_LAG_SUPPRESS_TICKS_66HZ          = 66.0 -- ~1s: no fake_lag scoring after DT release
 
--- Tight combat windows (66 Hz): shot → warp → follow-up shot/hit, not a full second later.
-local PRE_BURST_FIRE_TICKS_66HZ             = 14.0 -- must have fired before the warp
+-- Pre-burst must cover choke (≤21 ticks) plus margin; weapon_fire often only arrives on release.
+local PRE_BURST_FIRE_TICKS_66HZ             = FAKELAG_MAX_CHOKE_TICKS_66HZ + 12.0
 local POST_BURST_WINDOW_TICKS_66HZ          = 14.0 -- post-warp shots / damage register here
 
 local DT_EVIDENCE_WEIGHT                    = 30.0
@@ -169,6 +167,7 @@ local function getState(id)
 			lastProcessBurstTick     = 0,
 			lastCreditedBurstTick    = 0,
 			lastFiredTick            = 0,
+			lastDamageTick           = 0,
 			lastBurstAmount          = 0,
 			awaitingPostConfirm      = false,
 			preFireTick              = 0,
@@ -361,6 +360,22 @@ local function getPreBurstFireTick(id, burstTick)
 	return nil
 end
 
+-- Server hitscan damage while holding fire (minigun); works when weapon_fire is choked away.
+local function getPreBurstCombatTick(id, burstTick)
+	local fireTick = getPreBurstFireTick(id, burstTick)
+	if fireTick then
+		return fireTick, "shot"
+	end
+	local data = getState(id)
+	local window = getPreBurstFireTicks()
+	if data.lastDamageTick > 0
+		and data.lastDamageTick <= burstTick
+		and (burstTick - data.lastDamageTick) <= window then
+		return data.lastDamageTick, "hitscan"
+	end
+	return nil, nil
+end
+
 -- Post-warp shot: later tick, or same tick as warp if fire tick is after pre-fire
 -- or a second CTEFireBullets on the warp tick (shot → warp → shot in one tick).
 local function isPostWarpFire(data, tick)
@@ -436,14 +451,14 @@ local function handleWarpBurst(id, burstAmount, curTick)
 	data.lastProcessBurstTick = curTick
 	markDtRelease(id, curTick)
 
-	local preFireTick = getPreBurstFireTick(id, curTick)
-	if not preFireTick then
+	local preCombatTick, preCombatKind = getPreBurstCombatTick(id, curTick)
+	if not preCombatTick then
 		data.awaitingPostConfirm = false
 		dtDebugNoPreFire = dtDebugNoPreFire + 1
 		if shouldLogDtDebug() then
 			logDtDebug(string.format(
-				"[DoubleTap] %s DT-sized burst (%d ticks) ignored — no pre-warp shot (need weapon_fire / CTEFireBullets)",
-				id, burstAmount))
+				"[DoubleTap] %s DT-sized burst (%d ticks) ignored — no pre-warp combat (shot or hitscan within %d ticks)",
+				id, burstAmount, getPreBurstFireTicks()))
 		end
 		return
 	end
@@ -451,7 +466,7 @@ local function handleWarpBurst(id, burstAmount, curTick)
 	dtDebugBurstCount = dtDebugBurstCount + 1
 
 	data.awaitingPostConfirm = true
-	data.preFireTick = preFireTick
+	data.preFireTick = preCombatTick
 	data.postBurstHits = 0
 	data.firesOnBurstTick = 0
 	if data.lastFiredTick == curTick then
@@ -460,8 +475,8 @@ local function handleWarpBurst(id, burstAmount, curTick)
 
 	if Common.IsDebugEnabled() or isDtLogEnabled() then
 		print(string.format(
-			"[DoubleTap] %s warp %d ticks armed (pre-fire tick %d, awaiting post shot/hit)",
-			id, burstAmount, preFireTick))
+			"[DoubleTap] %s warp %d ticks armed (pre-%s tick %d, awaiting post shot/hit)",
+			id, burstAmount, preCombatKind or "?", preCombatTick))
 	end
 end
 
@@ -637,6 +652,8 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	local attackerID = hit.attackerID
 	local curTick    = hit.tickCount
 	local data       = getState(attackerID)
+
+	data.lastDamageTick = curTick
 
 	watchPlayer(attackerID, curTick)
 

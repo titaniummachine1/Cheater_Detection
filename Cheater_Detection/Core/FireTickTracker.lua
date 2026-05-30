@@ -99,7 +99,7 @@ end
 
 -- ── CTEFireBullets (secondary — eye data; A_AA.lua ShotDetect pass 2) ────────
 
-local function onProcessTempEntities(entEvtTable)
+local function processFireBulletsTable(entEvtTable)
 	if type(entEvtTable) ~= "table" then
 		return
 	end
@@ -118,6 +118,14 @@ local function onProcessTempEntities(entEvtTable)
 		publishFireSnapshot(shooter, "fire_bullets")
 
 		::continue::
+	end
+end
+
+local function onProcessTempEntities(tempEntity, entEvtTable)
+	if type(entEvtTable) == "table" then
+		processFireBulletsTable(entEvtTable)
+	elseif type(tempEntity) == "table" then
+		processFireBulletsTable(tempEntity)
 	end
 end
 
