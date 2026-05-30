@@ -262,6 +262,48 @@ local function getSustainedChokeAverage(deltaTicks, deltaCount)
 	return avgHigh
 end
 
+local function getPositiveAvgChoke(posDeltas, posCount)
+	if posCount < AVG_CHOKE_MIN_SAMPLES then
+		return nil
+	end
+
+	local sumPos = 0
+	for i = 1, posCount do
+		sumPos = sumPos + posDeltas[i]
+	end
+	local avgChoke = sumPos / posCount
+	if avgChoke < AVG_CHOKE_THRESHOLD then
+		return nil
+	end
+	return avgChoke
+end
+
+local function getRhythmicChokeEvidence(posDeltas, posCount)
+	if posCount < RHYTHM_MIN_EVENTS then
+		return nil, nil, nil
+	end
+
+	local anchorDelta = posDeltas[1]
+	if not anchorDelta or anchorDelta < MIN_FAKELAG_CHOKE_TICKS then
+		return nil, nil, nil
+	end
+
+	local tolerance = getRhythmTolerance(anchorDelta)
+	local matching, checked = countRhythmMatches(
+		posDeltas,
+		anchorDelta,
+		RHYTHM_CHECK_COUNT,
+		tolerance,
+		posCount
+	)
+	if checked < RHYTHM_MIN_EVENTS or (matching / checked) < RHYTHM_MATCH_RATIO then
+		return nil, nil, nil
+	end
+
+	return anchorDelta, "rhythmic choke", string.format(
+		"%d ticks (%d/%d within +/-%d)", anchorDelta, matching, checked, tolerance)
+end
+
 -- Choke debug: simtime gap kinds (newest-first deltas).
 -- hold=0t frozen simtime; gap=FL-sized advance; dt_rel=DT band [24,34) like unchoke/DT release.
 local function accumulateDeltaKinds(deltaTicks, sampleCount, acc)
@@ -515,6 +557,11 @@ function FakeLag.ProcessPlayer(playerState)
 		Evidence.HoldDecayForMethod(id, "fake_lag")
 	end
 
+	local fakeLagWeight = Evidence.GetMethodWeight(id, "fake_lag")
+	if fakeLagWeight >= FAKE_LAG_EVIDENCE_CAP then
+		return
+	end
+
 	local function countRecentStalls(lookbackEnd)
 		local stalls = 0
 		local lookback = math.min(BURST_STALL_LOOKBACK, lookbackEnd or deltaCount)
@@ -544,8 +591,6 @@ function FakeLag.ProcessPlayer(playerState)
 					"[FakeLag] %s %s: %s (evidence +%.1f) | %s",
 					id, logLabel, logDetail, addedWeight, formatDeltaKinds(kindAcc)))
 			end
-		elseif isDebug and weight > 0 then
-			print(string.format("[FakeLag] %s evidence blocked for %s (wanted +%.1f)", id, logLabel, weight))
 		end
 		return addedWeight
 	end
@@ -604,35 +649,21 @@ function FakeLag.ProcessPlayer(playerState)
 				"sustained choke",
 				string.format("avg %.1f ticks", sustainedAvg)
 			)
-		elseif posCount >= AVG_CHOKE_MIN_SAMPLES then
-			local sumPos = 0
-			for i = 1, posCount do
-				sumPos = sumPos + posDeltas[i]
-			end
-			local avgChoke = sumPos / posCount
-			if avgChoke >= AVG_CHOKE_THRESHOLD then
+		else
+			local avgChoke = getPositiveAvgChoke(posDeltas, posCount)
+			if avgChoke then
 				tryAddChokeEvidence(
 					buildEvidenceWeight(avgChoke),
 					"avg choke",
 					string.format("%.1f ticks (%d releases)", avgChoke, posCount)
 				)
-			end
-		elseif posCount >= RHYTHM_MIN_EVENTS then
-			local anchorDelta = posDeltas[1]
-			if anchorDelta >= MIN_FAKELAG_CHOKE_TICKS then
-				local tolerance = getRhythmTolerance(anchorDelta)
-				local matching, checked = countRhythmMatches(
-					posDeltas,
-					anchorDelta,
-					RHYTHM_CHECK_COUNT,
-					tolerance,
-					posCount
-				)
-				if checked >= RHYTHM_MIN_EVENTS and (matching / checked) >= RHYTHM_MATCH_RATIO then
+			else
+				local rhythmTicks, rhythmLabel, rhythmDetail = getRhythmicChokeEvidence(posDeltas, posCount)
+				if rhythmTicks then
 					tryAddChokeEvidence(
-						buildEvidenceWeight(anchorDelta),
-						"rhythmic choke",
-						string.format("%d ticks (%d/%d within +/-%d)", anchorDelta, matching, checked, tolerance)
+						buildEvidenceWeight(rhythmTicks),
+						rhythmLabel,
+						rhythmDetail
 					)
 				end
 			end
