@@ -116,7 +116,33 @@ jobs:
             dist/SHA256SUMS.txt
 
       - name: Purge workflow artifacts
-        uses: kolpav/purge-artifacts-action@v2
+        uses: actions/github-script@v7
         with:
-          token: ${{ github.token }}
-          max-entries: 0
+          script: |
+            const { owner, repo } = context.repo;
+            let page = 1;
+            let deleted = 0;
+            for (;;) {
+              const { data } = await github.rest.actions.listArtifactsForRepo({
+                owner,
+                repo,
+                per_page: 100,
+                page,
+              });
+              if (data.artifacts.length === 0) {
+                break;
+              }
+              for (const artifact of data.artifacts) {
+                await github.rest.actions.deleteArtifact({
+                  owner,
+                  repo,
+                  artifact_id: artifact.id,
+                });
+                deleted += 1;
+              }
+              if (data.artifacts.length < 100) {
+                break;
+              }
+              page += 1;
+            }
+            core.info(`Deleted ${deleted} workflow artifact(s).`);
