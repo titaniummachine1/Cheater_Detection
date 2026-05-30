@@ -20,6 +20,7 @@ local DUCK_CONFIRM_SECONDS         = 3.0
 local DUCK_SPEED_EVIDENCE_WEIGHT   = 15.0
 local DUCK_SPEED_EVIDENCE_COOLDOWN_S = 10.0
 local DUCK_SPEED_EVIDENCE_CAP      = Evidence.GetMethodScoreCap("duck_speed")
+local FL_DUCKING                   = 2
 
 local tickCounters                 = {}
 local evidenceCooldowns            = {}
@@ -47,6 +48,17 @@ function DuckSpeed.HasWork(playerState)
 	if not pdata or pdata.isDormant or not pdata.isAlive then
 		return false
 	end
+	if not pdata.onGround then
+		return false
+	end
+	local flags = pdata.flags
+	if not flags or (flags & FL_DUCKING) == 0 then
+		return false
+	end
+	local viewOffset = pdata.viewOffset
+	if not viewOffset or math.floor(viewOffset.z) ~= FULLY_CROUCHED_VIEW_OFFSET_Z then
+		return false
+	end
 	if Evidence.GetMethodWeight(playerState.id, "duck_speed") >= DUCK_SPEED_EVIDENCE_CAP then
 		return Common.IsLogCategoryEnabled("All")
 	end
@@ -65,12 +77,8 @@ function DuckSpeed.ProcessPlayer(playerState)
 	local pdata = playerState.pdata
 	local id = playerState.id
 
-	local onGround = pdata.onGround
-	local flags = pdata.flags
 	local velocity = pdata.velocity
-	local viewOffset = pdata.viewOffset
-
-	if onGround == nil or flags == nil or velocity == nil then
+	if velocity == nil then
 		return
 	end
 
@@ -91,41 +99,32 @@ function DuckSpeed.ProcessPlayer(playerState)
 		tickCounters[id] = 0
 	end
 
-	local ducking = (flags & 2) ~= 0
+	local ent = PlayerData.GetEntity(pdata)
+	if not ent then
+		return
+	end
 
-	local viewOffsetZ = viewOffset and viewOffset.z or 0
-	local isFullyCrouched = (math.floor(viewOffsetZ) == FULLY_CROUCHED_VIEW_OFFSET_Z)
+	local maxSpeed = ent:GetPropFloat("m_flMaxspeed")
+	local currentSpeed = velocity:Length()
 
-	if onGround and ducking and isFullyCrouched then
-		local ent = PlayerData.GetEntity(pdata)
-		if not ent then
-			return
-		end
+	if currentSpeed >= (maxSpeed * DUCK_SPEED_RATIO_MIN) then
+		tickCounters[id] = tickCounters[id] + 1
 
-		local maxSpeed = ent:GetPropFloat("m_flMaxspeed")
-		local currentSpeed = velocity:Length()
-
-		if currentSpeed >= (maxSpeed * DUCK_SPEED_RATIO_MIN) then
-			tickCounters[id] = tickCounters[id] + 1
-
-			if tickCounters[id] >= getConfirmTicks() then
-				local beforeWeight = Evidence.GetMethodWeight(id, "duck_speed")
-				Evidence.AddEvidence(id, "duck_speed", DUCK_SPEED_EVIDENCE_WEIGHT)
-				tickCounters[id] = 0
-				evidenceCooldowns[id] = now
-				if Common.IsDebugEnabled() then
-					print(string.format(
-						"[DuckSpeed] %s duck speed (evidence +%.1f, total duck_speed=%.1f)",
-						id,
-						Evidence.GetMethodWeight(id, "duck_speed") - beforeWeight,
-						Evidence.GetMethodWeight(id, "duck_speed")))
-				end
+		if tickCounters[id] >= getConfirmTicks() then
+			local beforeWeight = Evidence.GetMethodWeight(id, "duck_speed")
+			Evidence.AddEvidence(id, "duck_speed", DUCK_SPEED_EVIDENCE_WEIGHT)
+			tickCounters[id] = 0
+			evidenceCooldowns[id] = now
+			if Common.IsDebugEnabled() then
+				print(string.format(
+					"[DuckSpeed] %s duck speed (evidence +%.1f, total duck_speed=%.1f)",
+					id,
+					Evidence.GetMethodWeight(id, "duck_speed") - beforeWeight,
+					Evidence.GetMethodWeight(id, "duck_speed")))
 			end
-		else
-			tickCounters[id] = math.max(0, tickCounters[id] - 1)
 		end
 	else
-		tickCounters[id] = 0
+		tickCounters[id] = math.max(0, tickCounters[id] - 1)
 	end
 end
 

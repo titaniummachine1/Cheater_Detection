@@ -2,9 +2,19 @@ import { bundle } from "luabundle";
 import * as fs from "fs";
 import * as path from "path";
 
-const targetDir = path.join(process.env.LOCALAPPDATA || "", "lua");
-const targetPath = path.join(targetDir, "Cheater_Detection.lua");
-const prototypeRootMainPath = path.join(targetDir, "Main.lua");
+const bundleCiOnly = process.env.BUNDLE_CI === "1";
+const bundleOutputPath = process.env.BUNDLE_OUTPUT_PATH;
+const targetDir = bundleOutputPath
+  ? path.dirname(path.resolve(bundleOutputPath))
+  : path.join(process.env.LOCALAPPDATA || "", "lua");
+const targetPath = bundleOutputPath
+  ? path.resolve(bundleOutputPath)
+  : path.join(targetDir, "Cheater_Detection.lua");
+const prototypeRootMainPath = path.join(
+  process.env.LOCALAPPDATA || targetDir,
+  "lua",
+  "Main.lua"
+);
 
 function fileInfo(filePath) {
   const stat = fs.statSync(filePath);
@@ -70,7 +80,7 @@ function main() {
     console.log(`[BundleAndDeploy] Embedded SteamIDs in bundle: ${embedKeyCount}`);
 
     const prototypeEntryPath = "./Prototypes/Main.lua";
-    if (fs.existsSync(prototypeEntryPath)) {
+    if (!bundleCiOnly && fs.existsSync(prototypeEntryPath)) {
       const bundledPrototypeMain = bundleLua(prototypeEntryPath);
       writeLuaTarget(prototypeRootMainPath, bundledPrototypeMain, "prototype entrypoint");
       console.log(`[BundleAndDeploy] LOAD THIS FILE IN LMABOX: ${prototypeRootMainPath}`);
@@ -80,7 +90,7 @@ function main() {
     }
 
     const simplePrototypeEntryPath = "./Prototypes/LocalBridgeSimple/Main.lua";
-    if (fs.existsSync(simplePrototypeEntryPath)) {
+    if (!bundleCiOnly && fs.existsSync(simplePrototypeEntryPath)) {
       const bundledSimplePrototype = bundleLua(simplePrototypeEntryPath);
       const simpleTargetPath = path.join(targetDir, "LocalBridgeSimple", "Main.lua");
       writeLuaTarget(simpleTargetPath, bundledSimplePrototype, "prototype package");
@@ -88,7 +98,7 @@ function main() {
 
     // Copy all .lua files in Prototypes folder (they use global libs, no bundling needed)
     const prototypesDir = "./Prototypes";
-    if (fs.existsSync(prototypesDir)) {
+    if (!bundleCiOnly && fs.existsSync(prototypesDir)) {
       const prototypeFiles = fs
         .readdirSync(prototypesDir)
         .filter((file) => file.endsWith(".lua") && file !== "Main.lua");

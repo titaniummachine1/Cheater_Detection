@@ -1,6 +1,7 @@
 --[[ detectors/bhop.lua
      Detects scripted bunnyhops by counting consecutive "perfect" jumps.
      Tracks ground contact ticks on landing, then scores on ground→air transition.
+     Only runs while airborne or in the brief post-landing ground window (no idle ground work).
 ]]
 
 local Constants     = require("Cheater_Detection.Core.constants")
@@ -24,6 +25,11 @@ local function isBhopEnabled()
 	return adv and adv.Bhop == true
 end
 
+local function clearBhopState(id)
+	playerData[id] = nil
+end
+
+--- Airborne this tick, or still counting landing ticks after air (inAir / groundTicks only set during chains).
 function Bhop.HasWork(playerState)
 	if not isBhopEnabled() then
 		return false
@@ -34,10 +40,18 @@ function Bhop.HasWork(playerState)
 	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
 		return false
 	end
-	if playerState.pdata and (playerState.pdata.isDormant or not playerState.pdata.isAlive) then
+	local pdata = playerState.pdata
+	if not pdata or pdata.isDormant or not pdata.isAlive then
 		return false
 	end
-	return true
+	if pdata.onGround == nil then
+		return false
+	end
+	if not pdata.onGround then
+		return true
+	end
+	local data = playerData[playerState.id]
+	return data ~= nil and (data.inAir == true or data.groundTicks ~= nil)
 end
 
 function Bhop.ProcessPlayer(playerState)
@@ -51,22 +65,44 @@ function Bhop.ProcessPlayer(playerState)
 
 	local id = playerState.id
 	local pdata = playerState.pdata
-
 	local onGround = pdata.onGround
-
-	if onGround == nil then
-		return
-	end
 
 	if id == PlayerCache.GetLocalID() and not Common.IsDebugEnabled() then
 		return
 	end
 
+	if onGround then
+		local data = playerData[id]
+		if not data then
+			return
+		end
+
+		if data.inAir then
+			data.inAir = nil
+			data.groundTicks = 1
+			return
+		end
+
+		if not data.groundTicks then
+			return
+		end
+
+		data.groundTicks = data.groundTicks + 1
+		if data.groundTicks > MAX_GROUND_TICKS then
+			clearBhopState(id)
+		end
+		return
+	end
+
+	-- Airborne
 	local data = playerData[id]
+	if data and data.inAir then
+		return
+	end
+
+	local groundTicks = (data and data.groundTicks) or 0
 	if not data then
 		data = {
-			wasOnGround = false,
-			groundTicks = 0,
 			consecutivePerfects = 0,
 			lastJumpTime = nil,
 		}
@@ -78,44 +114,37 @@ function Bhop.ProcessPlayer(playerState)
 		data.consecutivePerfects = 0
 	end
 
-	if onGround then
-		data.groundTicks = data.groundTicks + 1
-		data.wasOnGround = true
-	else
-		if data.wasOnGround then
-			data.lastJumpTime = now
-			if data.groundTicks >= 0 and data.groundTicks <= MAX_GROUND_TICKS then
-				data.consecutivePerfects = data.consecutivePerfects + 1
+	data.lastJumpTime = now
+	if groundTicks >= 0 and groundTicks <= MAX_GROUND_TICKS then
+		data.consecutivePerfects = data.consecutivePerfects + 1
 
-				if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
-					local lastEvidence = evidenceCooldowns[id] or 0
-					if (now - lastEvidence) >= BHOP_EVIDENCE_COOLDOWN_S then
-						Evidence.AddEvidence(id, "bhop", BHOP_EVIDENCE_WEIGHT)
-						evidenceCooldowns[id] = now
-						if Common.IsDebugEnabled() then
-							print(string.format(
-								"[Bhop] %s perfect jump #%d (ground_ticks=%d) evidence +%.1f",
-								id, data.consecutivePerfects, data.groundTicks, BHOP_EVIDENCE_WEIGHT))
-						end
-					end
+		if data.consecutivePerfects >= Constants.BHOP_MIN_CONSECUTIVE_SUCCESS then
+			local lastEvidence = evidenceCooldowns[id] or 0
+			if (now - lastEvidence) >= BHOP_EVIDENCE_COOLDOWN_S then
+				Evidence.AddEvidence(id, "bhop", BHOP_EVIDENCE_WEIGHT)
+				evidenceCooldowns[id] = now
+				if Common.IsDebugEnabled() then
+					print(string.format(
+						"[Bhop] %s perfect jump #%d (ground_ticks=%d) evidence +%.1f",
+						id, data.consecutivePerfects, groundTicks, BHOP_EVIDENCE_WEIGHT))
 				end
-			else
-				data.consecutivePerfects = 0
 			end
-
-			data.wasOnGround = false
-			data.groundTicks = 0
 		end
+	else
+		data.consecutivePerfects = 0
 	end
+
+	data.groundTicks = nil
+	data.inAir = true
 end
 
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	playerData[id] = nil
+	clearBhopState(id)
 	evidenceCooldowns[id] = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
-	playerData[id] = nil
+	clearBhopState(id)
 	evidenceCooldowns[id] = nil
 end)
 

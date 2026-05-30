@@ -64,6 +64,14 @@ We have completely re-engineered the backend storage and in-memory execution pip
 
 [![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Detection/releases/latest/download/Cheater_Detection.lua)
 
+Every push to `main` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml): embedded DBs are rebuilt, Lua is bundled, the version tag is bumped (`v1.4` → `v1.5`, etc.), and a GitHub Release is published with:
+
+* `Cheater_Detection.lua` (bundled script)
+* `local_http_bridge_server.py` (optional bridge)
+* `SHA256SUMS.txt`
+
+Workflow artifacts are not kept (storage is purged after each run). To skip a release for a commit, include `[skip release]` in the commit message.
+
 ---
 
 ## Optional Local Bridge

@@ -448,6 +448,7 @@ local function OnCreateMove(cmd)
 		for _, pState in ipairs(activePlayers) do
 			enforceValveAutoDisconnect(pState)
 			if sessionState.valveDisconnectTriggered then
+				Profiler.End("ValveCheck")
 				Profiler.End("PlayerScan_Loop")
 				Profiler.End("CreateMove_Total")
 				return

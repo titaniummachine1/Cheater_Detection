@@ -1,0 +1,122 @@
+# Build bundled Cheater_Detection.lua + local HTTP bridge, tag with auto version bump, publish GitHub Release.
+# No workflow artifacts are uploaded (release assets only) to limit Actions storage use.
+
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_tag="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
+          if [[ -z "${latest_tag}" ]]; then
+            next="v1.0"
+          else
+            ver="${latest_tag#v}"
+            if [[ "${ver}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              IFS='.' read -r major minor <<< "${ver}"
+              next="v${major}.$((minor + 1))"
+            else
+              IFS='.' read -r major minor patch _ <<< "${ver}."
+              major="${major:-0}"
+              minor="${minor:-0}"
+              patch="${patch:-0}"
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          echo "latest=${latest_tag:-none}" >> "$GITHUB_OUTPUT"
+          echo "tag=${next}" >> "$GITHUB_OUTPUT"
+          echo "Next release tag: ${next} (previous: ${latest_tag:-none})"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Rebuild embedded databases
+        run: python external_sources/rebuild_embedded_databases.py
+
+      - name: Bundle Lua
+        env:
+          BUNDLE_CI: "1"
+          BUNDLE_OUTPUT_PATH: ${{ github.workspace }}/dist/Cheater_Detection.lua
+        run: npm run bundle
+
+      - name: Stage release files
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          test -s dist/Cheater_Detection.lua
+          cp LocalBridge/local_http_bridge_server.py dist/local_http_bridge_server.py
+          sha256sum dist/Cheater_Detection.lua dist/local_http_bridge_server.py > dist/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          short_sha="${GITHUB_SHA::7}"
+          body_file="$(mktemp)"
+          {
+            echo "Automated release for commit [\`${short_sha}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})."
+            echo ""
+            echo "### Assets"
+            echo "- \`Cheater_Detection.lua\` — bundled Lmaobox script (load from \`%localappdata%/lua/\`)"
+            echo "- \`local_http_bridge_server.py\` — optional localhost HTTP bridge"
+            echo "- \`SHA256SUMS.txt\` — checksums"
+            echo ""
+            echo "### Install"
+            echo "1. Download \`Cheater_Detection.lua\` from this release."
+            echo "2. Place it in \`%localappdata%/lua/Cheater_Detection.lua\`."
+            echo "3. (Optional) Run \`local_http_bridge_server.py\` with Python 3 for async lookups."
+          } > "${body_file}"
+          gh release create "${tag}" \
+            --title "${tag}" \
+            --notes-file "${body_file}" \
+            dist/Cheater_Detection.lua \
+            dist/local_http_bridge_server.py \
+            dist/SHA256SUMS.txt
+
+      - name: Purge workflow artifacts
+        uses: kolpav/purge-artifacts-action@v2
+        with:
+          token: ${{ github.token }}
+          max-entries: 0
