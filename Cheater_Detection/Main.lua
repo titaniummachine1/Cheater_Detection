@@ -374,12 +374,6 @@ local function OnCreateMove(cmd)
 	-- end
 	Profiler.End("PlayerCache_Sync")
 
-	if enableValveCheck then
-		Profiler.Begin("ValveCheck_Deferred")
-		ValveCheck.Tick()
-		Profiler.End("ValveCheck_Deferred")
-	end
-
 	-- Skip all detector work on frames where the game tick hasn't advanced
 	-- (CreateMove fires per frame, game ticks at 66 Hz)
 	local curTick = globals.TickCount()
@@ -392,6 +386,12 @@ local function OnCreateMove(cmd)
 	Profiler.Begin("Evidence_Decay")
 	Evidence.ApplyDecay()
 	Profiler.End("Evidence_Decay")
+
+	if enableValveCheck then
+		Profiler.Begin("ValveCheck_Deferred")
+		ValveCheck.Tick()
+		Profiler.End("ValveCheck_Deferred")
+	end
 
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer) or "")
