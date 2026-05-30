@@ -76,7 +76,7 @@ local DetectionToggles = {
 	anti_aim = "AntiAim",
 	bhop = "Bhop",
 	fake_lag = "Choke", -- Choke = Fake Lag in config
-	warp_dt = "Warp",
+	warp_dt = "DoubleTap",
 	duck_speed = "DuckSpeed",
 	silent_aimbot = "SilentAimbot",
 	manual_priority = "AutoFlagPriorityTen",
@@ -212,7 +212,7 @@ local function getPrimaryMethod(evidence)
 				if method == "fake_lag" and primaryMethod == "Exploit" then
 					primaryMethod = "Fake Lag"
 				elseif method == "warp_dt" then
-					primaryMethod = "Double Tap / Warp"
+					primaryMethod = "Double Tap"
 				elseif method == "anti_aim" then
 					primaryMethod = "Anti-Aim"
 				end

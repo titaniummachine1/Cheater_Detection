@@ -270,12 +270,12 @@ local function OnCreateMove(cmd)
 	local enableAntiAim    = adv.AntiAim == true
 	local enableDuckSpeed  = adv.DuckSpeed == true
 	local enableBhop       = adv.Bhop == true
-	local enableWarpDT     = adv["Warp"] == true
+	local enableDoubleTap  = Common.IsDoubleTapDetectionEnabled()
 	local enableChoke      = adv.Choke == true
 	local enableCosmetics  = adv.Cosmetics == true
 
 	if not (enableValveCheck or enableSilent or enableAntiAim or enableDuckSpeed
-			or enableBhop or enableWarpDT or enableChoke or enableCosmetics) then
+			or enableBhop or enableDoubleTap or enableChoke or enableCosmetics) then
 		Profiler.End("CreateMove_Total")
 		return
 	end
@@ -286,9 +286,9 @@ local function OnCreateMove(cmd)
 		if not sessionState.lastScanLogTime or (now - sessionState.lastScanLogTime) >= 5.0 then
 			sessionState.lastScanLogTime = now
 			print(string.format(
-				"[CD][SCAN] valve=%s silent=%s antiaim=%s duck=%s bhop=%s warp=%s choke=%s cosmetics=%s",
+				"[CD][SCAN] valve=%s silent=%s antiaim=%s duck=%s bhop=%s doubletap=%s choke=%s cosmetics=%s",
 				tostring(enableValveCheck), tostring(enableSilent), tostring(enableAntiAim),
-				tostring(enableDuckSpeed), tostring(enableBhop), tostring(enableWarpDT),
+				tostring(enableDuckSpeed), tostring(enableBhop), tostring(enableDoubleTap),
 				tostring(enableChoke), tostring(enableCosmetics)
 			))
 		end
@@ -432,10 +432,13 @@ local function OnCreateMove(cmd)
 		Profiler.End("Bhop")
 	end
 
-	if enableWarpDT then
-		Profiler.Begin("WarpDT")
+	if enableDoubleTap then
+		Profiler.Begin("DoubleTap")
+		for _, pState in ipairs(activePlayers) do
+			WarpDT.ProcessPlayer(pState)
+		end
 		WarpDT.Tick()
-		Profiler.End("WarpDT")
+		Profiler.End("DoubleTap")
 	end
 
 	if enableChoke then

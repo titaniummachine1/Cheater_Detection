@@ -143,8 +143,20 @@ function Common.IsDebugEnabled()
 	return G.Menu.Advanced.debug == true
 end
 
+--- Menu key Advanced.DoubleTap (legacy Advanced.Warp).
+function Common.IsDoubleTapDetectionEnabled()
+	local adv = G.Menu and G.Menu.Advanced
+	if not adv then
+		return false
+	end
+	if adv.DoubleTap == true then
+		return true
+	end
+	return adv.Warp == true
+end
+
 --- Check if a specific log category is enabled (controls log output only, not detection).
---- Categories: "All", "SilentAim", "AntiAim", "Warp/DT", "Choke", "Cosmetics", "ValveCheck", "Database"
+--- Categories: "All", "SilentAim", "AntiAim", "DoubleTap", "Choke", "Cosmetics", "ValveCheck", "Database"
 ---@param category string The log category to check
 ---@return boolean True if debug mode is on and category is selected
 function Common.IsLogCategoryEnabled(category)
@@ -163,7 +175,8 @@ function Common.IsLogCategoryEnabled(category)
 	local categoryMap = {
 		["SilentAim"] = 2,
 		["AntiAim"] = 3,
-		["Warp/DT"] = 4, -- Must match combo label exactly
+		["DoubleTap"] = 4, -- Must match combo label exactly
+		["Warp/DT"] = 4, -- legacy saved configs
 		["Choke"] = 5,
 		["Cosmetics"] = 6,
 		["ValveCheck"] = 7,

@@ -25,7 +25,7 @@ local Default_Config = {
 		profiler = false,                   -- Performance Profiler (uses global Profiler library)
 		-- Detection toggles (only for implemented detections)
 		Choke = false,                      -- Fake Lag detection
-		Warp = false,                       -- Warp/DT detection
+		DoubleTap = false,                  -- Double tap detection (legacy key: Warp)
 		Bhop = true,                        -- Bunny hop detection
 		DuckSpeed = true,                   -- Duck speed detection
 		AntiAim = true,                     -- Anti-aim detection

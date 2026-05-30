@@ -1,6 +1,7 @@
 local Menu = {}
 
 local G = require("Cheater_Detection.Utils.Globals")
+local Common = require("Cheater_Detection.Utils.Common")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 
@@ -62,6 +63,11 @@ local function EnsureMenuState()
 	G.Menu.Notifications = G.Menu.Notifications or {}
 	G.Menu.Misc = G.Menu.Misc or {}
 	G.Menu.currentTab = G.Menu.currentTab or "Main"
+
+	local adv = G.Menu.Advanced
+	if adv.Warp ~= nil and adv.DoubleTap == nil then
+		adv.DoubleTap = adv.Warp == true
+	end
 end
 
 local function DrawMenu()
@@ -151,13 +157,15 @@ local function DrawMenu()
 		TimMenu.NextLine()
 		TimMenu.Text("DEBUG ON = detectors run on YOU (self-test). OFF = you are never scanned.")
 		TimMenu.NextLine()
+		TimMenu.Text("Your flags: top-center HUD box. Others: WorldToScreen over head.")
+		TimMenu.NextLine()
 		Advanced.profiler = TimMenu.Checkbox("Performance Profiler", Advanced.profiler == true)
 		TimMenu.NextLine()
 		-- Debug category selector to reduce console spam
 		Advanced.DebugCategory = TimMenu.Combo(
 			"Debug Category",
 			Advanced.DebugCategory or { true, false, false, false, false, false, false, false },
-			{ "All", "SilentAim", "AntiAim", "Warp/DT", "Choke", "Cosmetics", "ValveCheck", "Database" }
+			{ "All", "SilentAim", "AntiAim", "DoubleTap", "Choke", "Cosmetics", "ValveCheck", "Database" }
 		)
 		TimMenu.NextLine()
 		Advanced.LogLevel = TimMenu.Combo(
@@ -176,7 +184,7 @@ local function DrawMenu()
 			TimMenu.Text("(OFF: Low FPS!)")
 		end
 		TimMenu.NextLine()
-		Advanced.Warp = TimMenu.Checkbox("Warp/DT Detection (Experimental)", Advanced.Warp == true)
+		Advanced.DoubleTap = TimMenu.Checkbox("Double Tap Detection (Experimental)", Common.IsDoubleTapDetectionEnabled())
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
 		TimMenu.NextLine()
 		Advanced.Cosmetics = TimMenu.Checkbox("Cosmetic Exploit Detection", Advanced.Cosmetics == true)
