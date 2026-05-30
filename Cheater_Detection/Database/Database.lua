@@ -149,11 +149,91 @@ local function getEntryFlags(entry)
 	return tonumber(entry.Flags) or 0
 end
 
+local BAN_FLAG_MASK = Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED
+local DATABASE_FILE_KIND = "database"
+
+local function getEntryKarma(entry)
+	if type(entry) ~= "table" then
+		return 0
+	end
+	if type(entry[1]) == "number" then
+		local slot6 = entry[6]
+		if type(slot6) == "number" then
+			if slot6 > 1000 then
+				return type(entry[7]) == "number" and entry[7] or 0
+			end
+			return slot6
+		end
+		return 0
+	end
+	return type(entry.Karma) == "number" and entry.Karma or 0
+end
+
+local function setEntryFlags(entry, flags)
+	if type(entry) ~= "table" then
+		return
+	end
+	if type(entry[1]) == "number" then
+		entry[1] = flags
+	else
+		entry.Flags = flags
+	end
+end
+
+local function getEntryRetaliation(entry)
+	if type(entry) ~= "table" then
+		return false
+	end
+	if type(entry[1]) == "number" then
+		return (getEntryFlags(entry) & Constants.Flags.RETALIATION) ~= 0
+	end
+	return entry.Retaliation == true
+end
+
+local function setEntryKarma(entry, karma)
+	if type(entry) ~= "table" or type(karma) ~= "number" or karma <= 0 then
+		return
+	end
+	karma = math.floor(karma)
+	if type(entry[1]) == "number" then
+		local slot6 = entry[6]
+		if type(slot6) == "number" and slot6 > 1000 then
+			entry[7] = karma
+		else
+			entry[6] = karma
+		end
+		return
+	end
+	entry.Karma = karma
+end
+
+local function setEntryRetaliation(entry, isRetaliation)
+	if type(entry) ~= "table" then
+		return
+	end
+	if type(entry[1]) == "number" then
+		local flags = getEntryFlags(entry)
+		if isRetaliation then
+			setEntryFlags(entry, flags | Constants.Flags.RETALIATION)
+		else
+			setEntryFlags(entry, flags & ~Constants.Flags.RETALIATION)
+		end
+		return
+	end
+	entry.Retaliation = isRetaliation == true
+end
+
 local function entriesEquivalent(entryA, entryB)
 	if not entryA or not entryB then
 		return false
 	end
 	if getEntryFlags(entryA) ~= getEntryFlags(entryB) then
+		return false
+	end
+	if getEntryKarma(entryA) ~= getEntryKarma(entryB) then
+		return false
+	end
+	if getEntryRetaliation(entryA) ~= getEntryRetaliation(entryB) then
 		return false
 	end
 	local reasonA = Database.ResolveReason(entryA)
@@ -165,10 +245,69 @@ local function entriesEquivalent(entryA, entryB)
 	elseif reasonA ~= reasonB then
 		return false
 	end
-	if Database.ResolveStatic(entryA) ~= Database.ResolveStatic(entryB) then
+	local staticA = Database.ResolveStatic(entryA)
+	local staticB = Database.ResolveStatic(entryB)
+	if type(staticA) == "string" and type(staticB) == "string" then
+		if staticA:lower() ~= staticB:lower() then
+			return false
+		end
+	elseif staticA ~= staticB then
 		return false
 	end
 	return true
+end
+
+--- True when entry carries stronger evidence than the build-time embed row for this SteamID.
+function Database.EntryBeatsBaseline(steamID, entry)
+	if type(entry) ~= "table" or type(steamID) ~= "string" then
+		return false
+	end
+	local baseline = Database.EmbeddedBaseline and Database.EmbeddedBaseline[steamID]
+	if not baseline then
+		return true
+	end
+	if entriesEquivalent(entry, baseline) then
+		return false
+	end
+	local baseReason = Database.ResolveReason(baseline)
+	local curReason = Database.ResolveReason(entry)
+	local baseStatic = Database.ResolveStatic(baseline)
+	local curStatic = Database.ResolveStatic(entry)
+	if ReasonWeightResolver.ShouldOverrideEvidence(baseReason, curReason, baseStatic, curStatic) then
+		return true
+	end
+	return getEntryFlags(entry) ~= getEntryFlags(baseline)
+end
+
+--- True when local database file should keep karma / retaliation not present in embed.
+function Database.HasLocalDatabaseDelta(steamID, entry)
+	if type(entry) ~= "table" or type(steamID) ~= "string" then
+		return false
+	end
+
+	local curKarma = getEntryKarma(entry)
+	local curRetaliation = getEntryRetaliation(entry)
+	local baseline = Database.EmbeddedBaseline and Database.EmbeddedBaseline[steamID]
+	local baseKarma = baseline and getEntryKarma(baseline) or 0
+	local baseRetaliation = baseline and getEntryRetaliation(baseline) or false
+
+	if curKarma > baseKarma then
+		return true
+	end
+	if curRetaliation and not baseRetaliation then
+		return true
+	end
+
+	if not baseline and (curKarma > 0 or curRetaliation) then
+		return true
+	end
+
+	local staticID = Database.ResolveStatic(entry)
+	if type(staticID) == "string" and staticID == "RetaliationKarma" and curKarma > 0 then
+		return true
+	end
+
+	return false
 end
 
 local function mergeEntryIntoBaseline(baseline, steamID, entry)
@@ -259,7 +398,7 @@ local function serializeCompressedDatabase(normalizedData)
 	local chunks = {}
 	local count = 1
 	chunks[count] =
-	"return {\n    _Metadata = {\n        Version = 5,\n        Format = \"global_lookup\",\n        Kind = \"overlay\"\n    },\n    Data = {\n"
+	"return {\n    _Metadata = {\n        Version = 5,\n        Format = \"global_lookup\",\n        Kind = \"" .. DATABASE_FILE_KIND .. "\"\n    },\n    Data = {\n"
 	count = count + 1
 
 	local isFirst = true
@@ -309,11 +448,11 @@ function Database.SaveDatabase(force)
 	end
 
 	local filepath = Database.GetFilePath()
-	local overlayCount = 0
+	local entryCount = 0
 	for _ in pairs(Database.Overlay) do
-		overlayCount = overlayCount + 1
+		entryCount = entryCount + 1
 	end
-	Logger.Debug("Database", string.format("[DB] Saving overlay (%d entries)...", overlayCount))
+	Logger.Debug("Database", string.format("[DB] Saving database (%d entries)...", entryCount))
 	ReapplyDetectedPriorities()
 
 	-- Use global lookup tables for compression
@@ -412,7 +551,7 @@ function Database.SaveDatabase(force)
 		if Serializer.writeFile(filepath, encoded) then
 			Database.State.isDirty = false
 			Database.State.lastSave = os.time()
-			Logger.Info("Database", string.format("Database overlay saved (%d entries): %s", overlayCount, filepath))
+			Logger.Info("Database", string.format("Database saved (%d entries): %s", entryCount, filepath))
 			local elapsed = nowSeconds() - saveStartedAt
 			if elapsed >= SLOW_SAVE_WARN_SECONDS then
 				Logger.Warning(
@@ -632,34 +771,99 @@ function Database.ShouldPersistEntry(steamID, entry, options)
 	if type(entry) ~= "table" or type(steamID) ~= "string" then
 		return false
 	end
-	if options and options.runtime == true then
+	if Database.HasLocalDatabaseDelta(steamID, entry) then
 		return true
 	end
+	return Database.EntryBeatsBaseline(steamID, entry)
+end
 
-	local baseline = Database.EmbeddedBaseline[steamID]
-	if not baseline then
-		return true
+--- Refresh runtime fields from live profile scans without touching overlay.
+--- No-op when the player is not already in G.DataBase (no memory spent on clean unknowns).
+function Database.UpdateRuntimeMemory(steamID, updates)
+	if type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
+		return false
 	end
-
-	local baseReason = Database.ResolveReason(baseline)
-	local curReason = Database.ResolveReason(entry)
-	local baseStatic = Database.ResolveStatic(baseline)
-	local curStatic = Database.ResolveStatic(entry)
-
-	if entriesEquivalent(entry, baseline) then
+	if type(updates) ~= "table" or type(G.DataBase) ~= "table" then
 		return false
 	end
 
-	-- Disk only stores runtime evidence that beats the build-time embed winner.
-	if ReasonWeightResolver.ShouldOverrideEvidence(baseReason, curReason, baseStatic, curStatic) then
+	local entry = G.DataBase[steamID]
+	if not entry then
+		return false
+	end
+
+	local changed = false
+
+	if type(updates.Name) == "string" and updates.Name ~= "" and updates.Name ~= "Unknown" then
+		if type(entry[1]) == "number" then
+			local currentName = entry[5]
+			if type(currentName) == "number" then
+				currentName = GlobalLookupTables.Names[currentName]
+			end
+			if currentName ~= updates.Name then
+				entry[5] = updates.Name
+				changed = true
+			end
+		elseif entry.Name ~= updates.Name then
+			entry.Name = updates.Name
+			changed = true
+		end
+	end
+
+	if changed then
+		decodedCache[steamID] = nil
+	end
+
+	return changed
+end
+
+--- Merge VAC/community-ban flags into runtime DB without touching embed reason/name/static.
+--- Overlay persists only when new ban flags beat the build-time embed row.
+function Database.ApplyBanFlags(steamID, banFlags)
+	if type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
+		return false
+	end
+	if type(banFlags) ~= "number" then
+		return false
+	end
+
+	local bitsToApply = banFlags & BAN_FLAG_MASK
+	if bitsToApply == 0 then
+		return false
+	end
+
+	if type(G.DataBase) ~= "table" then
+		G.DataBase = {}
+	end
+
+	local existing = G.DataBase[steamID]
+	if existing then
+		local oldFlags = getEntryFlags(existing)
+		local merged = oldFlags | bitsToApply
+		if merged == oldFlags then
+			return false
+		end
+		setEntryFlags(existing, merged)
+		decodedCache[steamID] = nil
+		Database.SyncOverlayEntry(steamID)
+		Database.State.isDirty = true
 		return true
 	end
 
-	if getEntryFlags(entry) ~= getEntryFlags(baseline) then
-		return true
-	end
-
-	return false
+	-- New row only when a ban is found — never cache clean players.
+	local reason = (bitsToApply & Constants.Flags.VAC_BANNED) ~= 0 and "VAC Ban" or "Community/Trade Ban"
+	G.DataBase[steamID] = {
+		Name = "Unknown",
+		Reason = reason,
+		Source = "SteamHistory",
+		Static = "vac_ban",
+		Flags = bitsToApply,
+		Timestamp = os.time(),
+	}
+	decodedCache[steamID] = nil
+	Database.SyncOverlayEntry(steamID)
+	Database.State.isDirty = true
+	return true
 end
 
 function Database.PruneOverlayAgainstBaseline()
@@ -685,11 +889,11 @@ function Database.PruneOverlayAgainstBaseline()
 
 	if pruned > 0 then
 		Logger.Info("Database",
-			string.format("[DB] Pruned %d overlay entries already covered by embedded baseline", pruned))
+			string.format("[DB] Pruned %d database entries already covered by embedded baseline", pruned))
 	end
 	if refreshed > 0 then
 		Logger.Debug("Database",
-			string.format("[DB] Refreshed %d stale overlay entries from runtime", refreshed))
+			string.format("[DB] Refreshed %d stale database entries from runtime", refreshed))
 	end
 
 	return pruned
@@ -724,6 +928,25 @@ function Database.SyncOverlayEntry(steamID, options)
 	end
 end
 
+local function mergeLocalDatabaseDeltaIntoRuntime(existing, diskEntry)
+	if type(existing) ~= "table" or type(diskEntry) ~= "table" then
+		return false
+	end
+
+	local changed = false
+	local diskKarma = getEntryKarma(diskEntry)
+	if diskKarma > getEntryKarma(existing) then
+		setEntryKarma(existing, diskKarma)
+		changed = true
+	end
+	if getEntryRetaliation(diskEntry) and not getEntryRetaliation(existing) then
+		setEntryRetaliation(existing, true)
+		changed = true
+	end
+
+	return changed
+end
+
 function Database.ApplyOverlayToDataBase()
 	if type(Database.Overlay) ~= "table" or type(G.DataBase) ~= "table" then
 		return
@@ -744,14 +967,55 @@ function Database.ApplyOverlayToDataBase()
 				if ReasonWeightResolver.ShouldOverrideEvidence(existingReason, overlayReason, existingStatic, overlayStatic) then
 					G.DataBase[steamID] = copyEntry(entry)
 					applied = applied + 1
+				elseif mergeLocalDatabaseDeltaIntoRuntime(existing, entry) then
+					decodedCache[steamID] = nil
+					applied = applied + 1
 				end
 			end
 		end
 	end
 
 	if applied > 0 then
-		Logger.Debug("Database", string.format("[DB] Overlay applied to runtime: %d entries merged", applied))
+		Logger.Debug("Database", string.format("[DB] Database file applied to runtime: %d entries merged", applied))
 	end
+end
+
+function Database.SanitizeLoadedDatabase(rewriteMetadata)
+	if type(Database.Overlay) ~= "table" then
+		return 0
+	end
+
+	local kept = 0
+	local pruned = 0
+	for steamID, entry in pairs(Database.Overlay) do
+		if type(steamID) == "string" and steamID:match("^7656119%d+$") and type(entry) == "table" then
+			if Database.ShouldPersistEntry(steamID, entry, nil) then
+				kept = kept + 1
+			else
+				Database.Overlay[steamID] = nil
+				pruned = pruned + 1
+				Database.State.isDirty = true
+			end
+		else
+			Database.Overlay[steamID] = nil
+			pruned = pruned + 1
+			Database.State.isDirty = true
+		end
+	end
+
+	if pruned > 0 then
+		Logger.Info("Database",
+			string.format("[DB] Sanitized database file: kept %d, removed %d redundant entries", kept, pruned))
+	end
+	if rewriteMetadata then
+		Database.State.isDirty = true
+	end
+
+	if Database.State.isDirty and (pruned > 0 or rewriteMetadata) then
+		Database.SaveDatabase(true)
+	end
+
+	return pruned
 end
 
 local function decodeDatabaseFileContent(content)
@@ -826,7 +1090,7 @@ function Database.MigrateLegacyFullToOverlay(legacyData, filePath)
 	end
 
 	Logger.Info("Database",
-		string.format("[DB] Migrated legacy database: %d overlay entries kept, %d embedded duplicates skipped",
+		string.format("[DB] Migrated legacy database: %d entries kept, %d embedded duplicates skipped",
 			kept, skipped))
 
 	if filePath and type(filePath) == "string" then
@@ -843,10 +1107,10 @@ function Database.MigrateLegacyFullToOverlay(legacyData, filePath)
 	Database.SaveDatabase(true)
 end
 
-function Database.LoadOverlayFromDisk(silent)
+function Database.LoadDatabaseFromDisk(silent)
 	local filePath = Database.GetFilePath()
 	if not silent then
-		Logger.Debug("Database", "[DB] Loading overlay from disk...")
+		Logger.Debug("Database", "[DB] Loading database from disk...")
 	end
 
 	local content = Serializer.readFile(filePath)
@@ -864,28 +1128,33 @@ function Database.LoadOverlayFromDisk(silent)
 	content = nil
 
 	if not decodedData then
-		Logger.Error("Database", "[DB] Overlay load failed: " .. tostring(decodeErr))
+		Logger.Error("Database", "[DB] Database load failed: " .. tostring(decodeErr))
 		Database.Overlay = {}
 		return
 	end
 
 	local metadata = decodedData._Metadata
-	local isOverlayKind = metadata and metadata.Kind == "overlay"
+	local fileKind = metadata and metadata.Kind or nil
+	local isPersistedDatabase = fileKind == DATABASE_FILE_KIND or fileKind == "overlay"
 	local dataTable = extractDataTableFromDecoded(decodedData)
 
-	if isOverlayKind then
+	if isPersistedDatabase then
 		Database.Overlay = dataTable
 		local count = 0
 		for _ in pairs(Database.Overlay) do
 			count = count + 1
 		end
-		Logger.Info("Database", string.format("[DB] Loaded overlay: %d entries", count))
+		Logger.Info("Database", string.format("[DB] Loaded database: %d entries", count))
+		Database.SanitizeLoadedDatabase(fileKind == "overlay")
 		return
 	end
 
-	-- Legacy full database on disk: one-time migration to overlay-only file
-	Logger.Info("Database", "[DB] Legacy full database detected; migrating to overlay format...")
+	Logger.Info("Database", "[DB] Legacy full database detected; migrating to database format...")
 	Database.MigrateLegacyFullToOverlay(decodedData, filePath)
+end
+
+function Database.LoadOverlayFromDisk(silent)
+	Database.LoadDatabaseFromDisk(silent)
 end
 
 function Database.LoadEmbeddedDatabases()
@@ -1046,7 +1315,7 @@ function Database.Initialize(silent)
 	Database.State.isDirty = false
 
 	Database.BuildEmbeddedBaseline()
-	Database.LoadOverlayFromDisk(silent)
+	Database.LoadDatabaseFromDisk(silent)
 	Database.LoadEmbeddedDatabases()
 	Database.ApplyOverlayToDataBase()
 	Database.PruneOverlayAgainstBaseline()
@@ -1118,8 +1387,8 @@ function Database.PurgeFriendsAndSelf()
 	return purged
 end
 
--- Runtime upsert (detectors, Valve, SteamHistory): no reason-weight arbitration.
--- List/fetch weights live in Parsers.ParseTF2BotDetector_MergeEntry; load-time embed in LoadDatabase.
+-- Runtime upsert (detectors, SteamHistory source-ban hits): updates G.DataBase always;
+-- overlay/database.txt only when EntryBeatsBaseline (new evidence vs embed).
 function Database.UpsertCheater(steamID, data)
 	if not steamID or type(steamID) ~= "string" then
 		return false
@@ -1228,9 +1497,8 @@ function Database.UpsertCheater(steamID, data)
 		Retaliation = finalRetaliation,
 	}
 
-	-- Invalidate cache for this entry
-	decodedCache[steamID] = nil
-	Database.SyncOverlayEntry(steamID, { runtime = true })
+	-- Overlay only when evidence beats embed; runtime memory is always updated above.
+	Database.SyncOverlayEntry(steamID)
 
 	return true
 end

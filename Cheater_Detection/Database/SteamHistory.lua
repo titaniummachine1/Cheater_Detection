@@ -428,7 +428,11 @@ end
 
 local function flagPlayer(steamID, context, entry)
 	local reason = entry.BanReason or "Unknown reason"
-	local name = resolveName(steamID, context, entry)
+	local existing = Database.GetCheater(steamID)
+	local name = existing and existing.Name
+	if not name or name == "" or name == "Unknown" then
+		name = resolveName(steamID, context, entry)
+	end
 
 	-- Hard evidence decision:
 	-- If the ban reason explicitly mentions cheats/hacks, we mark as CHEATER immediately.
@@ -576,17 +580,23 @@ local function setSteamHistoryChecks(steamID, entry)
 
 	DirtySystem.MarkDirty(steamID, "checks")
 
-	if
-		playerState.flags ~= oldFlags
-		and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= 0
-	then
-		Database.UpsertCheater(steamID, {
-			name = playerState.wrap:GetName() or resolveName(steamID, nil, entry),
-			reason = isVacBanned and "SteamHistory VAC Ban" or "SteamHistory Community/Trade Ban",
-			source = "SteamHistory",
-			flags = playerState.flags,
-			score = playerState.score or 0,
-		})
+	-- Only touch runtime DB rows that already exist (embed/list members). Clean unknowns stay out of G.DataBase.
+	if G.DataBase and G.DataBase[steamID] then
+		local liveName = entry and (entry.PersonaName or entry.personaName)
+		if type(liveName) == "string" and liveName ~= "" then
+			Database.UpdateRuntimeMemory(steamID, { Name = liveName })
+		end
+	end
+
+	local banBits = 0
+	if isVacBanned then
+		banBits = banBits | Constants.Flags.VAC_BANNED
+	end
+	if isCommBanned then
+		banBits = banBits | Constants.Flags.COMM_BANNED
+	end
+	if banBits ~= 0 and (playerState.flags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) ~= (oldFlags & (Constants.Flags.VAC_BANNED | Constants.Flags.COMM_BANNED)) then
+		Database.ApplyBanFlags(steamID, banBits)
 	end
 
 	return {

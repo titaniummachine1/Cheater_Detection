@@ -244,9 +244,12 @@ local function mergePlayersFromActiveSource(state, parseMode)
 						s.updStatic = (s.updStatic or 0) + 1
 					end
 				end
-				local steamID64 = Parsers.GetSteamID64(player.steamid)
-				if steamID64 then
-					Database.SyncOverlayEntry(steamID64)
+				-- Overlay is evidence-only; embed owns names and profile fields.
+				if added or updReason or updStatic then
+					local steamID64 = Parsers.GetSteamID64(player.steamid)
+					if steamID64 then
+						Database.SyncOverlayEntry(steamID64)
+					end
 				end
 			else
 				s.existing = s.existing + 1
@@ -749,7 +752,7 @@ function Fetcher.FinishFetch()
 			overlayCount = overlayCount + 1
 		end
 	end
-	printc(0, 255, 140, 255, string.format("Overlay entries on disk: %d (embedded lists are in the bundle)", overlayCount))
+	printc(0, 255, 140, 255, string.format("Database entries on disk: %d (embedded lists are in the bundle)", overlayCount))
 
 	if isDebugMode then
 		Logger.Debug(

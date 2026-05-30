@@ -439,20 +439,19 @@ local function resolveKnownEvidence(steamID64)
 	return nil, nil
 end
 
--- Skip live list rows that cannot beat existing runtime or build-time embed evidence.
--- Uses the same reason+source weight rules as merge and overlay persistence.
-local function shouldSkipListMerge(steamID64, staticSource, reason)
+-- True when incoming reason/static can replace what runtime or embed already holds.
+local function incomingBeatsKnownEvidence(steamID64, staticSource, reason)
 	if type(steamID64) ~= "string" or type(staticSource) ~= "string" or staticSource == "" then
-		return false
+		return true
 	end
 
 	local existingReason, existingStatic = resolveKnownEvidence(steamID64)
 	if not existingReason and not existingStatic then
-		return false
+		return true
 	end
 
 	local incomingReason = reason or "Unknown Source"
-	return not ReasonWeightResolver.ShouldOverrideEvidence(
+	return ReasonWeightResolver.ShouldOverrideEvidence(
 		existingReason, incomingReason, existingStatic, staticSource)
 end
 
@@ -482,19 +481,18 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 
 	local reason = buildReasonFromAttributes(player.attributes, defaultReason)
 
-	if shouldSkipListMerge(steamID64, staticSource, reason) then
-		return false, false, false
-	end
-
 	local existingEntry = existingEntries[steamID64]
 
 	-- Add to entries if not already there
 	if existingEntry then
-		-- IN-PLACE UPDATE OPTIMIZATION:
-		-- Data is pre-allocated from database.txt load. Update existing entry fields.
-		local updName, updReason, updStatic = false, false, false
+		-- Live lists are ID/evidence feeds only — names and profile data come from the embed rebuild.
+		if not incomingBeatsKnownEvidence(steamID64, staticSource, reason) then
+			return false, false, false
+		end
 
-		-- If it's compressed, expand it into a verbose table in-place so we can mutate it
+		local updReason, updStatic = false, false
+
+		-- Expand compressed entries only when incoming evidence can actually upgrade.
 		if type(existingEntry[1]) == "number" then
 			local eSource = existingEntry[2]
 			local eReason = existingEntry[3]
@@ -514,17 +512,6 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 				if existingEntry[6] then existingEntries[steamID64].Karma = existingEntry[6] end
 			end
 			existingEntry = existingEntries[steamID64]
-		end
-
-
-		-- If existing entry has unknown name and this one has a name
-		if
-			(existingEntry.Name == "Unknown" or existingEntry.Name == nil)
-			and playerName
-			and playerName ~= "Unknown"
-		then
-			existingEntry.Name = playerName
-			updName = true
 		end
 
 		-- Weight-based reason selection: always keep the highest-weight reason.
@@ -561,12 +548,15 @@ function Parsers.ParseTF2BotDetector_MergeEntry(player, existingEntries, staticS
 			existingEntry.Source = sourceName
 		end
 
-		local updated = updName or updReason or updStatic
+		local updated = updReason or updStatic
 
-
-		return false, updated, false, updName, updReason, updStatic
+		return false, updated, false, false, updReason, updStatic
 	else
-		-- Pre-allocation: Entry doesn't exist, create it in the existing table
+		-- New to runtime: only insert when evidence beats embed baseline (or player is unknown).
+		if not incomingBeatsKnownEvidence(steamID64, staticSource, reason) then
+			return false, false, false
+		end
+
 		existingEntries[steamID64] = {
 			Name = playerName or "Unknown",
 			Reason = reason or "Unknown Source",

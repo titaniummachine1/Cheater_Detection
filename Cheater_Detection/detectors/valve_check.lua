@@ -158,12 +158,7 @@ local function applyVacFlag(playerState)
 			"ValveCheck",
 			string.format("VAC ban confirmed – SteamID64=%s  Name=%s", playerState.id, playerState.wrap:GetName())
 		)
-		Database.UpsertCheater(playerState.id, {
-			name = playerState.wrap:GetName(),
-			reason = "VAC Ban on Record",
-			flags = playerState.flags,
-			score = playerState.score,
-		})
+		Database.ApplyBanFlags(playerState.id, Constants.Flags.VAC_BANNED)
 		Events.Publish("OnPlayerStateChange", playerState, "VAC Ban on Record")
 	end
 end
@@ -180,12 +175,7 @@ local function applyCommBanFlag(playerState)
 				playerState.wrap:GetName()
 			)
 		)
-		Database.UpsertCheater(playerState.id, {
-			name = playerState.wrap:GetName(),
-			reason = "Community/Trade Ban",
-			flags = playerState.flags,
-			score = playerState.score,
-		})
+		Database.ApplyBanFlags(playerState.id, Constants.Flags.COMM_BANNED)
 		Events.Publish("OnPlayerStateChange", playerState, "Community/Trade Ban")
 	end
 end
