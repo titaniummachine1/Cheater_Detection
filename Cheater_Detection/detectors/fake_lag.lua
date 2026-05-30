@@ -68,6 +68,24 @@ local consecutiveChokeCount       = {}                                     -- co
 local lastChokeDelta              = {}
 local debugSummaries              = {}
 local smoothedFrameTime           = 1 / 60
+local _positiveDeltaBuf           = {}
+
+-- Pre-HistoryManager, delta lists only had positive simtime steps (stalls omitted).
+-- Scoring thresholds assume that shape; full buffer (with 0t holds) is for stall/burst paths only.
+local function buildPositiveDeltaView(deltaTicks, deltaCount)
+	local n = 0
+	for i = 1, deltaCount do
+		local d = deltaTicks[i]
+		if d and d > 0 then
+			n = n + 1
+			_positiveDeltaBuf[n] = d
+		end
+	end
+	for k = n + 1, #_positiveDeltaBuf do
+		_positiveDeltaBuf[k] = nil
+	end
+	return _positiveDeltaBuf, n
+end
 
 -- ?????? helpers ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 local function isLocalFpsSufficient()
@@ -389,25 +407,27 @@ local function isChokeDetectionEnabled()
 	return adv and adv.Choke == true
 end
 
-local function isActiveChokePattern(deltaTicks, sumTicks, deltaCount)
+local function isActiveChokePattern(deltaTicks, deltaCount)
 	if getChokeHoldSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT, deltaCount) then
 		return true
 	end
 
-	if getSustainedChokeAverage(deltaTicks, deltaCount) then
+	local posDeltas, posCount = buildPositiveDeltaView(deltaTicks, deltaCount)
+
+	if getSustainedChokeAverage(posDeltas, posCount) then
 		return true
 	end
 
-	if deltaCount >= RHYTHM_MIN_EVENTS then
-		local anchorDelta = deltaTicks[1]
+	if posCount >= RHYTHM_MIN_EVENTS then
+		local anchorDelta = posDeltas[1]
 		if anchorDelta and anchorDelta >= MIN_FAKELAG_CHOKE_TICKS then
 			local tolerance = getRhythmTolerance(anchorDelta)
 			local matching, checked = countRhythmMatches(
-				deltaTicks,
+				posDeltas,
 				anchorDelta,
 				RHYTHM_CHECK_COUNT,
 				tolerance,
-				deltaCount
+				posCount
 			)
 			if checked >= RHYTHM_MIN_EVENTS and (matching / checked) >= RHYTHM_MATCH_RATIO then
 				return true
@@ -415,24 +435,18 @@ local function isActiveChokePattern(deltaTicks, sumTicks, deltaCount)
 		end
 	end
 
-	local recentChoke = getRecentChokeSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT, deltaCount)
+	local recentChoke = getRecentChokeSignal(posDeltas, RECENT_CHOKE_SAMPLE_COUNT, posCount)
 	if recentChoke then
 		return true
 	end
 
-	if deltaCount >= AVG_CHOKE_MIN_SAMPLES and sumTicks > 0 then
-		local positiveCount = 0
-		for i = 1, deltaCount do
-			local d = deltaTicks[i]
-			if d and d > 0 then
-				positiveCount = positiveCount + 1
-			end
+	if posCount >= AVG_CHOKE_MIN_SAMPLES then
+		local sumPos = 0
+		for i = 1, posCount do
+			sumPos = sumPos + posDeltas[i]
 		end
-		if positiveCount >= AVG_CHOKE_MIN_SAMPLES then
-			local avgChoke = sumTicks / positiveCount
-			if avgChoke >= AVG_CHOKE_THRESHOLD then
-				return true
-			end
+		if (sumPos / posCount) >= AVG_CHOKE_THRESHOLD then
+			return true
 		end
 	end
 
@@ -484,10 +498,12 @@ function FakeLag.ProcessPlayer(playerState)
 		end
 	end
 
-	local deltaTicks, deltaCount, sumTicks = HistoryManager.GetSimDeltaDeltas(history, HISTORY_SCAN_DELTAS)
+	local deltaTicks, deltaCount, _sumTicks = HistoryManager.GetSimDeltaDeltas(history, HISTORY_SCAN_DELTAS)
 	if deltaCount < 1 then
 		return
 	end
+
+	local posDeltas, posCount = buildPositiveDeltaView(deltaTicks, deltaCount)
 
 	if isDebug then
 		local snapshotWindow = (globals.TickCount() % DEBUG_SAMPLE_TICK_INTERVAL) == 0
@@ -495,7 +511,7 @@ function FakeLag.ProcessPlayer(playerState)
 	end
 
 	-- Ongoing choke: pause exploit decay so score does not drain between evidence cooldowns.
-	if isActiveChokePattern(deltaTicks, sumTicks, deltaCount) then
+	if isActiveChokePattern(deltaTicks, deltaCount) then
 		Evidence.HoldDecayForMethod(id, "fake_lag")
 	end
 
@@ -511,6 +527,9 @@ function FakeLag.ProcessPlayer(playerState)
 	end
 
 	local function tryAddChokeEvidence(weight, logLabel, logDetail)
+		if not weight or weight <= 0 then
+			return 0
+		end
 		local lastTime = evidenceCooldowns[id] or 0
 		if (now - lastTime) < FAKELAG_EVIDENCE_COOLDOWN_S then
 			return 0
@@ -566,10 +585,10 @@ function FakeLag.ProcessPlayer(playerState)
 	-- ?????? 2. Evidence paths (one shared realtime cooldown) ?????????????????????????????????????????????????????????
 	local chokeTicks, chokeLabel = getChokeHoldSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT, deltaCount)
 	if not chokeTicks then
-		chokeTicks, chokeLabel = getFastChokeSignal(deltaTicks, deltaCount)
+		chokeTicks, chokeLabel = getFastChokeSignal(posDeltas, posCount)
 	end
 	if not chokeTicks then
-		chokeTicks, chokeLabel = getRecentChokeSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT, deltaCount)
+		chokeTicks, chokeLabel = getRecentChokeSignal(posDeltas, RECENT_CHOKE_SAMPLE_COUNT, posCount)
 	end
 	if chokeTicks then
 		tryAddChokeEvidence(
@@ -578,23 +597,36 @@ function FakeLag.ProcessPlayer(playerState)
 			string.format("%.1f ticks", chokeTicks)
 		)
 	else
-		local sustainedAvg = getSustainedChokeAverage(deltaTicks, deltaCount)
+		local sustainedAvg = getSustainedChokeAverage(posDeltas, posCount)
 		if sustainedAvg then
 			tryAddChokeEvidence(
 				buildEvidenceWeight(sustainedAvg),
 				"sustained choke",
 				string.format("avg %.1f ticks", sustainedAvg)
 			)
-		elseif deltaCount >= RHYTHM_MIN_EVENTS then
-			local anchorDelta = getMaxFlGap(deltaTicks, deltaCount)
+		elseif posCount >= AVG_CHOKE_MIN_SAMPLES then
+			local sumPos = 0
+			for i = 1, posCount do
+				sumPos = sumPos + posDeltas[i]
+			end
+			local avgChoke = sumPos / posCount
+			if avgChoke >= AVG_CHOKE_THRESHOLD then
+				tryAddChokeEvidence(
+					buildEvidenceWeight(avgChoke),
+					"avg choke",
+					string.format("%.1f ticks (%d releases)", avgChoke, posCount)
+				)
+			end
+		elseif posCount >= RHYTHM_MIN_EVENTS then
+			local anchorDelta = posDeltas[1]
 			if anchorDelta >= MIN_FAKELAG_CHOKE_TICKS then
 				local tolerance = getRhythmTolerance(anchorDelta)
 				local matching, checked = countRhythmMatches(
-					deltaTicks,
+					posDeltas,
 					anchorDelta,
 					RHYTHM_CHECK_COUNT,
 					tolerance,
-					deltaCount
+					posCount
 				)
 				if checked >= RHYTHM_MIN_EVENTS and (matching / checked) >= RHYTHM_MATCH_RATIO then
 					tryAddChokeEvidence(
