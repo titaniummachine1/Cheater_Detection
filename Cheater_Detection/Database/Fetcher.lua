@@ -10,6 +10,8 @@ local HttpQueue = require("Cheater_Detection.services.http_queue")
 local Serializer = require("Cheater_Detection.Utils.Serializer")
 local Logger = require("Cheater_Detection.Utils.Logger")
 
+local Events = require("Cheater_Detection.Core.Events")
+
 local Fetcher = {}
 -- Stability-first mode: do not hammer the same source on nil JSON payloads.
 local MAX_JSON_NIL_RETRIES = 0
@@ -777,6 +779,7 @@ function Fetcher.FinishFetch()
 		printc(255, 255, 100, 255, string.format("Database redundant rows pruned: %d", pruned))
 	end
 	Logger.Debug("Fetcher", "Fetch process finished")
+	Events.Publish("OnFetcherComplete")
 end
 
 function Fetcher.GetStatus()

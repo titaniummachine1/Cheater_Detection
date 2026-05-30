@@ -64,6 +64,7 @@ local sessionState        = {
 	inServer = false,
 	cleanedFriendIDs = {},
 	lastProfilerEnabled = nil,
+	pendingDebugLocalPurge = false,
 }
 
 local function isValveAutoDisconnectEnabled()
@@ -175,6 +176,46 @@ local function isDebugEnabled()
 	return Common.IsDebugEnabled()
 end
 
+--- Debug self-test: drop local from runtime DB after fetch (fetch often finishes before in-game).
+local function purgeLocalPlayerFromDatabase()
+	local localID = PlayerCache.GetLocalID()
+	if not localID or localID == "" then
+		local lp = entities.GetLocalPlayer()
+		if lp and lp:IsValid() then
+			localID = tostring(Common.GetSteamID64(lp) or "")
+		end
+	end
+	if localID == "" then
+		return false
+	end
+
+	Database.RemoveCheater(localID)
+	Evidence.ClearPlayer(localID)
+
+	local pState = PlayerCache.GetByID(localID)
+	if pState and pState.wrap then
+		pState.wrap:SetPriority(0)
+	end
+	return true
+end
+
+local function tryPurgeLocalAfterFetch()
+	if not sessionState.pendingDebugLocalPurge then
+		return
+	end
+	if not isDebugEnabled() then
+		sessionState.pendingDebugLocalPurge = false
+		return
+	end
+	if Fetcher.State.isRunning then
+		return
+	end
+	if purgeLocalPlayerFromDatabase() then
+		sessionState.pendingDebugLocalPurge = false
+		print("[CD] Debug: cleared local player from runtime database after fetch")
+	end
+end
+
 local function isMenuProfilerEnabled()
 	local adv = G.Menu and G.Menu.Advanced
 	return adv and adv["profiler"] == true
@@ -202,6 +243,13 @@ local function Init()
 
 	DetectionConfig.RegisterWithHistoryManager()
 	CosmeticAbuse.Init()
+
+	Events.Subscribe("OnFetcherComplete", function()
+		if isDebugEnabled() then
+			sessionState.pendingDebugLocalPurge = true
+			tryPurgeLocalAfterFetch()
+		end
+	end)
 
 	-- Auto-sync: HTTP spread via scheduler + HttpQueue; parsing merges run in full per response/file.
 	if G.Menu and G.Menu.Main and G.Menu.Main.AutoSync ~= false then
@@ -252,6 +300,8 @@ local function OnCreateMove(cmd)
 		Profiler.End("CreateMove_Total")
 		return
 	end
+
+	tryPurgeLocalAfterFetch()
 
 	if sessionState.valveDisconnectTriggered then
 		Profiler.End("CreateMove_Total")

@@ -3,10 +3,10 @@
 
      DT = choke → unchoke → ~24 tick simtime jump (66 Hz). Fake lag stays below 22 ticks.
 
-     Detection:
-       1. ProcessPlayer — history scan for bursts >= 22 ticks (typical DT ~24).
-       2. Tick / OnHitscanHit — optional burst+damage correlation (stronger signal).
-       3. markDtRelease — suppress fake_lag scoring briefly after a burst.
+     Detection (evidence only with combat correlation):
+       1. Simtime burst 24–33 ticks after choke stalls (release step).
+       2. Player fired or dealt damage within the confirm window — no shot, no evidence.
+       3. ProcessPlayer tracks bursts for fake_lag suppress only; never adds evidence alone.
 ]]
 
 local Constants                             = require("Cheater_Detection.Core.constants")
@@ -26,10 +26,12 @@ local WarpDT                                = {}
 -- Hitch = multiple *humans* bursting same tick (bots on itemtest choke constantly).
 local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
 
--- At 66 Hz: fake lag releases top out below 22 ticks; DT is almost always ~24+.
+-- At 66 Hz: fake lag releases stay below 22 ticks; DT is bounded by
+-- sv_maxusrcmdprocessticks (~24). 33 gives headroom; anything larger is a merged
+-- double-release artifact or real packet loss, NOT a double tap.
 local BURST_MIN_TICKS_66HZ                  = 24.0
 local FAKELAG_MAX_CHOKE_TICKS_66HZ          = 21.0
-local BURST_MAX_TICKS_66HZ                  = 64.0 -- above this is disconnect/lag, not DT
+local BURST_MAX_TICKS_66HZ                  = 34.0 -- DT window is 24–33 ticks (d < max)
 local WARP_COOLDOWN_TICKS_66HZ              = 24.0 -- min spacing between ProcessPlayer burst flags
 local FAKE_LAG_SUPPRESS_TICKS_66HZ          = 66.0 -- ~1s: no fake_lag scoring after DT release
 
@@ -94,6 +96,11 @@ local playerState       = {}
 local watchUntil        = {}
 local dtSuppressUntil   = {} -- [id] = tick until fake_lag should ignore this player
 local _simTimes         = {}
+local _deltaTicks       = {}
+
+local DT_STALL_MAX_TICKS        = 1
+local DT_STALL_LOOKAHEAD        = 8
+local DT_STALL_MIN_BEFORE_BURST = 2
 -- Must cover DT release (~24 ticks) after damage; match BURST_MAX window.
 local ACTIVITY_WINDOW_TICKS = 66
 
@@ -159,6 +166,7 @@ local function getState(id)
 			lastHitCountEvidenceTime = 0,
 			lastProcessBurstTick     = 0,
 			lastCreditedBurstTick    = 0,
+			lastFiredTick            = 0,
 			recentHits               = { _data = {}, _head = 1, _count = 0 },
 			prevSimTick              = nil,
 			lastSimTick              = nil,
@@ -215,7 +223,7 @@ function WarpDT.MarkDtRelease(id)
 	markDtRelease(id, globals.TickCount())
 end
 
-function WarpDT.IsPlayerWatched(id)
+local function isPlayerWatched(id)
 	local untilTick = watchUntil[id]
 	if not untilTick then
 		return false
@@ -223,7 +231,39 @@ function WarpDT.IsPlayerWatched(id)
 	return globals.TickCount() <= untilTick
 end
 
--- Only the newest simtime step — avoids re-flagging the same burst while it sits in the ring.
+function WarpDT.IsPlayerWatched(id)
+	return isPlayerWatched(id)
+end
+
+local function buildNewestDeltas(id)
+	for k = 1, #_simTimes do
+		_simTimes[k] = nil
+	end
+	for k = 1, #_deltaTicks do
+		_deltaTicks[k] = nil
+	end
+
+	local history = HistoryManager.GetPlayerHistory(id)
+	if not history or history._count < 2 then
+		return _deltaTicks, 0
+	end
+
+	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTime)
+	if #_simTimes < 2 then
+		return _deltaTicks, 0
+	end
+
+	local deltas = _deltaTicks
+	for i = 1, #_simTimes - 1 do
+		local delta = _simTimes[i] - _simTimes[i + 1]
+		if delta > 0 then
+			deltas[#deltas + 1] = timeToTicks(delta)
+		end
+	end
+	return deltas, deltas[1] or 0
+end
+
+-- Newest step only — avoids re-flagging an old burst sitting in the ring buffer.
 local function findNewestHistoryBurst(id)
 	local history = HistoryManager.GetPlayerHistory(id)
 	if not history or history._count < 2 then
@@ -263,35 +303,51 @@ local function addCappedDtEvidence(id, wantedWeight)
 	return actual
 end
 
-local function tryAddProcessBurstEvidence(playerState, burstAmount, curTick)
+local function trackProcessBurst(playerState, burstAmount, curTick)
 	local id = playerState.id
 	local data = getState(id)
 
 	markDtRelease(id, curTick)
 	data.lastBurstTick = curTick
+	data.lastProcessBurstTick = curTick
 
+	if isDtLogEnabled() then
+		print(string.format(
+			"[DoubleTap] %s sim burst %d ticks (tracking only — evidence needs fire/hit)",
+			id, burstAmount))
+	end
+end
+
+local function canCreditDtEvidence(id, curTick)
+	if not isPlayerWatched(id) then
+		return false
+	end
+	local data = getState(id)
 	local cooldownTicks = math.floor(WARP_COOLDOWN_TICKS_66HZ / 66.0 / globals.TickInterval() + 0.5)
 	if data.lastCreditedBurstTick > 0 and (curTick - data.lastCreditedBurstTick) <= cooldownTicks then
-		return
+		return false
 	end
-	if data.lastProcessBurstTick > 0 and (curTick - data.lastProcessBurstTick) <= cooldownTicks then
-		return
-	end
-	data.lastProcessBurstTick = curTick
-	data.lastCreditedBurstTick = curTick
-
 	local now = globals.RealTime()
 	if (now - data.lastBurstEvidenceTime) < DT_EVIDENCE_COOLDOWN_S then
-		return
+		return false
 	end
-	data.lastBurstEvidenceTime = now
+	return true
+end
 
-	local weight = math.min(40, burstAmount * 1.2)
+local function tryAddDtBurstEvidence(id, burstAmount, curTick, weight)
+	if not canCreditDtEvidence(id, curTick) then
+		return 0
+	end
+	local data = getState(id)
+	data.lastCreditedBurstTick = curTick
+	data.lastBurstEvidenceTime = globals.RealTime()
 	local added = addCappedDtEvidence(id, weight)
 	if added > 0 and isDtLogEnabled() then
-		print(string.format("[DoubleTap] %s packet burst: %d ticks → evidence +%.1f",
+		print(string.format(
+			"[DoubleTap] %s packet burst: %d ticks → evidence +%.1f",
 			id, burstAmount, added))
 	end
+	return added
 end
 
 local function recordConfirmedHit(attackerID, tick)
@@ -348,16 +404,7 @@ local function sampleSimBurst(pState, curTick)
 		local k = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
 		local weight = DT_EVIDENCE_WEIGHT * DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
 		data.lastDamageTick = 0
-
-		local now = globals.RealTime()
-		if (now - data.lastBurstEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
-			data.lastBurstEvidenceTime = now
-			local added = addCappedDtEvidence(id, weight)
-			if added > 0 and isDebug then
-				print(string.format("[DoubleTap] %s burst after dmg (delay=%d ticks, %d ticks) → evidence +%.1f",
-					id, elapsedTicks, burstAmount, added))
-			end
-		end
+		tryAddDtBurstEvidence(id, burstAmount, curTick, weight)
 	end
 end
 
@@ -411,7 +458,7 @@ function WarpDT.ProcessPlayer(playerState)
 		return
 	end
 
-	tryAddProcessBurstEvidence(playerState, burstAmount, curTick)
+	trackProcessBurst(playerState, burstAmount, curTick)
 end
 
 function WarpDT.Tick()
@@ -475,21 +522,21 @@ Events.Subscribe("OnHitscanHit", function(hit)
 		end
 
 		if hitsInWindow >= 2 then
-			local now = globals.RealTime()
-			if (now - data.lastHitCountEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S then
-				data.lastHitCountEvidenceTime = now
-				local certaintyMult           = 2 ^ (hitsInWindow - 2)
-				local elapsedTicks            = curTick - data.lastBurstTick
-				local k                       = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
-				local timeMult                = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
-				local weight                  = DT_EVIDENCE_WEIGHT * timeMult * certaintyMult
+			local certaintyMult = 2 ^ (hitsInWindow - 2)
+			local elapsedTicks  = curTick - data.lastBurstTick
+			local k             = math.log(DT_EVIDENCE_MAX_MULT) / DT_CONFIRM_WINDOW_TICKS
+			local timeMult      = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsedTicks)
+			local weight        = DT_EVIDENCE_WEIGHT * timeMult * certaintyMult
 
+			local now = globals.RealTime()
+			if (now - data.lastHitCountEvidenceTime) >= DT_EVIDENCE_COOLDOWN_S
+				and canCreditDtEvidence(attackerID, curTick) then
+				data.lastHitCountEvidenceTime = now
 				local added = addCappedDtEvidence(attackerID, weight)
 				if added > 0 and isDtLogEnabled() then
 					print(string.format(
-						"[DoubleTap] %s DT: %d hits in %d ticks after %d-tick burst, dmg=%d → evidence +%.1f",
-						attackerID, hitsInWindow, elapsedTicks,
-						data.lastBurstTick > 0 and (curTick - data.lastBurstTick) or 0, hit.damage, added))
+						"[DoubleTap] %s DT: %d hits in %d ticks after burst, dmg=%d → evidence +%.1f",
+						attackerID, hitsInWindow, elapsedTicks, hit.damage, added))
 				end
 			end
 		end

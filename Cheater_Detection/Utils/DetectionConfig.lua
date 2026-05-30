@@ -18,7 +18,7 @@ DetectionConfig.Detectors = {
 		},
 	},
 	FakeLag = {
-		retentionTicks = 36, -- enough history for 3+ choke→release cycles
+		retentionTicks = 40, -- room for 3+ choke→release cycles plus stalls between
 		fields = { HistoryManager.Fields.SimulationTime },
 	},
 }

@@ -177,7 +177,10 @@ function FakeLag.ProcessPlayer(playerState)
 	if not Common.IsConnectionStableForDetection() then return end
 
 	if not playerState.pdata.isAlive then return end
-	if WarpDT.ShouldSuppressFakeLag(id) or WarpDT.IsPlayerWatched(id) then
+	-- Only skip right after a confirmed DT release. Do NOT skip just because the
+	-- player is shooting (fake-laggers shoot too) — the DT-burst check below
+	-- already separates a real double tap from sustained choke.
+	if WarpDT.ShouldSuppressFakeLag(id) then
 		return
 	end
 
