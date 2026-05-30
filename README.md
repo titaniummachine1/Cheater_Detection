@@ -67,7 +67,17 @@ We have completely re-engineered the backend storage and in-memory execution pip
 
 [![Download Latest](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total.svg?style=for-the-badge&logo=download&label=Download%20Latest)](https://github.com/titaniummachine1/Cheater_Detection/releases/latest/download/Cheater_Detection.lua)
 
-Every push to `main` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml): embedded DBs are rebuilt, Lua is bundled, the version tag is bumped (`v1.4` → `v1.5`, etc.), and a GitHub Release is published with:
+Every push to `main` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml): embedded DBs are rebuilt, Lua is bundled, a semver tag is bumped from the **first line of the commit message**, and a GitHub Release is published with:
+
+| Bump | Version change | Keywords in commit (examples) |
+|------|----------------|--------------------------------|
+| **patch** (default) | `+0.0.1` | `fix`, `perf`, `patch`, `hotfix` — or no keyword |
+| **minor** | `+0.1.0` (patch reset to 0) | `minor`, `feat`, `feature`, `update` |
+| **major** | `+1.0.0` (minor/patch reset) | `major`, `breaking`, `break` |
+
+Example: `v1.4.2` + commit `perf: faster bhop gate` → `v1.4.3`. Commit `update: new detections` → `v1.5.0`. Commit `major: rewrite evidence` → `v2.0.0`.
+
+Legacy tags like `v1.4` are treated as `v1.4.0` before bumping.
 
 - `Cheater_Detection.lua` (bundled script)
 - `local_http_bridge_server.py` (optional bridge)

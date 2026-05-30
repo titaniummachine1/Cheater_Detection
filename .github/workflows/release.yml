@@ -34,27 +34,62 @@ jobs:
       - name: Compute next version tag
         id: version
         shell: bash
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
+          # Semver bump from first line of commit message (priority: major > minor > patch).
+          # patch (+0.0.1): fix, perf, patch, hotfix, … — default when no keyword matches.
+          # minor (+0.1.0): minor, feat, feature, update
+          # major (+1.0.0): major, breaking, break
+          msg="$(printf '%s' "${COMMIT_MESSAGE}" | head -n1 | tr '[:upper:]' '[:lower:]')"
+          bump="patch"
+          if [[ "${msg}" =~ (^|[^a-z])(major|breaking|break)([^a-z]|$) ]]; then
+            bump="major"
+          elif [[ "${msg}" =~ (^|[^a-z])(minor|feature|feat|update)([^a-z]|$) ]]; then
+            bump="minor"
+          elif [[ "${msg}" =~ (^|[^a-z])(patch|fix|perf|hotfix)([^a-z]|$) ]]; then
+            bump="patch"
+          fi
+
           latest_tag="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
           if [[ -z "${latest_tag}" ]]; then
-            next="v1.0"
+            major=1
+            minor=0
+            patch=0
           else
             ver="${latest_tag#v}"
             if [[ "${ver}" =~ ^[0-9]+\.[0-9]+$ ]]; then
               IFS='.' read -r major minor <<< "${ver}"
-              next="v${major}.$((minor + 1))"
+              patch=0
             else
               IFS='.' read -r major minor patch _ <<< "${ver}."
               major="${major:-0}"
               minor="${minor:-0}"
               patch="${patch:-0}"
-              next="v${major}.${minor}.$((patch + 1))"
             fi
           fi
+
+          case "${bump}" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+          esac
+
+          next="v${major}.${minor}.${patch}"
           echo "latest=${latest_tag:-none}" >> "$GITHUB_OUTPUT"
           echo "tag=${next}" >> "$GITHUB_OUTPUT"
-          echo "Next release tag: ${next} (previous: ${latest_tag:-none})"
+          echo "bump=${bump}" >> "$GITHUB_OUTPUT"
+          echo "Next release tag: ${next} (${bump} bump, previous: ${latest_tag:-none})"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -93,10 +128,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.version.outputs.tag }}"
+          bump="${{ steps.version.outputs.bump }}"
           short_sha="${GITHUB_SHA::7}"
           body_file="$(mktemp)"
           {
-            echo "Automated release for commit [\`${short_sha}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})."
+            echo "Automated release for commit [\`${short_sha}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) (**${bump}** bump → \`${tag}\`)."
             echo ""
             echo "### Assets"
             echo "- \`Cheater_Detection.lua\` — bundled Lmaobox script (load from \`%localappdata%/lua/\`)"

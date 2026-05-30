@@ -264,12 +264,15 @@ end
 -- [[ Callbacks ]]
 local function OnCreateMove(cmd)
 	-- Game logic only on CreateMove (never on Draw).
-	Scheduler.Tick()
-
 	-- SetContext is expensive; Begin/End already no-op when profiler overlay is off.
 	if isMenuProfilerEnabled() then
 		Profiler.SetContext("tick")
 	end
+
+	Profiler.Begin("Scheduler_Tick")
+	Scheduler.Tick()
+	Profiler.End("Scheduler_Tick")
+
 	Profiler.Begin("CreateMove_Total")
 	local isGameUI = engine.IsGameUIVisible()
 	if isGameUI then
@@ -307,8 +310,11 @@ local function OnCreateMove(cmd)
 		return
 	end
 
+	Profiler.Begin("CreateMove_Events")
 	Events.DispatchEngineEvent("CreateMove", cmd)
+	Profiler.End("CreateMove_Events")
 
+	Profiler.Begin("CreateMove_Prep")
 	local menu             = G.Menu
 	local adv              = menu.Advanced
 
@@ -356,6 +362,7 @@ local function OnCreateMove(cmd)
 		sessionState.groupSearched = false
 		SteamLookup.StopGroupFetch()
 	end
+	Profiler.End("CreateMove_Prep")
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 
 	-- Sync authoritative live-player list and tick entity cache once per tick
@@ -375,15 +382,15 @@ local function OnCreateMove(cmd)
 	end
 	lastDetectorTick = curTick
 
-	-- Once per game tick: decay only for alive, non-dormant players (60s grace after HoldDecay).
+	Profiler.Begin("Evidence_Decay")
 	Evidence.ApplyDecay()
+	Profiler.End("Evidence_Decay")
 
 	local isDebug = isDebugEnabled()
 	local localID = tostring(Common.GetSteamID64(localPlayer) or "")
 	local stateTable = PlayerCache.GetActiveTable()
 
 	-- Pre-filter active players into a flat list (reuse module-level table)
-	Profiler.Begin("PlayerScan_Loop")
 	Profiler.Begin("PlayerScan_BuildActive")
 	for k = 1, #activePlayers do activePlayers[k] = nil end
 	for id, existingState in pairs(stateTable) do
@@ -449,7 +456,6 @@ local function OnCreateMove(cmd)
 			enforceValveAutoDisconnect(pState)
 			if sessionState.valveDisconnectTriggered then
 				Profiler.End("ValveCheck")
-				Profiler.End("PlayerScan_Loop")
 				Profiler.End("CreateMove_Total")
 				return
 			end
@@ -525,7 +531,6 @@ local function OnCreateMove(cmd)
 		Profiler.End("FakeLag")
 	end
 
-	Profiler.End("PlayerScan_Loop")
 	Profiler.End("CreateMove_Total")
 end
 
