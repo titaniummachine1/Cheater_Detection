@@ -5,6 +5,7 @@
 ![Last Commit](https://img.shields.io/github/last-commit/titaniummachine1/Cheater_Detection?style=plastic&logo=github)
 ![Downloads](https://img.shields.io/github/downloads/titaniummachine1/Cheater_Detection/total?style=plastic&logo=github)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://github.com/titaniummachine1/Cheater_Detection/actions/workflows/release.yml/badge.svg)](https://github.com/titaniummachine1/Cheater_Detection/actions/workflows/release.yml)
 
 # Cheater_Detection
 
@@ -18,11 +19,11 @@ Automatic bot and cheater detection with cheater prioritization, visuals based o
 
 Click the badges below to download required dependencies:
 
-[![LuaLib](https://img.shields.io/badge/Download-lnxLib-blue?style=for-the-badge&logo=github)](https://github.com/lnx00/Lmaobox-Library/releases/latest/) 
-*Copy `lnxLib.lua` to your `%localappdata%/lua` folder.*
+[![LuaLib](https://img.shields.io/badge/Download-lnxLib-blue?style=for-the-badge&logo=github)](https://github.com/lnx00/Lmaobox-Library/releases/latest/)
+_Copy `lnxLib.lua` to your `%localappdata%/lua` folder._
 
 [![TimMenu](https://img.shields.io/badge/Download-TimMenu-blue?style=for-the-badge&logo=github)](https://github.com/titaniummachine1/TimMenu/releases/download/v1.8.8/TimMenu.lua)
-*Copy `TimMenu.lua` to your `%localappdata%/lua` folder.*
+_Copy `TimMenu.lua` to your `%localappdata%/lua` folder._
 
 > [!NOTE]
 > Python 3 is optional but highly recommended to run the local HTTP bridge middleware for asynchronous background fetches.
@@ -36,7 +37,9 @@ Click the badges below to download required dependencies:
 <img width="643" height="744" alt="image" src="https://github.com/user-attachments/assets/41e758f9-a837-4d6e-ab0a-61e9a8f87f46" />
 
 > [!IMPORTANT]
+>
 > ### ✅ Current Active Detections Status
+>
 > **Everything except aimbot detections is now live and running.**
 >
 > - **Database Engine**: Fully functional, stable, and highly optimized.
@@ -53,10 +56,10 @@ Click the badges below to download required dependencies:
 
 We have completely re-engineered the backend storage and in-memory execution pipeline to offer massive performance gains **entirely for free**:
 
-* **Hybrid Lexical Database Compression**: Storing \~31,000+ cheater database records using pre-compiled integer IDs—saving **80-90%** of disk storage and Lua heap space (**reducing script RAM by 5-10 MB**).
-* **Lazy Decompression**: Entries stay compressed in memory and are decompressed **only once** on-demand when a player joins the server.
-* **Zero-Allocation Gameplay Path**: The high-frequency callback loops (such as `CreateMove` and `Draw`) perform direct lookups against active player cache states, allocating **zero tables** during frame rendering. This completely eliminates game micro-stutters and garbage collection spikes.
-* **Instant Disk Saves**: Database flushing is optimized to complete in **\~200 ms** (down from several seconds of gameplay freeze).
+- **Hybrid Lexical Database Compression**: Storing \~31,000+ cheater database records using pre-compiled integer IDs—saving **80-90%** of disk storage and Lua heap space (**reducing script RAM by 5-10 MB**).
+- **Lazy Decompression**: Entries stay compressed in memory and are decompressed **only once** on-demand when a player joins the server.
+- **Zero-Allocation Gameplay Path**: The high-frequency callback loops (such as `CreateMove` and `Draw`) perform direct lookups against active player cache states, allocating **zero tables** during frame rendering. This completely eliminates game micro-stutters and garbage collection spikes.
+- **Instant Disk Saves**: Database flushing is optimized to complete in **\~200 ms** (down from several seconds of gameplay freeze).
 
 ---
 
@@ -66,9 +69,9 @@ We have completely re-engineered the backend storage and in-memory execution pip
 
 Every push to `main` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml): embedded DBs are rebuilt, Lua is bundled, the version tag is bumped (`v1.4` → `v1.5`, etc.), and a GitHub Release is published with:
 
-* `Cheater_Detection.lua` (bundled script)
-* `local_http_bridge_server.py` (optional bridge)
-* `SHA256SUMS.txt`
+- `Cheater_Detection.lua` (bundled script)
+- `local_http_bridge_server.py` (optional bridge)
+- `SHA256SUMS.txt`
 
 Workflow artifacts are not kept (storage is purged after each run). To skip a release for a commit, include `[skip release]` in the commit message.
 
@@ -79,13 +82,15 @@ Workflow artifacts are not kept (storage is purged after each run). To skip a re
 Cheater Detection ships with an optional localhost HTTP bridge in the `LocalBridge` folder.
 
 When the bridge is running:
-* Online requests are processed asynchronously through the localhost promise-style bridge instead of blocking your gameplay.
-* The Python bridge handles HTTP fetch streams on a background thread.
-* Lua polls for results lazily and maintains connection state.
+
+- Online requests are processed asynchronously through the localhost promise-style bridge instead of blocking your gameplay.
+- The Python bridge handles HTTP fetch streams on a background thread.
+- Lua polls for results lazily and maintains connection state.
 
 When the bridge is not running:
-* The script safely runs in standard offline database fallback mode.
-* Probe testing and online lookups are strictly throttled to unobtrusive windows (like when you are dead or on the main menu).
+
+- The script safely runs in standard offline database fallback mode.
+- Probe testing and online lookups are strictly throttled to unobtrusive windows (like when you are dead or on the main menu).
 
 ### Running The Bridge
 
@@ -97,13 +102,13 @@ When the bridge is not running:
 
 ## Project Layout
 
-* `Cheater_Detection/services/http_queue.lua`: Owns the HTTP transport selection and fallback behavior.
-* `LocalBridge/local_http_bridge_server.py`: Asynchronous localhost bridge server middleware.
-* `LocalBridge/StartLocalBridge.bat`: Launcher utility for Windows users.
+- `Cheater_Detection/services/http_queue.lua`: Owns the HTTP transport selection and fallback behavior.
+- `LocalBridge/local_http_bridge_server.py`: Asynchronous localhost bridge server middleware.
+- `LocalBridge/StartLocalBridge.bat`: Launcher utility for Windows users.
 
 ---
 
 ## Contact
 
-* [Contact me on Telegram](https://t.me/TerminatorMachine)
-* [Official Telegram Channel](https://t.me/TerminatorMachine)
+- [Contact me on Telegram](https://t.me/TerminatorMachine)
+- [Official Telegram Channel](https://t.me/TerminatorMachine)
