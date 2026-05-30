@@ -77,7 +77,7 @@ function WarpDT.GetFakeLagMaxChokeTicks()
 end
 
 function WarpDT.GetFakeLagMinChokeTicks()
-	return math.max(3, math.floor(4.0 / 66.0 / globals.TickInterval() + 0.5))
+	return math.max(8, math.floor(8.0 / 66.0 / globals.TickInterval() + 0.5))
 end
 
 function WarpDT.IsDtSizedBurst(tickDelta)
