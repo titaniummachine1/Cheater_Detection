@@ -307,6 +307,10 @@ local function getPrimaryMethod(evidence)
 					primaryMethod = "Double Tap"
 				elseif method == "anti_aim" then
 					primaryMethod = "Anti-Aim"
+				elseif method == "duck_speed" then
+					primaryMethod = "Duck Speed"
+				elseif method == "bhop" then
+					primaryMethod = "Bhop"
 				end
 			end
 		end

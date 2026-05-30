@@ -63,6 +63,7 @@ local FPS_ROLLING_WINDOW_S        = 1.0                                   -- 1s 
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
 local DEBUG_DELTA_WINDOW          = 16   -- newest simtime gaps to classify for Choke logs
 local DEBUG_SAMPLE_TICK_INTERVAL  = 4   -- Choke log rollup: full window snapshot every N ticks
+local FL_PLAYER_PHASE_COUNT       = 4   -- stagger players across ticks (was: all on tick%4)
 -- Newest simtime gaps to read; clamped to DetectionConfig simtime retention (see cd_simhistory).
 local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
 -- Below ~40 fps, frame gaps can exceed the 8-tick choke threshold (tickrate/fps). No listen/debug bypass.
@@ -75,6 +76,14 @@ local debugSummaries              = {}
 local smoothedFrameTime           = 1 / 60
 local rollingFrameSamples         = {}                                     -- { t, ft } within FPS_ROLLING_WINDOW_S
 local _positiveDeltaBuf           = {}
+local cachedGapMaxTicks           = 23
+local flTickCache                 = {
+	curTick      = -1,
+	blockReason  = nil,
+	flScan       = 20,
+	isChokeDebug = false,
+	playerPhase  = 0,
+}
 
 -- Pre-HistoryManager, delta lists only had positive simtime steps (stalls omitted).
 -- Scoring thresholds assume that shape; full buffer (with 0t holds) is for stall/burst paths only.
@@ -232,41 +241,56 @@ function FakeLag.IsDetectionAllowed()
 	return FakeLag.GetDetectionBlockReason() == nil
 end
 
+--- Once per game tick before the player loop (Main.lua). Caches FPS gate, scan depth, gap cap.
+function FakeLag.BeginDetectionTick(curTick)
+	if flTickCache.curTick == curTick then
+		return
+	end
+	flTickCache.curTick = curTick
+	flTickCache.playerPhase = curTick % FL_PLAYER_PHASE_COUNT
+	flTickCache.isChokeDebug = Common.IsLogCategoryEnabled("Choke")
+	flTickCache.flScan = DetectionConfig.GetSimtimeScanLimits().flScan
+	cachedGapMaxTicks = DoubleTap.GetFakeLagMaxChokeTicks() + 2
+	flTickCache.blockReason = FakeLag.GetDetectionBlockReason()
+end
+
 function FakeLag.HasWork(playerState)
 	if not playerState or not playerState.id then
 		return false
 	end
-	if not FakeLag.IsDetectionAllowed() then
+	local curTick = globals.TickCount()
+	if flTickCache.curTick ~= curTick then
+		FakeLag.BeginDetectionTick(curTick)
+	end
+	if flTickCache.blockReason then
 		return false
 	end
+
+	local entIndex = playerState.entityIndex or 0
+	if (entIndex % FL_PLAYER_PHASE_COUNT) ~= flTickCache.playerPhase then
+		return false
+	end
+
 	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then
-		return Common.IsLogCategoryEnabled("Choke")
+		return flTickCache.isChokeDebug
 	end
+
 	local id = playerState.id
-	if Common.IsLogCategoryEnabled("Choke") then
-		if Evidence.GetMethodWeight(id, "fake_lag") >= FAKE_LAG_EVIDENCE_CAP then
-			return false
-		end
-		return true
-	end
 	if Evidence.GetMethodWeight(id, "fake_lag") >= FAKE_LAG_EVIDENCE_CAP then
-		return false
+		return flTickCache.isChokeDebug
 	end
-	return (globals.TickCount() % 4) == 0
+
+	return true
 end
 
 local function getRhythmTolerance(anchorDelta)
 	return math.max(RHYTHM_TOLERANCE_TICKS, math.floor(anchorDelta * 0.2 + 0.5))
 end
 
-local function getFlGapMaxTicks()
-	return DoubleTap.GetFakeLagMaxChokeTicks() + 2
-end
-
 local function isFlSizedGap(tickDelta)
 	return tickDelta
 		and tickDelta >= MIN_FAKELAG_CHOKE_TICKS
-		and tickDelta <= getFlGapMaxTicks()
+		and tickDelta <= cachedGapMaxTicks
 end
 
 local function countStallsInWindow(deltaTicks, sampleCount, deltaCount)
@@ -611,12 +635,10 @@ local function addCappedFakeLagEvidence(id, wantedWeight)
 	return 0
 end
 
-local function isActiveChokePattern(deltaTicks, deltaCount)
+local function isActiveChokePattern(deltaTicks, deltaCount, posDeltas, posCount)
 	if getChokeHoldSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT, deltaCount) then
 		return true
 	end
-
-	local posDeltas, posCount = buildPositiveDeltaView(deltaTicks, deltaCount)
 
 	if getSustainedChokeAverage(posDeltas, posCount) then
 		return true
@@ -670,8 +692,11 @@ function FakeLag.ProcessPlayer(playerState)
 		return
 	end
 
-	local blockReason = FakeLag.GetDetectionBlockReason()
-	if blockReason then
+	local curTick = globals.TickCount()
+	if flTickCache.curTick ~= curTick then
+		FakeLag.BeginDetectionTick(curTick)
+	end
+	if flTickCache.blockReason then
 		return
 	end
 
@@ -688,7 +713,7 @@ function FakeLag.ProcessPlayer(playerState)
 	if history._count < 5 then return end
 
 	local now     = globals.RealTime()
-	local isDebug = Common.IsLogCategoryEnabled("Choke")
+	local isDebug = flTickCache.isChokeDebug
 
 	if not isDebug then
 		if Evidence.GetMethodWeight(id, "fake_lag") >= FAKE_LAG_EVIDENCE_CAP then
@@ -701,8 +726,7 @@ function FakeLag.ProcessPlayer(playerState)
 		end
 	end
 
-	local flScan = DetectionConfig.GetSimtimeScanLimits().flScan
-	local deltaTicks, deltaCount, _sumTicks = HistoryManager.GetSimDeltaDeltas(history, flScan)
+	local deltaTicks, deltaCount, _sumTicks = HistoryManager.GetSimDeltaDeltas(history, flTickCache.flScan)
 	if deltaCount < 1 then
 		return
 	end
@@ -715,7 +739,7 @@ function FakeLag.ProcessPlayer(playerState)
 	end
 
 	-- Ongoing choke: pause exploit decay so score does not drain between evidence cooldowns.
-	if isActiveChokePattern(deltaTicks, deltaCount) then
+	if isActiveChokePattern(deltaTicks, deltaCount, posDeltas, posCount) then
 		Evidence.HoldDecayForMethod(id, "fake_lag")
 	end
 

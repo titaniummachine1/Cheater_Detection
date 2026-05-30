@@ -511,6 +511,7 @@ local function OnCreateMove(cmd)
 
 	if enableChoke then
 		Profiler.Begin("FakeLag")
+		FakeLag.BeginDetectionTick(curTick)
 		for _, pState in ipairs(activePlayers) do
 			if FakeLag.HasWork(pState) then
 				FakeLag.ProcessPlayer(pState)
