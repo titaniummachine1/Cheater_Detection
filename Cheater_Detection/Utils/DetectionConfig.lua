@@ -21,6 +21,11 @@ DetectionConfig.Detectors = {
 		retentionTicks = 40, -- room for 3+ choke→release cycles plus stalls between
 		fields = { HistoryManager.Fields.SimulationTime },
 	},
+	-- Double Tap: same simtime ring; burst scan needs depth when FL masks delta[1].
+	DoubleTap = {
+		retentionTicks = 40,
+		fields = { HistoryManager.Fields.SimulationTime },
+	},
 }
 
 DetectionConfig.DefaultRetentionTicks = 24

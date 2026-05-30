@@ -562,7 +562,7 @@ function Common.GetConnectionStabilityBlockReason()
 end
 
 -- Returns true when the local connection is stable enough to trust
--- simulation-time-based detectors (WarpDT, FakeLag).
+-- simulation-time-based detectors (DoubleTap, FakeLag).
 function Common.IsConnectionStableForDetection()
 	if Common.IsDebugEnabled() and Common.IsLocalListenServer() then
 		return true

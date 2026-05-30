@@ -7,7 +7,7 @@ local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local SteamHistory = require("Cheater_Detection.Database.SteamHistory")
 local Config = require("Cheater_Detection.Utils.Config")
 local Common = require("Cheater_Detection.Utils.Common")
-local WarpDT = require("Cheater_Detection.detectors.warp_dt")
+local DoubleTap = require("Cheater_Detection.detectors.double_tap")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 
 local Commands = {}
@@ -223,33 +223,24 @@ local function setupDiagnostics()
 	end)
 
 	Commands.Register("cd_dt_status", function(_args)
-		local FireTickTracker = require("Cheater_Detection.Core.FireTickTracker")
 		local lp = entities.GetLocalPlayer()
 		local localID = PlayerCache.GetLocalID()
 		if not localID and lp and lp:IsValid() then
 			localID = tostring(Common.GetSteamID64(lp) or "")
 		end
 
-		local stats = WarpDT.GetDebugStats()
-		local fireCounts = FireTickTracker.GetSourceCounts()
+		local stats = DoubleTap.GetDebugStats()
 
 		printc(100, 220, 255, 255, "[CD] DoubleTap diagnostic:")
 		printc(200, 200, 200, 255, string.format("  menu enabled : %s", tostring(Common.IsDoubleTapDetectionEnabled())))
 		printc(200, 200, 200, 255, string.format("  debug mode   : %s", tostring(Common.IsDebugEnabled())))
 		printc(200, 200, 200, 255, string.format("  local id     : %s", tostring(localID)))
-		printc(200, 200, 200, 255, string.format("  DT min ticks : %d", WarpDT.GetDtBurstMinTicks()))
-		printc(200, 200, 200, 255, string.format("  FL max choke : %d", WarpDT.GetFakeLagMaxChokeTicks()))
+		printc(200, 200, 200, 255, string.format("  DT min ticks : %d", DoubleTap.GetDtBurstMinTicks()))
+		printc(200, 200, 200, 255, string.format("  FL max choke : %d", DoubleTap.GetFakeLagMaxChokeTicks()))
 		printc(200, 200, 200, 255, string.format("  conn stable  : %s", tostring(Common.IsConnectionStableForDetection())))
 		printc(200, 200, 200, 255, string.format("  conn block   : %s", tostring(stats.connectionBlock)))
 		printc(200, 200, 200, 255, string.format("  listen bypass: %s", tostring(stats.localListenBypass)))
-		printc(200, 200, 200, 255,
-			string.format("  fires seen   : weapon_fire=%d CTEFireBullets=%d",
-				fireCounts.weapon_fire or 0, fireCounts.fire_bullets or 0))
-		printc(200, 200, 200, 255,
-			string.format("  DT armed     : %d  ignored (no pre-shot): %d",
-				stats.dtBurstsArmed or 0, stats.burstsNoPreFire or 0))
-		printc(200, 200, 200, 255,
-			"  model        : pre-shot -> 24-33 tick warp -> post shot/hit (capped evidence)")
+		printc(200, 200, 200, 255, string.format("  model        : %s", tostring(stats.model)))
 	end)
 end
 

@@ -1,67 +1,50 @@
 --[[ detectors/fake_lag.lua
-     Detects excessive packet choking (Fake Lag) via two complementary methods:
+     Sustained / rhythmic packet choke only — NOT double tap (see double_tap.lua).
 
-     1. Rhythmic pattern – recent simulation-time deltas match a fixed choke
-        interval (scaled tolerance). Fires evidence.
+     Fake lag = simtime gaps in the choke band (below DT min), via:
+       - Rhythmic matching deltas in 4–21 tick band (scaled per tickrate)
+       - Or average choke in that filtered window
 
-     2. Sustained high choke – most recent deltas stay large (e.g. steady 22-tick FL).
-
-     3. Choke/release burst – simtime freeze then large release spike.
-
-     4. Average choke-tick method (Rijin-derived) – computes the mean
-        simulation-time gap in ticks across the entire history window.
-        avg_choke_ticks >= AVG_CHOKE_THRESHOLD signals fakelag even when the
-        pattern is irregular (e.g. random/adaptive lag).
-        Fires Evidence.AddEvidence so it decays and stacks with other signals.
+     Skips when a DT-sized burst is in history; pauses while DT watches after hurt.
 ]]
 
-local G                           = require("Cheater_Detection.Utils.Globals")
-local Common                      = require("Cheater_Detection.Utils.Common")
-local Evidence                    = require("Cheater_Detection.Core.Evidence_system")
-local Events                      = require("Cheater_Detection.Core.Events")
-local HistoryManager              = require("Cheater_Detection.Utils.HistoryManager")
-local Fetcher                     = require("Cheater_Detection.Database.Fetcher")
-local PlayerCache                 = require("Cheater_Detection.Core.player_cache")
-local WarpDT                      = require("Cheater_Detection.detectors.warp_dt")
+local G                 = require("Cheater_Detection.Utils.Globals")
+local Common            = require("Cheater_Detection.Utils.Common")
+local Evidence          = require("Cheater_Detection.Core.Evidence_system")
+local Events            = require("Cheater_Detection.Core.Events")
+local HistoryManager    = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig   = require("Cheater_Detection.Utils.DetectionConfig")
+local Fetcher           = require("Cheater_Detection.Database.Fetcher")
+local PlayerCache       = require("Cheater_Detection.Core.player_cache")
+local DoubleTap         = require("Cheater_Detection.detectors.double_tap")
 
-local FakeLag                     = {}
+local FakeLag = {}
 
--- ── constants ──────────────────────────────────────────────────────────────
--- Normal gameplay advances simtime ~1 tick per update; 1–2 tick gaps are not fakelag.
-local MIN_FAKELAG_CHOKE_TICKS     = 4
-local FAKELAG_EVIDENCE_COOLDOWN_S = 1.0  -- was 2.0 — twice as many evidence refreshes
-local RECENT_CHOKE_SAMPLE_COUNT   = 16
-local STRONG_CHOKE_MIN_HIGH_TICKS = 8    -- was 10 — count 8+ tick gaps as choke
-local STRONG_CHOKE_HIGH_RATIO     = 0.28 -- was 0.55 — ~half the window must be large gaps
-local RHYTHM_MIN_EVENTS           = 6    -- was 8 — faster rhythmic match
-local RHYTHM_CHECK_COUNT          = 16   -- only judge recent deltas (not the whole ring buffer)
-local RHYTHM_MATCH_RATIO          = 0.5  -- was 0.75
-local RHYTHM_TOLERANCE_TICKS      = 2    -- floor tolerance for small choke values
-local SUSTAINED_SAMPLE_COUNT      = 20   -- recent samples for steady high-choke fakelag
-local SUSTAINED_MATCH_RATIO       = 0.45 -- was 0.65 — triggers on mixed 22+17 style choke
-local SUSTAINED_MIN_AVG_TICKS     = 8    -- average choke in that window (22-tick FL ≈ 22)
-
--- Rijin-derived: avg choke-tick threshold
--- avg simtime gap >= 2 ticks across the window = fakelag signal
-local AVG_CHOKE_THRESHOLD         = 4.2
-local AVG_CHOKE_MIN_SAMPLES       = 4                                      -- require more samples for average calculation
-local AVG_CHOKE_EVIDENCE_W        = 6.0                                    -- was 3.0 — doubled weight per trigger
-local BURST_CHOKE_MIN_TICKS       = 8                                      -- ignore normal single-tick jitter
-local BURST_CONFIRM_EVENTS        = 4                                      -- consecutive large deltas after a stall
-local BURST_STALL_MAX_TICKS       = 0                                      -- simtime frozen (0), not normal 1–2 tick stepping
-local BURST_STALL_LOOKBACK        = 6                                      -- recent samples that must include stalls
-local BURST_STALL_MIN_COUNT       = 2                                      -- require choke-then-release, not steady drift
+local FAKELAG_EVIDENCE_COOLDOWN_S = 1.0
+local RHYTHM_MIN_EVENTS           = 3
+local RHYTHM_TOLERANCE_TICKS      = 1
+local AVG_CHOKE_THRESHOLD         = 5.0
+local AVG_CHOKE_MIN_SAMPLES       = 5
+local AVG_CHOKE_EVIDENCE_W        = 6.0
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
-local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag") -- suspicious-only tuning cap
-local MIN_FPS_FOR_DETECTION       = 40                                     -- below ~40 fps, frame gaps can exceed the 8-tick choke threshold (ticks/frame = tickrate/fps)
+local FAKE_LAG_EVIDENCE_CAP       = Evidence.GetMethodScoreCap("fake_lag")
+local MIN_FPS_FOR_DETECTION       = 40
+local MAX_DELTA_SEC               = 2.5
 
-local evidenceCooldowns           = {}                                     -- [id] = last globals.RealTime() evidence was added
-local consecutiveChokeCount       = {}                                     -- count consecutive large deltas for impulse detection
-local lastChokeDelta              = {}
+local evidenceCooldowns           = {}
 local debugSummaries              = {}
 local smoothedFrameTime           = 1 / 60
+local _simTimes                   = {}
+local _deltaTicks                 = {}
+local _filteredDeltaTicks         = {}
 
--- ── helpers ────────────────────────────────────────────────────────────────
+local function _collectSimTime(_, record)
+	local simTime = record[HistoryManager.Fields.SimulationTime]
+	if simTime then
+		_simTimes[#_simTimes + 1] = simTime
+	end
+end
+
 local function isLocalFpsSufficient()
 	local ft = globals.AbsoluteFrameTime()
 	if ft and ft > 0 then
@@ -78,101 +61,66 @@ local function timeToTicks(time)
 	return math.floor(time / globals.TickInterval() + 0.5)
 end
 
-local function getRhythmTolerance(anchorDelta)
-	return math.max(RHYTHM_TOLERANCE_TICKS, math.floor(anchorDelta * 0.2 + 0.5))
+local function isFakeLagChokeDelta(tickDelta)
+	if not tickDelta then
+		return false
+	end
+	return tickDelta >= DoubleTap.GetFakeLagMinChokeTicks()
+		and tickDelta <= DoubleTap.GetFakeLagMaxChokeTicks()
 end
 
-local function countHighChokeDeltas(deltaTicks, sampleCount)
-	local limit = math.min(sampleCount, #deltaTicks)
-	local highCount = 0
-	local sumHigh = 0
-	for i = 1, limit do
-		local delta = deltaTicks[i]
-		if delta >= MIN_FAKELAG_CHOKE_TICKS then
-			highCount = highCount + 1
-			sumHigh = sumHigh + delta
+local function buildFakeLagDeltaWindow(rawDeltas, filtered)
+	for k = 1, #filtered do
+		filtered[k] = nil
+	end
+	local sumTicks = 0
+	for i = 1, #rawDeltas do
+		local d = rawDeltas[i]
+		if isFakeLagChokeDelta(d) then
+			filtered[#filtered + 1] = d
+			sumTicks = sumTicks + d
 		end
 	end
-	return highCount, sumHigh, limit
+	return sumTicks
 end
 
--- Match debug summaries: dominant large gaps in the recent window.
-local function getRecentChokeSignal(deltaTicks, sampleCount)
-	local highCount, sumHigh, limit = countHighChokeDeltas(deltaTicks, sampleCount)
-	if limit < AVG_CHOKE_MIN_SAMPLES or highCount == 0 then
-		return nil, nil
-	end
-
-	local minHigh = math.max(3, math.ceil(limit * STRONG_CHOKE_HIGH_RATIO))
-	local avgHigh = sumHigh / highCount
-
-	if highCount >= minHigh and avgHigh >= STRONG_CHOKE_MIN_HIGH_TICKS then
-		return avgHigh, "high choke"
-	end
-
-	if highCount >= 3 and avgHigh >= AVG_CHOKE_THRESHOLD then
-		return avgHigh, "elevated choke"
-	end
-
-	return nil, nil
-end
-
-local function getFastChokeSignal(deltaTicks)
-	local firstDelta = deltaTicks[1]
-	if not firstDelta or firstDelta < STRONG_CHOKE_MIN_HIGH_TICKS then
-		return nil, nil
-	end
-
-	local highCount, _, limit = countHighChokeDeltas(deltaTicks, 8)
-	if limit < 3 or highCount < 3 then
-		return nil, nil
-	end
-
-	return firstDelta, "high choke"
-end
-
-local function buildEvidenceWeight(anchorTicks)
-	local strength = math.min(6.0, math.max(1.0, anchorTicks / 6.0))
-	return AVG_CHOKE_EVIDENCE_W * strength
-end
-
-local function countRhythmMatches(deltaTicks, anchorDelta, sampleCount, tolerance)
-	local limit = math.min(sampleCount, #deltaTicks)
-	local matching = 0
-	for i = 1, limit do
-		local delta = deltaTicks[i]
-		if delta >= MIN_FAKELAG_CHOKE_TICKS and math.abs(delta - anchorDelta) <= tolerance then
-			matching = matching + 1
+local function hasDtBurstInWindow(deltaTicks)
+	for i = 1, #deltaTicks do
+		if DoubleTap.IsDtSizedBurst(deltaTicks[i]) then
+			return true
 		end
 	end
-	return matching, limit
+	return false
 end
 
-local function getSustainedChokeAverage(deltaTicks)
-	local limit = math.min(SUSTAINED_SAMPLE_COUNT, #deltaTicks)
-	if limit < RHYTHM_MIN_EVENTS then
-		return nil
+local function isRhythmicChoke(chokeDeltas)
+	if #chokeDeltas < RHYTHM_MIN_EVENTS then
+		return false
 	end
-
-	local highCount = 0
-	local sumHigh = 0
-	for i = 1, limit do
-		local delta = deltaTicks[i]
-		if delta >= MIN_FAKELAG_CHOKE_TICKS then
-			highCount = highCount + 1
-			sumHigh = sumHigh + delta
+	local firstDelta = chokeDeltas[1]
+	if not isFakeLagChokeDelta(firstDelta) then
+		return false
+	end
+	for i = 2, #chokeDeltas do
+		if not isFakeLagChokeDelta(chokeDeltas[i]) then
+			return false
+		end
+		if math.abs(chokeDeltas[i] - firstDelta) > RHYTHM_TOLERANCE_TICKS then
+			return false
 		end
 	end
+	return true
+end
 
-	if highCount / limit < SUSTAINED_MATCH_RATIO then
+local function getFakeLagChokeAverage(chokeDeltas)
+	if #chokeDeltas < AVG_CHOKE_MIN_SAMPLES then
 		return nil
 	end
-
-	local avgHigh = sumHigh / highCount
-	if avgHigh < SUSTAINED_MIN_AVG_TICKS then
-		return nil
+	local sum = 0
+	for i = 1, #chokeDeltas do
+		sum = sum + chokeDeltas[i]
 	end
-	return avgHigh
+	return sum / #chokeDeltas
 end
 
 local function formatTopDeltas(counts)
@@ -186,7 +134,6 @@ local function formatTopDeltas(counts)
 			bestB, bestBCount = delta, count
 		end
 	end
-
 	if not bestA then
 		return "none"
 	end
@@ -208,7 +155,6 @@ local function recordDebugSample(id, sampleCount, firstDelta, now)
 		}
 		debugSummaries[id] = summary
 	end
-
 	summary.samples = summary.samples + 1
 	if sampleCount <= 0 or firstDelta <= 0 then
 		summary.zero = summary.zero + 1
@@ -216,7 +162,6 @@ local function recordDebugSample(id, sampleCount, firstDelta, now)
 		summary.nonzero = summary.nonzero + 1
 		summary.counts[firstDelta] = (summary.counts[firstDelta] or 0) + 1
 	end
-
 	if (now - summary.lastPrint) >= DEBUG_SUMMARY_INTERVAL_S then
 		print(string.format("[FakeLag] %s delta summary: samples=%d zero=%d nonzero=%d top=%s",
 			id, summary.samples, summary.zero, summary.nonzero, formatTopDeltas(summary.counts)))
@@ -230,23 +175,16 @@ local function recordDebugSample(id, sampleCount, firstDelta, now)
 	end
 end
 
--- ── main entry ─────────────────────────────────────────────────────────────
 local function addCappedFakeLagEvidence(id, wantedWeight)
 	local currentWeight = Evidence.GetMethodWeight(id, "fake_lag")
 	local remaining = FAKE_LAG_EVIDENCE_CAP - currentWeight
 	if remaining <= 0 then
 		return 0
 	end
-
 	local actualWeight = math.min(wantedWeight, remaining)
 	local beforeWeight = Evidence.GetMethodWeight(id, "fake_lag")
 	Evidence.AddEvidence(id, "fake_lag", actualWeight)
-	local afterWeight = Evidence.GetMethodWeight(id, "fake_lag")
-	local added = afterWeight - beforeWeight
-	if added > 0 then
-		return added
-	end
-	return 0
+	return Evidence.GetMethodWeight(id, "fake_lag") - beforeWeight
 end
 
 local function isChokeDetectionEnabled()
@@ -254,40 +192,32 @@ local function isChokeDetectionEnabled()
 	return adv and adv.Choke == true
 end
 
-local function isActiveChokePattern(deltaTicks, sumTicks)
-	if getSustainedChokeAverage(deltaTicks) then
+local function isActiveChokePattern(chokeDeltas)
+	if isRhythmicChoke(chokeDeltas) then
 		return true
 	end
-
-	if #deltaTicks >= RHYTHM_MIN_EVENTS then
-		local anchorDelta = deltaTicks[1]
-		if anchorDelta and anchorDelta >= MIN_FAKELAG_CHOKE_TICKS then
-			local tolerance = getRhythmTolerance(anchorDelta)
-			local matching, checked = countRhythmMatches(
-				deltaTicks,
-				anchorDelta,
-				RHYTHM_CHECK_COUNT,
-				tolerance
-			)
-			if checked >= RHYTHM_MIN_EVENTS and (matching / checked) >= RHYTHM_MATCH_RATIO then
-				return true
-			end
-		end
-	end
-
-	local recentChoke = getRecentChokeSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT)
-	if recentChoke then
+	local avgChoke = getFakeLagChokeAverage(chokeDeltas)
+	if avgChoke and avgChoke >= AVG_CHOKE_THRESHOLD then
 		return true
 	end
-
-	if #deltaTicks >= AVG_CHOKE_MIN_SAMPLES then
-		local avgChoke = sumTicks / #deltaTicks
-		if avgChoke >= AVG_CHOKE_THRESHOLD then
-			return true
-		end
-	end
-
 	return false
+end
+
+local function tryAddChokeEvidence(id, now, isDebug, weight, logLabel, logDetail)
+	local lastTime = evidenceCooldowns[id] or 0
+	if (now - lastTime) < FAKELAG_EVIDENCE_COOLDOWN_S then
+		return 0
+	end
+	local addedWeight = addCappedFakeLagEvidence(id, weight)
+	if addedWeight > 0 then
+		evidenceCooldowns[id] = now
+		if isDebug then
+			print(string.format("[FakeLag] %s %s: %s (evidence +%.1f)", id, logLabel, logDetail, addedWeight))
+		end
+	elseif isDebug and weight > 0 then
+		print(string.format("[FakeLag] %s evidence blocked for %s (wanted +%.1f)", id, logLabel, weight))
+	end
+	return addedWeight
 end
 
 function FakeLag.ProcessPlayer(playerState)
@@ -308,166 +238,85 @@ function FakeLag.ProcessPlayer(playerState)
 		and not (Common.IsDebugEnabled() and Common.IsLocalListenServer()) then
 		return
 	end
-
 	if not playerState.pdata.isAlive then return end
-
-	-- Brief pause after DT-sized release only (do not block while DT is merely "watching").
-	if WarpDT.ShouldSuppressFakeLag(id) then
+	if DoubleTap.ShouldSuppressFakeLag(id) or DoubleTap.IsPlayerWatched(id) then
 		return
 	end
 
+	DetectionConfig.RecordHistory(playerState.wrap, "FakeLag")
+
 	local history = HistoryManager.GetPlayerHistory(id)
-	if not history then return end
+	if not history or history._count < 5 then return end
 
-	if history._count < 5 then return end
+	for k = 1, #_simTimes do _simTimes[k] = nil end
+	HistoryManager.ForEachRecordNewestFirst(history, nil, _collectSimTime)
+	if #_simTimes < 5 then return end
 
-	-- Collect simulation times newest-first (circular buffer order)
-	local simTimes = {}
-	HistoryManager.ForEachRecordNewestFirst(history, nil, function(_, record)
-		local simTime = record[HistoryManager.Fields.SimulationTime]
-		if simTime then
-			simTimes[#simTimes + 1] = simTime
-		end
-	end)
-
-	if #simTimes < 5 then return end
-
-	-- Build delta-tick array (positive deltas only; allow up to ~2s choke spikes)
-	local maxDeltaSec = 2.5
-	local deltaTicks  = {}
-	local sumTicks    = 0
+	for k = 1, #_deltaTicks do _deltaTicks[k] = nil end
+	local deltaTicks = _deltaTicks
+	local simTimes   = _simTimes
 
 	for i = 1, #simTimes - 1 do
-		local delta = simTimes[i] - simTimes[i + 1] -- simTimes[i] is newer
-		if delta > 0 and delta <= maxDeltaSec then
+		local delta = simTimes[i] - simTimes[i + 1]
+		if delta > 0 and delta <= MAX_DELTA_SEC then
 			local t = timeToTicks(delta)
-			deltaTicks[#deltaTicks + 1] = t
-			sumTicks = sumTicks + t
+			if t then
+				deltaTicks[#deltaTicks + 1] = t
+			end
 		end
+	end
+
+	if hasDtBurstInWindow(deltaTicks) then
+		DoubleTap.MarkDtRelease(id)
+		return
+	end
+
+	local filteredDeltas = _filteredDeltaTicks
+	buildFakeLagDeltaWindow(deltaTicks, filteredDeltas)
+	if #filteredDeltas < RHYTHM_MIN_EVENTS then
+		return
 	end
 
 	local now     = globals.RealTime()
 	local isDebug = Common.IsLogCategoryEnabled("Choke")
 
 	if isDebug then
-		recordDebugSample(id, #deltaTicks, deltaTicks[1] or 0, now)
+		recordDebugSample(id, #filteredDeltas, filteredDeltas[1] or 0, now)
 	end
 
-	-- Ongoing choke: pause exploit decay so score does not drain between evidence cooldowns.
-	if isActiveChokePattern(deltaTicks, sumTicks) then
+	if isActiveChokePattern(filteredDeltas) then
 		Evidence.HoldDecayForMethod(id, "fake_lag")
 	end
 
-	local function countRecentStalls()
-		local stalls = 0
-		local lookback = math.min(BURST_STALL_LOOKBACK, #deltaTicks)
-		for i = 2, lookback do
-			if deltaTicks[i] <= BURST_STALL_MAX_TICKS then
-				stalls = stalls + 1
-			end
-		end
-		return stalls
-	end
-
-	local function tryAddChokeEvidence(weight, logLabel, logDetail)
-		local lastTime = evidenceCooldowns[id] or 0
-		if (now - lastTime) < FAKELAG_EVIDENCE_COOLDOWN_S then
-			return 0
-		end
-		local addedWeight = addCappedFakeLagEvidence(id, weight)
-		if addedWeight > 0 then
-			evidenceCooldowns[id] = now
-			if isDebug then
-				print(string.format("[FakeLag] %s %s: %s (evidence +%.1f)", id, logLabel, logDetail, addedWeight))
-			end
-		elseif isDebug and weight > 0 then
-			print(string.format("[FakeLag] %s evidence blocked for %s (wanted +%.1f)", id, logLabel, weight))
-		end
-		return addedWeight
-	end
-
-	-- ── 1. Choke-then-release bursts (not steady simtime drift) ───────────────
-	if #deltaTicks >= 1 then
-		local firstDelta = deltaTicks[1]
-		if firstDelta >= BURST_CHOKE_MIN_TICKS and countRecentStalls() >= BURST_STALL_MIN_COUNT then
-			local previousDelta = lastChokeDelta[id]
-			local tolerance = firstDelta >= 16 and 12 or 2
-			if previousDelta and math.abs(firstDelta - previousDelta) > tolerance then
-				consecutiveChokeCount[id] = 1
-			else
-				consecutiveChokeCount[id] = (consecutiveChokeCount[id] or 0) + 1
-			end
-			lastChokeDelta[id] = firstDelta
-
-			if consecutiveChokeCount[id] >= BURST_CONFIRM_EVENTS then
-				consecutiveChokeCount[id] = 0
-				lastChokeDelta[id] = nil
-				tryAddChokeEvidence(
-					buildEvidenceWeight(firstDelta),
-					"choke/release burst",
-					string.format("%d ticks", firstDelta)
-				)
-			end
-		else
-			consecutiveChokeCount[id] = 0
-			lastChokeDelta[id] = nil
-		end
-	end
-
-	-- ── 2. Evidence paths (one shared realtime cooldown) ───────────────────
-	local chokeTicks, chokeLabel = getFastChokeSignal(deltaTicks)
-	if not chokeTicks then
-		chokeTicks, chokeLabel = getRecentChokeSignal(deltaTicks, RECENT_CHOKE_SAMPLE_COUNT)
-	end
-	if chokeTicks then
+	if isRhythmicChoke(filteredDeltas) then
 		tryAddChokeEvidence(
-			buildEvidenceWeight(chokeTicks),
-			chokeLabel,
-			string.format("%.1f ticks", chokeTicks)
+			id, now, isDebug,
+			AVG_CHOKE_EVIDENCE_W,
+			"rhythmic choke",
+			string.format("%d ticks (<%d max)", filteredDeltas[1], DoubleTap.GetDtBurstMinTicks())
 		)
 	else
-		local sustainedAvg = getSustainedChokeAverage(deltaTicks)
-		if sustainedAvg then
+		local avgChoke = getFakeLagChokeAverage(filteredDeltas)
+		if avgChoke and avgChoke >= AVG_CHOKE_THRESHOLD then
 			tryAddChokeEvidence(
-				buildEvidenceWeight(sustainedAvg),
-				"sustained choke",
-				string.format("avg %.1f ticks", sustainedAvg)
+				id, now, isDebug,
+				AVG_CHOKE_EVIDENCE_W,
+				"avg choke",
+				string.format("%.2f ticks in 4-%d band (>= %.1f)",
+					avgChoke, DoubleTap.GetFakeLagMaxChokeTicks(), AVG_CHOKE_THRESHOLD)
 			)
-		elseif #deltaTicks >= RHYTHM_MIN_EVENTS then
-			local anchorDelta = deltaTicks[1]
-			if anchorDelta >= MIN_FAKELAG_CHOKE_TICKS then
-				local tolerance = getRhythmTolerance(anchorDelta)
-				local matching, checked = countRhythmMatches(
-					deltaTicks,
-					anchorDelta,
-					RHYTHM_CHECK_COUNT,
-					tolerance
-				)
-				if checked >= RHYTHM_MIN_EVENTS and (matching / checked) >= RHYTHM_MATCH_RATIO then
-					tryAddChokeEvidence(
-						buildEvidenceWeight(anchorDelta),
-						"rhythmic choke",
-						string.format("%d ticks (%d/%d within ±%d)", anchorDelta, matching, checked, tolerance)
-					)
-				end
-			end
 		end
 	end
 end
 
--- ── cleanup ────────────────────────────────────────────────────────────────
 Events.Subscribe("OnPlayerDisconnect", function(id)
-	evidenceCooldowns[id]     = nil
-	consecutiveChokeCount[id] = nil
-	lastChokeDelta[id]        = nil
-	debugSummaries[id]        = nil
+	evidenceCooldowns[id] = nil
+	debugSummaries[id]    = nil
 end)
 
 Events.Subscribe("OnPlayerRemoved", function(id)
-	evidenceCooldowns[id]     = nil
-	consecutiveChokeCount[id] = nil
-	lastChokeDelta[id]        = nil
-	debugSummaries[id]        = nil
+	evidenceCooldowns[id] = nil
+	debugSummaries[id]    = nil
 end)
 
 return FakeLag

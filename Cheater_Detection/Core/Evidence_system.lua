@@ -45,8 +45,9 @@ Evidence.Config = {
 	AutoPriorityThreshold = 12.0, -- Evidence score threshold to trigger SUSPICIOUS flag
 	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
 	MethodScoreCaps = {
-		fake_lag = 60.0,
-		warp_dt  = 80.0,
+		fake_lag    = 60.0,
+		double_tap  = 80.0,
+		warp_dt     = 80.0, -- legacy key (pre-rename)
 	},
 
 	-- Category mappings (only implemented detections)
@@ -57,6 +58,7 @@ Evidence.Config = {
 		},
 		-- Exploit detection methods
 		Exploit = {
+			"double_tap",
 			"warp_dt",
 			"fake_lag",
 			"anti_aim",
@@ -77,6 +79,7 @@ local DetectionToggles = {
 	anti_aim = "AntiAim",
 	bhop = "Bhop",
 	fake_lag = "Choke", -- Choke = Fake Lag in config
+	double_tap = "DoubleTap",
 	warp_dt = "DoubleTap",
 	duck_speed = "DuckSpeed",
 	silent_aimbot = "SilentAimbot",
@@ -212,7 +215,7 @@ local function getPrimaryMethod(evidence)
 				end
 				if method == "fake_lag" and primaryMethod == "Exploit" then
 					primaryMethod = "Fake Lag"
-				elseif method == "warp_dt" then
+				elseif method == "double_tap" or method == "warp_dt" then
 					primaryMethod = "Double Tap"
 				elseif method == "anti_aim" then
 					primaryMethod = "Anti-Aim"

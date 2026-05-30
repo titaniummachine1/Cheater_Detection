@@ -38,7 +38,7 @@ local AimLock               = require("Cheater_Detection.detectors.aim_lock")
 local AntiAim               = require("Cheater_Detection.detectors.antiaim")
 local DuckSpeed             = require("Cheater_Detection.detectors.duck_speed")
 local Bhop                  = require("Cheater_Detection.detectors.bhop")
-local WarpDT                = require("Cheater_Detection.detectors.warp_dt")
+local DoubleTap             = require("Cheater_Detection.detectors.double_tap")
 local FakeLag               = require("Cheater_Detection.detectors.fake_lag")
 local CosmeticAbuse         = require("Cheater_Detection.detectors.cosmetic_abuse")
 
@@ -486,9 +486,8 @@ local function OnCreateMove(cmd)
 	if enableDoubleTap then
 		Profiler.Begin("DoubleTap")
 		for _, pState in ipairs(activePlayers) do
-			WarpDT.ProcessPlayer(pState)
+			DoubleTap.ProcessPlayer(pState)
 		end
-		WarpDT.Tick()
 		Profiler.End("DoubleTap")
 	end
 
