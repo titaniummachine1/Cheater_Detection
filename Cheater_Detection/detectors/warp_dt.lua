@@ -75,8 +75,12 @@ end
 
 -- ── state ──────────────────────────────────────────────────────────────────
 
--- [id] = { lastDamageTick, lastBurstTick, lastBurstEvidenceTime, lastHitCountEvidenceTime, recentHits }
+-- [id] = { lastDamageTick, lastBurstTick, lastBurstEvidenceTime, lastHitCountEvidenceTime, recentHits, lastActivityTick }
 local playerState = {}
+
+-- Only run expensive burst detection if player had damage activity within this window
+-- DT correlation window is DT_CONFIRM_WINDOW_TICKS (~33 ticks / 0.5s), no need to check longer
+local ACTIVITY_WINDOW_TICKS = 40 -- ~0.6s - slightly longer than DT window to catch edge cases
 
 
 -- Server-hitch suppression: track which ticks had simultaneous bursts
@@ -134,9 +138,19 @@ local function getState(id)
 			lastBurstEvidenceTime    = 0,
 			lastHitCountEvidenceTime = 0,
 			recentHits               = { _data = {}, _head = 1, _count = 0 },
+			lastActivityTick         = 0,
 		}
 	end
 	return playerState[id]
+end
+
+local function hasRecentActivity(data, curTick)
+	if data.lastActivityTick == 0 then return false end
+	return (curTick - data.lastActivityTick) <= ACTIVITY_WINDOW_TICKS
+end
+
+local function recordActivity(data, curTick)
+	data.lastActivityTick = curTick
 end
 
 local function isEnabled()
@@ -172,6 +186,14 @@ function WarpDT.ProcessPlayer(pState)
 	if id == tostring(Common.GetSteamID64(entities.GetLocalPlayer())) and not Common.IsDebugEnabled() then return end
 	if (pState.flags & Constants.Flags.CHEATER) ~= 0 then return end
 
+	local curTick = globals.TickCount()
+	local data = getState(id)
+
+	-- SKIP: No recent damage activity - don't waste CPU on burst detection
+	if not hasRecentActivity(data, curTick) then
+		return
+	end
+
 	local history = HistoryManager.GetPlayerHistory(id)
 	if not history then return end
 
@@ -198,7 +220,6 @@ function WarpDT.ProcessPlayer(pState)
 	end
 	if burstAmount == 0 then return end
 
-	local curTick = globals.TickCount()
 	cleanBurstTable(curTick)
 	recordBurstTick(curTick, id)
 
@@ -213,7 +234,6 @@ function WarpDT.ProcessPlayer(pState)
 	end
 
 	-- Record burst tick for reverse correlation (damage after burst)
-	local data = getState(id)
 	data.lastBurstTick = curTick
 
 	-- Burst after damage = Double Tap confirmed.
@@ -254,6 +274,9 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	local attackerID = hit.attackerID
 	local curTick    = hit.tickCount
 	local data       = getState(attackerID)
+
+	-- Mark player as active - enables burst detection for next 2 seconds
+	recordActivity(data, curTick)
 
 	recordConfirmedHit(attackerID, curTick)
 

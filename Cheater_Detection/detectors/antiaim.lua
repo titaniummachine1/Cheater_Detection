@@ -41,36 +41,52 @@ local function ApplyDecay(state)
 	end
 end
 
+-- Fast check: returns true if this player needs anti-aim checking.
+-- Skips: bots, already flagged cheaters, friends, local player, dormant/dead
+function AntiAim.HasWork(playerState)
+	if not playerState or not playerState.id then return false end
+	local id = playerState.id
+
+	-- Skip bots
+	if id:sub(1, 4) == "BOT_" then return false end
+
+	-- Skip already flagged cheaters (no point re-checking)
+	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then return false end
+
+	local pdata = playerState.pdata
+	if not pdata or not pdata.isAlive or pdata.isDormant then return false end
+
+	-- Skip friends and local player (unless debug)
+	if not Common.IsDebugEnabled() then
+		if playerState.isFriend or id == PlayerCache.GetLocalID() then
+			return false
+		end
+	end
+
+	return true
+end
+
 function AntiAim.ProcessPlayer(playerState, cmd)
 	if not playerState or not playerState.id then return end
 	if not Common.IsPlayerConnected() then return end
 	if not (G.Menu and G.Menu.Advanced and G.Menu.Advanced.AntiAim) then return end
-	if playerState.id:sub(1, 4) == "BOT_" then return end
 
-	local pdata = playerState.pdata
-	if not pdata or not pdata.isAlive or pdata.isDormant then return end
+	-- Fast path: HasWork checks all skip conditions
+	if not AntiAim.HasWork(playerState) then return end
 
-	-- Skip friends and local player
-	if not Common.IsDebugEnabled() then
-		if playerState.isFriend or playerState.id == PlayerCache.GetLocalID() then
-			return
-		end
-	end
+	local id = playerState.id
 
-	-- Already flagged
-	if (playerState.flags & Constants.Flags.CHEATER) ~= 0 then return end
-
-	-- Get state
-	local state = pitchScores[playerState.id]
+	-- Get state (or create if tracking)
+	local state = pitchScores[id]
 	if not state then
 		state = { score = 0, lastDecay = globals.RealTime() }
-		pitchScores[playerState.id] = state
+		pitchScores[id] = state
 	end
 
 	-- Apply decay
 	ApplyDecay(state)
 
-	-- Get pitch from entity
+	-- Get pitch from entity (only expensive call)
 	local pitch = GetPitch(playerState.wrap:GetEntity())
 	if not pitch then return end
 
@@ -81,7 +97,7 @@ function AntiAim.ProcessPlayer(playerState, cmd)
 		if state.score >= FLAG_THRESHOLD then
 			DetectorUtils.ApplyPlayerFlag(playerState, 0, Constants.Flags.CHEATER,
 				string.format("Invalid pitch (%.1f°)", pitch))
-			pitchScores[playerState.id] = nil
+			pitchScores[id] = nil
 		end
 	end
 end

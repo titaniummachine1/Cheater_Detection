@@ -115,6 +115,19 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	pdata.lastVictimTick = curTick
 end)
 
+-- Fast check: returns true if this player has recent victim data to analyze.
+-- Use this in Main.lua to avoid calling ProcessPlayer when unnecessary.
+function AimLock.HasWork(playerState)
+	if not playerState or not playerState.id then return false end
+	local pdata = playerData[playerState.id]
+	if not pdata then return false end
+	local targetID = pdata.lastVictimID
+	if not targetID then return false end
+	local targetTick = pdata.lastVictimTick or 0
+	local curTick = globals.TickCount()
+	return (curTick - targetTick) <= AIMLOCK_TARGET_TTL_TICKS
+end
+
 function AimLock.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
 		return

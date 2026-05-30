@@ -199,17 +199,32 @@ function HistoryManager.NewTick()
 	lastTickCount = curTick
 end
 
-function HistoryManager.Push(player)
-	if not _hasActiveFields then return end
+-- PER-FIELD LAZY RECORDING
+-- Track which fields are already stored for current tick to avoid re-calculation
+-- [steamID] = { [field] = tickWhenStored, ... }
+local _storedFieldsByPlayer = {}
+
+-- Request a field be recorded for a player. If already recorded this tick, returns immediately.
+-- Detectors call this to request fields on-demand instead of pre-recording all fields.
+function HistoryManager.RequestField(player, field)
+	if not _hasActiveFields then return nil end
+	if not activeFields[field] then return nil end
+
 	local steamID = tostring(player:GetSteamID64())
+	local curTick = globals.TickCount()
+
+	-- Check if field already stored this tick
+	local stored = _storedFieldsByPlayer[steamID]
+	if stored and stored[field] == curTick then
+		return nil -- Already recorded, skip
+	end
+
 	-- Ensure we have a history for this player
 	local history = playerHistories[steamID]
 	if not history then
 		history = { _head = 0, _count = 0, _lastTick = -1 }
 		playerHistories[steamID] = history
 	end
-
-	local curTick = globals.TickCount()
 
 	-- Lazily advance this player's circular-buffer head once per tick
 	if history._lastTick ~= curTick then
@@ -218,24 +233,46 @@ function HistoryManager.Push(player)
 			history._count = history._count + 1
 		end
 		history._lastTick = curTick
+		-- Clear stored fields tracking when advancing to new tick slot
+		if stored then
+			for f in pairs(stored) do
+				stored[f] = nil
+			end
+		end
 	end
 
-	-- Reuse existing slot table to avoid per-tick allocation
+	-- Reuse existing slot table
 	local headSlot = history._head
-	local record   = history[headSlot]
+	local record = history[headSlot]
 	if type(record) ~= "table" then
 		record = {}
 	end
 
-	for field in pairs(activeFields) do
-		local writer = FIELD_WRITERS[field]
-		if writer then
-			writer(player, record, field)
-		end
+	-- Record the field
+	local writer = FIELD_WRITERS[field]
+	if writer then
+		writer(player, record, field)
 	end
 
+	-- Mark field as stored for this tick
+	if not stored then
+		stored = {}
+		_storedFieldsByPlayer[steamID] = stored
+	end
+	stored[field] = curTick
 	record._tick = curTick
 	history[history._head] = record
+
+	return record[field]
+end
+
+-- Legacy Push - records all active fields at once. Use RequestField for per-field lazy recording.
+function HistoryManager.Push(player)
+	if not _hasActiveFields then return end
+
+	for field in pairs(activeFields) do
+		HistoryManager.RequestField(player, field)
+	end
 end
 
 function HistoryManager.MarkDamageDealt(steamID)
@@ -256,7 +293,9 @@ function HistoryManager.MarkDamageDealt(steamID)
 end
 
 function HistoryManager.ClearPlayer(steamID)
-	playerHistories[tostring(steamID)] = nil
+	local id = tostring(steamID)
+	playerHistories[id] = nil
+	_storedFieldsByPlayer[id] = nil
 end
 
 function HistoryManager.PushAngles(steamID, pitch, yaw)

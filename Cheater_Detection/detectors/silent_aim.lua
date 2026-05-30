@@ -944,6 +944,17 @@ Events.Subscribe("OnFireBullets", function(fire)
 	end
 end)
 
+-- Fast check: returns true if this player has pending shot analysis work.
+-- Use this in Main.lua to avoid calling ProcessPlayer when unnecessary.
+function SilentAim.HasPendingWork(playerState)
+	if not playerState or not playerState.id then return false end
+	local pdata = playerData[playerState.id]
+	if not pdata then return false end
+	if not pdata.shotPending then return false end
+	-- Only process if shot tick has passed (analysis happens 1 tick after shot)
+	return globals.TickCount() > pdata.shotPending.shotTick
+end
+
 function SilentAim.ProcessPlayer(playerState)
 	if not playerState or not playerState.pdata or not playerState.id then
 		return

@@ -391,8 +391,14 @@ local function OnCreateMove(cmd)
 	if enableSilent then
 		Profiler.Begin("SilentAim")
 		for _, pState in ipairs(activePlayers) do
-			SilentAim.ProcessPlayer(pState)
-			if enableAimLock then AimLock.ProcessPlayer(pState) end
+			-- Only process players with pending shots from damage events
+			if SilentAim.HasPendingWork(pState) then
+				SilentAim.ProcessPlayer(pState)
+			end
+			-- Only process aimlock for players with recent victims
+			if enableAimLock and AimLock.HasWork(pState) then
+				AimLock.ProcessPlayer(pState)
+			end
 		end
 		Profiler.End("SilentAim")
 	end
@@ -400,7 +406,10 @@ local function OnCreateMove(cmd)
 	if enableAntiAim then
 		Profiler.Begin("AntiAim")
 		for _, pState in ipairs(activePlayers) do
-			AntiAim.ProcessPlayer(pState, cmd)
+			-- Only check players that need anti-aim detection
+			if AntiAim.HasWork(pState) then
+				AntiAim.ProcessPlayer(pState, cmd)
+			end
 		end
 		Profiler.End("AntiAim")
 	end
@@ -416,7 +425,10 @@ local function OnCreateMove(cmd)
 	if enableBhop then
 		Profiler.Begin("Bhop")
 		for _, pState in ipairs(activePlayers) do
-			Bhop.ProcessPlayer(pState)
+			-- Only check players who are midair (potential bhop)
+			if Bhop.HasWork(pState) then
+				Bhop.ProcessPlayer(pState)
+			end
 		end
 		Profiler.End("Bhop")
 	end
