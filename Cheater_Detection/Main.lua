@@ -331,6 +331,7 @@ local function OnCreateMove(cmd)
 
 	if not (enableValveCheck or enableSilent or enableAntiAim or enableDuckSpeed
 			or enableBhop or enableDoubleTap or enableChoke or enableCosmetics) then
+		Profiler.End("CreateMove_Prep")
 		Profiler.End("CreateMove_Total")
 		return
 	end
@@ -372,6 +373,12 @@ local function OnCreateMove(cmd)
 	PlayerCache.SyncTick()
 	-- end
 	Profiler.End("PlayerCache_Sync")
+
+	if enableValveCheck then
+		Profiler.Begin("ValveCheck_Deferred")
+		ValveCheck.Tick()
+		Profiler.End("ValveCheck_Deferred")
+	end
 
 	-- Skip all detector work on frames where the game tick hasn't advanced
 	-- (CreateMove fires per frame, game ticks at 66 Hz)
