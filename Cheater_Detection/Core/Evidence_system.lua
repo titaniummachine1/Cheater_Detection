@@ -39,6 +39,12 @@ Evidence.Config = {
 		},
 	},
 
+	-- Per-method decay (weight/sec). double_tap: ~1 usage (30) per minute when idle.
+	MethodDecayPerSec = {
+		double_tap = 30.0 / 60.0,
+		warp_dt    = 30.0 / 60.0,
+	},
+
 	-- Thresholds
 	Evidence_Tolerance = 50,   -- Evidence threshold % (0–100) to mark as cheater
 	MinWeightFloor = 0,        -- Cannot decay below this
@@ -46,8 +52,8 @@ Evidence.Config = {
 	ExploitAutoCheaterMin = 70, -- Very high so fake lag alone rarely goes CHEATER
 	MethodScoreCaps = {
 		fake_lag    = 60.0,
-		double_tap  = 80.0,
-		warp_dt     = 80.0, -- legacy key (pre-rename)
+		double_tap  = 300.0, -- ~10 usages at DT_USAGE_WEIGHT (30) in double_tap.lua
+		warp_dt     = 300.0,
 	},
 
 	-- Category mappings (only implemented detections)
@@ -148,14 +154,22 @@ local function recalcTotalScore(evidence)
 	evidence.TotalScore = total
 end
 
-local function applyLazyDecayToReason(reason)
+local function getMethodDecayRate(detectionName, category)
+	local perMethod = Evidence.Config.MethodDecayPerSec
+	if detectionName and perMethod and perMethod[detectionName] then
+		return perMethod[detectionName]
+	end
+	return getCategoryDecayRate(category)
+end
+
+local function applyLazyDecayToReason(reason, detectionName)
 	if not reason or reason.ManualDecay == true then
 		return
 	end
 	local now = globals.RealTime()
 	local elapsed = now - (reason.LastDecayTime or now)
 	if elapsed > 0 then
-		local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
+		local rate = reason.DecayRate or getMethodDecayRate(detectionName, reason.Category)
 		if rate > 0 and reason.Weight > 0 then
 			reason.Weight = math.max(Evidence.Config.MinWeightFloor, reason.Weight - rate * elapsed)
 		end
@@ -457,17 +471,19 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 
 	-- Initialize detection stack if needed
 	if not evidence.Reasons[detectionName] then
+		local category = getCategory(detectionName)
 		evidence.Reasons[detectionName] = {
 			Weight = 0,
-			Category = getCategory(detectionName),
+			Category = category,
 			LastDecayTime = globals.RealTime(),
+			DecayRate = getMethodDecayRate(detectionName, category),
 		}
 	end
 	applyReasonOptions(evidence.Reasons[detectionName], opts)
 
 	-- Apply accumulated lazy decay before adding new weight
 	local reason = evidence.Reasons[detectionName]
-	applyLazyDecayToReason(reason)
+	applyLazyDecayToReason(reason, detectionName)
 
 	-- Add weight
 	reason.Weight = math.max(0, reason.Weight + weight)
@@ -512,7 +528,7 @@ local function applyDecayToEvidence(steamID, evidence, now)
 			local now = globals.RealTime()
 			local elapsed = now - (reason.LastDecayTime or now)
 			if elapsed > 0 then
-				local rate = reason.DecayRate or getCategoryDecayRate(reason.Category)
+				local rate = reason.DecayRate or getMethodDecayRate(methodName, reason.Category)
 				if not isDetectionEnabled(methodName) then
 					rate = rate * 5.0
 				end

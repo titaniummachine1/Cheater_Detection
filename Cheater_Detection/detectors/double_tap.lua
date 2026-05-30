@@ -32,9 +32,10 @@ local DT_CONFIRM_WINDOW_TICKS_66HZ = 48.0
 local MAX_SIMTIME_DELTA_SEC        = 2.5
 local FAKE_LAG_SUPPRESS_TICKS_66HZ   = 66.0
 
-local DT_EVIDENCE_WEIGHT     = 30.0
-local DT_EVIDENCE_MAX_MULT   = 5.0
-local DT_EVIDENCE_COOLDOWN_S = 0.5
+-- Flat ~30 per correlated burst (one "usage"). Cap 300 ≈ 10 usages before cheater threshold.
+local DT_EVIDENCE_WEIGHT          = 30.0
+local DT_LATE_DELAY_PENALTY_MAX   = 0.2 -- up to -20% weight at end of 48t confirm window
+local DT_EVIDENCE_COOLDOWN_S      = 0.5
 local REJECT_LOG_INTERVAL_S  = 0.35
 
 local cachedTickInterval  = nil
@@ -304,9 +305,9 @@ local function tryCreditDtCorrelation(id, burstAmount, burstTick, damageTick, re
 		return 0
 	end
 
-	local k = math.log(DT_EVIDENCE_MAX_MULT) / math.max(1, confirmWindow)
-	local mult = DT_EVIDENCE_MAX_MULT * math.exp(-k * elapsed)
-	local weight = DT_EVIDENCE_WEIGHT * mult
+	-- No 5× mult on tight timing — that let 2 bursts ≈ suspicious (56+140). One usage ≈ 30.
+	local delayFactor = 1.0 - DT_LATE_DELAY_PENALTY_MAX * (elapsed / math.max(1, confirmWindow))
+	local weight = DT_EVIDENCE_WEIGHT * delayFactor
 
 	data.lastBurstEvidenceTime = now
 	local added = addCappedDtEvidence(id, weight)
