@@ -301,6 +301,7 @@ local function OnCreateMove(cmd)
 		end
 	else
 		sessionState.groupSearched = false
+		SteamLookup.StopGroupFetch()
 	end
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 

@@ -14,6 +14,7 @@ local SteamLookup = {}
 
 local autoFetchedID64s = {} -- s64 string -> true
 local fetchState = {
+	armed = false, -- true only after RefreshValveGroup while Valve Check is enabled
 	done = false,
 	nextPage = 1,
 	inFlightCount = 0,
@@ -33,10 +34,20 @@ local function isValveCheckEnabled()
 end
 
 function SteamLookup.ShouldTickGroupFetch()
-	if isValveCheckEnabled() then
+	if fetchState.inFlightCount > 0 then
 		return true
 	end
-	return IsGroupFetchActive()
+	if not fetchState.armed or not isValveCheckEnabled() then
+		return false
+	end
+	return not fetchState.done
+end
+
+function SteamLookup.StopGroupFetch()
+	fetchState.armed = false
+	fetchState.done = true
+	fetchState.nextPage = MAX_FETCH_PAGES + 1
+	fetchState.cooldownUntil = 0
 end
 
 local function countLoadedIDs()
@@ -150,6 +161,10 @@ end
 
 --- Tick Valve group fetching. Safe windows can dispatch all remaining pages at once.
 function SteamLookup.TickGroupFetch()
+	if not SteamLookup.ShouldTickGroupFetch() then
+		return
+	end
+
 	if HttpQueue.ShouldDeferGameplayHTTP and HttpQueue.ShouldDeferGameplayHTTP() then
 		return
 	end
@@ -193,6 +208,10 @@ end
 
 --- Kick off the group fetch on startup
 function SteamLookup.RefreshValveGroup(force)
+	if not force and not isValveCheckEnabled() then
+		return false
+	end
+
 	local forceRefresh = force == true
 	if not forceRefresh then
 		if IsGroupFetchActive() or fetchState.done then
@@ -216,6 +235,7 @@ function SteamLookup.RefreshValveGroup(force)
 		autoFetchedID64s = {}
 	end
 
+	fetchState.armed = true
 	fetchState.done = false
 	fetchState.inFlightCount = 0
 	fetchState.nextPage = 1
