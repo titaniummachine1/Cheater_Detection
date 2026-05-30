@@ -96,13 +96,6 @@ local function GetGroupFetchParallelLimit()
 	return ACTIVE_GROUP_FETCH_LIMIT
 end
 
-local function IsGroupFetchActive()
-	if fetchState.inFlightCount > 0 then
-		return true
-	end
-	return fetchState.done ~= true and fetchState.nextPage <= MAX_FETCH_PAGES
-end
-
 local function markValveGroupRecheck()
 	local PlayerCache = require("Cheater_Detection.Core.player_cache")
 	local DirtySystem = require("Cheater_Detection.Core.DirtySystem")
@@ -214,12 +207,13 @@ function SteamLookup.RefreshValveGroup(force)
 
 	local forceRefresh = force == true
 	if not forceRefresh then
-		if IsGroupFetchActive() or fetchState.done then
+		if fetchState.inFlightCount > 0 or (fetchState.armed and not fetchState.done) then
 			return false
 		end
 
 		local cachedCount = countLoadedIDs()
 		if cachedCount > 0 then
+			fetchState.armed = false
 			fetchState.done = true
 			fetchState.inFlightCount = 0
 			fetchState.nextPage = MAX_FETCH_PAGES + 1
@@ -229,6 +223,10 @@ function SteamLookup.RefreshValveGroup(force)
 				print(string.format("[SteamLookup] Reusing cached Valve group IDs: %d loaded.", cachedCount))
 			end
 			markValveGroupRecheck()
+			return false
+		end
+
+		if fetchState.done then
 			return false
 		end
 	else
