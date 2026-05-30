@@ -87,11 +87,22 @@ local function simtimeToTicks(deltaSec)
 	return math.floor(deltaSec / globals.TickInterval() + 0.5)
 end
 
+local function getPreviousRecord(history)
+	if not history or history._count < 2 then
+		return nil
+	end
+	local prevIdx = history._head - 1
+	if prevIdx < 1 then
+		prevIdx = prevIdx + maxRetentionTicks
+	end
+	return history[prevIdx]
+end
+
 -- Stored on each ring slot when it becomes head: gap to the previous simtime sample (ticks).
 local function writeSimDeltaTicks(history, record)
 	local simField = HistoryManager.Fields.SimulationTime
 	local simNew = record[simField]
-	local older = HistoryManager.GetRecordAt(history, 1)
+	local older = getPreviousRecord(history)
 	if not simNew or not older then
 		record._sim_delta_ticks = nil
 		return
@@ -283,6 +294,62 @@ function HistoryManager.RequestField(player, field)
 	history[history._head] = record
 
 	return record[field]
+end
+
+--- Fast simtime ring write: uses pdata.simTime (no WrappedPlayer / second netprop read).
+--- Shares head advance + dedup with RequestField (SilentAim angles on same tick stay in one slot).
+function HistoryManager.RecordSimtimeTick(steamID, simTime)
+	if not initialized or not activeFields[HistoryManager.Fields.SimulationTime] then
+		return
+	end
+	if not steamID or simTime == nil then
+		return
+	end
+
+	local id = tostring(steamID)
+	local simField = HistoryManager.Fields.SimulationTime
+	local curTick = globals.TickCount()
+
+	local stored = _storedFieldsByPlayer[id]
+	if stored and stored[simField] == curTick then
+		return
+	end
+
+	local history = playerHistories[id]
+	if not history then
+		history = { _head = 0, _count = 0, _lastTick = -1 }
+		playerHistories[id] = history
+	end
+
+	if history._lastTick ~= curTick then
+		history._head = (history._head % maxRetentionTicks) + 1
+		if history._count < maxRetentionTicks then
+			history._count = history._count + 1
+		end
+		history._lastTick = curTick
+		if stored then
+			for f in pairs(stored) do
+				stored[f] = nil
+			end
+		end
+	end
+
+	local head = history._head
+	local record = history[head]
+	if type(record) ~= "table" then
+		record = {}
+		history[head] = record
+	end
+
+	record[simField] = simTime
+	writeSimDeltaTicks(history, record)
+	record._tick = curTick
+
+	if not stored then
+		stored = {}
+		_storedFieldsByPlayer[id] = stored
+	end
+	stored[simField] = curTick
 end
 
 function HistoryManager.RequestFields(player, fields)

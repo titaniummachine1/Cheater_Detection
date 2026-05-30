@@ -384,6 +384,7 @@ local function OnCreateMove(cmd)
 
 	-- Pre-filter active players into a flat list (reuse module-level table)
 	Profiler.Begin("PlayerScan_Loop")
+	Profiler.Begin("PlayerScan_BuildActive")
 	for k = 1, #activePlayers do activePlayers[k] = nil end
 	for id, existingState in pairs(stateTable) do
 		local pdata = existingState.pdata
@@ -423,6 +424,7 @@ local function OnCreateMove(cmd)
 		activePlayers[#activePlayers + 1] = existingState
 		::continue::
 	end
+	Profiler.End("PlayerScan_BuildActive")
 
 	if enableSilent then
 		Profiler.Begin("History_SilentAim")
@@ -434,7 +436,7 @@ local function OnCreateMove(cmd)
 	if enableChoke or enableDoubleTap then
 		Profiler.Begin("History_Simtime")
 		for _, pState in ipairs(activePlayers) do
-			DetectionConfig.RecordHistory(pState.wrap, "Simtime")
+			HistoryManager.RecordSimtimeTick(pState.id, pState.pdata.simTime)
 		end
 		Profiler.End("History_Simtime")
 	end
@@ -442,6 +444,7 @@ local function OnCreateMove(cmd)
 	-- ValveCheck runs via scheduler + DirtySystem "checks" (once per player per map)
 	-- Auto-disconnect enforcement still runs every tick for confirmed Valve employees
 	if enableValveCheck then
+		Profiler.Begin("ValveCheck")
 		for _, pState in ipairs(activePlayers) do
 			enforceValveAutoDisconnect(pState)
 			if sessionState.valveDisconnectTriggered then
@@ -450,6 +453,7 @@ local function OnCreateMove(cmd)
 				return
 			end
 		end
+		Profiler.End("ValveCheck")
 	end
 
 	if enableSilent then
