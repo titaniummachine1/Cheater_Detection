@@ -120,27 +120,14 @@ local function persistRetaliationKarma(steamID, playerName, delta, reasonLabel)
 	RetaliationKarma[steamID] = newKarma
 
 	local existing = getExistingDbEntry(steamID)
-	local existingFlags = (type(existing) == "table" and tonumber(existing.Flags or 0)) or 0
-	local existingScore = (type(existing) == "table" and tonumber(existing.Score or 0)) or 0
-	local existingReason = type(existing) == "table" and existing.Reason or nil
 
 	local isRetaliationTarget = newKarma >= RETALIATION_KARMA_THRESHOLD
-	local dbReason = existingReason
-	if isRetaliationTarget then
-		dbReason = "Retaliation Target"
-	elseif dbReason == nil or dbReason == "" or isRetaliationReason(dbReason) then
-		dbReason = "Vote Karma Tracking"
-	end
 
-	if type(Database) == "table" and type(Database.UpsertCheater) == "function" then
-		Database.UpsertCheater(steamID, {
-			name = playerName or (type(existing) == "table" and existing.Name) or steamID,
-			reason = dbReason,
-			flags = existingFlags,
-			score = existingScore,
+	if type(Database) == "table" and type(Database.ApplyKarmaDelta) == "function" then
+		Database.ApplyKarmaDelta(steamID, {
+			Name = playerName or (type(existing) == "table" and existing.Name) or steamID,
 			Karma = newKarma,
 			Retaliation = isRetaliationTarget,
-			Static = "RetaliationKarma",
 		})
 	end
 

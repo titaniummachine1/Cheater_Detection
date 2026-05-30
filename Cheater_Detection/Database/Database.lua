@@ -307,7 +307,7 @@ function Database.IsRedundantListFetch(steamID, staticSource, reason)
 		baseReason, incomingReason, baseStatic, staticSource)
 end
 
---- True when local database file should keep karma / retaliation not present in embed.
+--- True when local database file should keep karma / retaliation (always separate from embed).
 function Database.HasLocalDatabaseDelta(steamID, entry)
 	if type(entry) ~= "table" or type(steamID) ~= "string" then
 		return false
@@ -315,23 +315,11 @@ function Database.HasLocalDatabaseDelta(steamID, entry)
 
 	local curKarma = getEntryKarma(entry)
 	local curRetaliation = getEntryRetaliation(entry)
-	local baseline = Database.EmbeddedBaseline and Database.EmbeddedBaseline[steamID]
-	local baseKarma = baseline and getEntryKarma(baseline) or 0
-	local baseRetaliation = baseline and getEntryRetaliation(baseline) or false
 
-	if curKarma > baseKarma then
+	if curKarma > 0 then
 		return true
 	end
-	if curRetaliation and not baseRetaliation then
-		return true
-	end
-
-	if not baseline and (curKarma > 0 or curRetaliation) then
-		return true
-	end
-
-	local staticID = Database.ResolveStatic(entry)
-	if type(staticID) == "string" and staticID == "RetaliationKarma" and curKarma > 0 then
+	if curRetaliation then
 		return true
 	end
 
@@ -935,7 +923,80 @@ function Database.PruneOverlayAgainstBaseline()
 			string.format("[DB] Refreshed %d stale database entries from runtime", refreshed))
 	end
 
-	return pruned
+	return purged
+end
+
+--- Merge vote karma into runtime without clobbering embed reason/static/evidence.
+function Database.ApplyKarmaDelta(steamID, options)
+	if type(steamID) ~= "string" or not steamID:match("^7656119%d+$") then
+		return false
+	end
+	if type(options) ~= "table" then
+		return false
+	end
+
+	local incomingKarma = type(options.Karma) == "number" and math.floor(options.Karma) or nil
+	local incomingRetaliation = options.Retaliation
+	if incomingKarma == nil and incomingRetaliation == nil then
+		return false
+	end
+
+	if type(G.DataBase) ~= "table" then
+		G.DataBase = {}
+	end
+
+	local entry = G.DataBase[steamID]
+	if not entry then
+		local karma = incomingKarma or 0
+		if karma <= 0 and incomingRetaliation ~= true then
+			return false
+		end
+		G.DataBase[steamID] = {
+			Name = options.Name or "Unknown",
+			Reason = incomingRetaliation == true and "Retaliation Target" or "Vote Karma Tracking",
+			Static = "RetaliationKarma",
+			Karma = karma,
+			Retaliation = incomingRetaliation == true,
+			Timestamp = os.time(),
+		}
+	else
+		local currentKarma = getEntryKarma(entry)
+		local newKarma = incomingKarma and math.max(currentKarma, incomingKarma) or currentKarma
+		if newKarma > 0 and newKarma ~= currentKarma then
+			setEntryKarma(entry, newKarma)
+		end
+		if incomingRetaliation == true then
+			setEntryRetaliation(entry, true)
+		elseif incomingRetaliation == false then
+			setEntryRetaliation(entry, false)
+		end
+		decodedCache[steamID] = nil
+	end
+
+	Database.SyncOverlayEntry(steamID)
+	return true
+end
+
+--- Disk row for karma-only deltas (embed already owns reason/static/name).
+local function buildPersistSnapshot(steamID, entry)
+	if Database.HasLocalDatabaseDelta(steamID, entry)
+		and not Database.EntryBeatsBaseline(steamID, entry) then
+		local karma = getEntryKarma(entry)
+		local retaliation = getEntryRetaliation(entry)
+		if karma <= 0 and not retaliation then
+			return nil
+		end
+		local decoded = Database.GetCheater(steamID)
+		return {
+			Name = (decoded and decoded.Name) or "Unknown",
+			Reason = retaliation and "Retaliation Target" or "Vote Karma Tracking",
+			Static = "RetaliationKarma",
+			Karma = karma,
+			Retaliation = retaliation,
+			Timestamp = os.time(),
+		}
+	end
+	return copyEntry(entry)
 end
 
 function Database.SyncOverlayEntry(steamID, options)
@@ -956,8 +1017,8 @@ function Database.SyncOverlayEntry(steamID, options)
 	end
 
 	if Database.ShouldPersistEntry(steamID, entry, options) then
-		local snapshot = copyEntry(entry)
-		if not entriesEquivalent(snapshot, Database.Overlay[steamID]) then
+		local snapshot = buildPersistSnapshot(steamID, entry)
+		if snapshot and not entriesEquivalent(snapshot, Database.Overlay[steamID]) then
 			Database.Overlay[steamID] = snapshot
 			Database.State.isDirty = true
 		end
@@ -974,8 +1035,10 @@ local function mergeLocalDatabaseDeltaIntoRuntime(existing, diskEntry)
 
 	local changed = false
 	local diskKarma = getEntryKarma(diskEntry)
-	if diskKarma > getEntryKarma(existing) then
-		setEntryKarma(existing, diskKarma)
+	local runtimeKarma = getEntryKarma(existing)
+	local mergedKarma = math.max(runtimeKarma, diskKarma)
+	if mergedKarma > 0 and mergedKarma ~= runtimeKarma then
+		setEntryKarma(existing, mergedKarma)
 		changed = true
 	end
 	if getEntryRetaliation(diskEntry) and not getEntryRetaliation(existing) then
@@ -1467,6 +1530,21 @@ function Database.UpsertCheater(steamID, data)
 		incomingRetaliation = data.Retaliation
 	end
 
+	local karmaOnly = (incomingKarma ~= nil or incomingRetaliation ~= nil)
+		and data.reason == nil
+		and data.source == nil
+		and data.Static == nil
+		and persistentFlags == 0
+		and (data.score or 0) == 0
+
+	if karmaOnly then
+		return Database.ApplyKarmaDelta(steamID, {
+			Karma = incomingKarma,
+			Retaliation = incomingRetaliation,
+			Name = data.name,
+		})
+	end
+
 	if existing then
 		local scoreDelta = math.abs(score - (existing.Score or 0))
 		local timeDelta = currentTime - (existing.Timestamp or 0)
@@ -1494,8 +1572,14 @@ function Database.UpsertCheater(steamID, data)
 	end
 
 	local finalKarma = incomingKarma
-	if finalKarma == nil and type(existing) == "table" and type(existing.Karma) == "number" then
-		finalKarma = existing.Karma
+	if finalKarma == nil and type(existing) == "table" then
+		finalKarma = getEntryKarma(existing)
+		if finalKarma <= 0 and type(existing.Karma) == "number" then
+			finalKarma = existing.Karma
+		end
+	end
+	if type(existing) == "table" and type(finalKarma) == "number" and type(incomingKarma) == "number" then
+		finalKarma = math.max(finalKarma, incomingKarma)
 	end
 	local finalRetaliation = incomingRetaliation
 	if finalRetaliation == nil and type(existing) == "table" and type(existing.Retaliation) == "boolean" then
