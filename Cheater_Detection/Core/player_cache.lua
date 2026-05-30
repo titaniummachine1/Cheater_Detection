@@ -421,9 +421,9 @@ end
 
 local RUNTIME_HARD_FLAGS = Constants.Flags.CHEATER | Constants.Flags.VAC_BANNED | Constants.Flags.VALVE
 Events.Subscribe("OnPlayerStateChange", function(playerState, _reason)
-	if not playerState.id then return end
-	local ent = entities.GetPlayer(playerState.wrap.index)
-	if not ent:IsValid() then return end
+	if not playerState.id or not playerState.wrap then return end
+	local ent = playerState.wrap:GetEntity()
+	if not ent or not ent:IsValid() then return end
 	if (playerState.flags & RUNTIME_HARD_FLAGS) ~= 0 then
 		playerlist.SetPriority(ent, 10)
 		playerState.autoPrioritySusApplied = false

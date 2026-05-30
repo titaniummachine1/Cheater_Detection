@@ -199,9 +199,12 @@ local function syncServerBoundaryState()
 			-- Only reset if we have no scan activity yet (guards against double module load).
 			local hasActivity = next(state.scanned) or next(state.inFlight) or next(state.pending)
 			if not hasActivity then
-				printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Script loaded in server - initializing scan state")
 				resetState(true)
 				state.scanning = false
+				local scannerOn = G and G.Menu and G.Menu.Scanner and G.Menu.Scanner.SteamHistory == true
+				if scannerOn and SteamHistory.HasKey() then
+					printInfo({ 180, 210, 255, 255 }, "[SteamHistory] Script loaded in server - initializing scan state")
+				end
 			end
 		end
 		state.currentServerIP = serverIP
@@ -995,7 +998,11 @@ local function onCreateMove()
 	end
 
 	if not refreshEnabled() then
-		logInactiveReason(false)
+		-- Quiet when toggled off; only log missing key / API disable reasons.
+		local reason = getInactiveReason()
+		if reason ~= "toggle_off" then
+			logInactiveReason(false)
+		end
 		state.inactiveCreateMoveUntil = now + 0.5
 		return
 	end

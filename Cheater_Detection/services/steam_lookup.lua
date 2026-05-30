@@ -5,6 +5,8 @@
 local Events = require("Cheater_Detection.Core.Events")
 local ValveData = require("Cheater_Detection.data.valve_data")
 local Constants = require("Cheater_Detection.Core.constants")
+local Common = require("Cheater_Detection.Utils.Common")
+local G = require("Cheater_Detection.Utils.Globals")
 
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 
@@ -21,6 +23,21 @@ local fetchState = {
 local MAX_FETCH_PAGES = 3
 local GROUP_FETCH_COOLDOWN = 3.0
 local ACTIVE_GROUP_FETCH_LIMIT = 1
+
+local function shouldLogValveLookup()
+	return Common.IsLogCategoryEnabled("ValveCheck")
+end
+
+local function isValveCheckEnabled()
+	return G.Menu and G.Menu.Main and G.Menu.Main.ValveCheck == true
+end
+
+function SteamLookup.ShouldTickGroupFetch()
+	if isValveCheckEnabled() then
+		return true
+	end
+	return IsGroupFetchActive()
+end
 
 local function countLoadedIDs()
 	local count = 0
@@ -97,7 +114,9 @@ local function FinishGroupFetchIfReady()
 	end
 
 	fetchState.done = true
-	print(string.format("[SteamLookup] Group fetch done: %d IDs loaded.", fetchState.totalFetched))
+	if shouldLogValveLookup() then
+		print(string.format("[SteamLookup] Group fetch done: %d IDs loaded.", fetchState.totalFetched))
+	end
 	markValveGroupRecheck()
 end
 
@@ -107,12 +126,17 @@ local function OnValveGroupPageResponse(data, errorMessage, context)
 		fetchState.inFlightCount = fetchState.inFlightCount - 1
 	end
 
-	if type(errorMessage) == "string" and errorMessage ~= "" then
-		print(string.format("[SteamLookup] Page %d failed: %s", page, errorMessage))
-	else
+	if shouldLogValveLookup() then
+		if type(errorMessage) == "string" and errorMessage ~= "" then
+			print(string.format("[SteamLookup] Page %d failed: %s", page, errorMessage))
+		else
+			local found = parseGroupXML(data or "")
+			fetchState.totalFetched = fetchState.totalFetched + found
+			print(string.format("[SteamLookup] Page %d: +%d Valve group IDs", page, found))
+		end
+	elseif not (type(errorMessage) == "string" and errorMessage ~= "") then
 		local found = parseGroupXML(data or "")
 		fetchState.totalFetched = fetchState.totalFetched + found
-		print(string.format("[SteamLookup] Page %d: +%d Valve group IDs", page, found))
 	end
 
 	if not CanUseSafeWindowBurst() then
@@ -182,7 +206,9 @@ function SteamLookup.RefreshValveGroup(force)
 			fetchState.nextPage = MAX_FETCH_PAGES + 1
 			fetchState.totalFetched = cachedCount
 			fetchState.cooldownUntil = 0
-			print(string.format("[SteamLookup] Reusing cached Valve group IDs: %d loaded.", cachedCount))
+			if shouldLogValveLookup() then
+				print(string.format("[SteamLookup] Reusing cached Valve group IDs: %d loaded.", cachedCount))
+			end
 			markValveGroupRecheck()
 			return false
 		end

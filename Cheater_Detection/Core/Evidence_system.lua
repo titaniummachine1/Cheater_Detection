@@ -451,6 +451,19 @@ function Evidence.AddEvidence(steamID, detectionName, weight, opts)
 				end
 			end
 		end
+	elseif detectionName == "warp_dt" then
+		local adv = G.Menu and G.Menu.Advanced
+		if adv and adv["Warp"] == true then
+			-- allow evidence while testing double tap on yourself
+		elseif not Common.IsDebugEnabled() then
+			local localPlayer = entities.GetLocalPlayer()
+			if localPlayer and localPlayer:IsValid() then
+				local localSteamID = Common.GetSteamID64(localPlayer)
+				if localSteamID and steamID == tostring(localSteamID) then
+					return
+				end
+			end
+		end
 	elseif not Common.IsDebugEnabled() then
 		local localPlayer = entities.GetLocalPlayer()
 		if localPlayer and localPlayer:IsValid() then
@@ -752,7 +765,11 @@ function Evidence.SetPriorityForSteamID(steamID, priority)
 		return false
 	end
 
-	local success = playerlist.SetPriority(entities.GetPlayer(playerState.wrap.index), priority)
+	local ent = playerState.wrap:GetEntity()
+	if not ent or not ent:IsValid() then
+		return false
+	end
+	local success = playerlist.SetPriority(ent, priority)
 	if success then
 		local name = playerState.wrap:GetName() or steamID
 		Logger.Info("Evidence", string.format("Set priority %d for %s", priority, name))

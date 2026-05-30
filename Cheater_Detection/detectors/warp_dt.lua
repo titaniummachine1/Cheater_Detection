@@ -28,7 +28,8 @@ local WarpDT                                = {}
 
 -- ── constants ──────────────────────────────────────────────────────────────
 
-local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3 -- suppress if N players burst same tick (server hitch)
+-- Hitch = multiple *humans* bursting same tick (bots on itemtest choke constantly).
+local SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD = 3
 
 -- Burst detection: simtime spike must be in this tick range (scaled to server tickrate)
 local BURST_MIN_TICKS_66HZ                  = 10.0 -- minimum choke for DT (~150ms), excludes normal jitter
@@ -72,7 +73,8 @@ end
 local playerState = {}
 local watchUntil  = {}
 
-local ACTIVITY_WINDOW_TICKS = 40
+-- Must cover DT release (~24 ticks) after damage; match BURST_MAX window.
+local ACTIVITY_WINDOW_TICKS = 66
 
 
 -- Server-hitch suppression: track which ticks had simultaneous bursts
@@ -99,9 +101,24 @@ local function recordBurstTick(tick, id)
 	burstThisTick[tick][#burstThisTick[tick] + 1] = id
 end
 
-local function isServerHitch(tick)
+local function isHumanSteamID(id)
+	return type(id) == "string" and id:match("^7656119%d+$") ~= nil
+end
+
+local function countHumanBurstsOnTick(tick)
 	local list = burstThisTick[tick]
-	return list and #list >= SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD
+	if not list then return 0 end
+	local n = 0
+	for i = 1, #list do
+		if isHumanSteamID(list[i]) then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+local function isServerHitch(tick)
+	return countHumanBurstsOnTick(tick) >= SIMULTANEOUS_BURST_SUPPRESS_THRESHOLD
 end
 
 local function cleanBurstTable(curTick)
@@ -122,6 +139,7 @@ local function getState(id)
 			recentHits               = { _data = {}, _head = 1, _count = 0 },
 			prevSimTick              = nil,
 			lastSimTick              = nil,
+			lastSampleTick           = 0,
 		}
 	end
 	return playerState[id]
@@ -146,10 +164,17 @@ local function recordConfirmedHit(attackerID, tick)
 	end
 end
 
-local function tryBurst(pState, curTick)
+local function sampleSimBurst(pState, curTick)
 	local id = pState.id
 	local data = getState(id)
-	local simTick = timeToTicks(pState.wrap:GetSimulationTime())
+	if data.lastSampleTick == curTick then
+		return
+	end
+	data.lastSampleTick = curTick
+
+	local simTime = pState.wrap:GetSimulationTime()
+	if type(simTime) ~= "number" then return end
+	local simTick = timeToTicks(simTime)
 
 	local burstAmount = 0
 	if data.prevSimTick then
@@ -170,7 +195,9 @@ local function tryBurst(pState, curTick)
 	if isServerHitch(curTick) then
 		lastServerHitchTick = curTick
 		if isDebug then
-			print(string.format("[DoubleTap] server hitch suppressed burst for %s (tick=%d)", id, curTick))
+			print(string.format(
+				"[DoubleTap] server hitch suppressed burst for %s (tick=%d, humans=%d)",
+				id, curTick, countHumanBurstsOnTick(curTick)))
 		end
 		return
 	end
@@ -199,22 +226,17 @@ function WarpDT.Tick()
 	if not Common.IsConnectionStableForDetection() then return end
 
 	local curTick = globals.TickCount()
-	local localID = tostring(Common.GetSteamID64(entities.GetLocalPlayer()))
 	cleanBurstTable(curTick)
 
 	for id, untilTick in pairs(watchUntil) do
 		if curTick > untilTick then
 			watchUntil[id] = nil
-		elseif id == localID and not Common.IsDebugEnabled() then
-			-- skip local player
-		elseif id:sub(1, 4) == "BOT_" then
-			watchUntil[id] = nil
 		else
 			local pState = PlayerCache.GetByID(id)
-			if not pState or not pState.pdata.isAlive or (pState.flags & Constants.Flags.CHEATER) ~= 0 then
+			if not pState or not pState.pdata.isAlive then
 				watchUntil[id] = nil
 			else
-				tryBurst(pState, curTick)
+				sampleSimBurst(pState, curTick)
 			end
 		end
 	end
@@ -237,6 +259,12 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	local data       = getState(attackerID)
 
 	watchPlayer(attackerID, curTick)
+
+	local attackerState = PlayerCache.GetByID(attackerID)
+	if attackerState and attackerState.pdata.isAlive then
+		-- Sample on hurt tick too (CreateMove may run before player_hurt this frame).
+		sampleSimBurst(attackerState, curTick)
+	end
 
 	recordConfirmedHit(attackerID, curTick)
 
@@ -277,8 +305,9 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	data.lastDamageTick = curTick
 
 	if Common.IsLogCategoryEnabled("Warp/DT") then
-		print(string.format("[DoubleTap] %s dealt dmg=%d — watching for burst within %d ticks",
-			attackerID, hit.damage, DT_CONFIRM_WINDOW_TICKS))
+		print(string.format(
+			"[DoubleTap] %s dealt dmg=%d — watching for burst (lastBurstTick=%d, window=%d ticks)",
+			attackerID, hit.damage, data.lastBurstTick, DT_CONFIRM_WINDOW_TICKS))
 	end
 end)
 

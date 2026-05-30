@@ -293,9 +293,14 @@ local function OnCreateMove(cmd)
 
 	local historyEnabled = enableSilent or enableChoke
 
-	if not sessionState.groupSearched then
-		SteamLookup.RefreshValveGroup()
-		sessionState.groupSearched = true
+	-- Valve Steam group XML is only needed for Valve Check (not SteamHistory).
+	if enableValveCheck then
+		if not sessionState.groupSearched then
+			SteamLookup.RefreshValveGroup()
+			sessionState.groupSearched = true
+		end
+	else
+		sessionState.groupSearched = false
 	end
 	-- TickGroupFetch is paced in Scheduler.Tick, not the CreateMove hot path.
 

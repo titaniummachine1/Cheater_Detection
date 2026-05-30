@@ -40,6 +40,10 @@ local BRIDGE_MAX_CALLBACKS_PER_TICK = 1 -- finish at most one job per tick after
 local BRIDGE_STATS_INTERVAL = 5.0
 local BRIDGE_SLOW_LOCAL_GET_MS = 8.0
 
+local function shouldLogBridge()
+    return Common.IsLogCategoryEnabled("Database")
+end
+
 local bridgeStats = {
     polls = 0,
     pollsSkipped = 0,
@@ -161,18 +165,20 @@ local function maybePrintBridgeSummary(now)
         bridgeStats.pollsSkipped = 0
         return
     end
-    print(string.format(
-        "[HTTP BRIDGE] window %.0fs | lua_polls=%d skipped=%d submits=%d done=%d active=%d queued=%d local_get_ms=%.1f poll_get_ms=%.1f",
-        BRIDGE_STATS_INTERVAL,
-        bridgeStats.polls,
-        bridgeStats.pollsSkipped,
-        bridgeStats.submits,
-        bridgeStats.callbacksDone,
-        countActiveBridgeJobs(),
-        #queue,
-        bridgeStats.localGetMs,
-        bridgeStats.pollGetMs
-    ))
+    if shouldLogBridge() then
+        print(string.format(
+            "[HTTP BRIDGE] window %.0fs | lua_polls=%d skipped=%d submits=%d done=%d active=%d queued=%d local_get_ms=%.1f poll_get_ms=%.1f",
+            BRIDGE_STATS_INTERVAL,
+            bridgeStats.polls,
+            bridgeStats.pollsSkipped,
+            bridgeStats.submits,
+            bridgeStats.callbacksDone,
+            countActiveBridgeJobs(),
+            #queue,
+            bridgeStats.localGetMs,
+            bridgeStats.pollGetMs
+        ))
+    end
     bridgeStats.polls = 0
     bridgeStats.pollsSkipped = 0
     bridgeStats.submits = 0
@@ -193,14 +199,16 @@ local function logBridgeJobDone(item, jobId, responseBody, errorMessage)
         bytes = #responseBody
     end
     local status = errorMessage and ("ERR:" .. tostring(errorMessage)) or "OK"
-    print(string.format(
-        "[HTTP BRIDGE] DONE %s | wait=%.0fms bytes=%d src=%s | %s",
-        shortUrl(item.url),
-        waitMs,
-        bytes,
-        contextLabel(item.context),
-        status
-    ))
+    if shouldLogBridge() then
+        print(string.format(
+            "[HTTP BRIDGE] DONE %s | wait=%.0fms bytes=%d src=%s | %s",
+            shortUrl(item.url),
+            waitMs,
+            bytes,
+            contextLabel(item.context),
+            status
+        ))
+    end
 end
 
 local function InvokeCallback(item, responseBody, errorMessage)
@@ -475,12 +483,14 @@ local function TryDispatchToBridge(now)
         bridgeStats.submits = bridgeStats.submits + 1
         jobWaitStart[data.id] = now
         activeBridgeJobs[data.id] = item
-        print(string.format(
-            "[HTTP BRIDGE] SUBMIT id=%s src=%s | %s",
-            tostring(data.id):sub(1, 8),
-            contextLabel(item.context),
-            shortUrl(item.url)
-        ))
+        if shouldLogBridge() then
+            print(string.format(
+                "[HTTP BRIDGE] SUBMIT id=%s src=%s | %s",
+                tostring(data.id):sub(1, 8),
+                contextLabel(item.context),
+                shortUrl(item.url)
+            ))
+        end
     else
         AbandonBridge("bridge submit rejected")
         InvokeCallback(item, nil, "Bridge submission failed: " .. tostring(body))

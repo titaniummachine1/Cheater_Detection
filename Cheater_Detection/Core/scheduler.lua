@@ -59,7 +59,7 @@ function Scheduler.Tick()
         HttpQueue.Tick()
     end
 
-    if SteamLookup and SteamLookup.TickGroupFetch then
+    if SteamLookup and SteamLookup.ShouldTickGroupFetch and SteamLookup.ShouldTickGroupFetch() then
         SteamLookup.TickGroupFetch()
     end
 
