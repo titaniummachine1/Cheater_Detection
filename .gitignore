@@ -6,3 +6,4 @@ __pycache__/
 external_sources/build_removals.txt
 external_sources/build_overlay.json
 external_sources/validate_checkpoint.json
+external_sources/.fetch_cache/

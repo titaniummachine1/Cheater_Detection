@@ -18,11 +18,18 @@ file with weight-based reason normalization:
 Usage:
     python rebuild_embedded_databases.py
     python rebuild_embedded_databases.py --dry-run   # print stats, no file writes
+    python rebuild_embedded_databases.py --force-fetch   # bypass 10-minute remote fetch cache
+
+Remote HTTP responses are cached under external_sources/.fetch_cache/ for 10 minutes
+(default) so rapid BundleAndDeploy / run-on-save cycles do not hammer GitHub.
 """
 
+import hashlib
 import json
+import os
 import re
 import sys
+import time
 import argparse
 import urllib.request
 from collections import Counter
@@ -40,6 +47,10 @@ LOOKUP_FILE = OUTPUT_DIR / "global_lookup_tables.lua"
 UNIFIED_OUTPUT = "unified_embedded.lua"
 BUILD_REMOVALS_PATH = SCRIPT_DIR / "build_removals.txt"
 BUILD_OVERLAY_PATH  = SCRIPT_DIR / "build_overlay.json"
+FETCH_CACHE_DIR     = SCRIPT_DIR / ".fetch_cache"
+FETCH_CACHE_MANIFEST = FETCH_CACHE_DIR / "manifest.json"
+FETCH_CACHE_TTL_SEC = int(os.environ.get("EMBED_FETCH_CACHE_TTL_SEC", "600"))
+_force_fetch = False
 
 # ---------------------------------------------------------------------------
 # Weight tables (mirrors constants.lua exactly)
@@ -335,12 +346,70 @@ def sid64_valid(sid: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# HTTP
+# HTTP (10-minute response cache for rapid re-bundles)
 # ---------------------------------------------------------------------------
+
+def _url_cache_filename(url: str) -> str:
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
+    return f"{digest}.body"
+
+
+def _load_fetch_manifest() -> dict:
+    if not FETCH_CACHE_MANIFEST.exists():
+        return {"version": 1, "entries": {}}
+    try:
+        data = json.loads(FETCH_CACHE_MANIFEST.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("entries"), dict):
+            return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {"version": 1, "entries": {}}
+
+
+def _save_fetch_manifest(manifest: dict) -> None:
+    FETCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    FETCH_CACHE_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def _short_url(url: str, max_len: int = 72) -> str:
+    if len(url) <= max_len:
+        return url
+    return url[: max_len - 3] + "..."
+
+
 def fetch_url(url: str) -> bytes:
+    now = time.time()
+
+    if not _force_fetch:
+        manifest = _load_fetch_manifest()
+        entry = manifest.get("entries", {}).get(url)
+        if entry:
+            age = now - float(entry.get("fetched_at", 0))
+            if age < FETCH_CACHE_TTL_SEC:
+                cache_file = FETCH_CACHE_DIR / entry.get("file", "")
+                if cache_file.is_file():
+                    ttl_left = int(FETCH_CACHE_TTL_SEC - age)
+                    print(
+                        f"  [CACHE] {_short_url(url)} "
+                        f"({int(age)}s old, {ttl_left}s TTL remaining)"
+                    )
+                    return cache_file.read_bytes()
+
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=45) as resp:
-        return resp.read()
+        data = resp.read()
+
+    manifest = _load_fetch_manifest()
+    cache_name = _url_cache_filename(url)
+    FETCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (FETCH_CACHE_DIR / cache_name).write_bytes(data)
+    manifest.setdefault("entries", {})[url] = {
+        "file": cache_name,
+        "fetched_at": now,
+        "size": len(data),
+    }
+    _save_fetch_manifest(manifest)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -1197,13 +1266,27 @@ def merge_into(combined: Dict[str, dict], incoming: Dict[str, dict]) -> Tuple[in
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global _force_fetch
+
     ap = argparse.ArgumentParser(description="Rebuild embedded Lua databases with weight-based normalization")
     ap.add_argument("--dry-run", action="store_true",
                     help="Fetch and process but do not write any files")
+    ap.add_argument("--force-fetch", action="store_true",
+                    help="Ignore remote fetch cache and re-download all URLs")
     args = ap.parse_args()
+    _force_fetch = args.force_fetch
 
     if args.dry_run:
         print("[DRY-RUN] No files will be written.\n")
+
+    if args.force_fetch:
+        print("[CACHE] --force-fetch: downloading all remote sources\n")
+    else:
+        print(
+            f"[CACHE] Remote fetch cache active "
+            f"(TTL {FETCH_CACHE_TTL_SEC}s, dir {FETCH_CACHE_DIR.name}/). "
+            f"Use --force-fetch to refresh.\n"
+        )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

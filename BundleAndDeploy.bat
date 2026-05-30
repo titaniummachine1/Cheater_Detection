@@ -11,7 +11,7 @@ if exist "%targetFile%" (
 	)
 )
 
-echo [BundleAndDeploy] Rebuilding embedded databases from live sources...
+echo [BundleAndDeploy] Rebuilding embedded databases from live sources (remote fetch cached 10 min)...
 python "%~dp0external_sources\rebuild_embedded_databases.py"
 if errorlevel 1 (
 	echo [BundleAndDeploy] NOT DEPLOYED: embed rebuild failed.
