@@ -500,6 +500,7 @@ local function OnCreateMove(cmd)
 
 	if enableDoubleTap then
 		Profiler.Begin("DoubleTap")
+		DoubleTap.BeginDetectionTick(activePlayers, curTick)
 		for _, pState in ipairs(activePlayers) do
 			if DoubleTap.HasWork(pState) then
 				DoubleTap.ProcessPlayer(pState)

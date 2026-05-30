@@ -37,6 +37,13 @@ local DT_EVIDENCE_COOLDOWN_S      = 0.5
 local REJECT_LOG_INTERVAL_S       = 0.35
 local HURT_LOG_INTERVAL_S         = 1.0
 local WATCH_BURST_SCAN_INTERVAL   = 4 -- ticks between scans while waiting for post-hit burst
+local MAX_HURT_BURST_SCANS_TICK   = 10 -- routine cap per game tick (busy fights)
+local MAX_HURT_BURST_SCANS_HOT    = 14 -- absolute cap; hot shooters may exceed routine budget
+
+local DT_FOCUS_PRIORITY_WATCH     = 3 -- post-hit: waiting for simtime burst
+local DT_FOCUS_PRIORITY_BURST     = 2 -- burst seen: waiting for hurt
+local DT_FOCUS_PRIORITY_SUSPECT   = 1 -- already has double_tap evidence
+local DT_FOCUS_PRIORITY_ROUTINE   = 0 -- under cap, background scan
 
 local cachedTickInterval  = nil
 local cachedBurstMinTicks = nil
@@ -48,6 +55,15 @@ local dtSuppressUntil     = {}
 local burstThisTick       = {}
 local lastBurstCleanTick  = 0
 local lastServerHitchTick = -math.huge
+
+-- One burst-scan ProcessPlayer per game tick; hot suspects preempt the round-robin pool.
+local focusTick           = -1
+local focusedPlayerId     = nil
+local hotRoundRobinIndex  = 0
+local warmRoundRobinIndex = 0
+local coldRoundRobinIndex = 0
+local hurtBurstScanTick   = -1
+local hurtBurstScansUsed  = 0
 
 local function getBurstThresholds()
 	local tickInt = globals.TickInterval()
@@ -176,6 +192,7 @@ local function getState(id)
 			lastRejectTag         = nil,
 			lastRejectLogTime     = 0,
 			lastHurtLogTime       = 0,
+			lastHurtBurstScanTick = 0,
 		}
 	end
 	return playerState[id]
@@ -225,6 +242,129 @@ local function isWatchingForBurst(id)
 	end
 	local elapsed = globals.TickCount() - data.lastDamageTick
 	return elapsed >= 0 and elapsed <= getConfirmWindowTicks()
+end
+
+local function getDtEvidenceWeight(id)
+	local weight = Evidence.GetMethodWeight(id, "double_tap")
+	if weight <= 0 then
+		weight = Evidence.GetMethodWeight(id, "warp_dt")
+	end
+	return weight
+end
+
+local function getDtEvidenceCap()
+	local cap = Evidence.GetMethodScoreCap("double_tap")
+	if cap <= 0 then
+		cap = Evidence.GetMethodScoreCap("warp_dt")
+	end
+	return cap
+end
+
+local function getDtFocusPriority(id)
+	if not id or id:sub(1, 4) == "BOT_" then
+		return -1
+	end
+	if isWatchingForBurst(id) then
+		return DT_FOCUS_PRIORITY_WATCH
+	end
+	local data = getState(id)
+	if data.lastBurstTick > 0 then
+		return DT_FOCUS_PRIORITY_BURST
+	end
+	local weight = getDtEvidenceWeight(id)
+	local cap = getDtEvidenceCap()
+	if weight >= cap then
+		return -1
+	end
+	if weight > 0 then
+		return DT_FOCUS_PRIORITY_SUSPECT
+	end
+	return DT_FOCUS_PRIORITY_ROUTINE
+end
+
+local function pickRoundRobinId(pool, indexField)
+	if #pool == 0 then
+		return nil, indexField
+	end
+	local nextIndex = (indexField % #pool) + 1
+	return pool[nextIndex], nextIndex
+end
+
+-- Among simultaneous hot shooters, prefer whoever hurt most recently; RR on ties.
+local function pickHotPoolFocus(pool, rrIndex)
+	local bestDamageTick = -1
+	for i = 1, #pool do
+		local damageTick = getState(pool[i]).lastDamageTick
+		if damageTick > bestDamageTick then
+			bestDamageTick = damageTick
+		end
+	end
+	local tied = {}
+	for i = 1, #pool do
+		if getState(pool[i]).lastDamageTick == bestDamageTick then
+			tied[#tied + 1] = pool[i]
+		end
+	end
+	if #tied == 0 then
+		return pickRoundRobinId(pool, rrIndex)
+	end
+	if #tied == 1 then
+		return tied[1], rrIndex
+	end
+	return pickRoundRobinId(tied, rrIndex)
+end
+
+local function resetHurtBurstScanBudget(curTick)
+	if hurtBurstScanTick ~= curTick then
+		hurtBurstScanTick = curTick
+		hurtBurstScansUsed = 0
+	end
+end
+
+function DoubleTap.BeginDetectionTick(activePlayers, curTick)
+	if not isEnabled() or focusTick == curTick then
+		return
+	end
+	focusTick = curTick
+	focusedPlayerId = nil
+	resetHurtBurstScanBudget(curTick)
+
+	if not activePlayers or #activePlayers == 0 then
+		return
+	end
+
+	local hotPool, warmPool, coldPool = {}, {}, {}
+	for i = 1, #activePlayers do
+		local pState = activePlayers[i]
+		local id = pState and pState.id
+		if not id then
+			goto continue
+		end
+		local priority = getDtFocusPriority(id)
+		if priority == DT_FOCUS_PRIORITY_WATCH or priority == DT_FOCUS_PRIORITY_BURST then
+			hotPool[#hotPool + 1] = id
+		elseif priority == DT_FOCUS_PRIORITY_SUSPECT then
+			warmPool[#warmPool + 1] = id
+		elseif priority == DT_FOCUS_PRIORITY_ROUTINE then
+			coldPool[#coldPool + 1] = id
+		end
+		::continue::
+	end
+
+	local chosenId
+	if #hotPool > 0 then
+		chosenId, hotRoundRobinIndex = pickHotPoolFocus(hotPool, hotRoundRobinIndex)
+	elseif #warmPool > 0 then
+		chosenId, warmRoundRobinIndex = pickRoundRobinId(warmPool, warmRoundRobinIndex)
+	elseif #coldPool > 0 then
+		chosenId, coldRoundRobinIndex = pickRoundRobinId(coldPool, coldRoundRobinIndex)
+	end
+
+	focusedPlayerId = chosenId
+end
+
+local function isFocusedPlayer(id)
+	return focusedPlayerId ~= nil and id == focusedPlayerId
 end
 
 local function clearStaleBurstState(data, curTick)
@@ -413,6 +553,9 @@ local function onBurstDetected(id, burstAmount, curTick, burstIndex)
 end
 
 local function shouldScanBurstThisTick(id, curTick)
+	if isFocusedPlayer(id) and getDtFocusPriority(id) >= DT_FOCUS_PRIORITY_BURST then
+		return true
+	end
 	if not isWatchingForBurst(id) then
 		return true
 	end
@@ -451,6 +594,25 @@ local function tryDetectBurstForPlayer(id, curTick, forceScan)
 	onBurstDetected(id, burstAmount, curTick, burstIndex)
 end
 
+-- Hurt path: correlate every hit; burst scan at most once per attacker per tick (+ global cap).
+local function tryHurtBurstScan(id, curTick)
+	resetHurtBurstScanBudget(curTick)
+	local data = getState(id)
+	if data.lastHurtBurstScanTick == curTick then
+		return
+	end
+	local scanCap = MAX_HURT_BURST_SCANS_TICK
+	if getDtFocusPriority(id) >= DT_FOCUS_PRIORITY_WATCH then
+		scanCap = MAX_HURT_BURST_SCANS_HOT
+	end
+	if hurtBurstScansUsed >= scanCap then
+		return
+	end
+	data.lastHurtBurstScanTick = curTick
+	hurtBurstScansUsed = hurtBurstScansUsed + 1
+	tryDetectBurstForPlayer(id, curTick, true)
+end
+
 function DoubleTap.HasWork(playerState)
 	if not isEnabled() then
 		return false
@@ -459,21 +621,10 @@ function DoubleTap.HasWork(playerState)
 		return false
 	end
 	local id = playerState.id
-	local weight = Evidence.GetMethodWeight(id, "double_tap")
-	if weight <= 0 then
-		weight = Evidence.GetMethodWeight(id, "warp_dt")
+	if getDtFocusPriority(id) < 0 then
+		return false
 	end
-	local cap = Evidence.GetMethodScoreCap("double_tap")
-	if cap <= 0 then
-		cap = Evidence.GetMethodScoreCap("warp_dt")
-	end
-	if weight < cap then
-		return true
-	end
-	if isWatchingForBurst(id) then
-		return (globals.TickCount() % WATCH_BURST_SCAN_INTERVAL) == 0
-	end
-	return (globals.TickCount() % 4) == 0
+	return isFocusedPlayer(id)
 end
 
 function DoubleTap.ProcessPlayer(playerState)
@@ -511,6 +662,7 @@ function DoubleTap.ProcessPlayer(playerState)
 end
 
 function DoubleTap.Tick()
+	-- Focus is chosen in BeginDetectionTick (Main.lua) once per game tick.
 end
 
 Events.Subscribe("OnHitscanHit", function(hit)
@@ -543,7 +695,7 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	end
 
 	data.lastDamageTick = curTick
-	tryDetectBurstForPlayer(attackerID, curTick, true)
+	tryHurtBurstScan(attackerID, curTick)
 
 	if isDtLogEnabled() then
 		local now = globals.RealTime()
@@ -559,6 +711,9 @@ end)
 local function onPlayerGone(id)
 	playerState[id] = nil
 	dtSuppressUntil[id] = nil
+	if focusedPlayerId == id then
+		focusedPlayerId = nil
+	end
 end
 
 Events.Subscribe("OnPlayerDisconnect", onPlayerGone)
