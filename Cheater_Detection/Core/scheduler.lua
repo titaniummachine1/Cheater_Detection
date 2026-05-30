@@ -7,6 +7,7 @@ local SteamLookup = require("Cheater_Detection.services.steam_lookup")
 local HttpQueue = require("Cheater_Detection.services.http_queue")
 local Fetcher = require("Cheater_Detection.Database.Fetcher")
 local ValveCheck = require("Cheater_Detection.detectors.valve_check")
+local CosmeticAbuse = require("Cheater_Detection.detectors.cosmetic_abuse")
 local PlayerCache = require("Cheater_Detection.Core.player_cache")
 local G = require("Cheater_Detection.Utils.Globals")
 local Common = require("Cheater_Detection.Utils.Common")
@@ -28,7 +29,6 @@ local function detectorsNeedLiveCache()
         or (adv and adv.Bhop == true)
         or Common.IsDoubleTapDetectionEnabled()
         or (adv and adv.Choke == true)
-        or (adv and adv.Cosmetics == true)
 end
 
 local function syncPlayerCacheForMode()
@@ -66,6 +66,10 @@ function Scheduler.Tick()
 
     if ValveCheck.IsEnabled() then
         ValveCheck.Tick()
+    end
+
+    if CosmeticAbuse.HasPendingWork() then
+        CosmeticAbuse.ProcessPending()
     end
 
     if Fetcher and Fetcher.Tick then

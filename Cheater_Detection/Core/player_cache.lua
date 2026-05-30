@@ -34,6 +34,17 @@ local TickEntityCache        = require("Cheater_Detection.Utils.TickEntityCache"
 
 local PlayerCache            = {}
 
+local function requestCosmeticScanIfEnabled(id)
+	local adv = G.Menu and G.Menu.Advanced
+	if not adv or adv.Cosmetics ~= true then
+		return
+	end
+	local ok, cosmetic = pcall(require, "Cheater_Detection.detectors.cosmetic_abuse")
+	if ok and cosmetic.RequestScan then
+		cosmetic.RequestScan(id)
+	end
+end
+
 ---@type table<string, table>
 local activeSet              = {}
 
@@ -245,6 +256,7 @@ function PlayerCache.SyncTick()
 			}
 			activeSet[id]    = state
 			anyNew           = true
+			requestCosmeticScanIfEnabled(id)
 			DirtySystem.MarkDirty(id, "connected")
 			DirtySystem.MarkDirty(id, "score")
 			DirtySystem.MarkDirty(id, "flags")

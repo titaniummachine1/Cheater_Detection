@@ -155,10 +155,6 @@ local function DrawMenu()
 		TimMenu.BeginSector("Debug")
 		Advanced.debug = TimMenu.Checkbox("Debug Mode", Advanced.debug == true)
 		TimMenu.NextLine()
-		TimMenu.Text("DEBUG ON = detectors run on YOU (self-test). OFF = you are never scanned.")
-		TimMenu.NextLine()
-		TimMenu.Text("Your flags: top-center HUD box. Others: WorldToScreen over head.")
-		TimMenu.NextLine()
 		Advanced.profiler = TimMenu.Checkbox("Performance Profiler", Advanced.profiler == true)
 		TimMenu.NextLine()
 		-- Debug category selector to reduce console spam
@@ -179,10 +175,6 @@ local function DrawMenu()
 
 		TimMenu.BeginSector("Exploit Detection")
 		Advanced.Choke = TimMenu.Checkbox("Fake Lag Detection (Experimental)", Advanced.Choke == true)
-		local ft = globals.AbsoluteFrameTime()
-		if ft and ft > 0 and (1.0 / ft) < 40 then
-			TimMenu.Text("(OFF: Low FPS!)")
-		end
 		TimMenu.NextLine()
 		Advanced.DoubleTap = TimMenu.Checkbox("Double Tap Detection (Experimental)", Common.IsDoubleTapDetectionEnabled())
 		Advanced.AntiAim = TimMenu.Checkbox("Anti-Aim Detection", Advanced.AntiAim == true)
@@ -195,15 +187,6 @@ local function DrawMenu()
 		Advanced.Bhop = TimMenu.Checkbox("Bhop Detection", Advanced.Bhop == true)
 		TimMenu.NextLine()
 		Advanced.DuckSpeed = TimMenu.Checkbox("Duck Speed Detection", Advanced.DuckSpeed == true)
-		TimMenu.NextLine()
-		TimMenu.EndSector()
-		TimMenu.NextLine()
-
-		TimMenu.BeginSector("Aim Detection")
-		-- Disabled pending rework; forced off in Main.lua until silent aim is restored.
-		Advanced.SilentAimbot = false
-		Advanced.AimLock = false
-		TimMenu.Text("Silent Aim / AimLock: disabled (coming back later)")
 		TimMenu.NextLine()
 		TimMenu.EndSector()
 		TimMenu.NextLine()

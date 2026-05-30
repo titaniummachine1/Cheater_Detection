@@ -58,6 +58,8 @@ local BURST_STALL_LOOKBACK        = 6                                      -- re
 local BURST_STALL_MIN_COUNT       = 2                                      -- require choke-then-release, not steady drift
 local CHOKE_HOLD_STALL_RATIO      = 0.4                                    -- frozen simtime fraction in window (330ms FL)
 local CHOKE_HOLD_MIN_STALLS       = 6                                     -- min zero-tick gaps in 16-sample window
+local CHOKE_HOLD_MIN_RELEASE_TICKS = 14                                   -- 330ms FL ~22t; 8t holds are fps jitter
+local FPS_ROLLING_WINDOW_S        = 1.0                                   -- 1s window for avg + worst-frame gate
 local DEBUG_SUMMARY_INTERVAL_S    = 1.0
 local DEBUG_DELTA_WINDOW          = 16   -- newest simtime gaps to classify for Choke logs
 local DEBUG_SAMPLE_TICK_INTERVAL  = 4   -- Choke log rollup: full window snapshot every N ticks
@@ -71,6 +73,7 @@ local consecutiveChokeCount       = {}                                     -- co
 local lastChokeDelta              = {}
 local debugSummaries              = {}
 local smoothedFrameTime           = 1 / 60
+local rollingFrameSamples         = {}                                     -- { t, ft } within FPS_ROLLING_WINDOW_S
 local _positiveDeltaBuf           = {}
 
 -- Pre-HistoryManager, delta lists only had positive simtime steps (stalls omitted).
@@ -91,16 +94,114 @@ local function buildPositiveDeltaView(deltaTicks, deltaCount)
 end
 
 -- ?????? helpers ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+local function pruneRollingFrameSamples(now)
+	local cutoff = now - FPS_ROLLING_WINDOW_S
+	local writeIndex = 1
+	for i = 1, #rollingFrameSamples do
+		local sample = rollingFrameSamples[i]
+		if sample.t >= cutoff then
+			rollingFrameSamples[writeIndex] = sample
+			writeIndex = writeIndex + 1
+		end
+	end
+	for i = writeIndex, #rollingFrameSamples do
+		rollingFrameSamples[i] = nil
+	end
+end
+
+local function pushRollingFrameSample(ft, now)
+	if not ft or ft <= 0 then
+		return
+	end
+	now = now or globals.RealTime()
+	rollingFrameSamples[#rollingFrameSamples + 1] = { t = now, ft = ft }
+	pruneRollingFrameSamples(now)
+end
+
+local function getRollingAvgFps()
+	if #rollingFrameSamples == 0 then
+		return nil
+	end
+	local sumFt = 0
+	for i = 1, #rollingFrameSamples do
+		sumFt = sumFt + rollingFrameSamples[i].ft
+	end
+	return #rollingFrameSamples / sumFt
+end
+
+-- Worst frame in the window (same idea as 1% low / 0.1% low FPS).
+local function getRollingMinFps()
+	if #rollingFrameSamples == 0 then
+		return nil
+	end
+	local maxFt = 0
+	for i = 1, #rollingFrameSamples do
+		local ft = rollingFrameSamples[i].ft
+		if ft > maxFt then
+			maxFt = ft
+		end
+	end
+	if maxFt <= 0 then
+		return nil
+	end
+	return 1.0 / maxFt
+end
+
+local function getInstantFps()
+	local ft = globals.AbsoluteFrameTime()
+	if not ft or ft <= 0 then
+		return nil
+	end
+	return 1.0 / ft
+end
+
 local function getLocalSmoothedFps()
 	local ft = globals.AbsoluteFrameTime()
 	if ft and ft > 0 then
 		smoothedFrameTime = smoothedFrameTime * 0.9 + ft * 0.1
+		pushRollingFrameSample(ft)
 	end
 	return 1.0 / smoothedFrameTime
 end
 
+local function getFpsBlockReason()
+	getLocalSmoothedFps()
+
+	local instantFps = getInstantFps()
+	if instantFps and instantFps < MIN_FPS_FOR_DETECTION then
+		return string.format("fps=%.0f < %d (instant)", instantFps, MIN_FPS_FOR_DETECTION)
+	end
+
+	local rollingMin = getRollingMinFps()
+	if rollingMin and rollingMin < MIN_FPS_FOR_DETECTION then
+		return string.format("fps=%.0f < %d (1s worst)", rollingMin, MIN_FPS_FOR_DETECTION)
+	end
+
+	local rollingAvg = getRollingAvgFps()
+	if rollingAvg and rollingAvg < MIN_FPS_FOR_DETECTION then
+		return string.format("fps=%.0f < %d (1s avg)", rollingAvg, MIN_FPS_FOR_DETECTION)
+	end
+
+	local smoothedFps = 1.0 / smoothedFrameTime
+	if smoothedFps < MIN_FPS_FOR_DETECTION then
+		return string.format("fps=%.0f < %d (smoothed)", smoothedFps, MIN_FPS_FOR_DETECTION)
+	end
+
+	return nil
+end
+
+function FakeLag.GetFpsDiagnostics()
+	getLocalSmoothedFps()
+	return {
+		instant    = getInstantFps(),
+		rollingAvg = getRollingAvgFps(),
+		rollingMin = getRollingMinFps(),
+		smoothed   = 1.0 / smoothedFrameTime,
+	}
+end
+
 function FakeLag.IsLowFps()
-	return getLocalSmoothedFps() < MIN_FPS_FOR_DETECTION
+	return getFpsBlockReason() ~= nil
 end
 
 local function isChokeDetectionEnabled()
@@ -108,15 +209,15 @@ local function isChokeDetectionEnabled()
 	return adv and adv.Choke == true
 end
 
---- Why FakeLag did not run (nil = allowed). FPS gate is MIN_FPS only; no listen/debug bypass for net blocks.
+--- Why FakeLag did not run (nil = allowed). FPS gate: instant, 1s worst, 1s avg, smoothed (all >= 40).
 function FakeLag.GetDetectionBlockReason()
 	if not isChokeDetectionEnabled() then
 		return "menu off"
 	end
 
-	local smoothedFps = getLocalSmoothedFps()
-	if smoothedFps < MIN_FPS_FOR_DETECTION then
-		return string.format("fps=%.0f < %d", smoothedFps, MIN_FPS_FOR_DETECTION)
+	local fpsReason = getFpsBlockReason()
+	if fpsReason then
+		return fpsReason
 	end
 
 	local connReason = Common.GetConnectionStabilityBlockReason()
@@ -203,7 +304,7 @@ local function getChokeHoldSignal(deltaTicks, sampleCount, deltaCount)
 	end
 
 	local maxGap = getMaxFlGap(deltaTicks, deltaCount)
-	if maxGap < STRONG_CHOKE_MIN_HIGH_TICKS then
+	if maxGap < CHOKE_HOLD_MIN_RELEASE_TICKS then
 		return nil, nil
 	end
 
@@ -238,10 +339,8 @@ local function getRecentChokeSignal(deltaTicks, sampleCount, deltaCount)
 		return avgHigh, "high choke"
 	end
 
-	if highCount >= 3 and avgHigh >= AVG_CHOKE_THRESHOLD then
-		return avgHigh, "elevated choke"
-	end
-
+	-- No "elevated" evidence tier: 4???7t jitter clusters (legit lag / minigun) used to
+	-- trigger +5 and instant SUS at low menu suspicion %. 330ms FL uses choke hold / high choke.
 	return nil, nil
 end
 

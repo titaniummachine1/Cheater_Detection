@@ -27,6 +27,11 @@ local regionCache = {}
 -- per-player scan results: id -> { regions = {region->count}, totalWearables = n }
 local playerScanData = {}
 
+-- Event-driven queue (no CreateMove scan of all players).
+local pendingScanIds = {}
+local COSMETICS_SCANS_PER_TICK = 3
+local MAX_WEARABLE_SCAN_ATTEMPTS = 66
+
 -- One entities.FindByClass("CTFWearable") pass per game tick, shared by all players.
 local wearableCacheTick = -1
 local wearablesByPlayerIndex = {}
@@ -195,10 +200,79 @@ function CosmeticAbuse.Init()
 end
 
 function CosmeticAbuse.InvalidatePlayer(id)
+	id = id and tostring(id)
+	if not id then
+		return
+	end
 	playerScanData[id] = nil
+	pendingScanIds[id] = nil
 	local state = PlayerCache.GetByID(id)
 	if state then
 		state.wearablesScanned = nil
+		state.wearableScanAttempts = nil
+	end
+end
+
+function CosmeticAbuse.RequestScan(id)
+	if not id or not isEnabled() then
+		return
+	end
+	id = tostring(id)
+	if not id:match("^7656119%d+$") then
+		return
+	end
+	pendingScanIds[id] = true
+	local state = PlayerCache.GetByID(id)
+	if state then
+		state.wearablesScanned = nil
+		state.wearableScanAttempts = nil
+	end
+	playerScanData[id] = nil
+end
+
+function CosmeticAbuse.HasPendingWork()
+	return next(pendingScanIds) ~= nil
+end
+
+function CosmeticAbuse.ProcessPending(maxScans)
+	if not isEnabled() then
+		for k in pairs(pendingScanIds) do
+			pendingScanIds[k] = nil
+		end
+		return
+	end
+
+	local limit = maxScans or COSMETICS_SCANS_PER_TICK
+	local processed = 0
+	for id in pairs(pendingScanIds) do
+		if processed >= limit then
+			break
+		end
+		local state = PlayerCache.GetByID(id)
+		if not state or not state.pdata or not state.pdata.isAlive or state.pdata.isDormant then
+			pendingScanIds[id] = nil
+		else
+			CosmeticAbuse.ScanPlayer(state)
+			processed = processed + 1
+			if state.wearablesScanned then
+				pendingScanIds[id] = nil
+			elseif (state.wearableScanAttempts or 0) >= MAX_WEARABLE_SCAN_ATTEMPTS then
+				pendingScanIds[id] = nil
+			end
+		end
+	end
+end
+
+function CosmeticAbuse.OnSessionReset()
+	for k in pairs(pendingScanIds) do
+		pendingScanIds[k] = nil
+	end
+	for _, state in pairs(PlayerCache.GetActiveTable()) do
+		if state and state.id then
+			state.wearablesScanned = nil
+			state.wearableScanAttempts = nil
+			CosmeticAbuse.RequestScan(state.id)
+		end
 	end
 end
 
@@ -223,7 +297,7 @@ function CosmeticAbuse.ScanPlayer(playerState)
 	if scanned == nil then
 		local attempts = (playerState.wearableScanAttempts or 0) + 1
 		playerState.wearableScanAttempts = attempts
-		if attempts < 66 then
+		if attempts < MAX_WEARABLE_SCAN_ATTEMPTS then
 			return
 		end
 		playerState.wearablesScanned = true
@@ -251,12 +325,8 @@ function CosmeticAbuse.ScanPlayer(playerState)
 	end
 end
 
-local function scanPlayerById(id)
-	if not id or not isEnabled() then return end
-	local state = PlayerCache.GetByID(tostring(id))
-	if state then
-		CosmeticAbuse.ScanPlayer(state)
-	end
+local function queueScanById(id)
+	CosmeticAbuse.RequestScan(id)
 end
 
 local function onPlayerSpawn(event)
@@ -266,7 +336,7 @@ local function onPlayerSpawn(event)
 	if not ent or not ent:IsValid() then return end
 	local id = tostring(Common.GetSteamID64(ent))
 	if id:match("^7656119%d+$") then
-		scanPlayerById(id)
+		queueScanById(id)
 	end
 end
 
@@ -277,13 +347,20 @@ local function onPlayerChangeClass(event)
 	if not ent or not ent:IsValid() then return end
 	local id = tostring(Common.GetSteamID64(ent))
 	if id:match("^7656119%d+$") then
-		CosmeticAbuse.InvalidatePlayer(id)
-		scanPlayerById(id)
+		CosmeticAbuse.RequestScan(id)
 	end
 end
 
-Events.Subscribe("OnPlayerJoinTeam", scanPlayerById)
+local function onSessionReset(_event)
+	if not isEnabled() then return end
+	CosmeticAbuse.OnSessionReset()
+end
+
+Events.Subscribe("OnPlayerJoinTeam", queueScanById)
 Events.Register("FireGameEvent", "CosmeticAbuse_Spawn", onPlayerSpawn, "player_spawn")
 Events.Register("FireGameEvent", "CosmeticAbuse_ClassChange", onPlayerChangeClass, "player_changeclass")
+Events.Register("FireGameEvent", "CosmeticAbuse_NewMap", onSessionReset, "game_newmap")
+Events.Register("FireGameEvent", "CosmeticAbuse_RoundStart", onSessionReset, "teamplay_round_start")
+Events.Register("FireGameEvent", "CosmeticAbuse_RoundEnd", onSessionReset, "round_end")
 
 return CosmeticAbuse

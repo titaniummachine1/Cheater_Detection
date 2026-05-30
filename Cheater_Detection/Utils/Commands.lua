@@ -251,8 +251,17 @@ local function setupDiagnostics()
 
 	Commands.Register("cd_fl_status", function(_args)
 		local block = FakeLag.GetDetectionBlockReason()
+		local fps = FakeLag.GetFpsDiagnostics()
 		printc(100, 220, 255, 255, "[CD] FakeLag diagnostic:")
-		printc(200, 200, 200, 255, "  min FPS need  : >= 40 (smoothed)")
+		printc(200, 200, 200, 255, "  min FPS need  : >= 40 (instant, 1s worst, 1s avg, smoothed)")
+		if fps then
+			printc(200, 200, 200, 255, string.format(
+				"  fps now       : instant=%s  1s_worst=%s  1s_avg=%s  smoothed=%.0f",
+				fps.instant and string.format("%.0f", fps.instant) or "n/a",
+				fps.rollingMin and string.format("%.0f", fps.rollingMin) or "n/a",
+				fps.rollingAvg and string.format("%.0f", fps.rollingAvg) or "n/a",
+				fps.smoothed or 0))
+		end
 		printc(200, 200, 200, 255, string.format("  allowed       : %s", tostring(FakeLag.IsDetectionAllowed())))
 		printc(200, 200, 200, 255, string.format("  block reason  : %s", block or "none"))
 	end)
