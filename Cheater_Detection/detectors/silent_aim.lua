@@ -1,13 +1,6 @@
 --[[ detectors/silent_aim.lua
-     Silent Aimbot Detector — 2-tick view-angle extrapolation.
-     Uses shared tick-bucket history from HistoryManager.
-
-     Algorithm:
-       - Stage 3: Push angles to current bucket via HistoryManager.PushAngles()
-       - On player_hurt: Record shot angle, build predictions from history
-       - On ProcessPlayer: Consume accumulated score
-
-     Uses shared bucket structure for angle storage instead of per-player tables.
+     Silent aimbot detector — view-angle extrapolation vs hit timing.
+     Angles/eye history via HistoryManager (on-demand per tick + on hit).
 ]]
 
 local Events                            = require("Cheater_Detection.Core.Events")
@@ -19,6 +12,7 @@ local DetectorUtils                     = require("Cheater_Detection.Utils.Detec
 local Logger                            = require("Cheater_Detection.Utils.Logger")
 local PlayerData                        = require("Cheater_Detection.Utils.PlayerData")
 local HistoryManager                    = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig                   = require("Cheater_Detection.Utils.DetectionConfig")
 local PlayerCache                       = require("Cheater_Detection.Core.player_cache")
 local mathAbs                           = math.abs
 
@@ -218,8 +212,6 @@ local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotPitch, shotYa
 	if not history then
 		return 0.0, 0.0, 0.0, 0
 	end
-	local shotIndex = shotOffset + 1 -- convert to 1-indexed
-
 	local flags = 0
 	local maxDelta = 0.0
 	local totalDelta = 0.0
@@ -233,10 +225,8 @@ local function lilacAimbotHeuristics(id, shotOffset, shotTick, shotPitch, shotYa
 	local langYaw = shotYaw
 	local lastAimDist = aimDist
 
-	-- Look at older records (higher indices) for LILAC window
 	for i = 1, LILAC_WINDOW_TICKS do
-		local idx = shotIndex + i
-		local record = history[idx]
+		local record = HistoryManager.GetRecordAt(history, shotOffset + i)
 		if not record or record._tick ~= (shotTick - i) then
 			break
 		end
@@ -361,8 +351,7 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 	end
 
 	local shotOffset = curTick - pending.shotTick
-	local shotIndex = shotOffset + 1 -- convert to 1-indexed array
-	local shotRecord = history[shotIndex]
+	local shotRecord = HistoryManager.GetRecordAt(history, shotOffset)
 	if not shotRecord or shotRecord._tick ~= pending.shotTick then
 		return
 	end
@@ -435,16 +424,14 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 		end
 	end
 
-	-- 1. Gather pre-shot history for prediction (up to 5 clean ticks)
-	local startIdx = shotIndex + 1
 	local histN = 0
 	for i = 1, #_histPitches do _histPitches[i] = nil end
 	for i = 1, #_histYaws do _histYaws[i] = nil end
 	for i = 1, #_histTicks do _histTicks[i] = nil end
 
-	for idx = startIdx, startIdx + 10 do
+	for age = shotOffset + 1, shotOffset + 10 do
 		if histN >= 5 then break end
-		local record = history[idx]
+		local record = HistoryManager.GetRecordAt(history, age)
 		if not record then break end
 
 		local data = record[HistoryManager.Fields.Angles]
@@ -524,12 +511,10 @@ local function analyzePendingShot(playerState, ply, pdata, pending, curTick)
 
 	for k = 1, 3 do
 		local postTick = pending.shotTick + k
-		-- In new system: newer ticks have lower indices
-		-- shotIndex = shot record, shotIndex - 1 = 1 tick newer (if exists)
-		local postIdx = shotIndex - k
-		if postIdx < 1 then break end -- Can't go newer than current
+		local postOffset = shotOffset - k
+		if postOffset < 0 then break end
 
-		local postRecord = history[postIdx]
+		local postRecord = HistoryManager.GetRecordAt(history, postOffset)
 		if postRecord and postRecord._tick == postTick then
 			if not postRecord.damageDealt then
 				local postShotAngles = postRecord[HistoryManager.Fields.Angles]
@@ -814,8 +799,6 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	local adv = menu and menu.Advanced or nil
 	if not adv or adv.SilentAimbot ~= true then return end
 
-	HistoryManager.NewTick()
-
 	local attackerEnt   = hit.attackerEnt
 	local victimEnt     = hit.victimEnt
 	local curTick       = hit.tickCount
@@ -833,6 +816,10 @@ Events.Subscribe("OnHitscanHit", function(hit)
 	if not Common.IsValidPlayer(attackerEnt, nil, nil, nil) then return end
 	if not Common.IsValidPlayer(victimEnt, nil, nil, nil) then return end
 
+	local attackerState = PlayerCache.GetByID(attackerID)
+	if attackerState and attackerState.wrap then
+		DetectionConfig.RecordHistory(attackerState.wrap, "SilentAim")
+	end
 	HistoryManager.MarkDamageDealt(attackerID)
 
 	local acc = shotAccuracy[attackerID]

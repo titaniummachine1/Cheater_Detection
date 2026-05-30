@@ -23,6 +23,7 @@ local G                                     = require("Cheater_Detection.Utils.G
 local Evidence                              = require("Cheater_Detection.Core.Evidence_system")
 local Events                                = require("Cheater_Detection.Core.Events")
 local HistoryManager                        = require("Cheater_Detection.Utils.HistoryManager")
+local DetectionConfig                     = require("Cheater_Detection.Utils.DetectionConfig")
 local Common                                = require("Cheater_Detection.Utils.Common")
 local Fetcher                               = require("Cheater_Detection.Database.Fetcher")
 
@@ -193,6 +194,8 @@ function WarpDT.ProcessPlayer(pState)
 	if not hasRecentActivity(data, curTick) then
 		return
 	end
+
+	DetectionConfig.RecordHistory(pState.wrap, "WarpDT")
 
 	local history = HistoryManager.GetPlayerHistory(id)
 	if not history then return end

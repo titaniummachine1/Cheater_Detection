@@ -1,9 +1,7 @@
 --[[ HistoryManager.lua
-     Player-centric circular buffer for tick history.
-       - Each player has their own circular buffer: playerHistories[steamID]
-       - Buffer is an ipairs-traversable array: [1]=current tick, [2]=1 tick ago, etc.
-       - Circular overwrite: new data overwrites oldest when buffer full
-       - No per-tick bucket clearing needed
+     Per-player circular tick history. Detectors call RequestField (or
+     DetectionConfig.RecordHistory) for only the fields they need each tick.
+     Offset 0 = newest slot (use GetRecordAt); dedupes same field per player per tick.
 ]]
 
 local PlayerCache       = require("Cheater_Detection.Core.player_cache")
@@ -186,29 +184,17 @@ function HistoryManager.GetRecordAt(history, offset)
 	return idx and history[idx]
 end
 
-local lastTickCount = -1
-
-function HistoryManager.NewTick()
-	if not initialized then
-		return
-	end
-	local curTick = globals.TickCount()
-	if curTick == lastTickCount then
-		return
-	end
-	lastTickCount = curTick
-end
-
--- PER-FIELD LAZY RECORDING
--- Track which fields are already stored for current tick to avoid re-calculation
 -- [steamID] = { [field] = tickWhenStored, ... }
 local _storedFieldsByPlayer = {}
 
--- Request a field be recorded for a player. If already recorded this tick, returns immediately.
--- Detectors call this to request fields on-demand instead of pre-recording all fields.
+-- Record one field for this player on the current tick (no-op if already stored).
 function HistoryManager.RequestField(player, field)
-	if not _hasActiveFields then return nil end
-	if not activeFields[field] then return nil end
+	if not initialized or not _hasActiveFields then
+		return nil
+	end
+	if not player or not field or not activeFields[field] then
+		return nil
+	end
 
 	local steamID = tostring(player:GetSteamID64())
 	local curTick = globals.TickCount()
@@ -266,12 +252,12 @@ function HistoryManager.RequestField(player, field)
 	return record[field]
 end
 
--- Legacy Push - records all active fields at once. Use RequestField for per-field lazy recording.
-function HistoryManager.Push(player)
-	if not _hasActiveFields then return end
-
-	for field in pairs(activeFields) do
-		HistoryManager.RequestField(player, field)
+function HistoryManager.RequestFields(player, fields)
+	if not fields then
+		return
+	end
+	for i = 1, #fields do
+		HistoryManager.RequestField(player, fields[i])
 	end
 end
 
@@ -296,43 +282,6 @@ function HistoryManager.ClearPlayer(steamID)
 	local id = tostring(steamID)
 	playerHistories[id] = nil
 	_storedFieldsByPlayer[id] = nil
-end
-
-function HistoryManager.PushAngles(steamID, pitch, yaw)
-	if not initialized or not steamID then
-		return
-	end
-
-	local history = playerHistories[tostring(steamID)]
-	if not history then
-		history = { _head = 0, _count = 0, _lastTick = -1 }
-		playerHistories[tostring(steamID)] = history
-	end
-
-	local curTick = globals.TickCount()
-
-	if history._lastTick ~= curTick then
-		history._head = (history._head % maxRetentionTicks) + 1
-		if history._count < maxRetentionTicks then
-			history._count = history._count + 1
-		end
-		history._lastTick = curTick
-	end
-
-	local record = history[history._head]
-	if type(record) ~= "table" then
-		record = {}
-	end
-	local angField = HistoryManager.Fields.Angles
-	local t = record[angField]
-	if type(t) ~= "table" then
-		t = {}
-		record[angField] = t
-	end
-	t.pitch                = pitch
-	t.yaw                  = yaw
-	record._tick           = curTick
-	history[history._head] = record
 end
 
 function HistoryManager.GetRetentionTicks()

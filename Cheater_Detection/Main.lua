@@ -290,12 +290,7 @@ local function OnCreateMove(cmd)
 		end
 	end
 
-	local historyEnabled = enableSilent or enableWarpDT or enableChoke or enableAntiAim
-	if historyEnabled then
-		Profiler.Begin("History_NewTick")
-		HistoryManager.NewTick()
-		Profiler.End("History_NewTick")
-	end
+	local historyEnabled = enableSilent or enableWarpDT or enableChoke
 
 	if not sessionState.groupSearched then
 		SteamLookup.RefreshValveGroup()
@@ -366,13 +361,12 @@ local function OnCreateMove(cmd)
 		::continue::
 	end
 
-	-- One profiler section per detector type across all players (minimal overhead)
-	if historyEnabled then
-		Profiler.Begin("History_Push")
+	if enableSilent then
+		Profiler.Begin("History_SilentAim")
 		for _, pState in ipairs(activePlayers) do
-			HistoryManager.Push(pState.wrap)
+			DetectionConfig.RecordHistory(pState.wrap, "SilentAim")
 		end
-		Profiler.End("History_Push")
+		Profiler.End("History_SilentAim")
 	end
 
 	-- ValveCheck runs via scheduler + DirtySystem "checks" (once per player per map)
@@ -496,6 +490,7 @@ local function OnFireGameEvent(event)
 		if id and id:match("^7656119%d+$") then
 			local state = PlayerCache.GetByID(id)
 			persistSessionPlayerState(id, state, event:GetString("name"))
+			HistoryManager.ClearPlayer(id)
 			Events.Publish("OnPlayerDisconnect", id)
 			PlayerCache.Remove(id)
 		end

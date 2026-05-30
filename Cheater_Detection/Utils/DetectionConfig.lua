@@ -55,4 +55,13 @@ function DetectionConfig.RegisterWithHistoryManager()
 	HistoryManager.Initialize(retentionTicks, activeFields)
 end
 
+--- Record all history fields required by a detector for this tick (deduped inside HistoryManager).
+function DetectionConfig.RecordHistory(player, detectorName)
+	local spec = DetectionConfig.Detectors[detectorName]
+	if not spec or not player then
+		return
+	end
+	HistoryManager.RequestFields(player, spec.fields)
+end
+
 return DetectionConfig
